@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Vitest + Testing Library
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run unit tests
+        run: bun run test -- --reporter=default --reporter=junit --outputFile=test-report.junit.xml
+
+      - name: Accessibility checks (axe-core, zero violations)
+        run: bun run test:a11y
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-junit-report
+          path: test-report.junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  payments-matrix:
+    name: Currency × package checkout matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Fails the pull request if any computed total, 2% processing fee, or
+      # submission reference disagrees with the amount Stripe reports as charged
+      # for USD / EUR / GBP / NGN / ZAR across every package price.
+      - name: Verify totals vs Stripe charged amounts (all currencies × packages)
+        run: bun run test:payments -- --reporter=default --reporter=junit --outputFile=payments-matrix.junit.xml
+
+      - name: Upload matrix report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payments-matrix-report
+          path: payments-matrix.junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  a11y-e2e:
+
+    name: axe-core browser gate (SyncBadge + Retry)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: axe-core + contrast checks (zero violations, all badge phases)
+        run: bun run test:e2e:a11y
+
+      - name: axe-core on every SyncBadge state change (zero violations)
+        run: bun run test:e2e:a11y:transitions
+
+      - name: Touch tooltip checks (mobile viewport)
+        run: bun run test:e2e:a11y:mobile
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-e2e-artifacts
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  order-a11y-e2e:
+    # Keyboard / focus-ring / hash-deep-link gate for the homepage CTAs, the
+    # Recent Releases play preview and the #order form (incl. reduced motion).
+    # Any failing focus-ring or hash-scroll assertion uploads the Playwright
+    # screenshots, traces and the full run log as build artifacts.
+    name: Keyboard + focus + hash deep-link gate (order flow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      PLAYWRIGHT_JUNIT_OUTPUT_NAME: order-a11y.junit.xml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      # `list` gives a readable per-test PASS/FAIL line in the job log,
+      # `junit` feeds the checks UI, `html` is the artifact humans open.
+      - name: Order flow accessibility e2e (focus rings, focus return, #order deep links)
+        run: |
+          set -o pipefail
+          bun run test:e2e:a11y:order -- \
+            --reporter=list,junit,html 2>&1 | tee order-a11y-run.log
+
+      - name: Summarize result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### PASS — order flow accessibility e2e" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### FAIL — order flow accessibility e2e" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Failing assertions (focus ring / focus return / hash scroll):" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E "✘|Error:|expect\(" order-a11y-run.log | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Screenshots, traces and the full log are attached as the \`order-a11y-failure-artifacts\` artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload failure artifacts (screenshots, traces, logs)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-a11y-failure-artifacts
+          path: |
+            test-results/
+            playwright-report/
+            order-a11y-run.log
+            order-a11y.junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-a11y-junit-report
+          path: order-a11y.junit.xml
+          if-no-files-found: ignore
+          retention-days: 7

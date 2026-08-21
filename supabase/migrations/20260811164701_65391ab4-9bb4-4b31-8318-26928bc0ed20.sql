@@ -1,0 +1,3 @@
+CREATE POLICY "Artists upload own voice models" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'voice-models' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Artists read own voice models" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'voice-models' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Artists delete own voice models" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'voice-models' AND (storage.foldername(name))[1] = auth.uid()::text);

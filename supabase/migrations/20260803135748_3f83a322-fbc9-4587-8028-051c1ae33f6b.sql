@@ -1,0 +1,1 @@
+delete from public.track_requests where artist like 'pw-audit-%' and email = 'audit@example.com';

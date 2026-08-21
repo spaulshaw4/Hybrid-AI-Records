@@ -1,0 +1,1 @@
+ALTER TABLE public.form_drafts ADD COLUMN IF NOT EXISTS owner_key_hash text;

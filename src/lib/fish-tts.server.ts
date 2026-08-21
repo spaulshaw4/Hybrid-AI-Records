@@ -1,0 +1,165 @@
+/**
+ * Instant vocal clone (server-only).
+ *
+ * Studio POST /api/studio/vocal-clone (or generate with a saved take) sends
+ * the recorded/uploaded clip plus lyrics. The resulting stem is archived for
+ * the mixer. Provider names never leave this file.
+ */
+import { encode } from "@msgpack/msgpack";
+import { describeFetchError } from "@/lib/safe-fetch";
+import { lyricsForCloneSpeech } from "@/lib/clone-lyrics";
+import { samplePathFromUrl } from "@/lib/instant-voice";
+import { buildVocalClonePayload } from "@/lib/vocal-clone-payload";
+import type { ApiframeResult } from "@/lib/apiframe.server";
+
+const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
+const FISH_MODEL = "s2-pro";
+const VOICE_SAMPLE_BUCKET = "voice-samples";
+
+function env(name: string): string | undefined {
+  if (typeof process === "undefined" || !process.env) return undefined;
+  const direct = process.env[name];
+  if (direct?.trim()) return direct.trim();
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.toLowerCase() === wanted && value?.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function fishApiKey(): string {
+  const key = env("FISH_API_KEY") ?? env("FISH_AUDIO_API_KEY");
+  if (!key) {
+    throw new Error("Voice cloning is not configured yet.");
+  }
+  return key;
+}
+
+async function loadReferenceAudio(sampleUrl: string): Promise<Uint8Array> {
+  const path = samplePathFromUrl(sampleUrl);
+  if (path) {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin.storage.from(VOICE_SAMPLE_BUCKET).download(path);
+    if (!error && data) return new Uint8Array(await data.arrayBuffer());
+  }
+
+  let response: Response | undefined;
+  try {
+    response = await fetch(sampleUrl, { redirect: "follow", signal: AbortSignal.timeout(60_000) });
+  } catch (error) {
+    throw new Error(`That vocal take could not be read — ${describeFetchError(error)}.`);
+  }
+  if (!response?.ok) throw new Error("That vocal take expired. Record or upload it again.");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength < 256) throw new Error("That vocal take is empty. Record a cleaner clip.");
+  return bytes;
+}
+
+function cloneErrorMessage(status: number): string {
+  if (status === 401 || status === 403) {
+    return "Voice cloning needs to be reauthorized.";
+  }
+  if (status === 402) {
+    return "Voice cloning has no credit left. Add billing to continue.";
+  }
+  if (status === 413) {
+    return "That vocal take is too large. Keep clips under 25 MB.";
+  }
+  return "Vocal generation failed.";
+}
+
+export async function cloneVocalsFromBytes(
+  input: {
+    audioBytes: Uint8Array;
+    lyrics: string;
+    audioFormat?: "mp3" | "wav";
+    title?: string;
+    userId: string;
+    taskId: string;
+  },
+): Promise<ApiframeResult> {
+  const text = lyricsForCloneSpeech(input.lyrics);
+  if (!text) {
+    throw new Error("Add lyrics before cloning vocals from your take.");
+  }
+  if (input.audioBytes.byteLength < 256) {
+    throw new Error("That vocal take is empty. Record a cleaner clip.");
+  }
+
+  const format = input.audioFormat === "wav" ? "wav" : "mp3";
+  const body = encode(
+    buildVocalClonePayload({
+      text,
+      audio: input.audioBytes,
+      format,
+    }),
+  );
+
+  let response: Response | undefined;
+  try {
+    response = await fetch(FISH_TTS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${fishApiKey()}`,
+        "Content-Type": "application/msgpack",
+        model: FISH_MODEL,
+      },
+      body: Buffer.from(body),
+      signal: AbortSignal.timeout(180_000),
+    });
+  } catch (error) {
+    throw new Error(`Voice cloning is unreachable — ${describeFetchError(error)}.`);
+  }
+
+  if (!response) throw new Error("Voice cloning is unreachable — no response from the engine.");
+  if (!response.ok) {
+    throw new Error(cloneErrorMessage(response.status));
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const { archiveGeneratedAudioBytes } = await import("@/lib/apiframe.server");
+  const audioUrl = await archiveGeneratedAudioBytes(
+    bytes,
+    input.userId,
+    input.taskId,
+    format === "wav" ? "audio/wav" : "audio/mpeg",
+  );
+
+  return {
+    taskId: input.taskId,
+    status: "succeeded",
+    tracks: [
+      {
+        id: input.taskId,
+        title: input.title || "Vocal stem",
+        audioUrl,
+        imageUrl: null,
+        duration: null,
+      },
+    ],
+    raw: { cloned: true },
+  };
+}
+
+export async function cloneVocalsFromSample(
+  input: {
+    sampleUrl: string;
+    lyrics: string;
+    language?: string;
+    customLanguage?: string;
+    audioFormat?: "mp3" | "wav";
+    title?: string;
+    userId: string;
+    taskId: string;
+  },
+): Promise<ApiframeResult> {
+  const audioBytes = await loadReferenceAudio(input.sampleUrl);
+  return cloneVocalsFromBytes({
+    audioBytes,
+    lyrics: input.lyrics,
+    audioFormat: input.audioFormat,
+    title: input.title,
+    userId: input.userId,
+    taskId: input.taskId,
+  });
+}

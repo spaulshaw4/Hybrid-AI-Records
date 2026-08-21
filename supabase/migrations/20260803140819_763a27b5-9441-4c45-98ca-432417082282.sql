@@ -1,0 +1,1 @@
+DELETE FROM public.track_requests WHERE email = 'systemtest.qa@gmail.com' AND artist = 'SYSTEMTEST QA';

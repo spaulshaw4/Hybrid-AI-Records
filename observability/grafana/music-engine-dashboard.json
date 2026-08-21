@@ -1,0 +1,231 @@
+{
+  "title": "Hybrid AI Records — Music Engine",
+  "uid": "hybrid-music-engine",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["hybrid-ai-records", "music-engine"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "target",
+        "label": "Engine target",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(music_engine_requests_total, target)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Success rate (5m)",
+      "id": 1,
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.9 },
+              { "color": "green", "value": 0.98 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(music_engine_calls_total{result=\"success\"}[5m])) / clamp_min(sum(rate(music_engine_calls_total[5m])), 0.0000001)",
+          "legendFormat": "success rate"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Circuit breaker state",
+      "id": 2,
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Closed", "color": "green", "index": 0 }, "1": { "text": "OPEN", "color": "red", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "music_engine_breaker_open{target=~\"$target\"}",
+          "legendFormat": "{{target}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Retries (5m rate)",
+      "id": 3,
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 3 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(music_engine_retries_total{target=~\"$target\"}[5m]))", "legendFormat": "retries/s" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Failovers (1h)",
+      "id": 4,
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(music_engine_failovers_total[1h]))", "legendFormat": "failovers" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Call outcomes per second",
+      "id": 5,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "failure" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "short_circuit" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"], "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (result) (rate(music_engine_calls_total[5m]))", "legendFormat": "{{result}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP attempts by target and outcome",
+      "id": 6,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "calcs": ["lastNotNull"], "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (target, outcome) (rate(music_engine_requests_total{target=~\"$target\"}[5m]))",
+          "legendFormat": "{{target}} · {{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retry backoff delay quantiles",
+      "id": 7,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(music_engine_backoff_delay_seconds_bucket{target=~\"$target\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(music_engine_backoff_delay_seconds_bucket{target=~\"$target\"}[5m])))",
+          "legendFormat": "p90"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(music_engine_backoff_delay_seconds_bucket{target=~\"$target\"}[5m])))",
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(music_engine_backoff_delay_seconds_sum{target=~\"$target\"}[5m])) / clamp_min(sum(rate(music_engine_backoff_delay_seconds_count{target=~\"$target\"}[5m])), 0.0000001)",
+          "legendFormat": "avg"
+        }
+      ]
+    },
+    {
+      "type": "heatmap",
+      "title": "Backoff delay distribution",
+      "id": 8,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "options": { "calculate": false, "yAxis": { "unit": "s" }, "color": { "scheme": "Oranges", "mode": "scheme" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le) (rate(music_engine_backoff_delay_seconds_bucket{target=~\"$target\"}[5m]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Breaker state and consecutive failures",
+      "id": 9,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineInterpolation": "stepAfter" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "calcs": ["lastNotNull", "max"], "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "music_engine_breaker_open{target=~\"$target\"}", "legendFormat": "{{target}} open" },
+        { "refId": "B", "expr": "music_engine_breaker_failures{target=~\"$target\"}", "legendFormat": "{{target}} failures" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Breaker transitions (per hour)",
+      "id": 10,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "calcs": ["sum"], "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (target, to) (increase(music_engine_breaker_transitions_total{target=~\"$target\"}[1h]))",
+          "legendFormat": "{{target}} → {{to}}"
+        }
+      ]
+    }
+  ]
+}

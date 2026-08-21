@@ -1,0 +1,1 @@
+GRANT SELECT (created_at) ON public.pricing_settings TO anon, authenticated;

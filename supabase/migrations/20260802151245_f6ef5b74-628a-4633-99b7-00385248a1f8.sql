@@ -1,0 +1,4 @@
+ALTER TABLE public.track_requests
+  ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS paid_amount_label TEXT,
+  ADD COLUMN IF NOT EXISTS review_started_at TIMESTAMPTZ;

@@ -1,0 +1,2919 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  /* Light Studio page ground. */
+  --color-ink: var(--charcoal);
+  --color-ink-soft: var(--charcoal-soft);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-glow: var(--primary-glow);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-status-accent: var(--status-accent);
+  --color-status-outline: var(--status-outline);
+  --color-wordmark-red: var(--wordmark-red);
+  --color-wordmark-blue: var(--wordmark-blue);
+  --color-veteran-gold: var(--veteran-gold);
+  --color-veteran-gold-dim: var(--veteran-gold-dim);
+
+  /* Red / white / blue studio canvas. Use with `bg-rwb-studio`. */
+  --background-image-rwb-studio: var(--rwb-studio);
+}
+
+:root {
+  /* Obsidian studio — dark glass over crimson/cobalt ambient mesh. */
+  --background: #080a10;
+  --foreground: #f8fafc;
+
+  --surface: rgb(15 23 42 / 0.72);
+  --surface-elevated: #0f172a;
+
+  --card: rgb(15 23 42 / 0.72);
+  --card-foreground: #f8fafc;
+  --popover: #0b0d14;
+  --popover-foreground: #f8fafc;
+
+  --primary: #e11d48;
+  --primary-foreground: #ffffff;
+  --primary-glow: #f43f5e;
+  --glow-strength: 0;
+  --glow-guard: 1;
+
+  --glow-red: #fb7185;
+  --glow-white: #ffffff;
+  --glow-blue: #60a5fa;
+
+  --secondary: rgb(15 23 42 / 0.85);
+  --secondary-foreground: #f8fafc;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #e11d48;
+  --accent-foreground: #ffffff;
+  --destructive: #e11d48;
+  --destructive-foreground: #ffffff;
+
+  --border: rgb(255 255 255 / 0.1);
+  --border-strong: rgb(255 255 255 / 0.16);
+  --input: rgb(15 23 42 / 0.92);
+  --ring: #e11d48;
+
+  --status-accent: #be123c;
+  --status-outline: #e11d48;
+
+  --wordmark-red: #e11d48;
+  --wordmark-blue: #2563eb;
+  --wordmark-red-glow: rgb(225 29 72 / 0.45);
+  --wordmark-blue-glow: rgb(37 99 235 / 0.5);
+
+  --veteran-gold: #fbbf24;
+  --veteran-gold-dim: #f59e0b;
+
+  --charcoal: rgb(15 23 42 / 0.72);
+  --charcoal-soft: #080a10;
+  --overlay: rgb(0 0 0 / 0.62);
+  --glass: rgb(8 10 16 / 0.72);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --glass-blur: 16px;
+  /* Radials sit above the linear so the glows are visible. */
+  --rwb-studio:
+    radial-gradient(circle at 18% 22%, rgba(220, 38, 38, 0.28), transparent 46%),
+    radial-gradient(circle at 82% 78%, rgba(29, 78, 216, 0.28), transparent 46%),
+    #080a10;
+  --mesh-canvas: var(--rwb-studio);
+  --gradient-hero: var(--mesh-canvas);
+  --gradient-section: linear-gradient(180deg, rgb(8 10 16 / 0.2) 0%, rgb(8 10 16 / 0.45) 50%, rgb(8 10 16 / 0.7) 100%);
+  --gradient-red: linear-gradient(135deg, #e11d48, #be123c);
+  --shadow-red: 0 12px 28px -16px rgb(225 29 72 / 0.4);
+  --shadow-hard: 0 18px 40px -24px rgb(0 0 0 / 0.55);
+  --shadow-soft: 0 12px 32px -20px rgb(0 0 0 / 0.45);
+
+}
+
+/* Light surface scope. The console lives on dark glass, but its chips can sit
+   on bright artwork or a printed/light backdrop, so the tokens are re-pointed
+   here to keep crimson accents and focus rings legible on light panels. */
+.theme-light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --surface: rgb(255 255 255 / 0.8);
+  --surface-elevated: #ffffff;
+
+  --card: rgb(255 255 255 / 0.8);
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #e11d48;
+  --primary-foreground: #ffffff;
+  --primary-glow: #f43f5e;
+
+  --secondary: #ffffff;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #e11d48;
+  --accent-foreground: #ffffff;
+  --destructive: #e11d48;
+  --destructive-foreground: #ffffff;
+
+  --border: #e2e8f0;
+  --border-strong: #e2e8f0;
+  --input: #ffffff;
+  --ring: #e11d48;
+
+  --status-accent: #be123c;
+  --status-outline: #e11d48;
+
+  --wordmark-red: #e11d48;
+  --wordmark-blue: #2563eb;
+  --wordmark-red-glow: rgb(225 29 72 / 0.28);
+  --wordmark-blue-glow: rgb(37 99 235 / 0.32);
+
+  --veteran-gold: #a16207;
+  --veteran-gold-dim: #854d0e;
+}
+
+/* Brand lockup emphasis: a tight coloured halo behind the HYBRID / RECORDS
+   lettering so the red and blue read as deeper, punchier metal on any
+   backdrop without changing the type size or weight. */
+@utility wordmark-pop-red {
+  text-shadow: none;
+}
+
+@utility wordmark-pop-blue {
+  text-shadow: none;
+}
+
+.heading-pop {
+  font-weight: 800;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+  background-image: none;
+  background-clip: unset;
+  -webkit-background-clip: unset;
+  animation: none;
+}
+
+#catalog h2.heading-pop,
+#catalog h3.heading-pop,
+#podcast h2.heading-pop,
+#podcast h3.heading-pop,
+#radio h2.heading-pop,
+#radio h3.heading-pop {
+  background-image: none;
+  background-clip: unset;
+  -webkit-background-clip: unset;
+  color: inherit;
+  -webkit-text-fill-color: unset;
+  animation: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+}
+
+#catalog h2.heading-pop span,
+#podcast h2.heading-pop span,
+#radio h2.heading-pop span,
+#radio h3.heading-pop span {
+  color: inherit;
+  -webkit-text-fill-color: unset;
+  background: none;
+}
+
+.wordmark-records {
+  color: #2563eb;
+  -webkit-text-fill-color: #2563eb;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wordmark-pop-red:hover {
+    text-shadow: 0 0 12px var(--wordmark-red-glow);
+  }
+
+  .wordmark-pop-blue:hover {
+    text-shadow: 0 0 12px var(--wordmark-blue-glow);
+  }
+}
+
+
+
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html, #root {
+    background-color: transparent;
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+    /* Kills the iOS Safari rubber-band gap that exposes a white page behind
+       the app when the user overscrolls past the top or bottom. */
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    background-color: #f8fafc;
+    background-image: var(--rwb-studio);
+    background-repeat: no-repeat;
+    background-size: cover;
+    /* iOS Safari treats `fixed` as a compositor trap; desktop keeps the mesh parked. */
+    background-attachment: scroll;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Readability overhaul: lift the base type scale so every rem-based size
+       across mobile and desktop grows proportionally. */
+    font-size: 112.5%; /* 18px */
+  }
+
+  @media (min-width: 1024px) {
+    html {
+      font-size: 118.75%; /* 19px */
+    }
+  }
+
+  body {
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
+    line-height: 1.65;
+    text-shadow: none;
+  }
+
+  html.app-bg,
+  body.app-bg {
+    background-color: #07090f;
+    background-image: none;
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-attachment: scroll;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    body,
+    html.app-bg,
+    body.app-bg {
+      background-attachment: fixed;
+    }
+  }
+
+  html {
+    min-height: 100%;
+    --site-header-height: 4rem;
+    --site-sidebar-width: 0px;
+    --site-dock-height: 0px;
+    scroll-padding-top: var(--site-header-height);
+    scroll-padding-bottom: var(--site-dock-height);
+  }
+
+  html[data-site-nav="on"] {
+    --site-dock-height: 5.5rem;
+  }
+
+  @media (min-width: 1024px) {
+    html[data-site-nav="on"] {
+      --site-sidebar-width: 16.75rem;
+      --site-dock-height: 0px;
+    }
+  }
+
+  body {
+    min-height: 100%;
+    position: relative;
+  }
+
+  #root {
+    background-color: transparent !important;
+    min-height: 100%;
+  }
+
+.site-chrome-content {
+  padding-top: var(--site-header-height);
+  padding-bottom: 9rem;
+  padding-inline-start: var(--site-sidebar-width);
+  min-height: 100%;
+  background: transparent;
+}
+
+@media (min-width: 1024px) {
+  .site-chrome-content {
+    padding-bottom: 0;
+  }
+}
+
+.site-topbar {
+  inset-inline-start: var(--site-sidebar-width);
+  inset-inline-end: 0;
+  background-color: rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom-color: rgb(255 255 255 / 0.1);
+}
+
+/* Engine wizard: keep step fields and legal copy between the site header and
+   bottom chrome, with an inner scroll instead of pushing content under the
+   generate dock or mobile nav. */
+.engine-step-container,
+.legal-modal-container {
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  padding-bottom: 80px;
+  margin-top: 10px;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Continue/Generate lives at the end of the step, not pinned over the fields. */
+.engine-step-container {
+  padding-bottom: 1rem;
+}
+
+.engine-step-container::-webkit-scrollbar,
+.legal-modal-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.engine-step-container::-webkit-scrollbar-thumb,
+.legal-modal-container::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.engine-step-container::-webkit-scrollbar-track,
+.legal-modal-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.hybrid-access-title,
+.hybrid-access-title:hover,
+.hybrid-access-card h1,
+.hybrid-access-card h1:hover {
+  text-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  padding: 0 !important;
+  display: block;
+  color: var(--foreground) !important;
+  -webkit-text-fill-color: var(--foreground) !important;
+}
+
+.hybrid-access-card p,
+.hybrid-access-card li {
+  background-color: transparent !important;
+  padding: 0;
+  box-shadow: none;
+  text-shadow: none !important;
+}
+
+.hybrid-access-subtitle {
+  color: #64748b !important;
+}
+
+.hybrid-access-google {
+  letter-spacing: 0.08em;
+}
+
+[data-site-chrome] header.sticky,
+.site-chrome-content header.sticky {
+  top: var(--site-header-height);
+}
+
+
+
+  #root, main, header, footer { position: relative; z-index: 1; }
+
+
+
+  /* Ensure app content sits above the grid overlay */
+  #root, main, header, footer { position: relative; z-index: 1; }
+
+
+
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  /* --- Focus management ------------------------------------------------- */
+  /* Mouse/touch interaction never shows a ring; keyboard always does. */
+  :where(a, button, [role="button"], input, select, textarea, summary, [tabindex]):focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  :where(a, button, [role="button"], input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Radio console: every control keeps a high-contrast keyboard ring, even
+     where a utility class sets outline-none. */
+  [data-radio-console] :is(a, button, [role="button"], [role="radio"], input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--primary) !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px oklch(from var(--primary) l c h / 0.28);
+    border-radius: 4px;
+  }
+
+  /* Keep anchor / focus targets clear of the fixed header. */
+  section[id],
+  [id]:target {
+    scroll-margin-top: 5.5rem;
+  }
+}
+
+@utility skip-link {
+  position: absolute;
+  inset-inline-start: 1rem;
+  top: 0.5rem;
+  z-index: 100;
+  transform: translateY(-200%);
+  padding: 0.7rem 1.1rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transition: transform 0.2s ease-out;
+
+  &:focus-visible {
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+@utility grid-lines {
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.03) 1px, transparent 1px);
+  background-size: 80px 80px;
+}
+
+@utility btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.95rem 1.6rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border: 1px solid var(--primary);
+  box-shadow: var(--shadow-red);
+  transition: transform 200ms ease, background 200ms ease, box-shadow 200ms ease;
+  &:hover {
+    background: var(--primary-glow);
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px var(--primary), 0 8px 24px -12px var(--primary);
+  }
+}
+
+@utility btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.95rem 1.6rem;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-strong);
+  transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+  &:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--surface);
+    box-shadow: none;
+  }
+}
+
+/* Respect the OS "reduce motion" setting globally: no transitions, animations,
+   or smooth scrolling for users who ask for stillness. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-property: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ RTL -- */
+
+/*
+ * Arabic mirrors the whole document (dir="rtl" on <html>), but a lot of copy
+ * on the page stays Latin: brand names, artist and track titles, package
+ * names, prices, reference codes and any string the translator has not
+ * covered yet. Inside an RTL paragraph the Unicode bidi algorithm drags that
+ * run's trailing punctuation to the wrong edge, so "RAW WORDS." renders as
+ * ".RAW WORDS".
+ *
+ * `unicode-bidi: plaintext` makes each block resolve its own direction from
+ * its first strong character — exactly like dir="auto" — so Latin blocks read
+ * left-to-right with their punctuation intact while Arabic blocks stay RTL.
+ */
+[dir="rtl"] :is(h1, h2, h3, h4, h5, h6, p, li, dt, dd, label, figcaption,
+  blockquote, th, td, summary, button, a) {
+  unicode-bidi: plaintext;
+}
+
+/* Inputs echo whatever the visitor types, in either script. */
+[dir="rtl"] :is(input, textarea) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+/* Directional glyphs that are drawn, not laid out: arrows in buttons and
+   links point "forward", which is leftwards in Arabic. Opt out with
+   .rtl-keep for arrows that mean up/down or an external-link diagonal. */
+[dir="rtl"] :is(.rtl-flip, [data-rtl-flip]) {
+  transform: scaleX(-1);
+}
+
+/* Same treatment for leaf text nodes that are not semantic text elements:
+   price chips, badges, helper lines, counters, table cells built from divs
+   and spans. `:not(:has(*))` limits this to elements whose content is pure
+   text, so container layout and flex ordering are untouched. */
+[dir="rtl"] *:not(:has(*)) {
+  unicode-bidi: plaintext;
+}
+
+/* ---------------------------------------------------------------------------
+   Living background: cinematic dark canvas + one watermark crest at a time.
+   The four division logos are not tiled across the screen.
+--------------------------------------------------------------------------- */
+.living-bg {
+  contain: none;
+  z-index: -1;
+  background-color: transparent;
+}
+
+.living-bg-cinematic {
+  background: none;
+  animation: none;
+}
+
+.living-bg-glow {
+  display: none;
+}
+
+.living-bg-matrix {
+  display: none;
+}
+
+@keyframes living-bg-scan {
+  0% { background-position: 0 0, 0 0; }
+  100% { background-position: 0 220px, 0 0; }
+}
+
+@keyframes living-bg-aurora {
+  0%, 100% { background-position: 8% 4%, 92% 96%, 50% 42%, 0 0; }
+  50% { background-position: 14% 10%, 86% 90%, 48% 38%, 0 0; }
+}
+
+@keyframes living-bg-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.living-bg-tile {
+  opacity: 1;
+  animation: none;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+}
+
+/* YouTube HD stills: keep the frame crisp when CSS scales it into the tile. */
+.video-poster {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+}
+
+/*
+ * Loading placeholder: a slow shimmer that stands in until every crest has
+ * decoded. It disappears the moment the container flips to data-ready="true".
+ */
+.living-bg-skeleton {
+  opacity: 1;
+  transition: opacity 400ms ease-out;
+  background:
+    linear-gradient(
+      100deg,
+      rgba(255, 255, 255, 0) 35%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0) 65%
+    ),
+    radial-gradient(80% 60% at 60% 45%, rgba(255, 255, 255, 0.55), rgba(248, 250, 252, 0) 70%);
+  background-size: 220% 100%, 100% 100%;
+  animation: living-bg-shimmer 2.4s ease-in-out infinite;
+}
+
+.living-bg[data-ready="true"] .living-bg-skeleton {
+  opacity: 0;
+  animation: none;
+}
+
+@keyframes living-bg-shimmer {
+  0% { background-position: 120% 0, 0 0; }
+  100% { background-position: -40% 0, 0 0; }
+}
+
+.living-bg-layer {
+  opacity: 0;
+  will-change: auto;
+  transform: none;
+  background-size: min(88vw, 820px) auto;
+  background-repeat: no-repeat;
+  background-position: center 34%;
+  mix-blend-mode: normal;
+  filter: none;
+  animation: none;
+  transition: opacity 1.6s ease-in-out;
+}
+
+.living-bg[data-tier="full"] .living-bg-layer.is-active {
+  animation: living-bg-drift 16s ease-in-out infinite;
+}
+
+.living-bg[data-tier="full"][data-paused="false"] .living-bg-layer.is-active {
+  will-change: opacity, transform;
+}
+
+/*
+ * Static fallback: shown when an asset errors or decoding stalls past the
+ * timeout. It replaces the rotation entirely so nothing flickers or half-loads.
+ */
+.living-bg-fallback {
+  opacity: 0;
+  transition: opacity 500ms ease-out;
+  filter: saturate(1.14) contrast(1.12) brightness(1.08);
+  background-size: var(--crest-size, min(96vw, 96vh)) auto;
+  background-repeat: no-repeat;
+  background-position: center center;
+  mix-blend-mode: normal;
+}
+
+.living-bg[data-fallback="true"] .living-bg-fallback {
+  opacity: 0.85;
+}
+
+.living-bg[data-fallback="true"] .living-bg-layer {
+  display: none;
+}
+
+
+
+/* Veil: dark scrim so copy stays readable without washing out the mesh. */
+.living-bg-veil {
+  display: block;
+  background: linear-gradient(
+    180deg,
+    rgb(7 9 15 / 0.38) 0%,
+    rgb(7 9 15 / 0.22) 42%,
+    rgb(7 9 15 / 0.52) 100%
+  );
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+/* Page-wide mesh uses LivingBackground; skip the local ::after veil there. */
+.living-bg.flowing-patriotic-bg::after {
+  content: none;
+  display: none;
+}
+
+
+/* Copy over the living background sits on slate slabs. No neon bloom by
+   default — a low-opacity ambient blur is reserved for hover only. */
+main h1,
+main h2,
+main h3,
+main .eyebrow {
+  text-shadow: none;
+  letter-spacing: -0.015em;
+}
+
+main h1 {
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+
+main h2 {
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+
+main h3,
+main h4,
+main h5,
+main h6 {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+main .eyebrow {
+  letter-spacing: 0.18em;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+main p,
+main li,
+main dd,
+main dt,
+main label,
+main figcaption,
+main span,
+main a,
+main button,
+main summary,
+main th,
+main td {
+  font-weight: 600;
+  text-shadow: none;
+}
+
+main strong,
+main b {
+  font-weight: 800;
+  text-shadow: none;
+}
+
+/* Every free-standing block of copy over the living background gets its own
+   dark inline slab, so text never sits directly on a bright crest. Inline
+   painting keeps it tight to the text instead of boxing out empty space. */
+main p,
+main li,
+main dd,
+main figcaption {
+  box-decoration-break: clone;
+}
+
+main .text-muted-foreground {
+  font-weight: 600;
+  text-shadow: none;
+}
+
+main h1,
+main h2,
+main h3,
+main .eyebrow,
+main a,
+main button {
+  transition:
+    text-shadow 220ms ease-out,
+    box-shadow 220ms ease-out,
+    border-color 220ms ease-out,
+    transform 220ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  main h1:hover,
+  main h2:hover,
+  main h3:hover,
+  main .eyebrow:hover {
+    text-shadow: 0 0 16px color-mix(in oklab, var(--glow-red) 18%, transparent);
+  }
+
+  main a:hover,
+  main button:hover {
+    text-shadow: 0 0 12px color-mix(in oklab, var(--glow-red) 12%, transparent);
+  }
+}
+
+main a:hover,
+main button:hover {
+  transform: translateY(-1px);
+}
+
+main a:active,
+main button:active {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main h1,
+  main h2,
+  main h3,
+  main .eyebrow,
+  main a,
+  main button {
+    transition: none;
+  }
+
+  main a:hover,
+  main button:hover {
+    transform: none;
+  }
+}
+
+
+
+@media (prefers-contrast: more) {
+  main h1,
+  main h2,
+  main h3,
+  main .eyebrow,
+  main p,
+  main li {
+    text-shadow: 0 1px 3px rgba(20, 20, 24, 0.95);
+  }
+}
+
+
+@keyframes living-bg-cycle {
+  0%, 16% { opacity: 0.42; }
+  26%, 90% { opacity: 0; }
+  100% { opacity: 0.42; }
+}
+
+@keyframes living-bg-drift {
+  0%, 100% { transform: scale(1) translate3d(0, 0, 0); }
+  50% { transform: scale(1.03) translate3d(0, -1%, 0); }
+}
+
+
+/* Reduced motion: keep all four brands in rotation, but only as a slow
+   pure-opacity cross-fade — no drift, no scale, nothing that reads as movement. */
+@media (prefers-reduced-motion: reduce) {
+  .living-bg {
+    --watermark-cycle: 72s;
+  }
+
+  .living-bg-layer {
+    transform: none;
+    animation-name: living-bg-cycle;
+  }
+
+  .living-bg-cinematic,
+  .living-bg-glow {
+    animation: none;
+  }
+}
+
+
+
+/* Route cross-fade: page content fades in on navigation while the
+   LivingBackground (mounted outside the transition) keeps running. */
+.route-transition {
+  /* Opacity-only fade on purpose: any transform/translate (even a 0 value held
+     by animation-fill-mode) turns this wrapper into the containing block for
+     every `position: fixed` overlay inside a page, which pushed modals such as
+     the video player off-screen. Never add transform/translate here. */
+  animation: route-fade-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  will-change: opacity;
+}
+
+@keyframes route-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-transition {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Living background: device-capability tiers.
+   The markup picks how many crests exist; these rules decide how expensive
+   each of them is allowed to be.
+--------------------------------------------------------------------------- */
+
+/* Lite tier (low memory / few cores / slow-ish network / small touch screens):
+   all four crests still rotate, but on a longer cycle with no drift transform —
+   the transform, not the layer count, is what costs on weak GPUs. */
+.living-bg[data-tier="lite"] {
+  --watermark-cycle: 56s;
+}
+
+.living-bg[data-tier="lite"] .living-bg-cinematic,
+.living-bg[data-tier="lite"] .living-bg-glow,
+.living-bg[data-tier="static"] .living-bg-cinematic,
+.living-bg[data-tier="static"] .living-bg-glow {
+  animation: none;
+}
+
+.living-bg[data-tier="lite"] .living-bg-layer,
+.living-bg[data-tier="static"] .living-bg-layer {
+  filter: none;
+  transform: none;
+  background-size: min(58vw, 420px) auto;
+  animation-name: living-bg-cycle;
+  animation-duration: var(--watermark-cycle);
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-play-state: paused;
+}
+
+.living-bg[data-tier="lite"][data-ready="true"][data-paused="false"] .living-bg-layer {
+  animation-play-state: running;
+}
+
+/* Static tier (reduced motion, Save-Data, 2g): one watermark at a time,
+   slowest opacity cross-fade, no geometric movement. */
+.living-bg[data-tier="static"] {
+  --watermark-cycle: 80s;
+}
+
+.living-bg[data-tier="static"][data-ready="true"][data-paused="false"] .living-bg-layer {
+  animation-play-state: running;
+}
+
+
+/* Hidden tab: park every layer so a backgrounded page does zero compositor
+   work. The skeleton shimmer stops too. */
+.living-bg[data-paused="true"] .living-bg-layer,
+.living-bg[data-paused="true"] .living-bg-skeleton,
+.living-bg[data-paused="true"] .living-bg-fallback,
+.living-bg[data-paused="true"] .living-bg-cinematic,
+.living-bg[data-paused="true"] .living-bg-glow,
+.living-bg[data-paused="true"].flowing-patriotic-bg::before {
+  animation-play-state: paused;
+}
+
+/* ---------------------------------------------------------------------------
+   Portal launch: full-screen glassmorphism veil raised on "Start Your Project".
+   Translucent + blurred on purpose so the LivingBackground loop stays visible
+   through it and never restarts during the navigation.
+--------------------------------------------------------------------------- */
+.portal-launch-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--background) 55%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
+  animation: portal-veil-in 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
+.portal-launch-panel {
+  padding: 1.25rem 2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 82%, transparent);
+  box-shadow: var(--shadow-soft);
+  animation: portal-panel-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.portal-launch-label {
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--foreground);
+}
+
+@keyframes portal-veil-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px) saturate(100%);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(18px) saturate(130%);
+  }
+}
+
+@keyframes portal-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-launch-veil,
+  .portal-launch-panel {
+    animation: none;
+  }
+}
+
+/* Hero mission sits as a subhead — no isolated card. */
+@utility mission-panel {
+  background: none;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  text-shadow: none;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+.hero-band {
+  background: transparent;
+}
+
+.hero-band::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    rgba(7, 9, 15, 0.55) 0%,
+    rgba(7, 9, 15, 0.22) 46%,
+    transparent 78%
+  );
+}
+
+/* Flowing RWB mesh: overlapping color fields on a near-black base.
+   Blobs live on ::before; a dark veil on ::after keeps copy high-contrast. */
+.flowing-patriotic-bg {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #07090f;
+}
+
+.flowing-patriotic-bg::before {
+  content: "";
+  position: absolute;
+  inset: -28%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side, rgba(220, 38, 38, 0.72), transparent 72%),
+    radial-gradient(closest-side, rgba(248, 250, 252, 0.22), transparent 70%),
+    radial-gradient(closest-side, rgba(29, 78, 216, 0.7), transparent 74%),
+    radial-gradient(closest-side, rgba(185, 28, 28, 0.45), transparent 68%),
+    radial-gradient(closest-side, rgba(96, 165, 250, 0.38), transparent 70%),
+    radial-gradient(closest-side, rgba(255, 255, 255, 0.14), transparent 66%);
+  background-repeat: no-repeat;
+  background-size:
+    58% 52%,
+    42% 38%,
+    64% 58%,
+    46% 50%,
+    40% 44%,
+    34% 32%;
+  background-position:
+    8% 18%,
+    48% 42%,
+    92% 78%,
+    78% 8%,
+    18% 88%,
+    62% 62%;
+  filter: blur(48px);
+  will-change: background-position, transform;
+  animation:
+    patrioticMeshFlow 16s ease-in-out infinite,
+    patrioticMeshDrift 22s ease-in-out infinite;
+}
+
+.flowing-patriotic-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      105deg,
+      rgba(7, 9, 15, 0.78) 0%,
+      rgba(7, 9, 15, 0.52) 38%,
+      rgba(7, 9, 15, 0.28) 68%,
+      rgba(7, 9, 15, 0.4) 100%
+    ),
+    linear-gradient(180deg, rgba(7, 9, 15, 0.2) 0%, transparent 36%, rgba(7, 9, 15, 0.45) 100%);
+}
+
+@keyframes patrioticMeshFlow {
+  0%,
+  100% {
+    background-position:
+      8% 18%,
+      48% 42%,
+      92% 78%,
+      78% 8%,
+      18% 88%,
+      62% 62%;
+  }
+  33% {
+    background-position:
+      28% 62%,
+      38% 28%,
+      72% 22%,
+      88% 48%,
+      8% 42%,
+      54% 74%;
+  }
+  66% {
+    background-position:
+      4% 42%,
+      58% 58%,
+      82% 64%,
+      42% 12%,
+      32% 82%,
+      70% 36%;
+  }
+}
+
+@keyframes patrioticMeshDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -2.5%, 0) scale(1.06);
+  }
+}
+
+.hero-band h1 {
+  text-shadow: 0 2px 28px rgba(7, 9, 15, 0.9);
+}
+
+/* Beat `main h1 { -webkit-text-fill-color }` so each line keeps its flag colour.
+   Red matches Independent; blue matches Knoxville, TN. */
+.hero-line-red {
+  color: #e11d48;
+  -webkit-text-fill-color: #e11d48;
+}
+
+.hero-line-white {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.hero-line-blue {
+  color: #2563eb;
+  -webkit-text-fill-color: #2563eb;
+}
+
+.flag-red {
+  color: #e11d48;
+  -webkit-text-fill-color: #e11d48;
+}
+
+.flag-blue {
+  color: #2563eb;
+  -webkit-text-fill-color: #2563eb;
+}
+
+/* Division caption palettes — clipped flag gradients with a hard shadow so
+   they stay readable on the obsidian footer. */
+.division-label {
+  font-weight: 800;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95));
+  background-size: 100% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.division-label-usa,
+.division-label-jester {
+  background-image: linear-gradient(105deg, #ef4444 0%, #ffffff 48%, #3b82f6 100%);
+}
+
+.division-label-lithuania {
+  background-image: linear-gradient(105deg, #fbbf24 0%, #22c55e 50%, #ef4444 100%);
+}
+
+.division-label-nigeria {
+  background-image: linear-gradient(105deg, #22c55e 0%, #22c55e 42%, #ffffff 58%, #ffffff 100%);
+}
+
+/* White disc + halo so footer lockups stay sharp and readable on the mesh. */
+.logo-pop {
+  background: #ffffff;
+  border-radius: 9999px;
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 22px rgba(255, 255, 255, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+/* Square division emblems: lift gold/color off the baked-in dark field so they sit on obsidian. */
+.division-emblem {
+  mix-blend-mode: lighten;
+  background: transparent;
+}
+
+.radio-label-blue {
+  color: #2563eb;
+  -webkit-text-fill-color: #2563eb;
+}
+
+/* Podcast intro: Independent crimson, not the flag sweep or muted slate. */
+#podcast .podcast-copy-red,
+#podcast .podcast-copy-red span {
+  background: none;
+  background-image: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  animation: none;
+  filter: none;
+  color: #e11d48;
+  -webkit-text-fill-color: #e11d48;
+  text-shadow: none;
+}
+
+#radio .radio-copy-gray,
+#radio .radio-copy-gray span {
+  background: none;
+  background-image: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  animation: none;
+  filter: none;
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+  text-shadow: none;
+}
+
+/* Open-canvas copy on the patriotic mesh. Frosted modules keep charcoal. */
+main p,
+main li,
+main dd,
+main .text-foreground,
+footer p,
+footer li,
+footer .text-foreground {
+  color: #e2e8f0;
+}
+
+main .text-muted-foreground,
+footer .text-muted-foreground {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+.bg-surface :is(p, li, dd, h3, h4, .text-foreground),
+.bg-card :is(p, li, dd, h3, h4, .text-foreground),
+.studio-glass :is(p, li, dd, h3, h4, .text-foreground),
+.hybrid-access-card :is(p, li, dd, h3, h4, .text-foreground) {
+  color: var(--foreground);
+}
+
+.bg-surface .text-muted-foreground,
+.bg-card .text-muted-foreground,
+.studio-glass .text-muted-foreground,
+.hybrid-access-card .text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+.hero-mission {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  color: #f1f5f9;
+  text-shadow: 0 1px 18px rgba(7, 9, 15, 0.85);
+}
+
+.hero-band .hero-kicker {
+  color: #cbd5e1;
+  text-shadow: 0 1px 14px rgba(7, 9, 15, 0.8);
+}
+
+@utility studio-glass {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Copy sits on the mesh without per-line boxes. Opt out still works. */
+main p:not(.text-slab-none):not(.mission-panel),
+main li:not(.text-slab-none),
+main dd:not(.text-slab-none),
+main blockquote:not(.text-slab-none),
+main figcaption:not(.text-slab-none) {
+  background-color: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  box-decoration-break: clone;
+}
+
+main h1:not(.text-slab-none),
+main h2:not(.text-slab-none),
+main h3:not(.text-slab-none) {
+  display: inline-block;
+  background-color: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  box-decoration-break: clone;
+}
+
+.hero-kicker {
+  display: block;
+  width: 100%;
+  margin-top: 0;
+  background: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: clip;
+  color: #64748b;
+  font-weight: 700;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.3;
+}
+
+.hero-kicker-independent {
+  color: #e11d48;
+  -webkit-text-fill-color: #e11d48;
+  font-weight: 800;
+}
+
+.hero-kicker-location {
+  color: #2563eb;
+  -webkit-text-fill-color: #2563eb;
+  font-weight: 800;
+}
+
+@media (max-width: 639px) {
+  .hero-kicker {
+    white-space: nowrap !important;
+    font-size: 0.62rem !important;
+    letter-spacing: 0.05em !important;
+  }
+}
+
+
+
+/* Contrast fallback: when the guard finds the active crest too bright for the
+   crimson bloom, colour light is replaced by a denser dark halo and a more
+   opaque slab, so readability never depends on the glow. */
+:root[data-contrast-guard="on"] main h1,
+:root[data-contrast-guard="on"] main h2,
+:root[data-contrast-guard="on"] main h3,
+:root[data-contrast-guard="on"] main .eyebrow {
+  text-shadow: none;
+}
+
+:root[data-contrast-guard="on"] main p,
+:root[data-contrast-guard="on"] main li,
+:root[data-contrast-guard="on"] main dd,
+:root[data-contrast-guard="on"] main dt,
+:root[data-contrast-guard="on"] main label,
+:root[data-contrast-guard="on"] main figcaption,
+:root[data-contrast-guard="on"] main span,
+:root[data-contrast-guard="on"] main a,
+:root[data-contrast-guard="on"] main button,
+:root[data-contrast-guard="on"] main summary,
+:root[data-contrast-guard="on"] main .text-muted-foreground {
+  text-shadow: none;
+}
+
+:root[data-contrast-guard="on"] main p,
+:root[data-contrast-guard="on"] main li,
+:root[data-contrast-guard="on"] main dd,
+:root[data-contrast-guard="on"] main figcaption {
+  background-color: var(--surface);
+}
+
+/* Hover/focus stays a state change, but without extra bloom. */
+:root[data-contrast-guard="on"] main a:hover,
+:root[data-contrast-guard="on"] main a:focus-visible,
+:root[data-contrast-guard="on"] main button:hover,
+:root[data-contrast-guard="on"] main button:focus-visible,
+:root[data-contrast-guard="on"] main h1:hover,
+:root[data-contrast-guard="on"] main h2:hover,
+:root[data-contrast-guard="on"] main h3:hover {
+  text-shadow: none;
+}
+
+@media (prefers-contrast: more) {
+  /* Explicit user preference outranks the automatic guard. */
+  :root {
+    --glow-guard: 0;
+  }
+}
+
+
+/* Tri-colour lettering: white core with red and blue edge tints, so body copy
+   and headings themselves carry the flag, not just their glow. */
+@utility text-rwb {
+  background-image: linear-gradient(
+    100deg,
+    var(--glow-red) 0%,
+    var(--glow-white) 42%,
+    var(--glow-white) 58%,
+    var(--glow-blue) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+
+/* Headings sit on the dark mesh. Frosted modules restore charcoal below. */
+main h1,
+main h2 {
+  background-image: none;
+  background-clip: unset;
+  -webkit-background-clip: unset;
+  color: #f8fafc;
+  -webkit-text-fill-color: #f8fafc;
+  text-shadow: 0 2px 24px rgba(7, 9, 15, 0.85);
+  filter: none;
+}
+
+.bg-surface h1,
+.bg-card h1,
+.studio-glass h1,
+.hybrid-access-card h1,
+.bg-surface h2,
+.bg-card h2,
+.studio-glass h2,
+.hybrid-access-card h2 {
+  color: var(--foreground);
+  -webkit-text-fill-color: var(--foreground);
+  text-shadow: none;
+}
+
+main h1:hover,
+main h2:hover {
+  filter: none;
+}
+
+/* Contrast guard on: drop the clipped gradient and go back to solid white
+   with a dense dark halo, so readability never depends on the flag colours. */
+:root[data-contrast-guard="on"] main h1,
+:root[data-contrast-guard="on"] main h2 {
+  background-image: none;
+  color: var(--glow-white);
+  filter: none;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Tri-colour text cycle
+   Every glow layer above is scaled by --rwb-r / --rwb-w / --rwb-b. Cycling
+   those three weights makes all text pulse red -> white -> blue -> white and
+   back, and the gradient headings sweep the same flag across their letters.
+   Registered with @property so the numbers interpolate smoothly instead of
+   snapping between keyframes.
+--------------------------------------------------------------------------- */
+@property --rwb-r {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --rwb-w {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --rwb-b {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+/* Shared tokens for every glowing element: one duration, one easing, one set
+   of colour stops and one bloom recipe. Change these and the 005 radio block,
+   podcast titles, rotation song titles and footer all move together.
+   --rwb-bloom / --rwb-blur / --rwb-halo scale the whole system at once, which
+   is how the mobile and light-surface overrides below stay legible. */
+:root {
+  --rwb-duration: 12s;
+  --rwb-ease: ease-in-out;
+  --rwb-sweep-size: 260% 100%;
+
+  /* Global intensity dials (overridden per-context further down). */
+  --rwb-bloom: 0;
+  --rwb-blur: 0;
+  --rwb-halo: 0;
+  /* How far the red/blue gradient ends are pulled toward white. This is the
+     dial that actually decides contrast: the clipped gradient IS the text
+     colour, so the ends must stay above the WCAG AA luminance floor. */
+  --rwb-lift: 52%;
+
+  /* Colour stops: the red and blue ends are lifted toward white so the
+     clipped gradient never dips below readable luminance on dark panels. */
+  --rwb-stop-red: color-mix(in oklab, var(--glow-red) calc(100% - var(--rwb-lift)), var(--glow-white));
+  --rwb-stop-white: var(--glow-white);
+  --rwb-stop-blue: color-mix(in oklab, var(--glow-blue) calc(100% - var(--rwb-lift) - 6%), var(--glow-white));
+  --rwb-gradient: linear-gradient(
+    100deg,
+    var(--rwb-stop-red) 0%,
+    var(--rwb-stop-white) 34%,
+    var(--rwb-stop-white) 66%,
+    var(--rwb-stop-blue) 100%
+  );
+
+  /* Opaque dark halo carried under every glowing string — this is what buys
+     the contrast, the coloured bloom only sits on top of it. */
+  --rwb-halo-shadow: none;
+
+  --rwb-flame-filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+
+  --rwb-copy-shadow: none;
+}
+
+/* Small screens: text is physically smaller, so wide coloured bloom smears the
+   letterforms and the tinted gradient ends lose contrast at body sizes.
+   Tighten the blur, ease the bloom, keep the halo at full and lift the flag
+   ends further toward white so small copy clears WCAG AA. */
+@media (max-width: 767px) {
+  :root {
+    --rwb-bloom: 0;
+    --rwb-blur: 0;
+    --rwb-halo: 0;
+    --rwb-lift: 46%;
+  }
+}
+
+/* Coarse pointers (phones/tablets): freeze the interpolating @property cycle.
+   Animating --rwb-r/w/b on :root invalidates every heading drop-shadow on
+   every frame and is the cheapest compositor win we can take on iOS. */
+@media (hover: none) and (pointer: coarse) {
+  :root {
+    --rwb-bloom: 0;
+    --rwb-blur: 0;
+    --rwb-halo: 0;
+    --rwb-lift: 42%;
+    --rwb-r: 1;
+    --rwb-w: 1;
+    --rwb-b: 1;
+    animation: none;
+  }
+
+  :root[data-contrast-guard="on"] {
+    animation: none;
+  }
+
+  main h1,
+  main h2,
+  .text-rwb,
+  .rwb-flame,
+  .rwb-flame-deep,
+  #podcast h2,
+  #podcast h3,
+  #podcast h4,
+  #radio h2,
+  #radio h3,
+  #radio h4,
+  #radio .eyebrow,
+  footer h2,
+  footer h3,
+  footer h4 {
+    animation: none;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+  }
+
+  .cta-pulse,
+  .cta-pulse-delayed {
+    animation: none;
+    will-change: auto;
+  }
+}
+
+/* Increase Contrast: strip the coloured bloom back to a hint and run the flag
+   ends near-white so every string sits comfortably above AA. */
+@media (prefers-contrast: more) {
+  :root {
+    --rwb-bloom: 0;
+    --rwb-blur: 0;
+    --rwb-halo: 0;
+    --rwb-lift: 62%;
+  }
+}
+
+/* Contrast guard: keep bloom off; slabs already provide contrast. */
+:root[data-contrast-guard="on"] {
+  --rwb-bloom: 0;
+  --rwb-blur: 0;
+  --rwb-halo: 0;
+  --rwb-lift: 58%;
+}
+
+
+
+@keyframes rwb-text-cycle {
+  0% {
+    --rwb-r: 1.45;
+    --rwb-w: 0.55;
+    --rwb-b: 0.35;
+  }
+  25% {
+    --rwb-r: 0.75;
+    --rwb-w: 1.4;
+    --rwb-b: 0.75;
+  }
+  50% {
+    --rwb-r: 0.35;
+    --rwb-w: 0.55;
+    --rwb-b: 1.45;
+  }
+  75% {
+    --rwb-r: 0.75;
+    --rwb-w: 1.4;
+    --rwb-b: 0.75;
+  }
+  100% {
+    --rwb-r: 1.45;
+    --rwb-w: 0.55;
+    --rwb-b: 0.35;
+  }
+}
+
+/* Runs once on the root: the weights inherit down to every text rule. */
+:root {
+  animation: rwb-text-cycle var(--rwb-duration) var(--rwb-ease) infinite;
+}
+
+/* The clipped flag gradient on h1/h2 and .text-rwb drifts across the line, so
+   letters fade through red, white and blue rather than holding one tint. */
+@keyframes rwb-gradient-sweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+main h1,
+main h2,
+.text-rwb {
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+}
+
+/* Motion-sensitive users keep the static tri-colour treatment. */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  main h1,
+  main h2,
+  .text-rwb {
+    animation: none;
+  }
+}
+
+/* Contrast guard on: keep cycling, but damped. The guard already scales every
+   glow layer down, so the colours breathe without hurting readability. */
+@keyframes rwb-text-cycle-soft {
+  0% {
+    --rwb-r: 1.2;
+    --rwb-w: 0.8;
+    --rwb-b: 0.7;
+  }
+  25% {
+    --rwb-r: 0.9;
+    --rwb-w: 1.2;
+    --rwb-b: 0.9;
+  }
+  50% {
+    --rwb-r: 0.7;
+    --rwb-w: 0.8;
+    --rwb-b: 1.2;
+  }
+  75% {
+    --rwb-r: 0.9;
+    --rwb-w: 1.2;
+    --rwb-b: 0.9;
+  }
+  100% {
+    --rwb-r: 1.2;
+    --rwb-w: 0.8;
+    --rwb-b: 0.7;
+  }
+}
+
+:root[data-contrast-guard="on"] {
+  animation: rwb-text-cycle-soft var(--rwb-duration) var(--rwb-ease) infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Flag glow, everywhere
+   Body copy, podcast + radio titles, rotation song titles and the whole footer
+   pulse red -> white -> blue with the same 12s cycle as the headings.
+--------------------------------------------------------------------------- */
+
+/* Paragraph-level copy carries a much stronger tri-colour bloom than the
+   original hairline halo, so it reads as lit signage rather than flat text. */
+main p,
+main li,
+main dd,
+main figcaption,
+main blockquote,
+footer p,
+footer li,
+footer dd,
+footer span,
+footer a,
+footer button,
+footer address,
+footer small {
+  font-weight: 600;
+  text-shadow: var(--rwb-copy-shadow);
+
+}
+
+footer .division-label,
+.division-label {
+  font-weight: 800;
+  text-shadow: none;
+}
+
+/* Muted/utility copy on the mesh stays light; surfaces restore slate. */
+main .text-muted-foreground,
+footer .text-muted-foreground {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+/* Dimmer placeholder copy so hints recede behind actual user input. */
+.placeholder-dim::placeholder {
+  color: oklch(0.62 0.005 250);
+  opacity: 1;
+}
+
+.theme-light .placeholder-dim::placeholder {
+  color: oklch(0.55 0.012 20);
+}
+
+
+/* Footer headings and eyebrows sit outside <main>, so give them the same
+   heading bloom and hover behaviour. */
+footer h2,
+footer h3,
+footer h4,
+footer .eyebrow {
+  font-weight: 800;
+  transition: text-shadow 220ms ease-out, filter 220ms ease-out;
+}
+
+/* The signature treatment: clipped flag gradient that drifts across the
+   letters plus a red/white/blue bloom underneath. One rule drives the
+   `.rwb-flame` utility, podcast titles, the radio console, rotation song
+   titles and footer headings, so timing and colour stops never drift apart. */
+@utility rwb-flame {
+  background-image: var(--rwb-gradient);
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+  filter: var(--rwb-flame-filter);
+}
+
+#catalog h2,
+#catalog h3,
+#podcast h2,
+#podcast h3,
+#podcast h4,
+#radio h2,
+#radio h4,
+#radio h3:not(.radio-copy-gray),
+#radio .eyebrow,
+footer h2,
+footer h3,
+footer h4,
+footer .eyebrow {
+  background-image: var(--rwb-gradient);
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+  filter: var(--rwb-flame-filter);
+}
+
+/* Nested spans inside those titles must inherit the clip, or they punch a
+   solid-coloured hole through the gradient. */
+#catalog h2 span,
+#catalog h3 span,
+#podcast h2 span,
+#podcast h3 span,
+#radio h2 span,
+#radio h3 span,
+footer h2 span,
+footer h3 span {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  background: none;
+  text-shadow: inherit;
+}
+
+/* High-contrast headings opt out of the clipped flag so white / electric
+   blue / gold utilities actually paint. */
+#catalog h2.heading-pop,
+#catalog h3.heading-pop,
+#podcast h2.heading-pop,
+#podcast h3.heading-pop,
+#radio h2.heading-pop,
+#radio h3.heading-pop {
+  background-image: none !important;
+  background-clip: unset !important;
+  -webkit-background-clip: unset !important;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  animation: none !important;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+}
+
+#catalog h2.heading-pop span.text-white,
+#podcast h2.heading-pop,
+#radio h2.heading-pop {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+#catalog h2.heading-pop span.flag-red {
+  color: #e11d48 !important;
+  -webkit-text-fill-color: #e11d48 !important;
+}
+
+#catalog h2.heading-pop span.flag-blue,
+#radio h3.heading-pop {
+  color: #2563eb !important;
+  -webkit-text-fill-color: #2563eb !important;
+}
+
+/* Every remaining string in the radio console glows and fades too. */
+#radio p,
+#radio span,
+#radio li,
+#radio label,
+#radio button,
+#radio dt,
+#radio dd,
+#radio summary {
+  text-shadow: var(--rwb-copy-shadow);
+}
+
+
+/* Contrast guard on: drop the clipped gradients back to solid white so
+   readability never depends on the flag colours. */
+:root[data-contrast-guard="on"] #catalog h2,
+:root[data-contrast-guard="on"] #catalog h3,
+:root[data-contrast-guard="on"] #podcast h2,
+:root[data-contrast-guard="on"] #podcast h3,
+:root[data-contrast-guard="on"] #podcast h4,
+:root[data-contrast-guard="on"] #radio h2,
+:root[data-contrast-guard="on"] #radio h3,
+:root[data-contrast-guard="on"] #radio h4,
+:root[data-contrast-guard="on"] #radio .eyebrow,
+:root[data-contrast-guard="on"] footer h2,
+:root[data-contrast-guard="on"] footer h3,
+:root[data-contrast-guard="on"] footer h4,
+:root[data-contrast-guard="on"] footer .eyebrow,
+:root[data-contrast-guard="on"] .rwb-flame {
+  background-image: none;
+  color: var(--glow-white);
+  -webkit-text-fill-color: var(--glow-white);
+  filter: none;
+  text-shadow: none;
+}
+
+/* Hero motto stays solid flag lines — never the moving letter sweep. */
+.hero-band h1,
+.hero-line-red,
+.hero-line-white,
+.hero-line-blue {
+  background-image: none !important;
+  background-clip: unset !important;
+  -webkit-background-clip: unset !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #catalog h2,
+  #catalog h3,
+  #podcast h2,
+  #podcast h3,
+  #podcast h4,
+  #radio h2,
+  #radio h3,
+  #radio h4,
+  #radio .eyebrow,
+  footer h2,
+  footer h3,
+  footer h4,
+  footer .eyebrow,
+  .rwb-flame,
+  .rwb-nav-icon {
+    animation: none;
+  }
+}
+
+/* Dock + sidebar nav marks cycle with the same flag pulse as titles. */
+@keyframes rwb-nav-icon-cycle {
+  0%,
+  100% {
+    color: var(--glow-red);
+  }
+  35% {
+    color: var(--glow-white);
+  }
+  70% {
+    color: var(--glow-blue);
+  }
+}
+
+.rwb-nav-icon {
+  color: var(--glow-red);
+  animation: rwb-nav-icon-cycle var(--rwb-duration) var(--rwb-ease) infinite;
+}
+
+:root[data-contrast-guard="on"] .rwb-nav-icon {
+  animation: none;
+  color: var(--glow-white);
+}
+
+/* ---------------------------------------------------------------------------
+   Per-word flag colouring: solid Red / White / Blue words with a matching
+   glow. Used for the "Hybrid AI Records" wordmark in section headings, where
+   the animated gradient sweep would blur the three-colour reading.
+--------------------------------------------------------------------------- */
+@utility word-red {
+  color: var(--glow-red);
+  -webkit-text-fill-color: var(--glow-red);
+  background: none;
+  animation: none;
+  text-shadow: none;
+}
+
+@utility word-white {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  background: none;
+  animation: none;
+  text-shadow: none;
+}
+
+@utility word-blue {
+  color: var(--glow-blue);
+  -webkit-text-fill-color: var(--glow-blue);
+  background: none;
+  animation: none;
+  text-shadow: none;
+  font-weight: 800;
+}
+
+/* ── Cinematic hero lighting ─────────────────────────────────────────────
+ * Two slow, offset gradient washes (crimson key light + a cool blue fill)
+ * breathe behind the hero copy so the studio feels lit rather than static.
+ * Purely decorative, pointer-transparent, and disabled for reduced motion. */
+@keyframes hero-key-light {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translate3d(-2%, 0, 0) scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: translate3d(2%, -1.5%, 0) scale(1.08);
+  }
+}
+
+@keyframes hero-fill-light {
+  0%,
+  100% {
+    opacity: 0.24;
+    transform: translate3d(3%, 1%, 0) scale(1.05);
+  }
+  50% {
+    opacity: 0.46;
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+}
+
+@utility hero-key-light {
+  position: absolute;
+  inset: -18% -10% auto -20%;
+  height: 78%;
+  pointer-events: none;
+  z-index: -1;
+  will-change: opacity, transform;
+  background: radial-gradient(
+    52% 62% at 28% 34%,
+    color-mix(in oklab, var(--glow-red) calc(34% * var(--glow-strength, 1)), transparent) 0%,
+    color-mix(in oklab, var(--glow-red) calc(12% * var(--glow-strength, 1)), transparent) 42%,
+    transparent 72%
+  );
+  filter: blur(38px);
+  animation: hero-key-light 14s ease-in-out infinite;
+}
+
+@utility hero-fill-light {
+  position: absolute;
+  inset: auto -22% -24% 12%;
+  height: 70%;
+  pointer-events: none;
+  z-index: -1;
+  will-change: opacity, transform;
+  background:
+    radial-gradient(
+      46% 58% at 70% 62%,
+      color-mix(in oklab, var(--glow-blue) calc(30% * var(--glow-strength, 1)), transparent) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      30% 36% at 44% 46%,
+      color-mix(in oklab, var(--glow-white) calc(12% * var(--glow-strength, 1)), transparent) 0%,
+      transparent 74%
+    );
+  filter: blur(46px);
+  animation: hero-fill-light 19s ease-in-out infinite;
+  animation-delay: -6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-key-light,
+  .hero-fill-light {
+    animation: none;
+    transform: none;
+  }
+
+  .flowing-patriotic-bg::before {
+    animation: none;
+    transform: none;
+    filter: blur(36px);
+    will-change: auto;
+  }
+}
+
+/* ── CTA glow pulse ──────────────────────────────────────────────────────
+ * Primary/secondary hero CTAs breathe red → white → blue on the same 14s
+ * cadence as the hero key light, so the buttons feel lit by the same rig.
+ * Strength follows the global --glow-strength setting; motion is disabled
+ * for reduced-motion users (static crimson ring remains). */
+@keyframes cta-pulse-rwb {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--glow-red) calc(85% * var(--glow-strength, 1)), transparent),
+      0 0 18px -2px color-mix(in oklab, var(--glow-red) calc(95% * var(--glow-strength, 1)), transparent),
+      0 0 46px -6px color-mix(in oklab, var(--glow-red) calc(70% * var(--glow-strength, 1)), transparent);
+  }
+  33% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--glow-white) calc(70% * var(--glow-strength, 1)), transparent),
+      0 0 20px -2px color-mix(in oklab, var(--glow-white) calc(72% * var(--glow-strength, 1)), transparent),
+      0 0 48px -6px color-mix(in oklab, var(--glow-white) calc(46% * var(--glow-strength, 1)), transparent);
+  }
+  66% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--glow-blue) calc(90% * var(--glow-strength, 1)), transparent),
+      0 0 22px -2px color-mix(in oklab, var(--glow-blue) calc(98% * var(--glow-strength, 1)), transparent),
+      0 0 56px -6px color-mix(in oklab, var(--glow-blue) calc(76% * var(--glow-strength, 1)), transparent);
+  }
+}
+
+
+@utility cta-pulse {
+  animation: cta-pulse-rwb 14s ease-in-out infinite;
+  will-change: box-shadow;
+  &:hover,
+  &:focus-visible {
+    animation-duration: 6s;
+  }
+}
+
+/* Offset so the pair shimmer out of phase, mirroring the key/fill lights. */
+@utility cta-pulse-delayed {
+  animation: cta-pulse-rwb 19s ease-in-out infinite;
+  animation-delay: -6s;
+  will-change: box-shadow;
+  &:hover,
+  &:focus-visible {
+    animation-duration: 6s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-pulse,
+  .cta-pulse-delayed {
+    animation: none;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--glow-red) 45%, transparent);
+  }
+}
+
+/* ── Radio song titles: deeper red / stronger blue bloom ─────────────────
+ * Same sweep animation as `.rwb-flame`, but with a heavier bloom multiplier
+ * so track titles in the radio console read as lit signage. */
+@utility rwb-flame-deep {
+  --rwb-bloom: 1.75;
+  --rwb-blur: 1.25;
+  background-image: var(--rwb-gradient);
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+  filter: var(--rwb-flame-filter);
+}
+
+/* ── Glow intensity presets (Settings → Text glow) ───────────────────────
+ * Swaps the tri-colour palette only; every bloom layer keeps referencing
+ * these tokens, so one attribute retunes the whole site. Motion is untouched
+ * — reduced-motion rules above still hold at all three levels. */
+:root[data-glow-intensity="low"] {
+  --glow-red: #fda4af;
+  --glow-white: #ffffff;
+  --glow-blue: #93c5fd;
+}
+
+:root[data-glow-intensity="default"] {
+  --glow-red: #fb7185;
+  --glow-white: #ffffff;
+  --glow-blue: #60a5fa;
+}
+
+:root[data-glow-intensity="high"] {
+  --glow-red: #fb7185;
+  --glow-white: #ffffff;
+  --glow-blue: #38bdf8;
+}
+
+/* Bloom spread only moves on comfortable viewports, and never while the
+   contrast guard or Increase Contrast is active — accessibility floors win
+   over the preset. High is opt-in and stays a whisper, not a neon bloom. */
+@media (min-width: 768px) and (hover: hover) and (prefers-contrast: no-preference) {
+  :root[data-glow-intensity="low"]:not([data-contrast-guard="on"]) {
+    --rwb-bloom: 0;
+    --rwb-blur: 0;
+  }
+
+  :root[data-glow-intensity="high"]:not([data-contrast-guard="on"]) {
+    --rwb-bloom: 0.28;
+    --rwb-blur: 0.4;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Targeted readability floor
+   ---------------------------------------------------------------------------
+   Dense labels, mono eyebrows and helper copy used to bottom out around 10-12px.
+   Nothing informational is allowed below 14px any more, and body-level copy gets
+   a looser leading. Backgrounds and container styling are untouched so the
+   living crest / flashing logos keep blending as before. */
+.text-xs,
+[class*="text-[8px]"],
+[class*="text-[9px]"],
+[class*="text-[10px]"],
+[class*="text-[11px]"],
+[class*="text-[12px]"],
+[class*="text-[13px]"],
+[class*="text-[0.5"],
+[class*="text-[0.6"],
+[class*="text-[0.65"],
+[class*="text-[0.68"],
+[class*="text-[0.7"],
+[class*="text-[0.75"],
+[class*="text-[0.8125"] {
+  font-size: max(0.875rem, 14px) !important;
+  line-height: 1.55;
+}
+
+.text-sm {
+  font-size: max(0.95rem, 15px);
+  line-height: 1.65;
+}
+
+.text-base,
+main p,
+main li,
+main dd {
+  line-height: 1.7;
+}
+
+/* Small red utility labels were the hardest thing to read on charcoal: below
+   the 14px tier they switch to crisp off-white while headline red stays brand. */
+[class*="text-[#e11d2e]"].text-xs,
+[class*="text-[#e11d2e]"][class*="text-[8px]"],
+[class*="text-[#e11d2e]"][class*="text-[9px]"],
+[class*="text-[#e11d2e]"][class*="text-[10px]"],
+[class*="text-[#e11d2e]"][class*="text-[11px]"],
+[class*="text-[#e11d2e]"][class*="text-[12px]"] {
+  color: #e11d48;
+}
+
+/* Helper copy: charcoal in chrome/cards, light on the open mesh. */
+.text-muted-foreground {
+  color: #64748b;
+}
+
+main .text-muted-foreground,
+footer .text-muted-foreground {
+  color: #cbd5e1;
+}
+
+.site-sidebar .text-muted-foreground,
+.site-dock .text-muted-foreground,
+.site-topbar .text-muted-foreground,
+.bg-surface .text-muted-foreground,
+.bg-card .text-muted-foreground,
+.studio-glass .text-muted-foreground,
+.hybrid-access-card .text-muted-foreground {
+  color: #94a3b8;
+}
+
+.eyebrow {
+  font-size: max(0.8rem, 14px);
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile readability pass
+   ---------------------------------------------------------------------------
+   Phone-sized viewports keep the same 14px floor but get slightly larger body
+   copy, looser tracking on all-caps eyebrows (which get illegible when tiny)
+   and a hard contrast lift for helper/placeholder text on the charcoal base. */
+@media (max-width: 767px) {
+  .text-xs,
+  [class*="text-[8px]"],
+  [class*="text-[9px]"],
+  [class*="text-[10px]"],
+  [class*="text-[11px]"],
+  [class*="text-[12px]"],
+  [class*="text-[13px]"],
+  [class*="text-[0.5"],
+  [class*="text-[0.6"],
+  [class*="text-[0.65"],
+  [class*="text-[0.68"],
+  [class*="text-[0.7"],
+  [class*="text-[0.75"],
+  [class*="text-[0.8125"] {
+    font-size: max(0.875rem, 14px) !important;
+    line-height: 1.6;
+  }
+
+  /* Very wide tracking plus 14px caps wraps badly on narrow screens. */
+  [class*="tracking-[0.2"],
+  [class*="tracking-[0.3"],
+  .tracking-widest {
+    letter-spacing: 0.12em;
+  }
+
+  /* Helper, muted and placeholder copy stays slate on the silver canvas. */
+  .text-muted-foreground,
+  small,
+  figcaption:not(:has(.division-label)),
+  label {
+    color: #64748b;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in oklab, #64748b 72%, transparent);
+  }
+
+  /* Inputs stay at 16px so iOS Safari never zooms (which reflows the layout). */
+  input,
+  select,
+  textarea {
+    font-size: max(1rem, 16px);
+  }
+}
+
+/* ── iOS Safari overlay compositing guard ────────────────────────────────
+ * Mobile WebKit collapses to a frozen black screen when too many accelerated
+ * layers are live at once (rotating crests + blurred hero washes + a newly
+ * portalled select/sheet). While any Radix overlay is open we park the
+ * decorative layers and release their `will-change` hints so the overlay gets
+ * the compositor to itself. See src/lib/overlay-compositing.ts. */
+html[data-overlay-open="true"] .living-bg-layer,
+html[data-overlay-open="true"] .living-bg-skeleton,
+html[data-overlay-open="true"] .living-bg-fallback,
+html[data-overlay-open="true"] .living-bg-cinematic,
+html[data-overlay-open="true"] .living-bg-glow,
+html[data-overlay-open="true"] .bg-carousel-layer {
+  animation-play-state: paused !important;
+  will-change: auto !important;
+  transition: none !important;
+}
+
+html[data-overlay-open="true"] .living-bg-veil {
+  /* A blurred full-screen backdrop-filter under a portalled menu is the exact
+     combination that black-screens on iOS; the gradient alone still scrims. */
+  backdrop-filter: none !important;
+  transition: none !important;
+}
+
+html[data-overlay-open="true"] .hero-key-light,
+html[data-overlay-open="true"] .hero-fill-light,
+html[data-overlay-open="true"] .flowing-patriotic-bg::before {
+  animation-play-state: paused;
+  will-change: auto;
+}
+
+/* Portalled overlay surfaces get their own promoted, opaque layer that always
+   stacks above the background, and never inherit a blur from a parent. */
+[data-radix-popper-content-wrapper] {
+  z-index: 60;
+}
+
+[data-radix-select-content],
+[data-radix-menu-content],
+[data-radix-popover-content],
+[role="dialog"][data-state="open"] {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+
+  isolation: isolate;
+}
+
+/* Touch devices (iOS Safari): keep overlay surfaces fully opaque and let the
+   viewport scroll on the compositor rather than re-rasterising every frame. */
+@media (hover: none) and (pointer: coarse) {
+  [data-radix-select-content],
+  [data-radix-menu-content],
+  [data-radix-popover-content],
+  [role="dialog"][data-state="open"] {
+    backdrop-filter: none !important;
+    background-color: var(--popover);
+  }
+
+  [data-radix-select-viewport],
+  [data-radix-menu-content] {
+    overscroll-behavior: contain;
+  }
+
+  /* Every glass surface in the app: a live backdrop-filter forces WebKit to
+     re-sample the whole page behind each panel on every frame. On phones we
+     drop the blur and use an opaque silver fill so the mesh still reads
+     around the card without compositor collapse. */
+  [class*="backdrop-blur"],
+  .glass-panel,
+  .studio-glass,
+  .site-sidebar,
+  .site-topbar,
+  .site-dock,
+  .living-bg-veil {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .studio-glass,
+  .bg-card,
+  .bg-surface,
+  .site-sidebar,
+  .site-dock {
+    background-color: rgb(8 10 16 / 0.96) !important;
+  }
+
+  .site-topbar {
+    background-color: rgb(8 10 16 / 0.96) !important;
+  }
+
+  /* Long-lived `will-change` promotions are pure GPU-memory cost once the
+     animation they were hinting for is idle; Safari evicts layers (black
+     tiles) when it runs out. Keep them only while actually animating. */
+  .hero-key-light,
+  .hero-fill-light,
+  .glow-pulse,
+  .route-transition,
+  /* Four stacked full-screen crest layers each promoted to their own GPU
+     texture is what tips Safari into layer eviction on older iPhones. The
+     opacity/transform cross-fade still composites fine without the hint. */
+  .living-bg-layer,
+  .bg-carousel-layer,
+  .flowing-patriotic-bg::before {
+    will-change: auto !important;
+  }
+
+  /* Animated blur washes over the crest stack are a classic WebKit heat
+     source; keep a static tint, no filter, no transform. */
+  .hero-key-light,
+  .hero-fill-light {
+    animation: none !important;
+    filter: none !important;
+    transform: none !important;
+    opacity: 0.32;
+  }
+
+  .flowing-patriotic-bg::before {
+    animation: none !important;
+    filter: none !important;
+    transform: none !important;
+  }
+
+  /* Dense color-mix text-shadows re-rasterise whenever anything behind them
+     moves. One dark halo is enough for contrast on a charcoal page. */
+  main h1,
+  main h2,
+  main h3,
+  main .eyebrow,
+  main p,
+  main li,
+  main dd,
+  main dt,
+  main label,
+  main figcaption,
+  main span,
+  main a,
+  main button,
+  main summary,
+  main th,
+  main td,
+  main strong,
+  main b,
+  main .text-muted-foreground,
+  footer p,
+  footer li,
+  footer span,
+  footer a,
+  footer button,
+  #radio p,
+  #radio span,
+  #radio li,
+  #radio label,
+  #radio button {
+    text-shadow: none;
+    filter: none;
+    transition: none;
+  }
+
+  main h1:hover,
+  main h2:hover,
+  main h3:hover,
+  main .eyebrow:hover,
+  main a:hover,
+  main a:focus-visible,
+  main button:hover,
+  main button:focus-visible {
+    text-shadow: none;
+  }
+
+  .living-bg-layer,
+  .living-bg-fallback {
+    filter: none;
+  }
+
+  /* Filter/backdrop transitions are the most expensive thing WebKit can
+     animate. Cross-fade opacity instead. */
+  .living-bg-veil {
+    transition: opacity 1200ms ease-in-out;
+    backdrop-filter: none !important;
+  }
+}
+
+
+/* ── WebKit Safe Mode ────────────────────────────────────────────────────
+ * Engaged automatically after repeated white screens or error-boundary
+ * recoveries on this device (see src/lib/webkit-safe-mode.ts), or manually
+ * from /diagnostics. It removes every decorative animation, translucency and
+ * GPU-layer promotion in one sweep so mobile WebKit has nothing left to
+ * composite beyond flat, opaque content. Layout, colour and functionality are
+ * unchanged — only the effects that cause layer eviction disappear. */
+html[data-safe-mode="on"] .living-bg,
+html[data-safe-mode="on"] .living-bg-veil {
+  display: none !important;
+}
+
+html[data-safe-mode="on"] .hero-key-light,
+html[data-safe-mode="on"] .hero-fill-light,
+html[data-safe-mode="on"] .glow-pulse {
+  display: none !important;
+}
+
+html[data-safe-mode="on"] body {
+  background-color: var(--background);
+}
+
+html[data-safe-mode="on"] *,
+html[data-safe-mode="on"] *::before,
+html[data-safe-mode="on"] *::after {
+  /* No animation and no long-lived layer hints: both are pure compositor
+     cost on a device that has already proven it cannot afford them. */
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  mask-image: none !important;
+}
+
+/* Glass surfaces lose the blur, so they need a real opaque fill or the text
+   would sit on whatever is behind them. */
+html[data-safe-mode="on"] [class*="backdrop-blur"],
+html[data-safe-mode="on"] .glass-panel,
+html[data-safe-mode="on"] [data-radix-select-content],
+html[data-safe-mode="on"] [data-radix-menu-content],
+html[data-safe-mode="on"] [data-radix-popover-content],
+html[data-safe-mode="on"] [role="dialog"][data-state="open"],
+html[data-safe-mode="on"] [data-slot="sheet-content"] {
+  background-color: var(--card) !important;
+  border-color: var(--border);
+}
+
+html[data-safe-mode="on"] [data-slot="dialog-overlay"],
+html[data-safe-mode="on"] [data-slot="sheet-overlay"] {
+  background-color: var(--overlay) !important;
+}
+
+/* Focus rings are drawn with box-shadow, so the blanket reset above would
+   remove keyboard focus visibility — restore it explicitly. */
+html[data-safe-mode="on"] :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Fiery engine sliders
+   Range inputs in the Hybrid Engine studio. The filled portion is driven
+   by the inline `--fill` percentage set by React so the active track can
+   glow independently of the remaining track.
+   ------------------------------------------------------------------ */
+@property --fx-ember {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fx-lick-a {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fx-lick-b {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.fx-slider {
+  --fill: 50%;
+  --fx-ember: 0px;
+  --fx-lick-a: 0px;
+  --fx-lick-b: 0px;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 1.15rem;
+  border-radius: 999px;
+  cursor: pointer;
+  background:
+    /* bright flame tongues licking along the burning portion */
+    radial-gradient(
+        60% 120% at var(--fx-lick-a) 100%,
+        #fff6c8 0%,
+        #ffd24a 26%,
+        #ff7a1a 52%,
+        transparent 72%
+      )
+      0 0 / var(--fill) 100% no-repeat,
+    radial-gradient(
+        44% 150% at var(--fx-lick-b) 110%,
+        #ffffff 0%,
+        #ffe08a 22%,
+        #ff4d00 55%,
+        transparent 78%
+      )
+      0 0 / var(--fill) 100% no-repeat,
+    repeating-linear-gradient(
+        112deg,
+        color-mix(in oklab, #ffd24a 78%, transparent) calc(var(--fx-ember) - 20px),
+        color-mix(in oklab, #ff3d00 60%, transparent) calc(var(--fx-ember) - 10px),
+        color-mix(in oklab, #ffd24a 78%, transparent) var(--fx-ember)
+      )
+      0 0 / var(--fill) 100% no-repeat,
+    /* molten base of the burning portion */
+    linear-gradient(
+        180deg,
+        #ffcf4d 0%,
+        #ff8a00 42%,
+        #e02200 100%
+      )
+      0 0 / var(--fill) 100% no-repeat,
+    color-mix(in oklab, var(--muted) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--primary) 35%, transparent);
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / 0.5),
+    0 0 calc(14px * var(--glow-strength, 1))
+      color-mix(in oklab, var(--primary) calc(28% * var(--glow-strength, 1)), transparent);
+  transition: box-shadow 220ms ease, background-size 120ms ease, filter 220ms ease;
+  animation:
+    fx-ember-drift 2.4s linear infinite,
+    fx-ember-pulse 2.8s ease-in-out infinite,
+    fx-lick-a 1.1s ease-in-out infinite alternate,
+    fx-lick-b 0.7s ease-in-out infinite alternate,
+    fx-flicker 0.28s steps(2, end) infinite;
+}
+
+@keyframes fx-ember-drift {
+  to {
+    --fx-ember: 20px;
+  }
+}
+
+@keyframes fx-lick-a {
+  from {
+    --fx-lick-a: 8px;
+  }
+  to {
+    --fx-lick-a: 240px;
+  }
+}
+
+@keyframes fx-lick-b {
+  from {
+    --fx-lick-b: 200px;
+  }
+  to {
+    --fx-lick-b: 20px;
+  }
+}
+
+@keyframes fx-flicker {
+  0%,
+  100% {
+    filter: brightness(1) saturate(1.15);
+  }
+  50% {
+    filter: brightness(1.14) saturate(1.35);
+  }
+}
+
+@keyframes fx-ember-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 2px rgb(0 0 0 / 0.5),
+      0 0 calc(16px * var(--glow-strength, 1))
+        color-mix(in oklab, #ff7a1a calc(40% * var(--glow-strength, 1)), transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 2px rgb(0 0 0 / 0.5),
+      0 0 calc(30px * var(--glow-strength, 1))
+        color-mix(in oklab, #ffb020 calc(62% * var(--glow-strength, 1)), transparent),
+      0 -6px calc(22px * var(--glow-strength, 1))
+        color-mix(in oklab, #ff4d00 calc(46% * var(--glow-strength, 1)), transparent);
+  }
+}
+
+
+.fx-slider:hover,
+.fx-slider:focus-visible {
+  filter: saturate(1.25) brightness(1.06);
+}
+
+
+.fx-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff3d0, var(--primary) 70%);
+  border: 1px solid color-mix(in oklab, var(--primary) 70%, #ffd24a);
+  box-shadow:
+    0 0 10px color-mix(in oklab, var(--primary) 70%, transparent),
+    0 0 24px color-mix(in oklab, #ff8a00 45%, transparent);
+  transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.4), box-shadow 200ms ease;
+}
+
+.fx-slider:active::-webkit-slider-thumb,
+.fx-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.18);
+  box-shadow:
+    0 0 16px color-mix(in oklab, var(--primary) 85%, transparent),
+    0 0 34px color-mix(in oklab, #ff8a00 60%, transparent);
+}
+
+.fx-slider::-moz-range-thumb {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff3d0, var(--primary) 70%);
+  border: 1px solid color-mix(in oklab, var(--primary) 70%, #ffd24a);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--primary) 70%, transparent);
+  transition: transform 160ms ease;
+}
+
+.fx-slider:active::-moz-range-thumb {
+  transform: scale(1.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-slider,
+  .fx-slider::-webkit-slider-thumb,
+  .fx-slider::-moz-range-thumb {
+    transition: none;
+    animation: none;
+  }
+}
+
+html[data-safe-mode="on"] .fx-slider,
+html[data-safe-mode="on"] .fx-slider::-webkit-slider-thumb {
+  box-shadow: none;
+  animation: none;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Readability pass: body copy, labels and form text render as charcoal
+   with no crimson bloom. The red/white/blue glow stays on headings, brand
+   lockups and primary interactive targets only.
+--------------------------------------------------------------------------- */
+main p,
+main li,
+main dd,
+main span,
+main small,
+main label,
+main figcaption,
+main blockquote,
+main input,
+main textarea,
+main button,
+footer p,
+footer li,
+footer dd,
+footer span,
+footer small,
+footer address {
+  text-shadow: none;
+}
+
+main .text-muted-foreground,
+footer .text-muted-foreground {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Light Studio glass + type remaps
+   Frosted modules let the red/white/blue mesh show through. White type from
+   the dark theme is remapped to charcoal unless it sits on a raspberry fill.
+--------------------------------------------------------------------------- */
+.studio-glass,
+.hybrid-access-card,
+.bg-card,
+.bg-surface,
+.bg-background\/95,
+.site-sidebar,
+.site-dock {
+  background-color: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft);
+  color: var(--foreground);
+}
+
+.site-topbar {
+  background-color: rgb(0 0 0 / 0.6) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: none;
+}
+
+footer a,
+main a[href^="http"],
+main a[href^="mailto"] {
+  color: #e2e8f0;
+}
+
+footer a:hover,
+main a[href^="http"]:hover,
+main a[href^="mailto"]:hover {
+  color: #ffffff;
+}
+
+footer a.vetcert-badge {
+  border: 1px solid rgb(245 158 11 / 0.4);
+  background: rgb(15 23 42 / 0.9);
+  color: #fde68a;
+  text-shadow: none;
+  box-shadow: none;
+}
+
+footer a.vetcert-badge:hover {
+  background: rgb(30 41 59 / 1);
+  border-color: rgb(251 191 36 / 0.85);
+  color: #fde68a;
+}
+
+footer a.vetcert-badge .vetcert-badge-icon {
+  color: #fbbf24;
+}
+
+.overlay-scrim {
+  background-color: var(--overlay) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+html.app-bg :is(.text-white, [class*="text-white\/"]):not(.bg-primary):not(.btn-primary) {
+  color: #ffffff;
+}
+
+html.app-bg .bg-primary,
+html.app-bg .btn-primary,
+html.app-bg .bg-primary :is(.text-white, [class*="text-white\/"]),
+html.app-bg .btn-primary :is(.text-white, [class*="text-white\/"]) {
+  color: var(--primary-foreground);
+}
+

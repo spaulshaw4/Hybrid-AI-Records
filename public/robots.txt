@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+
+# Internal, transactional and personal-lookup pages (also noindex in <head>)
+Disallow: /admin/
+Disallow: /dev/
+Disallow: /mcp
+Disallow: /.lovable/
+Disallow: /api/
+Disallow: /auth
+Disallow: /receipts
+Disallow: /order-status
+Disallow: /checkout/return
+
+Sitemap: https://hybrid-ai-records.com/sitemap.xml

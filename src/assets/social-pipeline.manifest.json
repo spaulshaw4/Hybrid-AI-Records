@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-08-04T08:17:49Z",
+  "sources": {
+    "src/assets/social-banner.svg": "2a9d0803556d7d0b",
+    "src/assets/brand-crest-us.jpg": "ecfdb35e0a1f2b53",
+    "scripts/generate_social_from_logo.py": "23ea606b8c1b01fd",
+    "scripts/social_pipeline.py": "c1d162055f785cea"
+  },
+  "svgFamily": [
+    "src/assets/social-banner.svg",
+    "src/assets/social-banner-hd.svg",
+    "src/assets/social-banner-story.svg",
+    "src/assets/social-banner-square.svg"
+  ],
+  "variants": {
+    "wide": {
+      "file": "social-banner-wide.jpg",
+      "from": "social-banner.svg",
+      "width": 2400,
+      "height": 1260,
+      "sha256": "d6c53214bac46004"
+    },
+    "og1200": {
+      "file": "social-banner-1200x630.jpg",
+      "from": "social-banner.svg",
+      "width": 1200,
+      "height": 630,
+      "sha256": "9900fd4d4d1db371"
+    },
+    "hd1920": {
+      "file": "social-banner-1920x1080.jpg",
+      "from": "social-banner-hd.svg",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "7783847ddb7fbf16"
+    },
+    "square": {
+      "file": "social-banner-1080x1080.jpg",
+      "from": "social-banner-square.svg",
+      "width": 1080,
+      "height": 1080,
+      "sha256": "ceb850d61c60f1c9"
+    },
+    "squareVector": {
+      "file": "social-banner-vector-1080x1080.jpg",
+      "from": "social-banner-square.svg",
+      "width": 1080,
+      "height": 1080,
+      "sha256": "ceb850d61c60f1c9"
+    },
+    "story": {
+      "file": "social-banner-1080x1920.jpg",
+      "from": "social-banner-story.svg",
+      "width": 1080,
+      "height": 1920,
+      "sha256": "d9842577455e594d"
+    },
+    "og1200png": {
+      "file": "social-banner-1200x630.png",
+      "from": "social-banner.svg",
+      "width": 1200,
+      "height": 630,
+      "sha256": "1f0c31d29c2bec93"
+    },
+    "squarePng": {
+      "file": "social-banner-1080x1080.png",
+      "from": "social-banner-square.svg",
+      "width": 1080,
+      "height": 1080,
+      "sha256": "8a178495b5a1b729"
+    },
+    "storyPng": {
+      "file": "social-banner-1080x1920.png",
+      "from": "social-banner-story.svg",
+      "width": 1080,
+      "height": 1920,
+      "sha256": "174d8ce50f18fae1"
+    }
+  }
+}

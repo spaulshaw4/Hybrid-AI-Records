@@ -1,0 +1,1 @@
+ALTER TABLE public.track_requests ADD COLUMN IF NOT EXISTS artist_note text;
