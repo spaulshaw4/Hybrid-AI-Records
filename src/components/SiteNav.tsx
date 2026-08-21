@@ -36,32 +36,52 @@ function NavLink({
   compact?: boolean;
   active: boolean;
 }) {
+  const isCreate = item.id === "make-track";
   const Icon = ICONS[item.icon];
-  const className = cn(
-    "flex items-center rounded-lg bg-zinc-900 border border-zinc-700 shadow-md outline-none transition-all hover:border-blue-500 hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-blue-400",
-    compact
-      ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 px-1 py-1.5"
-      : "min-h-11 gap-3 px-3 py-2",
-    active && "border-blue-400 bg-zinc-800",
-  );
+  const className = isCreate
+    ? cn(
+        "flex items-center rounded-lg bg-gradient-to-r from-red-600/20 to-transparent border-l-4 border-red-500 text-white outline-none transition-all hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-red-500",
+        compact
+          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 border-l-0 border-t-4 px-1 py-1.5"
+          : "min-h-11 gap-3 px-4 py-3",
+        active && "bg-white/10",
+      )
+    : cn(
+        "flex items-center rounded-lg bg-zinc-900 border border-zinc-700 shadow-md outline-none transition-all hover:border-blue-500 hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-blue-400",
+        compact
+          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 px-1 py-1.5"
+          : "min-h-11 gap-3 px-3 py-2",
+        active && "border-blue-400 bg-zinc-800",
+      );
   const label = (
     <>
-      <Icon
-        className={cn(
-          "rwb-nav-icon shrink-0",
-          compact ? "size-4" : "size-[18px]",
-        )}
-        aria-hidden
-      />
+      {isCreate ? (
+        <span className="text-base text-red-500" aria-hidden>
+          ✦
+        </span>
+      ) : (
+        <Icon
+          className={cn(
+            "rwb-nav-icon shrink-0",
+            compact ? "size-4" : "size-[18px]",
+          )}
+          aria-hidden
+        />
+      )}
       <span
         className={cn(
-          "rwb-flame rwb-flame-deep font-mono font-bold uppercase",
+          "uppercase",
+          isCreate
+            ? "font-black tracking-widest text-white"
+            : "rwb-flame rwb-flame-deep font-mono font-bold",
           compact
             ? "max-w-full truncate text-center text-[9px] tracking-[0.08em]"
-            : "min-w-0 text-start text-[11px] tracking-[0.16em]",
+            : isCreate
+              ? "min-w-0 text-start text-sm"
+              : "min-w-0 text-start text-[11px] tracking-[0.16em]",
         )}
       >
-        {compact ? item.short : item.label}
+        {compact ? item.short : isCreate ? "Create" : item.label}
       </span>
     </>
   );

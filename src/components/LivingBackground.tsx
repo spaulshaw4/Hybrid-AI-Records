@@ -191,35 +191,44 @@ export function LivingBackground() {
   );
 }
 
+const DIVISION_TITLE_CLASS = {
+  usa: "text-red-500",
+  jester: "text-blue-400",
+  lithuania: "text-emerald-400",
+  nigeria: "text-green-500",
+} as const;
+
 /** Four division crests as a single footer lockup — not a full-screen grid. */
 export function DivisionFooterBadge({ className = "" }: { className?: string }) {
   return (
     <div
-      className={`mt-8 grid w-full max-w-2xl grid-cols-2 items-start gap-6 sm:grid-cols-4 sm:gap-5 ${className}`}
+      className={`mt-12 w-full border-t border-white/10 bg-black/40 py-8 ${className}`}
       role="group"
       aria-label="Hybrid AI Records divisions"
     >
-      {DIVISION_FOOTER_CRESTS.map((crest) => (
-        <figure key={crest.name} className="m-0 flex min-w-0 flex-col items-center gap-2">
-          <img
-            src={crest.src}
-            alt={`${crest.title} emblem`}
-            title={crest.label}
-            width={512}
-            height={512}
-            className="division-emblem h-auto w-full max-w-[9.5rem] select-none bg-transparent object-contain [image-rendering:-webkit-optimize-contrast]"
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-          />
-          <figcaption className="w-full text-center font-mono text-xs uppercase tracking-widest">
-            <span className="block text-slate-500">Official Label</span>
-            <span className={`block text-sm font-black division-label division-label-${crest.name}`}>
-              {crest.title}
-            </span>
-          </figcaption>
-        </figure>
-      ))}
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-8 px-4 text-center">
+        {DIVISION_FOOTER_CRESTS.map((crest) => (
+          <figure key={crest.name} className="m-0 flex min-w-[140px] flex-col items-center gap-1">
+            <img
+              src={crest.src}
+              alt={`${crest.title} emblem`}
+              title={crest.label}
+              width={512}
+              height={512}
+              className="division-emblem mb-1 h-auto w-full max-w-[6.5rem] select-none bg-transparent object-contain [image-rendering:-webkit-optimize-contrast]"
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+            />
+            <figcaption className="flex flex-col items-center gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-gray-400">Official Label</span>
+              <span className={`text-xs font-black tracking-wider ${DIVISION_TITLE_CLASS[crest.name]}`}>
+                {crest.title}
+              </span>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
     </div>
   );
 }

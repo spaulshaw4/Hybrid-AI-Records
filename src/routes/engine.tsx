@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { AudioStudio } from "@/components/AudioStudio";
-import { Badge } from "@/components/ui/badge";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
@@ -81,25 +80,21 @@ function EnginePage() {
   return (
     <main
       id="engine-workspace"
-      className="relative z-10 min-h-[calc(100dvh-var(--site-header-height)-var(--site-dock-height))] bg-transparent py-6 sm:py-8"
+      className="relative z-10 min-h-[calc(100dvh-var(--site-header-height)-var(--site-dock-height))] bg-[#0d0d11] py-6 text-white sm:py-8"
     >
-      <div className="mx-auto mb-6 w-full max-w-3xl px-4">
+      <div className="mx-auto mb-8 w-full max-w-7xl px-4 sm:px-6">
         <PortalBreadcrumb trail={[{ label: "Hybrid Engine 1.0" }]} />
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Hybrid Engine 1.0</h1>
-          <Badge
-            variant="outline"
-            className="border-status-outline text-status-accent bg-transparent font-mono text-xs tracking-wider"
-          >
-            v1.0
-          </Badge>
+        <div className="mt-4 border-b border-white/10 pb-4">
+          <h1 className="text-2xl font-black uppercase tracking-wider text-red-500">
+            Hybrid Track Creation Studio
+          </h1>
+          <p className="mt-1 text-sm text-gray-400">
+            No studio, no engineer required. Select your engine mode and start creating.
+          </p>
         </div>
-        <p className="mt-2 text-muted-foreground">
-          Raw words. Real music. One prompt, one token, one mastered track.
-        </p>
       </div>
 
-      <section className="w-full px-4">
+      <section className="w-full px-4 sm:px-6">
         <AudioStudio />
       </section>
     </main>
