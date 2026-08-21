@@ -27,8 +27,24 @@ const ICONS = {
   packages: Clapperboard,
 } as const;
 
-function NavLink({
-  item,
+function CreateWaveformIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M12 3v18M8 6v12M4 9v6M16 6v12M20 9v6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function NavItem({
   compact,
   active,
 }: {
@@ -40,10 +56,10 @@ function NavLink({
   const Icon = ICONS[item.icon];
   const className = isCreate
     ? cn(
-        "flex items-center rounded-lg bg-gradient-to-r from-red-600/20 to-transparent border-l-4 border-red-500 text-white outline-none transition-all hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-red-500",
+        "flex items-center rounded-lg text-white outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-cyan-400",
         compact
-          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 border-l-0 border-t-4 px-1 py-1.5"
-          : "min-h-11 gap-3 px-4 py-3",
+          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 px-1 py-1.5"
+          : "min-h-11 gap-3 px-4 py-3 text-sm font-bold tracking-wider uppercase",
         active && "bg-white/10",
       )
     : cn(
@@ -56,9 +72,9 @@ function NavLink({
   const label = (
     <>
       {isCreate ? (
-        <span className="text-base text-red-500" aria-hidden>
-          ✦
-        </span>
+        <CreateWaveformIcon
+          className={cn("shrink-0 text-cyan-400", compact ? "h-4 w-4" : "h-5 w-5")}
+        />
       ) : (
         <Icon
           className={cn(
@@ -72,7 +88,7 @@ function NavLink({
         className={cn(
           "uppercase",
           isCreate
-            ? "font-black tracking-widest text-white"
+            ? "font-bold tracking-wider text-white"
             : "rwb-flame rwb-flame-deep font-mono font-bold",
           compact
             ? "max-w-full truncate text-center text-[9px] tracking-[0.08em]"
