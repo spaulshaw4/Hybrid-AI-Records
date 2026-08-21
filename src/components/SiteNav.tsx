@@ -45,6 +45,7 @@ function CreateWaveformIcon({ className }: { className?: string }) {
   );
 }
 function NavItem({
+  item,
   compact,
   active,
 }: {
@@ -182,7 +183,7 @@ function SiteSidebar() {
       </div>
       <nav className="flex flex-1 flex-col gap-2 p-3">
         {SITE_NAV.map((item) => (
-          <NavLink
+          <NavItem
             key={item.id}
             item={item}
             active={isSiteNavActive(item, pathname, search, hash)}
@@ -225,7 +226,7 @@ function SiteDock() {
     >
       <div className="flex items-stretch">
         {SITE_NAV.map((item) => (
-          <NavLink
+          <NavItem
             key={item.id}
             item={item}
             compact
