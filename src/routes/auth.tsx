@@ -233,7 +233,7 @@ function AuthPage() {
         <button
           type="button"
           onClick={google}
-          className="hybrid-access-google mt-6 inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-white/60 bg-white/80 px-4 py-2.5 font-mono text-xs uppercase text-foreground transition hover:border-primary hover:text-primary"
+          className="hybrid-access-google mt-6 inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-100"
         >
           <GoogleMark />
           Continue with Google

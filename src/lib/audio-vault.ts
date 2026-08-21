@@ -4,6 +4,9 @@ export const AUDIO_VAULT_BUCKET = "audio-vault";
 /** Studio engine archive bucket (stems and fallback masters). */
 export const STUDIO_AUDIO_BUCKET = "studio-deliveries";
 
+/** Matchering 2.0 masters land under this prefix in the vault bucket. */
+export const MASTERED_TRACKS_PREFIX = "mastered_tracks";
+
 /** 150 MB — matches the bucket file_size_limit. */
 export const AUDIO_VAULT_MAX_BYTES = 157_286_400;
 
@@ -70,4 +73,15 @@ export function vaultStemObjectPath(
 ): string {
   const id = trackId.replace(/[^a-zA-Z0-9_-]/g, "_") || "track";
   return `masters/${id}_${stem}.${normalizeVaultFileType(fileType)}`;
+}
+
+/** `mastered_tracks/{userId}/{taskId}_master.{wav|mp3}` — Matchering output. */
+export function masteredTrackObjectPath(
+  userId: string,
+  taskId: string,
+  fileType: string = "mp3",
+): string {
+  const uid = userId.replace(/[^a-zA-Z0-9_-]/g, "_") || "user";
+  const id = taskId.replace(/[^a-zA-Z0-9_-]/g, "_") || "track";
+  return `${MASTERED_TRACKS_PREFIX}/${uid}/${id}_master.${normalizeVaultFileType(fileType)}`;
 }

@@ -36,7 +36,7 @@ export const DIVISION_FOOTER_CRESTS = [
     name: "jester" as const,
     src: jesterEmblem,
     label: "The Jester AI",
-    title: "LEGACY RECORDS",
+    title: "THE JESTER AI LEGACY RECORDS",
   },
   {
     name: "lithuania" as const,
@@ -192,10 +192,10 @@ export function LivingBackground() {
 }
 
 const DIVISION_TITLE_CLASS = {
-  usa: "text-red-500",
-  jester: "text-blue-400",
-  lithuania: "text-emerald-400",
-  nigeria: "text-green-500",
+  usa: "rwb-flame rwb-flame-deep",
+  jester: "rwb-flame rwb-flame-deep",
+  lithuania: "lt-flame",
+  nigeria: "ng-flame",
 } as const;
 
 /** Four division crests as a single footer lockup — not a full-screen grid. */
@@ -220,8 +220,7 @@ export function DivisionFooterBadge({ className = "" }: { className?: string }) 
               decoding="async"
               draggable={false}
             />
-            <figcaption className="flex flex-col items-center gap-1">
-              <span className="text-[10px] uppercase tracking-widest text-gray-400">Official Label</span>
+            <figcaption className="text-center">
               <span className={`text-xs font-black tracking-wider ${DIVISION_TITLE_CLASS[crest.name]}`}>
                 {crest.title}
               </span>

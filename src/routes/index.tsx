@@ -725,7 +725,7 @@ function Home() {
                 <span className="text-base text-slate-100">
                   Write it, describe it, hear it in minutes. No studio, no engineer.
                 </span>
-                <span className="mt-2 inline-flex items-center gap-2 font-bold uppercase tracking-wider text-cyan-400 group-hover:text-cyan-300">
+                <span className="mt-2 inline-flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#2563eb]">
                   Start creating <ArrowUpRight size={15} />
                 </span>
               </Link>

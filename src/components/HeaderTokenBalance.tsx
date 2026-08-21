@@ -55,7 +55,7 @@ function HeaderTokenBalanceBase({ className = "" }: { className?: string }) {
           className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-primary transition-colors hover:bg-primary/20"
         >
           <HybridTokenIcon className="size-4 text-primary" />
-          Sign in to see tokens
+          Sign in
         </Link>
       </div>
     );
@@ -73,9 +73,9 @@ function HeaderTokenBalanceBase({ className = "" }: { className?: string }) {
       </Link>
       <Link
         to="/tokens"
-        className="hidden rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground/80 transition-colors hover:text-foreground lg:inline-flex"
+        className="inline-flex rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground/80 transition-colors hover:text-foreground"
       >
-        Buy
+        Buy tokens
       </Link>
     </div>
   );

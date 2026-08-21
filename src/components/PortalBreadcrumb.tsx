@@ -25,12 +25,15 @@ export function PortalBreadcrumb({
   trail = [],
   backTo = "/",
   backLabel = "Home",
+  end,
 }: {
   trail?: PortalCrumb[];
   /** Where back navigation lands when there is no in-app history. */
   backTo?: string;
   /** Label shown on the mobile back control. */
   backLabel?: string;
+  /** Optional control shown beside the trail (token balance, etc.). */
+  end?: React.ReactNode;
 }) {
   const router = useRouter();
 
@@ -84,43 +87,46 @@ export function PortalBreadcrumb({
           <span>Back to {backLabel.toLowerCase()}</span>
         </button>
 
-        <ol className="flex min-w-max items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <li>
-            <Link
-              to="/"
-              preload="intent"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Home size={14} aria-hidden="true" className="shrink-0" />
-              <span>Home</span>
-            </Link>
-          </li>
-          {trail.map((crumb, index) => {
-            const isLast = index === trail.length - 1;
-            return (
-              <li key={`${crumb.label}-${index}`} className="flex items-center gap-1">
-                <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-border" />
-                {crumb.to && !isLast ? (
-                  <Link
-                    to={crumb.to}
-                    search={crumb.search as never}
-                    preload="intent"
-                    className="inline-flex min-h-11 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {crumb.label}
-                  </Link>
-                ) : (
-                  <span
-                    aria-current={isLast ? "page" : undefined}
-                    className="inline-flex min-h-11 items-center px-2 text-white"
-                  >
-                    {crumb.label}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2">
+          <ol className="flex min-w-max items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <li>
+              <Link
+                to="/"
+                preload="intent"
+                className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Home size={14} aria-hidden="true" className="shrink-0" />
+                <span>Home</span>
+              </Link>
+            </li>
+            {trail.map((crumb, index) => {
+              const isLast = index === trail.length - 1;
+              return (
+                <li key={`${crumb.label}-${index}`} className="flex items-center gap-1">
+                  <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-border" />
+                  {crumb.to && !isLast ? (
+                    <Link
+                      to={crumb.to}
+                      search={crumb.search as never}
+                      preload="intent"
+                      className="inline-flex min-h-11 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {crumb.label}
+                    </Link>
+                  ) : (
+                    <span
+                      aria-current={isLast ? "page" : undefined}
+                      className="inline-flex min-h-11 items-center px-2 text-white"
+                    >
+                      {crumb.label}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+          {end ? <div className="shrink-0 px-1">{end}</div> : null}
+        </div>
       </nav>
     </>
   );

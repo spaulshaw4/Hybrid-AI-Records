@@ -11,14 +11,14 @@ const COPY: Record<Division, { org: string; division: string }> = {
   usa: { org: "HYBRID AI RECORDS", division: "USA DIVISION" },
   lithuania: { org: "HYBRID AI RECORDS", division: "LITHUANIA DIVISION" },
   nigeria: { org: "HYBRID AI RECORDS", division: "NIGERIA DIVISION" },
-  jester: { org: "THE JESTER AI", division: "LEGACY RECORDS" },
+  jester: { org: "", division: "THE JESTER AI LEGACY RECORDS" },
 };
 
 const DIVISION_LABEL_CLASS: Record<Division, string> = {
-  usa: "text-red-500",
-  jester: "text-blue-400",
-  lithuania: "text-emerald-400",
-  nigeria: "text-green-500",
+  usa: "rwb-flame rwb-flame-deep",
+  jester: "rwb-flame rwb-flame-deep",
+  lithuania: "lt-flame",
+  nigeria: "ng-flame",
 };
 
 const SIZE_CLASS: Record<CrestSize, string> = {
@@ -87,7 +87,9 @@ export function DivisionCrest({
         data-testid="division-label-mobile"
         className="text-center font-mono uppercase tracking-widest"
       >
-        <span className="block text-[10px] uppercase tracking-widest text-gray-400">{copy.org}</span>
+        {copy.org ? (
+          <span className="block text-[10px] uppercase tracking-widest text-gray-400">{copy.org}</span>
+        ) : null}
         <span className={`block text-xs font-black tracking-wider ${DIVISION_LABEL_CLASS[division]}`}>{copy.division}</span>
       </div>
     </div>

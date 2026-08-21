@@ -348,23 +348,95 @@
   border-bottom-color: rgb(255 255 255 / 0.1);
 }
 
-/* Engine wizard: keep step fields and legal copy between the site header and
-   bottom chrome, with an inner scroll instead of pushing content under the
-   generate dock or mobile nav. */
-.engine-step-container,
+/* Engine wizard: everything stays in document flow. No sticky/fixed chrome. */
+.engine-wizard-card,
+.engine-wizard-card.studio-glass {
+  background: #09090b !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: #27272a;
+}
+
+#engine-workspace #studio-step-progress,
+#engine-workspace #studio-generate-dock {
+  position: relative !important;
+  top: auto !important;
+  bottom: auto !important;
+  inset: auto !important;
+  z-index: auto;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Portalled outside #engine-workspace — must not depend on that ancestor.
+   --card / --glass are 72% opaque and would show the form through the menu. */
+.engine-opaque-menu,
+.engine-opaque-menu[data-radix-popover-content],
+html[data-safe-mode="on"] .engine-opaque-menu,
+html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
+  background: #09090b !important;
+  background-color: #09090b !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  color: #f4f4f5 !important;
+  -webkit-text-fill-color: #f4f4f5 !important;
+  border: 1px solid #27272a !important;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.85) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.engine-opaque-menu .engine-genre-scroll {
+  background: #09090b;
+}
+
+.engine-step-container {
+  position: relative;
+  margin-top: 10px;
+  padding-bottom: 1rem;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.engine-genre-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 #09090b;
+}
+
+.engine-genre-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.engine-genre-scroll::-webkit-scrollbar-track {
+  background: #09090b;
+  border-radius: 999px;
+}
+
+.engine-genre-scroll::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 999px;
+  border: 2px solid #09090b;
+}
+
+.engine-genre-scroll::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+.engine-genre-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .legal-modal-container {
-  max-height: calc(100vh - 160px);
+  max-height: min(22rem, calc(100dvh - var(--site-header-height) - var(--site-dock-height) - 16rem));
   overflow-y: auto;
-  padding-bottom: 80px;
+  padding-bottom: 1rem;
   margin-top: 10px;
   box-sizing: border-box;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-}
-
-/* Continue/Generate lives at the end of the step, not pinned over the fields. */
-.engine-step-container {
-  padding-bottom: 1rem;
 }
 
 .engine-step-container::-webkit-scrollbar,
@@ -411,7 +483,29 @@
 }
 
 .hybrid-access-google {
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
+  background: #ffffff !important;
+  background-image: none !important;
+  color: #18181b !important;
+  -webkit-text-fill-color: #18181b !important;
+  border-color: #d4d4d8 !important;
+  text-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  text-transform: none;
+}
+
+.hybrid-access-google:hover,
+.hybrid-access-google:focus-visible {
+  background: #f4f4f5 !important;
+  color: #18181b !important;
+  -webkit-text-fill-color: #18181b !important;
+  border-color: #a1a1aa !important;
+}
+
+.hybrid-access-google svg {
+  filter: none;
+  opacity: 1;
 }
 
 [data-site-chrome] header.sticky,
@@ -1637,6 +1731,8 @@ main h2:hover {
   .text-rwb,
   .rwb-flame,
   .rwb-flame-deep,
+  .lt-flame,
+  .ng-flame,
   #podcast h2,
   #podcast h3,
   #podcast h4,
@@ -1959,7 +2055,9 @@ footer h3 span {
 :root[data-contrast-guard="on"] footer h3,
 :root[data-contrast-guard="on"] footer h4,
 :root[data-contrast-guard="on"] footer .eyebrow,
-:root[data-contrast-guard="on"] .rwb-flame {
+:root[data-contrast-guard="on"] .rwb-flame,
+:root[data-contrast-guard="on"] .lt-flame,
+:root[data-contrast-guard="on"] .ng-flame {
   background-image: none;
   color: var(--glow-white);
   -webkit-text-fill-color: var(--glow-white);
@@ -1994,7 +2092,9 @@ footer h3 span {
   footer h4,
   footer .eyebrow,
   .rwb-flame,
-  .rwb-nav-icon {
+  .rwb-nav-icon,
+  .lt-flame,
+  .ng-flame {
     animation: none;
   }
 }
@@ -2016,6 +2116,47 @@ footer h3 span {
 .rwb-nav-icon {
   color: var(--glow-red);
   animation: rwb-nav-icon-cycle var(--rwb-duration) var(--rwb-ease) infinite;
+}
+
+@keyframes nav-create-glow {
+  0%,
+  100% {
+    border-color: #ef4444;
+    box-shadow:
+      0 0 0 1px #ef4444,
+      0 0 14px rgba(239, 68, 68, 0.85);
+  }
+  50% {
+    border-color: #ffffff;
+    box-shadow:
+      0 0 0 1px #ffffff,
+      0 0 16px rgba(255, 255, 255, 0.75);
+  }
+}
+
+.nav-create-glow {
+  animation: nav-create-glow 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-create-glow {
+    animation: none;
+    border-color: #ef4444;
+    box-shadow: 0 0 0 1px #ef4444;
+  }
+}
+
+/* Never stack the desktop sidebar and the mobile dock. */
+@media (max-width: 1023.98px) {
+  .site-sidebar {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .site-dock {
+    display: none !important;
+  }
 }
 
 :root[data-contrast-guard="on"] .rwb-nav-icon {
@@ -2199,6 +2340,46 @@ footer h3 span {
   --rwb-bloom: 1.75;
   --rwb-blur: 1.25;
   background-image: var(--rwb-gradient);
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+  filter: var(--rwb-flame-filter);
+}
+
+/* Lithuania: yellow / green / red flag sweep on division labels. */
+@utility lt-flame {
+  background-image: linear-gradient(
+    100deg,
+    #fde047 0%,
+    #4ade80 38%,
+    #4ade80 52%,
+    #f87171 100%
+  );
+  background-size: var(--rwb-sweep-size);
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  animation: rwb-gradient-sweep var(--rwb-duration) var(--rwb-ease) infinite;
+  filter: var(--rwb-flame-filter);
+}
+
+/* Nigeria: green / white flag sweep on division labels. */
+@utility ng-flame {
+  background-image: linear-gradient(
+    100deg,
+    #22c55e 0%,
+    #ffffff 40%,
+    #ffffff 60%,
+    #22c55e 100%
+  );
   background-size: var(--rwb-sweep-size);
   background-position: 0% 50%;
   background-clip: text;

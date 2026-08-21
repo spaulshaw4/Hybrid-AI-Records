@@ -27,23 +27,6 @@ const ICONS = {
   packages: Clapperboard,
 } as const;
 
-function CreateWaveformIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-    >
-      <path
-        d="M12 3v18M8 6v12M4 9v6M16 6v12M20 9v6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 function NavItem({
   item,
   compact,
@@ -55,50 +38,36 @@ function NavItem({
 }) {
   const isCreate = item.id === "make-track";
   const Icon = ICONS[item.icon];
-  const className = isCreate
+  const className = compact
     ? cn(
-        "flex items-center rounded-lg text-white outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-cyan-400",
-        compact
-          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 px-1 py-1.5"
-          : "min-h-11 gap-3 px-4 py-3 text-sm font-bold tracking-wider uppercase",
-        active && "bg-white/10",
+        "flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-none border border-zinc-700 bg-zinc-900 px-1 py-1.5 outline-none transition-colors hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-red-500",
+        isCreate && "nav-create-glow border-red-500",
+        active && !isCreate && "border-white/70 bg-zinc-800",
+        active && isCreate && "bg-zinc-800",
       )
     : cn(
-        "flex items-center rounded-lg bg-zinc-900 border border-zinc-700 shadow-md outline-none transition-all hover:border-blue-500 hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-blue-400",
-        compact
-          ? "mx-0.5 min-h-11 flex-1 flex-col justify-center gap-0.5 px-1 py-1.5"
-          : "min-h-11 gap-3 px-3 py-2",
-        active && "border-blue-400 bg-zinc-800",
+        "flex min-h-11 items-center gap-3 rounded-none border border-zinc-700 bg-zinc-900 px-3 py-2 outline-none transition-colors hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-red-500",
+        isCreate && "nav-create-glow border-red-500",
+        active && "bg-zinc-800",
       );
   const label = (
     <>
-      {isCreate ? (
-        <CreateWaveformIcon
-          className={cn("shrink-0 text-cyan-400", compact ? "h-4 w-4" : "h-5 w-5")}
-        />
-      ) : (
-        <Icon
-          className={cn(
-            "rwb-nav-icon shrink-0",
-            compact ? "size-4" : "size-[18px]",
-          )}
-          aria-hidden
-        />
-      )}
+      <Icon
+        className={cn(
+          "rwb-nav-icon shrink-0",
+          compact ? "size-4" : "size-[18px]",
+        )}
+        aria-hidden
+      />
       <span
         className={cn(
-          "uppercase",
-          isCreate
-            ? "font-bold tracking-wider text-white"
-            : "rwb-flame rwb-flame-deep font-mono font-bold",
+          "rwb-flame rwb-flame-deep font-mono font-bold uppercase",
           compact
             ? "max-w-full truncate text-center text-[9px] tracking-[0.08em]"
-            : isCreate
-              ? "min-w-0 text-start text-sm"
-              : "min-w-0 text-start text-[11px] tracking-[0.16em]",
+            : "min-w-0 text-start text-[11px] tracking-[0.16em]",
         )}
       >
-        {compact ? item.short : isCreate ? "Create" : item.label}
+        {compact ? item.short : item.label}
       </span>
     </>
   );
@@ -222,9 +191,9 @@ function SiteDock() {
     <nav
       data-site-nav="dock"
       aria-label="Primary"
-      className="site-dock pointer-events-auto fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 rounded-full border border-white/10 bg-black/70 px-1 py-1 shadow-2xl backdrop-blur-lg lg:hidden"
+      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-50 rounded-none border-t border-white/10 bg-black/80 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] lg:hidden"
     >
-      <div className="flex items-stretch">
+      <div className="grid grid-cols-5 items-stretch gap-1">
         {SITE_NAV.map((item) => (
           <NavItem
             key={item.id}

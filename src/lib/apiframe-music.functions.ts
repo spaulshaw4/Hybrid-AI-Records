@@ -196,10 +196,29 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     const sourceMasterUrl = vocalUrl ?? instrumentalUrl ?? introUrl;
     let masterUrl = sourceMasterUrl;
-    if (payload.vaultId && sourceMasterUrl) {
+    const taskId = timed.taskIds.vocals ?? timed.taskIds.instrumental ?? timed.taskIds.intro ?? correlationId;
+
+    try {
+      const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
+      const mastered = await mixAndMasterHybridTrack({
+        introUrl,
+        instrumentalUrl,
+        vocalUrl,
+        userId: context.userId,
+        taskId,
+      });
+      if (mastered.masterUrl) masterUrl = mastered.masterUrl;
+    } catch (error) {
+      console.warn(
+        "[matchering] generate fallback to raw stem",
+        error instanceof Error ? error.message : error,
+      );
+    }
+
+    if (payload.vaultId && masterUrl) {
       try {
         const { uploadMasterToVaultFromUrl } = await import("@/lib/audio-vault-upload.server");
-        masterUrl = await uploadMasterToVaultFromUrl(sourceMasterUrl, payload.vaultId, "mp3");
+        masterUrl = await uploadMasterToVaultFromUrl(masterUrl, payload.vaultId, "mp3");
       } catch (error) {
         console.warn(
           "[audio-vault] master upload failed",
@@ -230,10 +249,23 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       vocalUrl,
     });
 
+    const playableTracks = masterUrl
+      ? [
+          {
+            id: `${taskId}-master`,
+            title: payload.title || "Mastered track",
+            audioUrl: masterUrl,
+            imageUrl: null,
+            duration: durationSeconds,
+          },
+          ...tracks,
+        ]
+      : tracks;
+
     return {
-      taskId: timed.taskIds.vocals ?? timed.taskIds.instrumental ?? timed.taskIds.intro,
+      taskId,
       status: "succeeded",
-      tracks,
+      tracks: playableTracks,
       stems: {
         masterUrl,
         instrumentalUrl,

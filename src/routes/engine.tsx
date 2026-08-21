@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { AudioStudio } from "@/components/AudioStudio";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
@@ -83,13 +84,16 @@ function EnginePage() {
       className="relative z-10 min-h-[calc(100dvh-var(--site-header-height)-var(--site-dock-height))] bg-[#0d0d11] py-6 text-white sm:py-8"
     >
       <div className="mx-auto mb-8 w-full max-w-7xl px-4 sm:px-6">
-        <PortalBreadcrumb trail={[{ label: "Hybrid Engine 1.0" }]} />
+        <PortalBreadcrumb
+          trail={[{ label: "Hybrid Engine 1.0" }]}
+          end={<HeaderTokenBalance />}
+        />
         <div className="mt-4 border-b border-white/10 pb-4">
           <h1 className="text-2xl font-black uppercase tracking-wider text-red-500">
-            Hybrid Track Creation Studio
+            Hybrid Engine 1.0
           </h1>
           <p className="mt-1 text-sm text-gray-400">
-            No studio, no engineer required. Select your engine mode and start creating.
+            Your sound, your workflow. Choose pure AI generation or build hybrid tracks with tailored vocals and master-grade finishing.
           </p>
         </div>
       </div>

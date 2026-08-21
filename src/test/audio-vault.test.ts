@@ -4,6 +4,7 @@ import {
   AUDIO_VAULT_MAX_BYTES,
   AUDIO_VAULT_MIME_TYPES,
   storageObjectFromUrl,
+  masteredTrackObjectPath,
   vaultMasterObjectPath,
   vaultMimeType,
   vaultStemObjectPath,
@@ -33,6 +34,15 @@ describe("audio-vault upload contract", () => {
   it("names stem cleanup paths next to the master", () => {
     expect(vaultStemObjectPath("abc", "vocal", "mp3")).toBe("masters/abc_vocal.mp3");
     expect(vaultStemObjectPath("abc", "instrumental", "wav")).toBe("masters/abc_instrumental.wav");
+  });
+
+  it("stores Matchering masters under mastered_tracks/", () => {
+    expect(masteredTrackObjectPath("user1", "job-2", "mp3")).toBe(
+      "mastered_tracks/user1/job-2_master.mp3",
+    );
+    expect(masteredTrackObjectPath("user1", "job-2", "wav")).toBe(
+      "mastered_tracks/user1/job-2_master.wav",
+    );
   });
 
   it("reads bucket and path from signed storage URLs", () => {
