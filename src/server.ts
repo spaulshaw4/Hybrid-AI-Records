@@ -57,6 +57,18 @@ async function normalizeCatastrophicSsrResponse(
 export default {
   async fetch(request: Request, env?: unknown, ctx?: unknown) {
     try {
+      const pathname = new URL(request.url).pathname.replace(/\/$/, "") || "/";
+      if (pathname === "/api/coproducer") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/coproducer/route");
+        return POST(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response, request);

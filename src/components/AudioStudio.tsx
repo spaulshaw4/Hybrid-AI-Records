@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
@@ -1212,7 +1213,6 @@ export function AudioStudio() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"concept" | "lyrics" | "vocal" | "style" | null>(null);
-  const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [language, setLanguage] = useState<LyricLanguage>(readSavedLanguage);
   const [customLanguage, setCustomLanguage] = useState(readSavedCustomLanguage);
   const trippedRef = useRef<Set<string>>(new Set());
@@ -1274,6 +1274,32 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
+
+  const lyricMutation = useMutation({
+    mutationFn: async ({ title, lang, style }: { title: string; lang: string; style?: string }) => {
+      const res = await fetch("/api/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trackTitle: title,
+          language: lang,
+          style: style || "Rock/Alternative",
+        }),
+      });
+      const data = (await res.json()) as { lyrics?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "Failed to generate lyrics");
+      return data.lyrics;
+    },
+    onSuccess: (nextLyrics) => {
+      console.log("[TANSTACK_MUTATION_SUCCESS]", nextLyrics);
+      setLyrics(String(nextLyrics ?? "").slice(0, PROMPT_MAX));
+      setLyricWarnings([]);
+    },
+    onError: (err) => {
+      console.error("[TANSTACK_MUTATION_ERROR]", err);
+      alert(err instanceof Error ? err.message : "Failed to generate lyrics");
+    },
+  });
 
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
@@ -2657,49 +2683,32 @@ export function AudioStudio() {
               </Label>
               <button
                 type="button"
-                disabled={isGeneratingLyrics}
-                aria-busy={isGeneratingLyrics}
+                disabled={lyricMutation.isPending}
+                aria-busy={lyricMutation.isPending}
                 className={cn(
                   buttonVariants({ size: "sm", variant: "secondary" }),
                   "pointer-events-auto disabled:pointer-events-auto",
                 )}
-                onClick={async (e) => {
+                onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log("--> FORCE CLICKED CO-PRODUCER", { trackTitle, language });
                   if (!trackTitle?.trim()) {
-                    alert("Please enter a Track Title first.");
+                    alert("Please enter a track title first.");
                     return;
                   }
-                  setIsGeneratingLyrics(true);
-                  try {
-                    const res = await fetch("/api/coproducer", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        trackTitle,
-                        language: targetLanguage,
-                        style: styleLine || "Rock/Alternative",
-                      }),
-                    });
-                    const data = (await res.json()) as { lyrics?: string; error?: string };
-                    if (!res.ok) throw new Error(data.error || "Failed to generate lyrics");
-                    setLyrics(String(data.lyrics ?? "").slice(0, PROMPT_MAX));
-                    setLyricWarnings([]);
-                  } catch (err) {
-                    console.error("Co-Producer Error:", err);
-                    alert(err instanceof Error ? err.message : "Failed to connect to Co-Producer");
-                  } finally {
-                    setIsGeneratingLyrics(false);
-                  }
+                  lyricMutation.mutate({
+                    title: trackTitle,
+                    lang: targetLanguage || "English",
+                    style: styleLine || "Rock/Alternative",
+                  });
                 }}
               >
-                {isGeneratingLyrics ? (
+                {lyricMutation.isPending ? (
                   <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
                 ) : (
                   <Sparkles className="mr-2 size-4" aria-hidden />
                 )}
-                Co-Producer
+                {lyricMutation.isPending ? "Generating..." : "Co-Producer"}
               </button>
             </div>
 

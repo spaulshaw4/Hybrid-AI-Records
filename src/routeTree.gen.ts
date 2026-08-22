@@ -36,7 +36,6 @@ import { Route as Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRouteImpo
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as AccountDownloadsRouteImport } from './routes/account.downloads'
 import { Route as AccountLedgerRouteImport } from './routes/account.ledger'
-import { Route as ApiCoproducerRouteImport } from './routes/api/coproducer'
 import { Route as CheckoutReturnRouteImport } from './routes/checkout.return'
 import { Route as DevBackgroundReportRouteImport } from './routes/dev.background-report'
 import { Route as DevSyncBadgeRouteImport } from './routes/dev.sync-badge'
@@ -206,11 +205,6 @@ const AccountLedgerRoute = AccountLedgerRouteImport.update({
   id: '/ledger',
   path: '/ledger',
   getParentRoute: () => AccountRoute,
-} as any)
-const ApiCoproducerRoute = ApiCoproducerRouteImport.update({
-  id: '/api/coproducer',
-  path: '/api/coproducer',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const CheckoutReturnRoute = CheckoutReturnRouteImport.update({
   id: '/checkout/return',
@@ -413,7 +407,6 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
-  '/api/coproducer': typeof ApiCoproducerRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -474,7 +467,6 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
-  '/api/coproducer': typeof ApiCoproducerRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -537,7 +529,6 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
-  '/api/coproducer': typeof ApiCoproducerRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -600,7 +591,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
-    | '/api/coproducer'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -661,7 +651,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
-    | '/api/coproducer'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -723,7 +712,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
-    | '/api/coproducer'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -784,7 +772,6 @@ export interface RootRouteChildren {
   Char91DotmcpChar93ListToolsRoute: typeof Char91DotmcpChar93ListToolsRoute
   Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute: typeof Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
-  ApiCoproducerRoute: typeof ApiCoproducerRoute
   CheckoutReturnRoute: typeof CheckoutReturnRoute
   StartPackageRoute: typeof StartPackageRoute
   StartOnboardingRoute: typeof StartOnboardingRoute
@@ -992,13 +979,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/account/ledger'
       preLoaderRoute: typeof AccountLedgerRouteImport
       parentRoute: typeof AccountRoute
-    }
-    '/api/coproducer': {
-      id: '/api/coproducer'
-      path: '/api/coproducer'
-      fullPath: '/api/coproducer'
-      preLoaderRoute: typeof ApiCoproducerRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/checkout/return': {
       id: '/checkout/return'
@@ -1328,7 +1308,6 @@ const rootRouteChildren: RootRouteChildren = {
     Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute,
   Char91DotwellKnownChar93OauthProtectedResourceRoute:
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
-  ApiCoproducerRoute: ApiCoproducerRoute,
   CheckoutReturnRoute: CheckoutReturnRoute,
   StartPackageRoute: StartPackageRoute,
   StartOnboardingRoute: StartOnboardingRoute,
