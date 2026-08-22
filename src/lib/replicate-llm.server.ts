@@ -13,9 +13,9 @@
 import { replicateBaseUrl } from "@/lib/ai-provider.server";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
 
-/** Fast, cost-effective instruct model for all text work. */
+/** Fast Gemini Flash text model for remaining chat completions. */
 export const REPLICATE_LLM_MODEL =
-  process.env["REPLICATE_LLM_MODEL"]?.trim() || "meta/meta-llama-3-8b-instruct";
+  process.env["REPLICATE_LLM_MODEL"]?.trim() || "google/gemini-2.5-flash";
 
 /** Official Google text model on Replicate, used by Co-Producer lyrics. */
 export const REPLICATE_GEMINI_MODEL =

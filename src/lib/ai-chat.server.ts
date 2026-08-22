@@ -2,7 +2,7 @@
  * Single entry point for every chat/completion call (server only).
  *
  * All LLM traffic — Engine 1.0 and the Visual Engine — now runs on Replicate
- * (`meta/meta-llama-3-8b-instruct` by default) using REPLICATE_API_TOKEN. The
+ * (`google/gemini-2.5-flash` by default) using REPLICATE_API_TOKEN. The
  * function keeps its OpenAI-compatible request/response contract so every
  * existing caller works unchanged.
  */

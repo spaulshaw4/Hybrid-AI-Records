@@ -1271,21 +1271,33 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
+  const isPending = aiBusy === "lyrics";
 
   /** Gemini fills the lyrics box from the title, style and any existing lyrics. */
-  async function handleWriteLyrics() {
-    if (aiBusy) return;
+  async function handleCoProducer() {
+    console.log("[CO_PRODUCER_CLICKED]", { trackTitle, language, isPending });
+    if (aiBusy) {
+      console.log("[CO_PRODUCER_SKIPPED]", { reason: "already pending", aiBusy });
+      return;
+    }
     if (!title.trim()) {
+      console.warn("[CO_PRODUCER_SKIPPED]", { reason: "missing title" });
       toast.error("Add a track title first.");
       return;
     }
     if (!isValidLyricLanguage(language)) {
+      console.warn("[CO_PRODUCER_SKIPPED]", { reason: "invalid language", language });
       toast.error("Invalid language selection.");
       setLanguage(DEFAULT_LYRIC_LANGUAGE);
       return;
     }
     setAiBusy("lyrics");
     try {
+      console.log("[CO_PRODUCER_REQUEST]", {
+        title: title.trim(),
+        language: targetLanguage,
+        style: styleLine || null,
+      });
       const out = await writeLyrics({
         data: {
           concept: (lyrics.trim() || styleLine || title.trim()).slice(0, 600),
@@ -1294,15 +1306,12 @@ export function AudioStudio() {
           language: targetLanguage,
         },
       });
-      const repair = repairLyricStructure(out.lyrics ?? "");
-      setLyrics(repair.lyrics.slice(0, PROMPT_MAX));
-      setLyricWarnings(repair.warnings);
-      if (repair.warnings.length > 0) {
-        toast.warning("Co-Producer structure tags were cleaned up automatically.");
-      } else {
-        toast.success("Co-Producer wrote your lyrics.");
-      }
+      console.log("[CO_PRODUCER_RESPONSE]", { lyricsLength: out.lyrics?.length ?? 0 });
+      setLyrics((out.lyrics ?? "").slice(0, PROMPT_MAX));
+      setLyricWarnings([]);
+      toast.success("Co-Producer wrote your lyrics.");
     } catch (error) {
+      console.error("[GEMINI_REPLICATE_ERROR]", error);
       toast.error(error instanceof Error ? error.message : "The Co-Producer could not write lyrics.");
     } finally {
       setAiBusy(null);
@@ -2695,7 +2704,10 @@ export function AudioStudio() {
                 variant="secondary"
                 disabled={aiBusy !== null}
                 aria-busy={aiBusy === "lyrics"}
-                onClick={() => void handleWriteLyrics()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void handleCoProducer();
+                }}
               >
                 {aiBusy === "lyrics" ? (
                   <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />

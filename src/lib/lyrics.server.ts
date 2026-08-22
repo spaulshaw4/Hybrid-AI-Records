@@ -1,10 +1,13 @@
 import { aiChatFetch } from "@/lib/ai-chat.server";
 import { aiFastModel } from "@/lib/ai-provider.server";
-import { REPLICATE_GEMINI_MODEL, replicateChat } from "@/lib/replicate-llm.server";
+import Replicate from "replicate";
 
 /** Server-only lyric writer used by both the studio button and the engine fallback. */
 
-export const COPRODUCER_GEMINI_MODEL = REPLICATE_GEMINI_MODEL;
+/** Locked to Gemini Flash on Replicate. Override only via REPLICATE_GEMINI_MODEL. */
+export const COPRODUCER_GEMINI_MODEL =
+  (typeof process !== "undefined" && process.env["REPLICATE_GEMINI_MODEL"]?.trim()) ||
+  "google/gemini-2.5-flash";
 
 export type LyricBrief = {
   concept: string;
@@ -13,43 +16,42 @@ export type LyricBrief = {
   language?: string | undefined;
 };
 
-function coProducerSystemPrompt(language: string, trackTitle: string): string {
-  return (
-    `You are an expert music lyricist and co-producer. Write full, structured song lyrics in ${language} ` +
-    `(with [Verse], [Chorus], [Bridge], [Outro] tags) for a song titled '${trackTitle}'. ` +
-    `Maintain rhythmic cadence and authentic phrasing in ${language}. ` +
-    `Return only the lyrics, no commentary. Never copy existing songs.`
-  );
+function replicateToken(): string {
+  const token =
+    (typeof process !== "undefined" && process.env["REPLICATE_API_TOKEN"]?.trim()) || "";
+  if (!token) {
+    throw new Error("Co-Producer is not configured: set REPLICATE_API_TOKEN.");
+  }
+  return token;
 }
 
 export async function writeLyrics(brief: LyricBrief): Promise<string> {
   const language = brief.language?.trim() || "English";
   const trackTitle = brief.title?.trim() || "Untitled";
-  const genre = brief.style?.trim() || "";
-  const user = [
-    `Language: ${language}`,
-    `Title: ${trackTitle}`,
-    genre ? `Genre / style: ${genre}` : null,
-    brief.concept.trim() ? `Brief / existing lyrics:\n${brief.concept.trim()}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const style = brief.style?.trim() || "Rock/Alternative";
+  const modelString = COPRODUCER_GEMINI_MODEL;
+  const systemPrompt =
+    `You are an elite music co-producer and lyricist. Write structured song lyrics in ${language} ` +
+    `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
+    `Style: ${style}.`;
 
-  const lyrics = await replicateChat(
-    [
-      { role: "system", content: coProducerSystemPrompt(language, trackTitle) },
-      { role: "user", content: user },
-    ],
-    {
-      label: "Co-Producer",
-      model: COPRODUCER_GEMINI_MODEL,
-      temperature: 0.7,
-      maxTokens: 4096,
-      timeoutMs: 120_000,
-    },
-  );
-  if (!lyrics) throw new Error("Co-Producer returned nothing. Try a richer brief.");
-  return lyrics;
+  console.log("[CO_PRODUCER]", { trackTitle, language, model: modelString, style });
+
+  try {
+    const replicate = new Replicate({ auth: replicateToken() });
+    const output = await replicate.run(modelString as `${string}/${string}`, {
+      input: { prompt: systemPrompt, temperature: 0.75, max_output_tokens: 2048 },
+    });
+    const lyricsText = Array.isArray(output) ? output.join("") : String(output);
+    const lyrics = lyricsText.trim();
+    if (!lyrics || lyrics === "undefined" || lyrics === "null") {
+      throw new Error("Co-Producer returned nothing. Try a richer brief.");
+    }
+    return lyrics;
+  } catch (error) {
+    console.error("[GEMINI_REPLICATE_ERROR]", error);
+    throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
+  }
 }
 
 const CONCEPT_SYSTEM_PROMPT =

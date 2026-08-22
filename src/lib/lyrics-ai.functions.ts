@@ -13,12 +13,17 @@ const Input = z.object({
 });
 
 /**
- * Writes song lyrics through Replicate's Gemini/Gemma deployment
- * (`REPLICATE_API_TOKEN` + `REPLICATE_GEMINI_MODEL`).
+ * Writes song lyrics through Replicate Google Gemini only
+ * (`REPLICATE_API_TOKEN` + `google/gemini-2.5-flash`). Never Llama.
  */
 export const generateLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))
   .handler(async ({ data }) => {
+    console.log("[CO_PRODUCER]", {
+      title: data.title ?? null,
+      language: data.language ?? null,
+      conceptLength: data.concept.length,
+    });
     try {
       const { writeLyrics } = await import("./lyrics.server");
       const lyrics = await writeLyrics({
@@ -27,10 +32,11 @@ export const generateLyrics = createServerFn({ method: "POST" })
         title: data.title,
         language: data.language,
       });
+      console.log("[CO_PRODUCER]", { lyricsLength: lyrics.length });
       return { lyrics };
     } catch (error) {
-      console.error("[generateLyrics]", error);
-      throw friendlyAiError(error, "The lyric writer");
+      console.error("[GEMINI_REPLICATE_ERROR]", error);
+      throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
     }
   });
 
