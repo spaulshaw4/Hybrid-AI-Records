@@ -2649,76 +2649,73 @@ export function AudioStudio() {
             </p>
           </div>
 
+          <button
+            type="button"
+            id="coproducer-generate-btn"
+            style={{
+              position: "relative",
+              zIndex: 999999,
+              pointerEvents: "auto",
+              cursor: "pointer",
+            }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow-lg"
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+
+              const titleVal =
+                trackTitle ||
+                (document.querySelector(
+                  'input[name="title"], input[placeholder*="Title"]',
+                ) as HTMLInputElement | null)?.value;
+              if (!titleVal?.trim()) {
+                alert("Please enter a track title first.");
+                return;
+              }
+              const btn = e.currentTarget;
+              btn.innerText = "Generating...";
+              btn.disabled = true;
+              try {
+                const res = await fetch("/api/coproducer", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    trackTitle: titleVal.trim(),
+                    language: targetLanguage || "English",
+                  }),
+                });
+                const data = (await res.json()) as { lyrics?: string; error?: string };
+
+                if (data.lyrics) {
+                  const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
+                  setLyrics(nextLyrics);
+                  setLyricWarnings([]);
+                  const txt = document.querySelector(
+                    `#${SONG_LYRICS_INPUT_ID}, textarea[name="lyrics"], textarea[placeholder*="Lyrics"]`,
+                  ) as HTMLTextAreaElement | null;
+                  if (txt) {
+                    txt.value = nextLyrics;
+                    txt.dispatchEvent(new Event("input", { bubbles: true }));
+                  }
+                } else {
+                  alert("Error: " + (data.error || "Failed to generate lyrics"));
+                }
+              } catch (err) {
+                alert("Network Error: " + (err instanceof Error ? err.message : "unknown error"));
+              } finally {
+                btn.innerText = "Co-Producer";
+                btn.disabled = false;
+              }
+            }}
+          >
+            Co-Producer
+          </button>
+
           {/* 2. Lyrics box */}
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
-                Lyrics
-              </Label>
-              <button
-                type="button"
-                id="coproducer-generate-btn"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow-lg"
-                style={{
-                  position: "relative",
-                  zIndex: 999999,
-                  pointerEvents: "all",
-                  cursor: "pointer",
-                }}
-                onClick={async (e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  console.log("[INLINE_CLICK_TRIGGERED]");
-
-                  const titleInput =
-                    trackTitle ||
-                    (document.querySelector(
-                      'input[name="title"], input[placeholder*="Title"]',
-                    ) as HTMLInputElement | null)?.value;
-                  if (!titleInput?.trim()) {
-                    alert("Please enter a track title first.");
-                    return;
-                  }
-                  const btn = e.currentTarget;
-                  const originalText = btn.innerText;
-                  btn.innerText = "Generating...";
-                  btn.disabled = true;
-                  try {
-                    const response = await fetch("/api/coproducer", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        trackTitle: titleInput.trim(),
-                        language: targetLanguage || "English",
-                      }),
-                    });
-                    const data = (await response.json()) as { lyrics?: string; error?: string };
-                    if (data.lyrics) {
-                      const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
-                      setLyrics(nextLyrics);
-                      setLyricWarnings([]);
-                      const textarea = document.querySelector(
-                        `#${SONG_LYRICS_INPUT_ID}, textarea[name="lyrics"], textarea[placeholder*="Lyrics"]`,
-                      ) as HTMLTextAreaElement | null;
-                      if (textarea) {
-                        textarea.value = nextLyrics;
-                      }
-                    } else {
-                      alert("API returned an error: " + (data.error || JSON.stringify(data)));
-                    }
-                  } catch (err) {
-                    console.error("[COPRODUCER_FETCH_ERROR]", err);
-                    alert("Fetch failed: " + (err instanceof Error ? err.message : "unknown error"));
-                  } finally {
-                    btn.innerText = originalText;
-                    btn.disabled = false;
-                  }
-                }}
-              >
-                Co-Producer
-              </button>
-            </div>
-
+            <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
+              Lyrics
+            </Label>
             <Textarea
               id={SONG_LYRICS_INPUT_ID}
               name="lyrics"
