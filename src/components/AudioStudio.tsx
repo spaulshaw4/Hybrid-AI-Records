@@ -2013,7 +2013,10 @@ export function AudioStudio() {
       }
 
 
-      let ready = started.tracks.filter((t) => t.audioUrl);
+      // Widened to the poll response shape: start and poll return the same
+      // tracks with different nullability, and both feed this variable.
+      let ready: Array<{ audioUrl: string | null; title: string | null }> =
+        started.tracks.filter((t) => t.audioUrl);
       let pollErrors = 0;
       const deadline = startedAt + POLL_TIMEOUT_MS;
       while (ready.length === 0 && started.taskId && Date.now() < deadline) {

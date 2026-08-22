@@ -54,7 +54,7 @@ describe("buildVocalClonePayload", () => {
     expect(payload.normalize).toBe(true);
     expect(payload.prosody.normalize_loudness).toBe(true);
     expect(payload.features).toEqual(["quality-guard"]);
-    expect(payload.references[0]?.text).toBe("");
-    expect(payload.references[0]?.audio).toBe(audio);
+    expect(payload.references?.[0]?.text).toBe("");
+    expect(payload.references?.[0]?.audio).toBe(audio);
   });
 });

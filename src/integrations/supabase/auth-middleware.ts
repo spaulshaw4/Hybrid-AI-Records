@@ -4,6 +4,12 @@ import { getRequest } from "@tanstack/react-start/server";
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
     const { DEV_TEST_USER, DEV_TEST_USER_UUID, isDevAuthBypass } = await import("@/lib/dev-auth");
+    // Both branches must agree on the claims shape or the inferred middleware
+    // context collapses to `undefined` in every consuming server function.
+    // Supabase's real claims declare `email` as optional, so the dev bypass
+    // has to keep it optional too — not `string | undefined`.
+    type AuthClaims = { sub: string; email?: string };
+
     if (isDevAuthBypass()) {
       const { tryGetSupabaseAdmin, createSupabaseUserClient } = await import(
         "@/integrations/supabase/client.server"
@@ -20,18 +26,12 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
           throw error;
         }
       }
+      const devClaims: AuthClaims = {
+        sub: DEV_TEST_USER_UUID,
+        email: DEV_TEST_USER.email,
+      };
       return next({
-        context: {
-          supabase,
-          userId: DEV_TEST_USER_UUID,
-          // `DEV_TEST_USER` is `as const`, so without widening, `email` infers
-          // as a string literal that the real-auth branch below (`string |
-          // undefined`) cannot satisfy.
-          claims: {
-            sub: DEV_TEST_USER_UUID as string,
-            email: DEV_TEST_USER.email as string | undefined,
-          },
-        },
+        context: { supabase, userId: DEV_TEST_USER_UUID, claims: devClaims },
       });
     }
 
@@ -72,12 +72,9 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
       throw new Error("Unauthorized: No user ID found in token");
     }
 
+    const claims: AuthClaims = data.claims;
     return next({
-      context: {
-        supabase,
-        userId: data.claims.sub,
-        claims: data.claims,
-      },
+      context: { supabase, userId: data.claims.sub, claims },
     });
   },
 );

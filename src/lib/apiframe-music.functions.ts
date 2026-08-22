@@ -213,8 +213,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     let referenceSampleUrl = payload.referenceAudioUrl?.trim() || undefined;
     const voiceId = payload.voiceId?.trim() || undefined;
-    const customVoiceRequested = Boolean(voiceId) && !payload.instrumental;
-    if (customVoiceRequested) {
+    if (voiceId && !payload.instrumental) {
       const { VOCAL_CONSENT_REQUIRED_MESSAGE } = await import("@/lib/vocal-consent");
       if (!payload.termsAccepted) {
         throw new Error(VOCAL_CONSENT_REQUIRED_MESSAGE);

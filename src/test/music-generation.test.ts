@@ -84,7 +84,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(started.payload.make_instrumental).toBe(false);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SONIC_CREATE_URL);
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
@@ -119,7 +119,7 @@ describe("MusicAPI sonic workflow", () => {
     const fetchMock = await stubCreateOk("task-alias");
 
     await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
-    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
       string,
       string
     >;
@@ -133,7 +133,7 @@ describe("MusicAPI sonic workflow", () => {
     const fetchMock = await stubCreateOk("task-vite");
 
     await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
-    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
       string,
       string
     >;
@@ -147,7 +147,7 @@ describe("MusicAPI sonic workflow", () => {
     const fetchMock = await stubCreateOk("task-sonic");
 
     await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
-    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
       string,
       string
     >;
@@ -161,7 +161,7 @@ describe("MusicAPI sonic workflow", () => {
     const fetchMock = await stubCreateOk("task-aimusic");
 
     await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
-    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
       string,
       string
     >;
@@ -175,7 +175,7 @@ describe("MusicAPI sonic workflow", () => {
     const fetchMock = await stubCreateOk("task-aimusic-direct");
 
     await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
-    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
       string,
       string
     >;

@@ -34,7 +34,7 @@ describe("Fish Audio native TTS", () => {
 
     expect(FISH_TTS_URL).toBe("https://api.fish.audio/v1/tts");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.fish.audio/v1/tts");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
