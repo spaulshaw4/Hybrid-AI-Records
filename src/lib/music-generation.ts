@@ -8,9 +8,8 @@
  * (`Authorization: Bearer ${apiKey}`). Custom-mode body is Sonic, not MiniMax:
  * lyrics go in `prompt`, style in `tags`, model in `mv`.
  *
- * `mv` is MusicAPI's model id. Standard v5 is `sonic-v5`. `sonic-v5-5` is
- * attempted first when requested, then we fall back to `sonic-v5` if the
- * provider rejects it (`mv field is invalid`).
+ * `mv` defaults to `sonic-v5`. `vocal_gender` is sent only when the caller
+ * selected `m`/`f` (or Male/Female) and the model supports it.
  *
  * Server-only: imported from `generateEngineTrack` (`createServerFn` handler).
  * Reads Node `process.env`; never import this from client components.
@@ -23,12 +22,21 @@ export const SONIC_CREATE_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/create`;
 export const SONIC_TASK_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/task`;
 /** Official AIMusicAPI auth scheme — not `x-api-key` or a raw key header. */
 export const AIMUSICAPI_HEADER_FORMAT = "Authorization: Bearer";
-/** Standard MusicAPI v5 model. */
+/** Default MusicAPI model. Supports `vocal_gender`. */
 export const SONIC_MODEL = "sonic-v5";
 /** Newer id — some accounts reject this; we retry with SONIC_MODEL. */
 export const SONIC_MODEL_V55 = "sonic-v5-5";
+export const SONIC_MODEL_V45 = "sonic-v4-5";
+export const SONIC_MODEL_V45_PLUS = "sonic-v4-5-plus";
 
-export type SonicModel = typeof SONIC_MODEL | typeof SONIC_MODEL_V55;
+export const VOCAL_GENDER_MODELS = [
+  SONIC_MODEL_V45,
+  SONIC_MODEL_V45_PLUS,
+  SONIC_MODEL,
+  SONIC_MODEL_V55,
+] as const;
+
+export type SonicModel = (typeof VOCAL_GENDER_MODELS)[number] | (string & {});
 
 export type StudioTrackOptions = {
   genre?: string;
@@ -41,7 +49,10 @@ export type StudioTrackOptions = {
   lyrics?: string;
   title?: string;
   isInstrumental?: boolean;
+  mv?: SonicModel;
 };
+
+export type SonicVocalGender = "f" | "m";
 
 export type SonicCreatePayload = {
   task_type: "create_music";
@@ -51,8 +62,8 @@ export type SonicCreatePayload = {
   tags: string;
   title: string;
   make_instrumental: boolean;
-  vocal_gender: "f" | "m";
-  negative_tags: string;
+  vocal_gender?: SonicVocalGender;
+  negative_tags?: string;
 };
 
 export type StudioTrackStart = {
@@ -214,6 +225,51 @@ function styleTags(options: StudioTrackOptions): string {
     .join(", ");
 }
 
+export function supportsVocalGender(mv: string): boolean {
+  return (VOCAL_GENDER_MODELS as readonly string[]).includes(mv);
+}
+
+/** Maps studio labels to Sonic `m`/`f`. Anything else is omitted. */
+export function normalizeVocalGender(value: string | undefined): SonicVocalGender | undefined {
+  if (!value) return undefined;
+  const raw = value.trim().toLowerCase();
+  if (raw === "f" || raw === "female") return "f";
+  if (raw === "m" || raw === "male") return "m";
+  return undefined;
+}
+
+function genderNegativeTags(gender: SonicVocalGender | undefined): string | undefined {
+  if (gender === "f") return "male vocals, low baritone, synthpop, electronic dance";
+  if (gender === "m") return "female vocals, soprano, synthpop, 80s dance pop, electronic synths, autotune";
+  return undefined;
+}
+
+/** Drop undefined / null optional keys before the Sonic POST. */
+export function cleanSonicPayload<T extends Record<string, unknown>>(payload: T): T {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined && value !== null),
+  ) as T;
+}
+
+export function buildSonicCreatePayload(options: StudioTrackOptions): SonicCreatePayload {
+  const mv = options.mv || SONIC_MODEL;
+  const gender = normalizeVocalGender(options.vocalGender);
+  const payload: SonicCreatePayload = {
+    task_type: "create_music",
+    custom_mode: true,
+    mv,
+    prompt: options.lyrics ?? "",
+    tags: styleTags(options) || options.genre || "",
+    title: options.title || "Studio Master",
+    make_instrumental: Boolean(options.isInstrumental),
+    negative_tags: genderNegativeTags(gender),
+  };
+  if (gender && supportsVocalGender(mv)) {
+    payload.vocal_gender = gender;
+  }
+  return cleanSonicPayload(payload);
+}
+
 function previewBody(raw: unknown): string {
   if (raw == null) return "";
   if (typeof raw === "string") return raw;
@@ -251,7 +307,8 @@ async function postSonicCreate(
   payload: SonicCreatePayload,
   apiKey: string,
 ): Promise<{ response: Response; raw: unknown }> {
-  console.log("[MUSICAPI_CREATE_REQUEST]", JSON.stringify(payload, null, 2));
+  const body = cleanSonicPayload(payload);
+  console.log("[MUSICAPI_CREATE_REQUEST]", JSON.stringify(body, null, 2));
   logAimusicRequest(SONIC_CREATE_URL, apiKey);
   const response = await fetch(SONIC_CREATE_URL, {
     method: "POST",
@@ -259,7 +316,7 @@ async function postSonicCreate(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   const raw = await readResponseBody(response);
   console.log("[MUSICAPI_CREATE_RESPONSE]", response.status, previewBody(raw));
@@ -272,29 +329,18 @@ async function postSonicCreate(
 export async function generateStudioTrack(options: StudioTrackOptions): Promise<StudioTrackStart> {
   const apiKey = getMusicApiKey();
 
-  const base = {
-    task_type: "create_music" as const,
-    custom_mode: true as const,
-    prompt: options.lyrics ?? "",
-    tags: styleTags(options) || options.genre || "",
-    title: options.title || "Studio Master",
-    make_instrumental: Boolean(options.isInstrumental),
-    vocal_gender: options.vocalGender?.toLowerCase().startsWith("f") ? ("f" as const) : ("m" as const),
-    negative_tags: options.vocalGender?.toLowerCase().startsWith("f")
-      ? "male vocals, low baritone, synthpop, electronic dance"
-      : "female vocals, soprano, synthpop, 80s dance pop, electronic synths, autotune",
-  };
-
-  // Prefer v5.5 when the account allows it; MusicAPI often returns
-  // "mv field is invalid" for sonic-v5-5 — retry standard sonic-v5.
-  let payload: SonicCreatePayload = { ...base, mv: SONIC_MODEL_V55 };
+  let payload = buildSonicCreatePayload(options);
   let { response, raw } = await postSonicCreate(payload, apiKey);
 
-  if (!response.ok && isInvalidMvRejection(response.status, raw)) {
-    payload = { ...base, mv: SONIC_MODEL };
+  if (
+    !response.ok &&
+    isInvalidMvRejection(response.status, raw) &&
+    payload.mv !== SONIC_MODEL
+  ) {
+    payload = buildSonicCreatePayload({ ...options, mv: SONIC_MODEL });
     console.log(
       "[MUSICAPI_CREATE_FALLBACK]",
-      `sonic-v5-5 rejected (${response.status}); retrying ${SONIC_MODEL}`,
+      `${options.mv} rejected (${response.status}); retrying ${SONIC_MODEL}`,
     );
     ({ response, raw } = await postSonicCreate(payload, apiKey));
   }
