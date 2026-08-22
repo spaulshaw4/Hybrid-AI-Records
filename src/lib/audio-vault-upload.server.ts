@@ -31,7 +31,17 @@ async function persistVaultObject(
   body: VaultUploadBody,
   mimeType: string,
 ): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  if (body instanceof Uint8Array || Buffer.isBuffer(body)) {
+    const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
+    const { uploadEngineMaster } = await import("@/lib/engine-pipeline.server");
+    return uploadEngineMaster(bytes, path, mimeType.includes("wav") ? "wav" : "mp3");
+  }
+
+  const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const supabaseAdmin = tryGetSupabaseAdmin();
+  if (!supabaseAdmin) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+  }
   const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(path, body, {
     contentType: mimeType,
     upsert: true,

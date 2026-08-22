@@ -112,24 +112,35 @@ async function toApiTracks(
 }
 
 export async function listUserVaultApiTracks(userId: string): Promise<UserVaultApiTrack[]> {
+  let remote: UserVaultApiTrack[] = [];
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("user_vault")
-      .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-    if (error) {
-      console.warn("[user_vault] list failed", error.message);
-      return [];
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = tryGetSupabaseAdmin();
+    if (admin) {
+      const { data, error } = await admin
+        .from("user_vault")
+        .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) {
+        console.warn("[user_vault] list failed", error.message);
+      } else {
+        remote = await toApiTracks(data ?? []);
+      }
     }
-    return toApiTracks(data ?? []);
   } catch (error) {
     console.warn(
       "[user_vault] list failed",
       error instanceof Error ? error.message : error,
     );
-    return [];
+  }
+  try {
+    const { listLocalVaultTracks } = await import("@/lib/local-vault.server");
+    const local = await listLocalVaultTracks();
+    const ids = new Set(remote.map((row) => row.id));
+    return [...local.filter((row) => !ids.has(row.id)), ...remote];
+  } catch {
+    return remote;
   }
 }
 

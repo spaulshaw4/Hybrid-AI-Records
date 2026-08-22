@@ -58,6 +58,7 @@ import { Route as AuthenticatedAdminTokenLedgerRouteImport } from './routes/_aut
 import { Route as AuthenticatedAdminTokensRouteImport } from './routes/_authenticated/admin.tokens'
 import { Route as AuthenticatedAdminTranslationsRouteImport } from './routes/_authenticated/admin.translations'
 import { Route as AuthenticatedAdminUploadsRouteImport } from './routes/_authenticated/admin.uploads'
+import { Route as ApiLocalVaultFileNameRouteImport } from './routes/api/local-vault.$fileName'
 import { Route as ApiPublicAudioProxyRouteImport } from './routes/api/public/audio-proxy'
 import { Route as ApiPublicClientErrorsRouteImport } from './routes/api/public/client-errors'
 import { Route as ApiPublicMetricsRouteImport } from './routes/api/public/metrics'
@@ -327,6 +328,11 @@ const AuthenticatedAdminUploadsRoute =
     path: '/admin/uploads',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiLocalVaultFileNameRoute = ApiLocalVaultFileNameRouteImport.update({
+  id: '/api/local-vault/$fileName',
+  path: '/api/local-vault/$fileName',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAudioProxyRoute = ApiPublicAudioProxyRouteImport.update({
   id: '/api/public/audio-proxy',
   path: '/api/public/audio-proxy',
@@ -423,6 +429,7 @@ export interface FileRoutesByFullPath {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
@@ -482,6 +489,7 @@ export interface FileRoutesByTo {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
@@ -543,6 +551,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/_authenticated/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/_authenticated/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
@@ -604,6 +613,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
@@ -663,6 +673,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
@@ -723,6 +734,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/tokens'
     | '/_authenticated/admin/translations'
     | '/_authenticated/admin/uploads'
+    | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
@@ -766,6 +778,7 @@ export interface RootRouteChildren {
   StartIndexRoute: typeof StartIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
+  ApiLocalVaultFileNameRoute: typeof ApiLocalVaultFileNameRoute
   ApiPublicAudioProxyRoute: typeof ApiPublicAudioProxyRoute
   ApiPublicClientErrorsRoute: typeof ApiPublicClientErrorsRoute
   ApiPublicMetricsRoute: typeof ApiPublicMetricsRoute
@@ -1121,6 +1134,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminUploadsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/local-vault/$fileName': {
+      id: '/api/local-vault/$fileName'
+      path: '/api/local-vault/$fileName'
+      fullPath: '/api/local-vault/$fileName'
+      preLoaderRoute: typeof ApiLocalVaultFileNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/audio-proxy': {
       id: '/api/public/audio-proxy'
       path: '/api/public/audio-proxy'
@@ -1294,6 +1314,7 @@ const rootRouteChildren: RootRouteChildren = {
   StartIndexRoute: StartIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
+  ApiLocalVaultFileNameRoute: ApiLocalVaultFileNameRoute,
   ApiPublicAudioProxyRoute: ApiPublicAudioProxyRoute,
   ApiPublicClientErrorsRoute: ApiPublicClientErrorsRoute,
   ApiPublicMetricsRoute: ApiPublicMetricsRoute,

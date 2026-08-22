@@ -245,8 +245,11 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       }
     }
 
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const db = tryGetSupabaseAdmin() ?? context.supabase;
+
     const { persistHybridTrack } = await import("@/lib/hybrid-tracks.server");
-    await persistHybridTrack(context.supabase, context.userId, {
+    await persistHybridTrack(db, context.userId, {
       title: payload.title || "Untitled master track",
       genrePrompt: payload.style || payload.prompt,
       lyrics: payload.instrumental ? "" : payload.lyrics,
@@ -257,7 +260,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     });
 
     const { persistUserVault } = await import("@/lib/user-vault.server");
-    await persistUserVault(context.supabase, context.userId, {
+    const vaultId = await persistUserVault(db, context.userId, {
       id: payload.vaultId,
       title: payload.title || "Untitled Track",
       style: payload.style || payload.prompt,
@@ -266,6 +269,18 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       instrumentalUrl,
       vocalUrl,
     });
+    if (!vaultId && masterUrl) {
+      const { persistLocalVaultTrack } = await import("@/lib/local-vault.server");
+      await persistLocalVaultTrack(context.userId, {
+        id: payload.vaultId,
+        title: payload.title || "Untitled Track",
+        style: payload.style || payload.prompt,
+        status: "completed",
+        masterUrl,
+        instrumentalUrl,
+        vocalUrl,
+      });
+    }
 
     const playableTracks = masterUrl
       ? [

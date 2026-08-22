@@ -39,3 +39,6 @@ dist-ssr
 
 # Playwright JUnit output from the a11y CI gate
 *.junit.xml
+
+# Local-dev mastered-track fallback when SUPABASE_SERVICE_ROLE_KEY is unset
+.data/

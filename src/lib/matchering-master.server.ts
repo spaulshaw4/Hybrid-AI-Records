@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { AUDIO_VAULT_BUCKET, STUDIO_AUDIO_BUCKET, vaultMimeType } from "@/lib/audio-vault";
 import { HYBRID_INTRO_SECONDS } from "@/lib/hybrid-track-pipeline";
 import {
   MATCHERING_MIX_TIMEOUT_MS,
@@ -27,7 +26,6 @@ import {
 } from "@/lib/matchering";
 
 const execFileAsync = promisify(execFile);
-const SIGNED_URL_TTL = 60 * 60 * 24 * 365;
 
 export type MixAndMasterResult = {
   masterUrl: string | null;
@@ -193,28 +191,8 @@ async function uploadMasteredBytes(
   path: string,
   fileType: "wav" | "mp3",
 ): Promise<string> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const mimeType = vaultMimeType(fileType);
-  const buckets = [AUDIO_VAULT_BUCKET, STUDIO_AUDIO_BUCKET];
-  let lastError: unknown = null;
-  for (const bucket of buckets) {
-    const { error } = await supabaseAdmin.storage.from(bucket).upload(path, bytes, {
-      contentType: mimeType,
-      upsert: true,
-      cacheControl: "31536000",
-    });
-    if (error) {
-      lastError = error;
-      continue;
-    }
-    const { data, error: signError } = await supabaseAdmin.storage
-      .from(bucket)
-      .createSignedUrl(path, SIGNED_URL_TTL);
-    if (!signError && data?.signedUrl) return data.signedUrl;
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("The mastered track could not be saved to storage.");
+  const { uploadEngineMaster } = await import("@/lib/engine-pipeline.server");
+  return uploadEngineMaster(bytes, path, fileType);
 }
 
 async function mixAndMasterOnce(options: {

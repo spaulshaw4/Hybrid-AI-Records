@@ -23,8 +23,9 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 
 /** Resolves the signed-in studio user from a Bearer token. */
 export async function studioUserIdFromRequest(request: Request): Promise<string> {
-  const SUPABASE_URL = process.env["SUPABASE_URL"];
-  const SUPABASE_PUBLISHABLE_KEY = process.env["SUPABASE_PUBLISHABLE_KEY"];
+  const { backendAnonKey, backendSupabaseUrl } = await import("@/lib/supabase-env.server");
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || backendSupabaseUrl();
+  const SUPABASE_PUBLISHABLE_KEY = backendAnonKey();
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error("Unauthorized");
   }

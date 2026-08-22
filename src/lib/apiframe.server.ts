@@ -52,8 +52,6 @@ export type ApiframeResult = {
   raw: unknown;
 };
 
-const STUDIO_AUDIO_BUCKET = "studio-deliveries";
-
 function audioExtension(contentType: string, sourceUrl: string): "mp3" | "wav" | "m4a" | "ogg" {
   const type = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
   if (type.includes("wav")) return "wav";
@@ -109,18 +107,8 @@ export async function archiveGeneratedAudioBytes(
   }
   const extension = contentType.includes("wav") ? "wav" : "mp3";
   const path = `${userId}/${taskId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extension}`;
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.storage.from(STUDIO_AUDIO_BUCKET).upload(path, bytes, {
-    contentType: extension === "mp3" ? "audio/mpeg" : `audio/${extension}`,
-    cacheControl: "31536000",
-    upsert: true,
-  });
-  if (error) throw new Error("The finished track could not be saved for playback.");
-  const { data, error: signError } = await supabaseAdmin.storage
-    .from(STUDIO_AUDIO_BUCKET)
-    .createSignedUrl(path, 60 * 60 * 24 * 365);
-  if (signError || !data?.signedUrl) throw new Error("The finished track could not be opened for playback.");
-  return data.signedUrl;
+  const { uploadEngineMaster } = await import("@/lib/engine-pipeline.server");
+  return uploadEngineMaster(bytes, path, extension);
 }
 
 async function archiveOnce(sourceUrl: string, userId: string, taskId: string): Promise<string> {
@@ -144,18 +132,8 @@ async function archiveOnce(sourceUrl: string, userId: string, taskId: string): P
 
   const extension = audioExtension(contentType, sourceUrl);
   const path = `${userId}/${taskId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extension}`;
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.storage.from(STUDIO_AUDIO_BUCKET).upload(path, bytes, {
-    contentType: extension === "mp3" ? "audio/mpeg" : `audio/${extension}`,
-    cacheControl: "31536000",
-    upsert: true,
-  });
-  if (error) throw new Error("The finished track could not be saved for playback.");
-  const { data, error: signError } = await supabaseAdmin.storage
-    .from(STUDIO_AUDIO_BUCKET)
-    .createSignedUrl(path, 60 * 60 * 24 * 365);
-  if (signError || !data?.signedUrl) throw new Error("The finished track could not be opened for playback.");
-  return data.signedUrl;
+  const { uploadEngineMaster } = await import("@/lib/engine-pipeline.server");
+  return uploadEngineMaster(bytes, path, extension === "wav" ? "wav" : "mp3");
 }
 
 

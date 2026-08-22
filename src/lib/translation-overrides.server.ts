@@ -30,10 +30,26 @@ const toOverride = (row: Row): TranslationOverride => ({
 });
 
 function publicClient() {
-  const key = process.env["SUPABASE_PUBLISHABLE_KEY"]!;
-  return createClient<Database>(process.env["SUPABASE_URL"]!, key, {
+  const { backendAnonKey, backendSupabaseUrl } = requireEnv();
+  return createClient<Database>(backendSupabaseUrl(), backendAnonKey(), {
     auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
   });
+}
+
+function requireEnv() {
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    process.env.SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    process.env.SUPABASE_ANON_KEY?.trim();
+  if (!url || !key) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  }
+  return {
+    backendSupabaseUrl: () => url,
+    backendAnonKey: () => key,
+  };
 }
 
 /** Public read used by the storefront translator. Never throws. */

@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type { UserVaultApiTrack, UserVaultStems } from "@/lib/user-vault.server";
-import { asVaultStatus } from "@/lib/user-vault.server";
 import { isDevRuntime } from "@/lib/supabase-env.server";
 
 const ROOT = join(process.cwd(), ".data", "local-vault");
@@ -11,6 +10,11 @@ const CATALOG = join(ROOT, "catalog.json");
 
 export function localVaultEnabled(): boolean {
   return isDevRuntime();
+}
+
+function asVaultStatus(value: string | null | undefined): UserVaultApiTrack["status"] {
+  if (value === "completed" || value === "failed" || value === "processing") return value;
+  return "processing";
 }
 
 function mimeFor(name: string): string {
