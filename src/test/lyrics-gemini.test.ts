@@ -47,7 +47,7 @@ describe("Co-Producer Google Interactions API", () => {
     delete process.env.GEMINI_API_KEY;
     delete process.env.GOOGLE_API_KEY;
     await expect(writeLyricsWithStudio("Night Drive", "English")).rejects.toThrow(
-      "GEMINI_API_KEY is not defined in .env.local",
+      "The Co-Producer is not configured. Add the lyric engine API key to .env.local.",
     );
   });
 

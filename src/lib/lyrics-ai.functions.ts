@@ -35,7 +35,7 @@ export const generateLyrics = createServerFn({ method: "POST" })
       return { lyrics };
     } catch (error) {
       console.error("[GEMINI_DIRECT_ERROR]", error);
-      throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
+      throw error instanceof Error ? error : new Error("Co-Producer request failed.");
     }
   });
 

@@ -272,6 +272,6 @@ describe("MusicAPI sonic workflow", () => {
       "fetch",
       vi.fn(async () => jsonResponse({ data: { status: "failed" } })),
     );
-    await expect(waitForStudioTrack("task-fail")).rejects.toThrow("Suno v5: generation failed.");
+    await expect(waitForStudioTrack("task-fail")).rejects.toThrow("Music engine: generation failed.");
   });
 });

@@ -289,7 +289,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const finished = await waitForStudioTrack(started.taskId);
     const sonicUrl = finished.audioUrl;
     if (!sonicUrl) {
-      throw new Error("Suno 5.5: no audio URL was returned.");
+      throw new Error("Music engine: no audio URL was returned.");
     }
 
     const rawTracks = [
@@ -316,7 +316,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     const archivedBase = tracks[0]?.audioUrl ?? null;
     if (!archivedBase) {
-      throw new Error("Suno 5.5: no audio URL was returned.");
+      throw new Error("Music engine: no audio URL was returned.");
     }
 
     const { runHybridMasterPipeline } = await import("@/lib/hybrid-master-pipeline.server");

@@ -270,12 +270,12 @@ export async function generateStudioTrack(options: StudioTrackOptions): Promise<
       raw && typeof raw === "object" && "error" in raw
         ? String((raw as { error?: unknown }).error)
         : `Request failed (${response.status})`;
-    throw new Error(`Suno v5: ${detail}`);
+    throw new Error(`Music engine: ${detail}`);
   }
 
   const taskId = readTaskId(raw);
   if (!taskId) {
-    throw new Error("Suno v5: the provider returned no task id.");
+    throw new Error("Music engine: the provider returned no task id.");
   }
 
   return { taskId, payload, status: "processing" };
@@ -295,7 +295,7 @@ export async function fetchStudioTrackTask(taskId: string): Promise<StudioTrackR
     return { taskId, status: "processing", audioUrl: null, imageUrl: null, title: null };
   }
   if (!response.ok) {
-    throw new Error(`Suno v5: task poll failed (${response.status})`);
+    throw new Error(`Music engine: task poll failed (${response.status})`);
   }
   const clip = readTaskResult(raw);
   return {
@@ -316,9 +316,9 @@ export async function waitForStudioTrack(taskId: string): Promise<StudioTrackRes
     const current = await fetchStudioTrackTask(taskId);
     if (current.status === "completed" && current.audioUrl) return current;
     if (current.status === "failed") {
-      throw new Error("Suno v5: generation failed.");
+      throw new Error("Music engine: generation failed.");
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
-  throw new Error("Suno v5: generation timed out.");
+  throw new Error("Music engine: generation timed out.");
 }

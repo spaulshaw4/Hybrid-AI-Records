@@ -38,7 +38,7 @@ export const validateReplicateKey = createServerFn({ method: "POST" })
         ...base,
         status: null,
         valid: false,
-        message: "REPLICATE_API_KEY is not configured.",
+        message: "The engine API key is not configured.",
       };
     }
 
@@ -90,12 +90,12 @@ export const validateReplicateKey = createServerFn({ method: "POST" })
         message: `Authenticated as ${account?.username ?? account?.name ?? "the configured account"}.`,
       };
     } catch (err) {
-      console.error("Replicate key check network error:", err);
+      console.error("[ENGINE_KEY_CHECK] network error:", err);
       return {
         ...base,
         status: null,
         valid: false,
-        message: err instanceof Error ? err.message : "Could not reach Replicate.",
+        message: err instanceof Error ? err.message : "Could not reach the engine provider.",
       };
     }
   });

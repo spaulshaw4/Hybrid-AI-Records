@@ -7,7 +7,9 @@ export const COPRODUCER_GEMINI_MODEL =
 export async function writeLyricsWithStudio(trackTitle: string, language: string) {
   const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)?.trim();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not defined in .env.local");
+    // Vendor names must stay out of thrown copy: this message reaches the
+    // studio as a toast. The env var is named on the lookup line above.
+    throw new Error("The Co-Producer is not configured. Add the lyric engine API key to .env.local.");
   }
   const ai = new GoogleGenAI({ apiKey });
   try {

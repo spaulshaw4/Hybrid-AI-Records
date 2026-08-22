@@ -82,7 +82,7 @@ export const ENGINE_ENDPOINT =
 export const ENGINE_CURL_HEADERS: Array<[string, string]> = [
   ["Content-Type", "application/json"],
   ["Accept", "application/json"],
-  ["Authorization", "Bearer $REPLICATE_API_KEY"],
+  ["Authorization", "Bearer $ENGINE_API_KEY"],
   ["X-Correlation-Id", "curl-debug"],
 ];
 
