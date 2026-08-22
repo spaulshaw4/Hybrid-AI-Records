@@ -53,7 +53,10 @@ export async function generateTimedHybridTrack(
     language?: string;
     customLanguage?: string;
     userId?: string;
+    voiceId?: string;
     referenceSampleUrl?: string;
+    bpm?: number;
+    preserveUserPrompt?: boolean;
   },
   correlationId: string = newCorrelationId("gen-hybrid"),
 ): Promise<TimedHybridTrackResult> {
@@ -63,6 +66,9 @@ export async function generateTimedHybridTrack(
     lyricContent: input.lyricContent,
     totalDurationSec: input.totalDurationSec,
     audioFormat: input.audioFormat,
+    bpm: input.bpm,
+    voiceId: input.voiceId,
+    referenceAudioUrl: input.referenceSampleUrl,
   });
 
   engineLog("info", "generate.hybrid.start", correlationId, {
@@ -94,12 +100,15 @@ export async function generateTimedHybridTrack(
       audioFormat: input.audioFormat,
       language: input.language,
       customLanguage: input.customLanguage,
+      voiceId: input.voiceId,
+      referenceAudioUrl: input.referenceSampleUrl,
+      preserveUserPrompt: input.preserveUserPrompt !== false,
     },
     `${correlationId}-minimax`,
   );
 
-  const vocalJob =
-    input.referenceSampleUrl && input.lyricContent.trim() && input.userId
+  const customVoice = Boolean(input.referenceSampleUrl && input.lyricContent.trim() && input.userId);
+  const vocalJob = customVoice
       ? import("@/lib/fish-tts.server").then(({ cloneVocalsFromSample }) =>
           cloneVocalsFromSample({
             sampleUrl: input.referenceSampleUrl as string,
@@ -110,6 +119,7 @@ export async function generateTimedHybridTrack(
             title: input.title || "Vocal stem",
             userId: input.userId as string,
             taskId: `${correlationId}-clone`,
+            voiceId: input.voiceId,
           }),
         )
       : requestAceStepGeneration(
@@ -119,6 +129,9 @@ export async function generateTimedHybridTrack(
             durationSeconds: plan.coreSeconds,
             audioFormat: input.audioFormat,
             title: input.title || "Vocal stem",
+            bpm: input.bpm,
+            voiceId: input.voiceId,
+            referenceAudioUrl: input.referenceSampleUrl,
           },
           `${correlationId}-ace`,
         );

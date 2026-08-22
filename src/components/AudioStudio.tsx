@@ -21,7 +21,7 @@ import { QuickVocalRecorder } from "@/components/QuickVocalRecorder";
 import { AudioVault } from "@/components/AudioVault";
 
 import { supabase } from "@/integrations/supabase/client";
-import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_VOICE_ID, isDevAuthBypass } from "@/lib/dev-auth";
+import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
 
 import { checkEngineHealth, generateEngineTrack, getEngineTrackTask } from "@/lib/apiframe-music.functions";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
@@ -101,16 +101,15 @@ import {
 import {
   
   VOCAL_STYLE_GROUPS,
-  compileEnginePrompt,
   formatLyricBlocks,
   vocalProfileLabel,
 } from "@/lib/vocal-presets";
+import { buildDynamicStylePrompt } from "@/lib/generation-style-prompt";
 import {
   DEFAULT_TARGET_DURATION_SECONDS,
   MAX_TARGET_DURATION_SECONDS,
   MIN_TARGET_DURATION_SECONDS,
   TARGET_DURATION_STEP_SECONDS,
-  applyDurationToPrompt,
   arrangeLyricsForDuration,
   formatDuration,
   snapTargetDuration,
@@ -1921,21 +1920,26 @@ export function AudioStudio() {
 
       setStatusText("Mastering track…");
 
-      // Directives are composed server-side from the validated control values.
-      const enginePrompt = applyDurationToPrompt(
-        compileEnginePrompt({
-          styleTags: styles.filter(Boolean),
-          vocalPresets: usesDefaultAiVocal(withVocals, vocalSource)
-              ? [...vocalPresets, vocalPrompt.trim()].filter(Boolean)
-              : [],
-          instrumental: !withVocals,
-        }),
-        targetDuration,
-      );
+      const genre = styles.filter(Boolean).join(", ");
+      const vocalProfile = usesDefaultAiVocal(withVocals, vocalSource)
+        ? vocalPresets.filter(Boolean).join(", ")
+        : "";
+      const mood = vocalPrompt.trim();
+      const stylePrompt = buildDynamicStylePrompt({
+        genre,
+        bpm,
+        mood,
+        instruments: [],
+        vocalProfile: withVocals ? vocalProfile : undefined,
+      });
       const started = await startGeneration({
         data: {
-          prompt: enginePrompt,
-          style: enginePrompt,
+          prompt: stylePrompt || genre,
+          style: genre,
+          genre,
+          ...(mood ? { mood } : {}),
+          instruments: [],
+          ...(vocalProfile ? { vocalProfile } : {}),
           title: trackTitle,
           lyrics: withVocals
             ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
@@ -1946,12 +1950,7 @@ export function AudioStudio() {
           language: selectedLanguage,
           customLanguage: customLanguage.trim(),
           audioFormat: "mp3" as const,
-          ...(withVocals &&
-          usesCustomVocal(studioPayload) &&
-          voiceId &&
-          voiceId !== DEV_TEST_VOICE_ID
-            ? { voiceId }
-            : {}),
+          ...(withVocals && usesCustomVocal(studioPayload) && voiceId ? { voiceId } : {}),
           termsAccepted:
             studioPayload.vocal_config.type === "custom"
               ? studioPayload.vocal_config.terms_accepted

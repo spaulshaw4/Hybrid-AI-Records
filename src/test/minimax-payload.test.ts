@@ -76,4 +76,17 @@ describe("buildMiniMaxPayload", () => {
 
     expect(result.input.prompt).toContain("Latvian");
   });
+
+  it("does not replace the artist's Style/Tempo tags with stock genre defaults", () => {
+    const result = buildMiniMaxPayload({
+      prompt: "[Style: Nu-Metal] [Tempo: 102 BPM] [Vocals: Heavy / Nu-Metal]",
+      lyrics: "",
+      instrumental: true,
+      voiceId: "voice_keep",
+    });
+    expect(result.input.prompt).toContain("[Style: Nu-Metal]");
+    expect(result.input.prompt).toContain("[Tempo: 102 BPM]");
+    expect(result.input.prompt).not.toContain("emotive contemporary");
+    expect(result.settings.voice_id).toBe("voice_keep");
+  });
 });

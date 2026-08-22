@@ -59,6 +59,14 @@ const generateSchema = z.object({
   /** Ignored. Kept for older clients. */
   allowReslice: z.boolean().optional(),
   controls: controlsSchema.optional(),
+  /** Core style/genre tags from the studio — not rewritten to a stock genre. */
+  genre: z.string().trim().max(600).optional(),
+  mood: z.string().trim().max(400).optional(),
+  instruments: z.array(z.string().trim().min(1).max(80)).max(24).optional(),
+  /** Default-AI vocal character (Aggressive Rock Vocal, Female Vocal, …). */
+  vocalProfile: z.string().trim().max(400).optional(),
+  /** Direct sample URL when the client already resolved the cloned take. */
+  referenceAudioUrl: z.string().trim().max(2000).optional(),
   /** Open `user_vault` row to flip from processing → completed. */
   vaultId: z.preprocess((value) => {
     if (typeof value !== "string") return undefined;
@@ -86,7 +94,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }) => {
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
-    const { isDevAuthBypass } = await import("@/lib/dev-auth");
+    const { DEV_TEST_VOICE_ID, isDevAuthBypass } = await import("@/lib/dev-auth");
     if (!isDevAuthBypass()) {
     // Entitlement gate. Tokens are charged only after a successful render, but
     // the render itself costs real money, so the server refuses to start one
@@ -107,7 +115,11 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       newCorrelationId,
     } = await import("@/lib/apiframe.server");
     const { engineCreditErrorMessage } = await import("@/lib/engine-credits");
-    const { applyEngineControlsToPrompt } = await import("@/lib/engine-controls");
+    const {
+      buildDynamicStylePrompt,
+      concatStylePromptWithLyrics,
+      logApiPayload,
+    } = await import("@/lib/generation-style-prompt");
     const {
       controls,
       durationSeconds: requestedSeconds,
@@ -119,33 +131,64 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       MINIMAX_MAX_SECONDS,
       Math.max(10, requestedSeconds ?? DEFAULT_LONGFORM_SECONDS),
     );
-    const payload = controls
-      ? {
-          ...rest,
-          prompt: applyEngineControlsToPrompt(rest.prompt, controls),
-          style: rest.style ? applyEngineControlsToPrompt(rest.style, controls) : rest.style,
-        }
-      : rest;
+    const payload = rest;
+    const genre = (payload.genre || payload.style || payload.prompt).trim();
+    const bpm = controls?.bpm;
+    const mood = payload.mood?.trim() || "";
+    const instruments = (payload.instruments ?? []).map((item) => item.trim()).filter(Boolean);
+    const vocalProfile = payload.vocalProfile?.trim() || "";
+    const stylePrompt = buildDynamicStylePrompt({
+      genre,
+      bpm,
+      mood,
+      instruments,
+      vocalProfile: payload.instrumental ? undefined : vocalProfile,
+    });
+    const lyricContent = payload.instrumental ? "" : payload.lyrics;
+    const combinedPrompt = concatStylePromptWithLyrics(stylePrompt, lyricContent);
     const { generateTimedHybridTrack } = await import("@/lib/hybrid-track-pipeline.server");
     const correlationId = newCorrelationId("gen");
 
-    let referenceSampleUrl: string | undefined;
-    if (payload.voiceId && !payload.instrumental) {
+    let referenceSampleUrl = payload.referenceAudioUrl?.trim() || undefined;
+    const voiceId = payload.voiceId?.trim() || undefined;
+    const customVoiceRequested = Boolean(voiceId) && !payload.instrumental;
+    if (customVoiceRequested) {
       const { VOCAL_CONSENT_REQUIRED_MESSAGE } = await import("@/lib/vocal-consent");
       if (!payload.termsAccepted) {
         throw new Error(VOCAL_CONSENT_REQUIRED_MESSAGE);
       }
-      const { data: profile } = await context.supabase
-        .from("voice_profiles")
-        .select("sample_url")
-        .eq("user_id", context.userId)
-        .eq("voice_id", payload.voiceId)
-        .maybeSingle();
-      referenceSampleUrl = profile?.sample_url ?? undefined;
-      if (!referenceSampleUrl) {
+      const isDevTestVoice = voiceId === DEV_TEST_VOICE_ID && isDevAuthBypass();
+      if (!referenceSampleUrl && !isDevTestVoice) {
+        const { data: profile } = await context.supabase
+          .from("voice_profiles")
+          .select("sample_url")
+          .eq("user_id", context.userId)
+          .eq("voice_id", voiceId)
+          .maybeSingle();
+        referenceSampleUrl = profile?.sample_url ?? undefined;
+      }
+      if (!referenceSampleUrl && !isDevTestVoice) {
         throw new Error("That saved voice could not be loaded. Record or upload it again.");
       }
     }
+
+    logApiPayload({
+      stylePrompt,
+      prompt: combinedPrompt,
+      lyrics: lyricContent,
+      genre,
+      bpm: bpm ?? null,
+      mood: mood || null,
+      instruments,
+      vocalProfile: vocalProfile || null,
+      voice_id: voiceId ?? null,
+      reference_audio: referenceSampleUrl ?? null,
+      instrumental: payload.instrumental,
+      language: payload.language,
+      customLanguage: payload.customLanguage,
+      audioFormat: payload.audioFormat,
+      durationSeconds,
+    });
 
     // Platform render credits are a separate meter from Hybrid Tokens. Check
     // them before starting so an exhausted account produces an accurate,
@@ -157,16 +200,19 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     const timed = await generateTimedHybridTrack(
       {
-        introPrompt: `${payload.style || payload.prompt}. 30-second producer tag intro, radio ident.`,
-        mainStylePrompt: payload.style || payload.prompt,
-        lyricContent: payload.instrumental ? "" : payload.lyrics,
+        introPrompt: `${stylePrompt}. 30-second producer tag intro, radio ident.`,
+        mainStylePrompt: stylePrompt,
+        lyricContent,
         totalDurationSec: durationSeconds,
         audioFormat: payload.audioFormat,
         title: payload.title,
         language: payload.language,
         customLanguage: payload.customLanguage,
         userId: context.userId,
+        voiceId,
         referenceSampleUrl,
+        bpm,
+        preserveUserPrompt: true,
       },
       correlationId,
     );
@@ -251,7 +297,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const { persistHybridTrack } = await import("@/lib/hybrid-tracks.server");
     await persistHybridTrack(db, context.userId, {
       title: payload.title || "Untitled master track",
-      genrePrompt: payload.style || payload.prompt,
+      genrePrompt: genre,
       lyrics: payload.instrumental ? "" : payload.lyrics,
       introUrl,
       instrumentalUrl,
@@ -263,7 +309,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const vaultId = await persistUserVault(db, context.userId, {
       id: payload.vaultId,
       title: payload.title || "Untitled Track",
-      style: payload.style || payload.prompt,
+      style: genre,
       status: "completed",
       masterUrl,
       instrumentalUrl,
@@ -274,7 +320,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       await persistLocalVaultTrack(context.userId, {
         id: payload.vaultId,
         title: payload.title || "Untitled Track",
-        style: payload.style || payload.prompt,
+        style: genre,
         status: "completed",
         masterUrl,
         instrumentalUrl,

@@ -32,6 +32,9 @@ export function planTimedHybridTrack(input: {
   lyricContent: string;
   totalDurationSec?: number;
   audioFormat?: "mp3" | "wav";
+  bpm?: number;
+  voiceId?: string;
+  referenceAudioUrl?: string;
 }): TimedHybridPlan {
   const coreSeconds = Math.min(
     MINIMAX_MAX_SECONDS,
@@ -53,12 +56,16 @@ export function planTimedHybridTrack(input: {
       lyrics: "",
       instrumental: true,
       audioFormat: input.audioFormat,
+      voiceId: input.voiceId,
     }),
     acestep: buildAceStepPayload({
       prompt: style,
       lyrics: input.lyricContent,
       durationSeconds: coreSeconds,
       audioFormat: input.audioFormat,
+      bpm: input.bpm,
+      voiceId: input.voiceId,
+      referenceAudioUrl: input.referenceAudioUrl,
     }),
   };
 }

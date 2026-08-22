@@ -514,6 +514,8 @@ export type ApiframeGenerateInput = {
   model: string;
   audioFormat?: "mp3" | "wav";
   voiceId?: string;
+  referenceAudioUrl?: string;
+  preserveUserPrompt?: boolean;
   /** Lyric-language picker value ("auto", "lt", "en-ng", "custom", …). */
   language?: string;
   /** Free-text language when the picker is set to "custom". */
@@ -537,6 +539,9 @@ export async function requestApiframeGeneration(
     "./engine-directive-guard"
   );
   const { buildMiniMaxPayload } = await import("./minimax-payload");
+  const { concatStylePromptWithLyrics, isDynamicStylePrompt, logApiPayload } = await import(
+    "./generation-style-prompt"
+  );
 
 
   engineLog("info", "generate.start", correlationId, {
@@ -545,6 +550,7 @@ export async function requestApiframeGeneration(
     promptLength: input.prompt.length,
     lyricsLength: input.lyrics.length,
     language: input.language ?? "auto",
+    voiceId: input.voiceId ?? null,
   });
 
   const instrumental = input.instrumental === true;
@@ -593,9 +599,14 @@ export async function requestApiframeGeneration(
   // Strict separation: style/genre (never lyric text) goes to `prompt`. The
   // language directive is style guidance, so it belongs here too — it tells the
   // model how to pronounce the lyrics without ever being sung itself.
-  const basePrompt = instrumental
-    ? buildInstrumentalEnginePrompt(cleanStyle, cleanPrompt)
-    : buildEnginePrompt(cleanStyle, cleanPrompt);
+  const preserveUserPrompt =
+    input.preserveUserPrompt === true || isDynamicStylePrompt(input.prompt) || isDynamicStylePrompt(input.style);
+  const userStyle = preserveUserPrompt ? input.prompt.trim() || input.style.trim() : "";
+  const basePrompt = preserveUserPrompt
+    ? userStyle
+    : instrumental
+      ? buildInstrumentalEnginePrompt(cleanStyle, cleanPrompt)
+      : buildEnginePrompt(cleanStyle, cleanPrompt);
   // Instrumentals get the no-vocals variant of the directive.
   const prompt = applyDirectiveToPrompt(basePrompt, profile, instrumental);
 
@@ -624,12 +635,22 @@ export async function requestApiframeGeneration(
     lyrics,
     language: input.language,
     customLanguage: input.customLanguage,
-    genre: cleanStyle || undefined,
+    genre: preserveUserPrompt ? undefined : cleanStyle || undefined,
     instrumental,
     audioFormat,
+    voiceId: input.voiceId,
   });
 
   const body = { input: payload.input };
+
+  logApiPayload({
+    ...body,
+    prompt: concatStylePromptWithLyrics(prompt, lyrics),
+    lyrics,
+    voice_id: input.voiceId ?? null,
+    reference_audio: input.referenceAudioUrl ?? null,
+    settings: payload.settings,
+  });
 
   logEnginePayload(correlationId, {
     prompt,
@@ -682,6 +703,9 @@ export async function requestElevenLabsMusic(
       output_format: elevenLabsMusicOutputFormat(input.audioFormat),
     },
   };
+
+  const { logApiPayload } = await import("./generation-style-prompt");
+  logApiPayload(body);
 
   engineLog("info", "generate.elevenlabs.start", correlationId, {
     promptLength: input.prompt.length,
@@ -772,6 +796,9 @@ export type AceStepGenerateInput = {
   durationSeconds: number;
   audioFormat?: "mp3" | "wav";
   title?: string;
+  bpm?: number;
+  voiceId?: string;
+  referenceAudioUrl?: string;
 };
 
 /** Fish Audio ACE-Step 1.5 — vocal stems and arrangement. */
@@ -780,24 +807,38 @@ export async function requestAceStepGeneration(
   correlationId: string = newCorrelationId("gen-ace"),
 ): Promise<ApiframeResult> {
   const { ACE_STEP_MODEL, buildAceStepPayload } = await import("./ace-step-payload");
+  const { concatStylePromptWithLyrics, logApiPayload } = await import("./generation-style-prompt");
   const payload = buildAceStepPayload({
     prompt: input.prompt,
     lyrics: input.lyrics,
     durationSeconds: input.durationSeconds,
     audioFormat: input.audioFormat,
+    bpm: input.bpm,
+    voiceId: input.voiceId,
+    referenceAudioUrl: input.referenceAudioUrl,
   });
   const version = await resolveCommunityModelVersion(ACE_STEP_MODEL, correlationId);
+  const { voice_id: aceVoiceId, ...aceInput } = payload.input;
+  const wireBody = communityPredictionBody(version, aceInput);
+  logApiPayload({
+    ...wireBody,
+    prompt: concatStylePromptWithLyrics(payload.input.prompt, payload.input.lyrics),
+    lyrics: payload.input.lyrics,
+    voice_id: input.voiceId ?? aceVoiceId ?? null,
+    reference_audio: input.referenceAudioUrl ?? payload.input.reference_audio ?? null,
+  });
   engineLog("info", "generate.acestep.start", correlationId, {
     promptLength: payload.input.prompt.length,
     lyricsLength: payload.input.lyrics.length,
     duration: payload.input.duration,
     version,
+    voiceId: input.voiceId ?? null,
   });
   return call(
     REPLICATE_COMMUNITY_PREDICTIONS_PATH,
     {
       method: "POST",
-      body: JSON.stringify(communityPredictionBody(version, { ...payload.input })),
+      body: JSON.stringify(wireBody),
     },
     input.title || null,
     correlationId,

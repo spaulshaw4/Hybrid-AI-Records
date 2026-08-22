@@ -151,8 +151,17 @@ export async function cloneVocalsFromSample(
     title?: string;
     userId: string;
     taskId: string;
+    voiceId?: string;
   },
 ): Promise<ApiframeResult> {
+  const { logApiPayload } = await import("@/lib/generation-style-prompt");
+  logApiPayload({
+    engine: "fish-tts-clone",
+    voice_id: input.voiceId ?? null,
+    reference_audio: input.sampleUrl,
+    lyrics: input.lyrics,
+    audioFormat: input.audioFormat === "wav" ? "wav" : "mp3",
+  });
   const audioBytes = await loadReferenceAudio(input.sampleUrl);
   return cloneVocalsFromBytes({
     audioBytes,

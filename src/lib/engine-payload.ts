@@ -15,6 +15,7 @@ import {
   normalizeLyricUnicode,
   resolveLanguageProfile,
 } from "./engine-language";
+import { isDynamicStylePrompt } from "./generation-style-prompt";
 
 export type AudioFormat = "mp3" | "wav";
 
@@ -46,9 +47,12 @@ export function buildEnginePayloadPreview(
   const safeLyrics = normalizeLyricUnicode(lyrics);
   // Same resolution the server performs, so the preview shows the real prompt.
   const profile = resolveLanguageProfile(language?.selected, language?.custom, safeLyrics);
-  const basePrompt = instrumental
-    ? buildInstrumentalEnginePrompt(clean, clean)
-    : buildEnginePrompt(clean, clean);
+  const preserve = isDynamicStylePrompt(stylePrompt);
+  const basePrompt = preserve
+    ? clean
+    : instrumental
+      ? buildInstrumentalEnginePrompt(clean, clean)
+      : buildEnginePrompt(clean, clean);
   return {
     model: ENGINE_MODEL,
     input: {

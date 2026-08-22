@@ -28,6 +28,8 @@ export interface GenerationRequestPayload {
   genre?: string;
   instrumental?: boolean;
   audioFormat?: AudioFormat;
+  /** Cloned / selected voice id — logged and kept on the payload when present. */
+  voiceId?: string;
 }
 
 export interface MiniMaxPayload {
@@ -48,6 +50,7 @@ export interface MiniMaxPayload {
     bitrate: 256000;
     instrumental: boolean;
     timeout_seconds: 240;
+    voice_id?: string;
   };
 }
 
@@ -66,8 +69,17 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
   // instrumental variant) so diacritics and accent survive the generation.
   const directive = directiveForMode(profile, instrumental);
 
-  // Merge the supplied prompt with any genre hint, then append the directive.
-  const basePrompt = [req.prompt.trim(), req.genre?.trim()].filter(Boolean).join(" ").trim();
+  const voiceId = req.voiceId?.trim();
+  const userPrompt = req.prompt.trim();
+  const genreHint = req.genre?.trim();
+  const alreadyTagged = /\[Style:/i.test(userPrompt);
+  const basePrompt = [
+    userPrompt,
+    !alreadyTagged && genreHint && !userPrompt.includes(genreHint) ? genreHint : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const prompt = [basePrompt, basePrompt.includes(directive) ? "" : directive]
     .filter(Boolean)
     .join(" ")
@@ -92,6 +104,7 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
       bitrate: 256000,
       instrumental,
       timeout_seconds: 240,
+      ...(voiceId ? { voice_id: voiceId } : {}),
     },
   };
 }
