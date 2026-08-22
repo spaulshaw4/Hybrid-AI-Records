@@ -203,6 +203,23 @@ export const LANGUAGE_PROFILES: Record<string, LanguageProfile> = {
     accent: "native Japanese pronunciation",
     phonetics: "mora-timed syllables, pure short vowels, pitch-accent patterns",
   }),
+  af: P({
+    id: "af",
+    name: "Afrikaans",
+    native: "Afrikaans",
+    accent: "native Afrikaans pronunciation",
+    phonetics:
+      "guttural g, rolled r, diphthongs ei/ou/ui kept distinct, final consonants fully voiced",
+    diacritics: "é ê ë î ô û",
+  }),
+  sw: P({
+    id: "sw",
+    name: "Swahili",
+    native: "Kiswahili",
+    accent: "native Swahili pronunciation",
+    phonetics: "pure five-vowel system, syllable-timed delivery, ng' as a velar nasal, rolled r",
+    prosody: "penultimate syllable stress on every word",
+  }),
   ko: P({
     id: "ko",
     name: "Korean",

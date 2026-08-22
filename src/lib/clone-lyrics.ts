@@ -11,9 +11,22 @@ export function lyricsForCloneSpeech(lyrics: string): string {
 }
 
 export function languageHintForClone(language: string, customLanguage = ""): string {
-  if (language === "lt") return "lt";
-  if (language === "es") return "es";
-  if (language === "custom") {
+  const code = language.trim().toLowerCase();
+  if (code === "en" || code === "auto" || code === "") return "en";
+  if (
+    code === "es" ||
+    code === "lt" ||
+    code === "af" ||
+    code === "fr" ||
+    code === "de" ||
+    code === "ja" ||
+    code === "pt" ||
+    code === "it" ||
+    code === "sw"
+  ) {
+    return code;
+  }
+  if (code === "custom") {
     const custom = customLanguage.trim().toLowerCase();
     if (custom.startsWith("lt") || custom.includes("lithuan")) return "lt";
     if (custom.startsWith("es") || custom.includes("spanish")) return "es";

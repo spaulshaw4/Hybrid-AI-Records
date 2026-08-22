@@ -1,37 +1,36 @@
 import { z } from "zod";
 
-/** Target languages offered next to the Gemini Co-Producer buttons. */
+/** Target languages offered in the Hybrid Engine Step 1 picker. */
 
 export const LYRIC_LANGUAGES = [
-  { value: "auto", label: "Auto / English (Default)", instruction: "English" },
-  { value: "lt", label: "Lithuanian (Lietuvių)", instruction: "Lithuanian (Lietuvių)" },
-  {
-    value: "ng",
-    label: "Nigerian (Pidgin / Afro-Fusion)",
-    instruction: "Nigerian Pidgin with Afro-Fusion phrasing",
-  },
-  {
-    value: "en-lt",
-    label: "Bilingual (English + Lithuanian)",
-    instruction: "Bilingual: English hooks with Lithuanian verses and ad-libs",
-  },
-  {
-    value: "en-ng",
-    label: "Bilingual (English + Nigerian Pidgin)",
-    instruction: "Bilingual: English hooks with Nigerian Pidgin verses and ad-libs",
-  },
+  { value: "en", label: "English", instruction: "English" },
   { value: "es", label: "Spanish (Español)", instruction: "Spanish (Español)" },
-  { value: "custom", label: "Custom / Other", instruction: "" },
+  { value: "lt", label: "Lithuanian (Lietuvių)", instruction: "Lithuanian (Lietuvių)" },
+  { value: "af", label: "Afrikaans", instruction: "Afrikaans" },
+  { value: "fr", label: "French (Français)", instruction: "French (Français)" },
+  { value: "de", label: "German (Deutsch)", instruction: "German (Deutsch)" },
+  { value: "ja", label: "Japanese (日本語)", instruction: "Japanese (日本語)" },
+  { value: "pt", label: "Portuguese (Português)", instruction: "Portuguese (Português)" },
+  { value: "it", label: "Italian (Italiano)", instruction: "Italian (Italiano)" },
+  { value: "sw", label: "Swahili (Kiswahili)", instruction: "Swahili (Kiswahili)" },
 ] as const;
 
 export const VALID_LYRIC_LANGUAGE_VALUES = LYRIC_LANGUAGES.map((l) => l.value);
 
 export type LyricLanguage = (typeof LYRIC_LANGUAGES)[number]["value"];
 
-export const DEFAULT_LYRIC_LANGUAGE: LyricLanguage = "auto";
+export const DEFAULT_LYRIC_LANGUAGE: LyricLanguage = "en";
 
 /** Zod schema to validate a lyric language value before it reaches the Gemini payload. */
 export const lyricLanguageSchema = z.enum(VALID_LYRIC_LANGUAGE_VALUES as [LyricLanguage, ...LyricLanguage[]]);
+
+/**
+ * Form/API field: missing or legacy picker values (`auto`, `custom`, …) fall
+ * back to English so the form is never in an empty invalid state.
+ */
+export const lyricLanguageFieldSchema = lyricLanguageSchema
+  .default(DEFAULT_LYRIC_LANGUAGE)
+  .catch(DEFAULT_LYRIC_LANGUAGE);
 
 /** Returns true if the value is one of the supported dropdown language options. */
 export function isValidLyricLanguage(value: unknown): value is LyricLanguage {
@@ -39,11 +38,19 @@ export function isValidLyricLanguage(value: unknown): value is LyricLanguage {
 }
 
 export function lyricLanguageLabel(value: string): string {
-  return LYRIC_LANGUAGES.find((l) => l.value === value)?.label ?? "Auto / English (Default)";
+  return LYRIC_LANGUAGES.find((l) => l.value === value)?.label ?? "English";
 }
 
 /** Human-readable target language handed to Gemini. */
 export function lyricLanguageInstruction(value: string, custom?: string): string {
-  if (value === "custom") return custom?.trim() || "English";
-  return LYRIC_LANGUAGES.find((l) => l.value === value)?.instruction || "English";
+  return LYRIC_LANGUAGES.find((l) => l.value === value)?.instruction || custom?.trim() || "English";
+}
+
+/** Step 1 may continue only when title, lyrics, and a language are all set. */
+export function isStudioStep1Complete(input: {
+  title: string;
+  lyrics: string;
+  language: string;
+}): boolean {
+  return Boolean(input.title.trim() && input.lyrics.trim() && isValidLyricLanguage(input.language));
 }

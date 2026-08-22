@@ -18,8 +18,10 @@ describe("lyricsForCloneSpeech", () => {
 describe("languageHintForClone", () => {
   it("maps studio language picks to short hints", () => {
     expect(languageHintForClone("auto")).toBe("en");
+    expect(languageHintForClone("en")).toBe("en");
     expect(languageHintForClone("lt")).toBe("lt");
     expect(languageHintForClone("es")).toBe("es");
+    expect(languageHintForClone("sw")).toBe("sw");
     expect(languageHintForClone("custom", "Lithuanian")).toBe("lt");
   });
 });

@@ -547,7 +547,7 @@ export async function requestApiframeGeneration(
     customMode: input.customMode,
     promptLength: input.prompt.length,
     lyricsLength: input.lyrics.length,
-    language: input.language ?? "auto",
+    language: input.language ?? "en",
     voiceId: input.voiceId ?? null,
   });
 

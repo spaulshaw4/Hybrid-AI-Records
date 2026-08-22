@@ -12,7 +12,7 @@ import {
   MIN_STYLE_INFLUENCE,
   MAX_STYLE_INFLUENCE,
 } from "@/lib/engine-controls";
-import { DEFAULT_LYRIC_LANGUAGE, lyricLanguageSchema } from "@/lib/lyric-languages";
+import { lyricLanguageFieldSchema } from "@/lib/lyric-languages";
 import { DEFAULT_LONGFORM_SECONDS, MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
 
 export interface MusicGenerationRequest {
@@ -111,10 +111,9 @@ const generateSchema = z.object({
   termsAccepted: z.boolean().default(false),
   /**
    * Target lyric language. Drives pronunciation, diacritic handling and accent
-   * in the engine prompt — validated here so the browser can only pick a
-   * supported option (or supply a short free-text label under "custom").
+   * in the engine prompt. Defaults to English so the form is never empty.
    */
-  language: lyricLanguageSchema.default(DEFAULT_LYRIC_LANGUAGE),
+  language: lyricLanguageFieldSchema,
   customLanguage: z.string().trim().max(60).default(""),
   customMode: z.boolean().default(false),
   model: z.enum(SUNO_MODELS).default("V4_5"),
