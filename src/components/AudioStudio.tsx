@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
@@ -1274,42 +1273,6 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
-
-  const lyricMutation = useMutation({
-    mutationFn: async ({ title, lang, style }: { title: string; lang: string; style?: string }) => {
-      const res = await fetch("/api/coproducer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          trackTitle: title,
-          language: lang,
-          style: style || "Rock/Alternative",
-        }),
-      });
-      const data = (await res.json()) as { lyrics?: string; error?: string };
-      if (!res.ok) throw new Error(data.error || "Failed to generate lyrics");
-      return data.lyrics;
-    },
-    onSuccess: (nextLyrics) => {
-      console.log("[TANSTACK_MUTATION_SUCCESS]", nextLyrics);
-      setLyrics(String(nextLyrics ?? "").slice(0, PROMPT_MAX));
-      setLyricWarnings([]);
-    },
-    onError: (err) => {
-      console.error("[TANSTACK_MUTATION_ERROR]", err);
-      alert(err instanceof Error ? err.message : "Failed to generate lyrics");
-    },
-  });
-
-  useEffect(() => {
-    const btn = document.getElementById("coproducer-generate-btn");
-    if (!btn) return;
-    const handleNativeClick = () => {
-      console.log("[NATIVE_DOM_COPRODUCER_FIRED]");
-    };
-    btn.addEventListener("click", handleNativeClick);
-    return () => btn.removeEventListener("click", handleNativeClick);
-  }, [studioStep]);
 
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
@@ -2695,42 +2658,70 @@ export function AudioStudio() {
               <button
                 type="button"
                 id="coproducer-generate-btn"
-                style={{ position: "relative", zIndex: 9999, pointerEvents: "auto" }}
-                disabled={lyricMutation.isPending}
-                aria-busy={lyricMutation.isPending}
-                className={cn(
-                  buttonVariants({ size: "sm", variant: "secondary" }),
-                  "relative z-50 pointer-events-auto disabled:pointer-events-auto",
-                )}
-                onClick={(e) => {
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow-lg"
+                style={{
+                  position: "relative",
+                  zIndex: 999999,
+                  pointerEvents: "all",
+                  cursor: "pointer",
+                }}
+                onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log("[COPRODUCER_CLICK_TRIGGERED]");
-                  const currentTitle =
+                  console.log("[INLINE_CLICK_TRIGGERED]");
+
+                  const titleInput =
                     trackTitle ||
-                    (document.querySelector('input[name="title"]') as HTMLInputElement | null)?.value;
-                  if (!currentTitle?.trim()) {
+                    (document.querySelector(
+                      'input[name="title"], input[placeholder*="Title"]',
+                    ) as HTMLInputElement | null)?.value;
+                  if (!titleInput?.trim()) {
                     alert("Please enter a track title first.");
                     return;
                   }
-                  lyricMutation.mutate({
-                    title: currentTitle,
-                    lang: targetLanguage || language || "English",
-                    style: styleLine || "Rock/Alternative",
-                  });
+                  const btn = e.currentTarget;
+                  const originalText = btn.innerText;
+                  btn.innerText = "Generating...";
+                  btn.disabled = true;
+                  try {
+                    const response = await fetch("/api/coproducer", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        trackTitle: titleInput.trim(),
+                        language: targetLanguage || "English",
+                      }),
+                    });
+                    const data = (await response.json()) as { lyrics?: string; error?: string };
+                    if (data.lyrics) {
+                      const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
+                      setLyrics(nextLyrics);
+                      setLyricWarnings([]);
+                      const textarea = document.querySelector(
+                        `#${SONG_LYRICS_INPUT_ID}, textarea[name="lyrics"], textarea[placeholder*="Lyrics"]`,
+                      ) as HTMLTextAreaElement | null;
+                      if (textarea) {
+                        textarea.value = nextLyrics;
+                      }
+                    } else {
+                      alert("API returned an error: " + (data.error || JSON.stringify(data)));
+                    }
+                  } catch (err) {
+                    console.error("[COPRODUCER_FETCH_ERROR]", err);
+                    alert("Fetch failed: " + (err instanceof Error ? err.message : "unknown error"));
+                  } finally {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                  }
                 }}
               >
-                {lyricMutation.isPending ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
-                ) : (
-                  <Sparkles className="mr-2 size-4" aria-hidden />
-                )}
-                {lyricMutation.isPending ? "Generating..." : "Co-Producer"}
+                Co-Producer
               </button>
             </div>
 
             <Textarea
               id={SONG_LYRICS_INPUT_ID}
+              name="lyrics"
               value={lyrics}
               rows={8}
               maxLength={PROMPT_MAX}
