@@ -2653,21 +2653,9 @@ export function AudioStudio() {
           <div className="space-y-5 overflow-visible">
           {/* 1. Track title */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
-                Track Title
-              </Label>
-              <button
-                type="button"
-                id="coproducer-submit-btn"
-                onClick={handleCoProducerClick}
-                disabled={isGeneratingLyrics}
-                style={{ position: "relative", zIndex: 100, pointerEvents: "auto", cursor: "pointer" }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded"
-              >
-                {isGeneratingLyrics ? "Co-Producer Writing..." : "Co-Producer"}
-              </button>
-            </div>
+            <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
+              Track Title
+            </Label>
             <Input
               id="studio-title"
               name="title"
@@ -2702,9 +2690,21 @@ export function AudioStudio() {
 
           {/* 2. Lyrics box */}
           <div className="space-y-2">
-            <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
-              Lyrics
-            </Label>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
+                Lyrics
+              </Label>
+              <button
+                type="button"
+                id="coproducer-submit-btn"
+                onClick={handleCoProducerClick}
+                disabled={isGeneratingLyrics}
+                className="rounded bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                style={{ position: "relative", zIndex: 50, pointerEvents: "auto", cursor: "pointer" }}
+              >
+                {isGeneratingLyrics ? "Co-Producer Writing..." : "Co-Producer"}
+              </button>
+            </div>
             <Textarea
               id={SONG_LYRICS_INPUT_ID}
               name="lyrics"

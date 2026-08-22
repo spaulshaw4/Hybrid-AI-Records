@@ -1,20 +1,28 @@
 import dotenv from "dotenv";
 
-dotenv.config({ path: ".env.local" });
-dotenv.config({ path: ".env.development" });
-dotenv.config({ path: ".env" });
-
-console.log(
-  "[ENV_CHECK] Fish Audio Key loaded:",
-  Boolean(process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY),
-);
-
 /**
  * Pipeline env lookup for TanStack Start / Vite.
  *
  * Vite `loadEnv` copies `.env*` into `process.env` at config load.
  * dotenv is a Node fallback when this module is imported outside Vite.
+ *
+ * The server entry's own `dotenv.config()` calls run *after* its
+ * `import "./lib/env"` because ES imports hoist, so this module is what
+ * actually populates `process.env` for the pipeline. `dotenv.config()` calls
+ * `process.cwd()`, which does not exist in the browser, so it stays guarded.
  */
+const isNodeRuntime = typeof process !== "undefined" && typeof process.cwd === "function";
+
+if (isNodeRuntime) {
+  dotenv.config({ path: ".env.local" });
+  dotenv.config({ path: ".env.development" });
+  dotenv.config({ path: ".env" });
+
+  console.log(
+    "[ENV_CHECK] Fish Audio Key loaded:",
+    Boolean(process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY),
+  );
+}
 
 export type PipelineStage =
   | "MusicAPI (Base Arrangement)"
@@ -76,14 +84,7 @@ export function readEnv(keyName: string): string | undefined {
 }
 
 export function requireStageKey(keyName: string, stage: string): string {
-  const meta = viteEnv();
-  const value =
-    process.env[keyName] ||
-    process.env[`VITE_${keyName}`] ||
-    (typeof import.meta !== "undefined" && meta?.[keyName]) ||
-    (typeof import.meta !== "undefined" && meta?.[`VITE_${keyName}`]) ||
-    readEnv(keyName);
-  const trimmed = trimEnv(value);
+  const trimmed = readEnv(keyName);
   if (!trimmed) {
     const errorMsg = `[PIPELINE_INIT_FAILED] ${stage} failed: Missing ${keyName}`;
     console.error(errorMsg);
@@ -98,11 +99,7 @@ export function getEnvKey(keyName: string, stage = keyName): string {
 
 /** Official Fish Audio key. Prefers FISH_API_KEY, then FISH_AUDIO_API_KEY. */
 export function getFishApiKey(): string | undefined {
-  const direct =
-    typeof process !== "undefined"
-      ? (process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY)?.trim()
-      : undefined;
-  return direct || readEnv("FISH_API_KEY") || readEnv("FISH_AUDIO_API_KEY");
+  return readEnv("FISH_API_KEY") || readEnv("FISH_AUDIO_API_KEY");
 }
 
 export function requireFishApiKey(): string {

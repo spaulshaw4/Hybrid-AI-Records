@@ -24,7 +24,13 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
         context: {
           supabase,
           userId: DEV_TEST_USER_UUID,
-          claims: { sub: DEV_TEST_USER_UUID, email: DEV_TEST_USER.email },
+          // `DEV_TEST_USER` is `as const`, so without widening, `email` infers
+          // as a string literal that the real-auth branch below (`string |
+          // undefined`) cannot satisfy.
+          claims: {
+            sub: DEV_TEST_USER_UUID as string,
+            email: DEV_TEST_USER.email as string | undefined,
+          },
         },
       });
     }
