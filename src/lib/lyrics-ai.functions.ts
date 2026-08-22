@@ -13,8 +13,8 @@ const Input = z.object({
 });
 
 /**
- * Writes song lyrics through the unified Replicate text engine
- * (Bearer REPLICATE_API_TOKEN) — no Google OAuth/Bearer key is used here.
+ * Writes song lyrics through Replicate's Gemini/Gemma deployment
+ * (`REPLICATE_API_TOKEN` + `REPLICATE_GEMINI_MODEL`).
  */
 export const generateLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))

@@ -158,10 +158,9 @@ export function aiChatUrl(tier: AiTier = "free"): string {
  * no requirement for the user to save anything in Settings.
  */
 export function geminiNativeKeys(byokKey?: string | null): string[] {
-  const platform = ["GOOGLE_PAID_API_KEY", "GEMINI_API_KEY", "GEMINI_FREE_API_KEY"]
+  const platform = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_PAID_API_KEY", "GEMINI_FREE_API_KEY"]
     .map((name) => env(name)?.trim())
     .filter((value): value is string => Boolean(value));
-  console.log("[Gemini Auth] Using platform key:", Boolean(process.env['GOOGLE_PAID_API_KEY']));
   const byok = byokKey?.trim();
   const ordered = byok ? [byok, ...platform] : platform;
   return Array.from(new Set(ordered));

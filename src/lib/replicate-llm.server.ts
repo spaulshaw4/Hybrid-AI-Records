@@ -17,6 +17,10 @@ import { resilientFetch } from "@/lib/resilient-fetch.server";
 export const REPLICATE_LLM_MODEL =
   process.env["REPLICATE_LLM_MODEL"]?.trim() || "meta/meta-llama-3-8b-instruct";
 
+/** Official Google text model on Replicate, used by Co-Producer lyrics. */
+export const REPLICATE_GEMINI_MODEL =
+  process.env["REPLICATE_GEMINI_MODEL"]?.trim() || "google/gemini-2.5-flash";
+
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function env(name: string): string | undefined {
@@ -61,8 +65,44 @@ function toReplicateInput(messages: ChatMessage[]) {
 
 function joinOutput(output: unknown): string {
   if (typeof output === "string") return output;
-  if (Array.isArray(output)) return output.map((chunk) => String(chunk ?? "")).join("");
-  return "";
+  if (Array.isArray(output)) return output.map((chunk) => joinOutput(chunk)).join("");
+  if (output && typeof output === "object") {
+    const row = output as Record<string, unknown>;
+    if (typeof row.text === "string") return row.text;
+    return "";
+  }
+  return output == null ? "" : String(output);
+}
+
+function isGoogleTextModel(model: string): boolean {
+  const name = model.replace(/^google\//i, "").toLowerCase();
+  return name.startsWith("gemini") || name.startsWith("gemma");
+}
+
+function predictionInput(
+  model: string,
+  system: string,
+  prompt: string,
+  options: { maxTokens?: number; temperature?: number; json?: boolean },
+): Record<string, unknown> {
+  const text = options.json
+    ? `${prompt}\n\nRespond with valid JSON only. No prose, no markdown fences.`
+    : prompt;
+  if (isGoogleTextModel(model)) {
+    return {
+      prompt: text,
+      ...(system ? { system_instruction: system } : {}),
+      temperature: options.temperature ?? 0.7,
+      max_output_tokens: options.maxTokens ?? 4096,
+      thinking_budget: 0,
+    };
+  }
+  return {
+    prompt: text,
+    ...(system ? { system_prompt: system } : {}),
+    max_tokens: options.maxTokens ?? 4096,
+    temperature: options.temperature ?? 0.7,
+  };
 }
 
 /**
@@ -91,14 +131,7 @@ export async function replicateChat(
       method: "POST",
       headers: headers(label),
       body: JSON.stringify({
-        input: {
-          prompt: options.json
-            ? `${prompt}\n\nRespond with valid JSON only. No prose, no markdown fences.`
-            : prompt,
-          ...(system ? { system_prompt: system } : {}),
-          max_tokens: options.maxTokens ?? 4096,
-          temperature: options.temperature ?? 0.7,
-        },
+        input: predictionInput(model, system, prompt, options),
       }),
     },
     { label, retries: 2, timeoutMs: 120_000, baseDelayMs: 1500, respectRetryAfter: true },

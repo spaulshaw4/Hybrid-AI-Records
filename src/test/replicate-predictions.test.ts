@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { ACE_STEP_MODEL } from "@/lib/ace-step-payload";
 import {
   REPLICATE_COMMUNITY_PREDICTIONS_PATH,
+  REPLICATE_COST_EFFECTIVE_GPU,
   communityPredictionBody,
   officialModelPredictionsPath,
+  replicateRunHeaders,
 } from "@/lib/replicate-predictions";
 
 describe("replicate prediction routes", () => {
@@ -22,7 +24,17 @@ describe("replicate prediction routes", () => {
       version: "abc",
       input: { prompt: "x" },
     });
+    expect(communityPredictionBody("abc", { prompt: "x" }, { hardware: "gpu-t4" })).toEqual({
+      version: "abc",
+      input: { prompt: "x" },
+      hardware: "gpu-t4",
+    });
     expect(REPLICATE_COMMUNITY_PREDICTIONS_PATH).toBe("/predictions");
+    expect(REPLICATE_COST_EFFECTIVE_GPU).toBe("gpu-t4");
+    expect(replicateRunHeaders(120_000)).toEqual({
+      "Cancel-After": "120s",
+      Prefer: "wait=60",
+    });
     expect(officialModelPredictionsPath("minimax/music-2.6")).not.toBe(
       `/models/${ACE_STEP_MODEL}/predictions`,
     );

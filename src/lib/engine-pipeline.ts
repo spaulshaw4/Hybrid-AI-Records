@@ -5,8 +5,10 @@
  * Storage for the Complete step is `engine-pipeline.server.ts`, which
  * createClient()s with NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
  *
- * Style descriptors for MiniMax / ACE-Step are serialized here from the
+ * Style descriptors for MiniMax / Fish Audio are serialized here from the
  * artist's exact request fields — never a hardcoded genre lock.
+ *
+ * Audio chain: Base Gen → Demucs split → Fish Audio vocals → Matchering master.
  */
 
 export const ENGINE_PIPELINE_STEPS = [

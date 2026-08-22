@@ -1,8 +1,12 @@
 /**
- * Suno / Sonic 5.5 studio generation (MusicAPI).
+ * Suno / Sonic studio generation (MusicAPI).
  *
  * Two-step workflow: POST /sonic/create, then poll GET /sonic/task/{id}
  * until `data.status` is succeeded or failed.
+ *
+ * `mv` is MusicAPI's model id. Standard v5 is `sonic-v5`. `sonic-v5-5` is
+ * attempted first when requested, then we fall back to `sonic-v5` if the
+ * provider rejects it (`mv field is invalid`).
  *
  * Server-only: imported from `generateEngineTrack` (`createServerFn` handler).
  * Reads Node `process.env`; never import this from client components.
@@ -12,7 +16,12 @@ import { requireStageKey } from "@/lib/env";
 
 export const SONIC_CREATE_URL = "https://api.musicapi.ai/api/v1/sonic/create";
 export const SONIC_TASK_URL = "https://api.musicapi.ai/api/v1/sonic/task";
-export const SONIC_MODEL = "sonic-v5-5";
+/** Standard MusicAPI v5 model. */
+export const SONIC_MODEL = "sonic-v5";
+/** Newer id — some accounts reject this; we retry with SONIC_MODEL. */
+export const SONIC_MODEL_V55 = "sonic-v5-5";
+
+export type SonicModel = typeof SONIC_MODEL | typeof SONIC_MODEL_V55;
 
 export type StudioTrackOptions = {
   genre?: string;
@@ -30,7 +39,7 @@ export type StudioTrackOptions = {
 export type SonicCreatePayload = {
   task_type: "create_music";
   custom_mode: true;
-  mv: typeof SONIC_MODEL;
+  mv: SonicModel;
   prompt: string;
   tags: string;
   title: string;
@@ -163,25 +172,44 @@ function styleTags(options: StudioTrackOptions): string {
     .join(", ");
 }
 
-export async function generateStudioTrack(options: StudioTrackOptions): Promise<StudioTrackStart> {
-  const apiKey = requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+function previewBody(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw, null, 2);
+  } catch {
+    return String(raw);
+  }
+}
 
-  const payload: SonicCreatePayload = {
-    task_type: "create_music",
-    custom_mode: true,
-    mv: SONIC_MODEL,
-    prompt: options.lyrics ?? "",
-    tags: styleTags(options) || options.genre || "",
-    title: options.title || "Studio Master",
-    make_instrumental: Boolean(options.isInstrumental),
-    vocal_gender: options.vocalGender?.toLowerCase().startsWith("f") ? "f" : "m",
-    negative_tags: options.vocalGender?.toLowerCase().startsWith("f")
-      ? "male vocals, low baritone, synthpop, electronic dance"
-      : "female vocals, soprano, synthpop, 80s dance pop, electronic synths, autotune",
-  };
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
 
-  console.log("[SUNO_5_5_DISPATCH_BODY]", JSON.stringify(payload, null, 2));
+/** True when MusicAPI rejected the model version (not auth / network). */
+export function isInvalidMvRejection(status: number, raw: unknown): boolean {
+  if (status === 401 || status === 403) return false;
+  if (status < 400) return false;
+  const text = previewBody(raw).toLowerCase();
+  return (
+    status === 400 ||
+    status === 422 ||
+    text.includes("mv field is invalid") ||
+    text.includes("invalid model")
+  );
+}
 
+async function postSonicCreate(
+  payload: SonicCreatePayload,
+  apiKey: string,
+): Promise<{ response: Response; raw: unknown }> {
+  console.log("[MUSICAPI_CREATE_REQUEST]", JSON.stringify(payload, null, 2));
   const response = await fetch(SONIC_CREATE_URL, {
     method: "POST",
     headers: {
@@ -190,20 +218,52 @@ export async function generateStudioTrack(options: StudioTrackOptions): Promise<
     },
     body: JSON.stringify(payload),
   });
+  const raw = await readResponseBody(response);
+  console.log("[MUSICAPI_CREATE_RESPONSE]", response.status, previewBody(raw));
+  return { response, raw };
+}
 
-  const raw: unknown = await response.json().catch(() => null);
-  console.log("[MUSICAPI_CREATE_RESPONSE]", JSON.stringify(raw, null, 2));
+export async function generateStudioTrack(options: StudioTrackOptions): Promise<StudioTrackStart> {
+  const apiKey = requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+
+  const base = {
+    task_type: "create_music" as const,
+    custom_mode: true as const,
+    prompt: options.lyrics ?? "",
+    tags: styleTags(options) || options.genre || "",
+    title: options.title || "Studio Master",
+    make_instrumental: Boolean(options.isInstrumental),
+    vocal_gender: options.vocalGender?.toLowerCase().startsWith("f") ? ("f" as const) : ("m" as const),
+    negative_tags: options.vocalGender?.toLowerCase().startsWith("f")
+      ? "male vocals, low baritone, synthpop, electronic dance"
+      : "female vocals, soprano, synthpop, 80s dance pop, electronic synths, autotune",
+  };
+
+  // Prefer v5.5 when the account allows it; MusicAPI often returns
+  // "mv field is invalid" for sonic-v5-5 — retry standard sonic-v5.
+  let payload: SonicCreatePayload = { ...base, mv: SONIC_MODEL_V55 };
+  let { response, raw } = await postSonicCreate(payload, apiKey);
+
+  if (!response.ok && isInvalidMvRejection(response.status, raw)) {
+    payload = { ...base, mv: SONIC_MODEL };
+    console.log(
+      "[MUSICAPI_CREATE_FALLBACK]",
+      `sonic-v5-5 rejected (${response.status}); retrying ${SONIC_MODEL}`,
+    );
+    ({ response, raw } = await postSonicCreate(payload, apiKey));
+  }
+
   if (!response.ok) {
     const detail =
       raw && typeof raw === "object" && "error" in raw
         ? String((raw as { error?: unknown }).error)
         : `Request failed (${response.status})`;
-    throw new Error(`Suno 5.5: ${detail}`);
+    throw new Error(`Suno v5: ${detail}`);
   }
 
   const taskId = readTaskId(raw);
   if (!taskId) {
-    throw new Error("Suno 5.5: the provider returned no task id.");
+    throw new Error("Suno v5: the provider returned no task id.");
   }
 
   return { taskId, payload, status: "processing" };
@@ -217,13 +277,13 @@ export async function fetchStudioTrackTask(taskId: string): Promise<StudioTrackR
       Authorization: `Bearer ${apiKey}`,
     },
   });
-  const raw: unknown = await response.json().catch(() => null);
-  console.log("[MUSICAPI_POLL_RESPONSE]", JSON.stringify(raw, null, 2));
+  const raw = await readResponseBody(response);
+  console.log("[MUSICAPI_POLL_RESPONSE]", response.status, previewBody(raw));
   if (response.status === 202) {
     return { taskId, status: "processing", audioUrl: null, imageUrl: null, title: null };
   }
   if (!response.ok) {
-    throw new Error(`Suno 5.5: task poll failed (${response.status})`);
+    throw new Error(`Suno v5: task poll failed (${response.status})`);
   }
   const clip = readTaskResult(raw);
   return {
@@ -244,9 +304,9 @@ export async function waitForStudioTrack(taskId: string): Promise<StudioTrackRes
     const current = await fetchStudioTrackTask(taskId);
     if (current.status === "completed" && current.audioUrl) return current;
     if (current.status === "failed") {
-      throw new Error("Suno 5.5: generation failed.");
+      throw new Error("Suno v5: generation failed.");
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
-  throw new Error("Suno 5.5: generation timed out.");
+  throw new Error("Suno v5: generation timed out.");
 }

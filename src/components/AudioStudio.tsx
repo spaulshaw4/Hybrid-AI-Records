@@ -40,7 +40,6 @@ import { generateLyrics, generateVocalPrompt } from "@/lib/lyrics-ai.functions";
 import { repairLyricStructure } from "@/lib/lyric-repair";
 import {
   DEFAULT_LYRIC_LANGUAGE,
-  isStudioStep1Complete,
   isValidLyricLanguage,
   LYRIC_LANGUAGES,
   lyricLanguageInstruction,
@@ -153,81 +152,32 @@ const STUDIO_STEPS = [
 const ENGINE_DROPDOWN_CLASS =
   "engine-opaque-menu z-50 flex max-h-80 w-[min(22rem,calc(100vw-2rem))] flex-col overflow-hidden border border-zinc-800 bg-zinc-950 p-2 text-zinc-100 shadow-2xl";
 
-const STEP1_INCOMPLETE_MESSAGE = "Add a title, lyrics, and a language to continue.";
+const STEP1_INCOMPLETE_MESSAGE = "Add a title and lyrics to continue.";
 
-function StudioLanguagePicker({
+function StudioLanguageSelect({
   id,
   value,
-  onValueChange,
-  fullWidth = false,
+  onChange,
 }: {
   id: string;
   value: LyricLanguage;
-  onValueChange: (next: string) => void;
-  fullWidth?: boolean;
+  onChange: (next: string) => void;
 }) {
-  const menu = useReturnFocus<HTMLButtonElement>();
-  const selected = LYRIC_LANGUAGES.find((l) => l.value === value) ?? LYRIC_LANGUAGES[0];
-
   return (
-    <Popover open={menu.open} onOpenChange={menu.setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          ref={menu.triggerRef}
-          id={id}
-          type="button"
-          variant="secondary"
-          role="combobox"
-          aria-expanded={menu.open}
-          aria-haspopup="listbox"
-          className={`justify-between border-border bg-secondary px-3 text-secondary-foreground shadow-sm hover:bg-secondary/80 ${
-            fullWidth ? "h-12 w-full text-sm" : "h-8 min-w-[210px] text-xs"
-          }`}
-        >
-          <span className="truncate">{selected?.label ?? "English"}</span>
-          <ChevronDown className="ml-2 size-4 shrink-0 opacity-70" aria-hidden />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        side="bottom"
-        sideOffset={6}
-        avoidCollisions={false}
-        {...menu.contentProps}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") menu.closeAndReturnFocus();
-        }}
-        className={ENGINE_DROPDOWN_CLASS}
-        style={{ backgroundColor: "#09090b" }}
-      >
-        <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">
-          Language
-        </p>
-        <div className="engine-genre-scroll max-h-72 overflow-y-auto" role="listbox" aria-label="Lyric language">
-          {LYRIC_LANGUAGES.map((l) => {
-            const active = l.value === value;
-            return (
-              <button
-                key={l.value}
-                type="button"
-                role="option"
-                aria-selected={active}
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm ${
-                  active ? "bg-primary/20 text-zinc-100" : "text-zinc-100 hover:bg-zinc-800"
-                }`}
-                onClick={() => {
-                  onValueChange(l.value);
-                  menu.closeAndReturnFocus();
-                }}
-              >
-                <span>{l.label}</span>
-                <span className="font-mono text-[10px] uppercase text-zinc-500">{l.value}</span>
-              </button>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <select
+      id={id}
+      name="language"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label="Language"
+      className="h-12 w-full cursor-pointer rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 shadow-sm outline-none transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      {LYRIC_LANGUAGES.map((l) => (
+        <option key={l.value} value={l.value} className="bg-zinc-950 text-zinc-100">
+          {l.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -459,6 +409,8 @@ type Result = {
   style: string;
   vocalProfile: string;
   audioUrl: string;
+  vocalUrl?: string | null;
+  instrumentalUrl?: string | null;
 };
 
 /** Normalises legacy rows (no id/status) so old history keeps rendering. */
@@ -1317,13 +1269,14 @@ export function AudioStudio() {
 
   const styleLine = styles.filter(Boolean).join(", ");
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
+  const trackTitle = title;
+  const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
 
   /** Gemini fills the lyrics box from the title, style and any existing lyrics. */
   async function handleWriteLyrics() {
     if (aiBusy) return;
-    const concept = lyrics.trim() || styleLine || title.trim();
-    if (concept.length < 3) {
-      toast.error("Add a song concept, title or style first.");
+    if (!title.trim()) {
+      toast.error("Add a track title first.");
       return;
     }
     if (!isValidLyricLanguage(language)) {
@@ -1335,9 +1288,9 @@ export function AudioStudio() {
     try {
       const out = await writeLyrics({
         data: {
-          concept: concept.slice(0, 600),
+          concept: (lyrics.trim() || styleLine || title.trim()).slice(0, 600),
           style: styleLine || undefined,
-          title: title.trim() || undefined,
+          title: title.trim(),
           language: targetLanguage,
         },
       });
@@ -1399,16 +1352,24 @@ export function AudioStudio() {
     setLanguage(DEFAULT_LYRIC_LANGUAGE);
   }
 
+  function handleStep1Next() {
+    if (!canProceed) {
+      toast.error(STEP1_INCOMPLETE_MESSAGE);
+      return;
+    }
+    setStudioStep(1);
+  }
+
   function renderLanguagePicker(idPrefix: string) {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor={`${idPrefix}-language`} className="sr-only">
           Language
         </Label>
-        <StudioLanguagePicker
+        <StudioLanguageSelect
           id={`${idPrefix}-language`}
           value={language}
-          onValueChange={applyLanguage}
+          onChange={applyLanguage}
         />
       </div>
     );
@@ -1788,7 +1749,7 @@ export function AudioStudio() {
       toast.error("Sign in to generate a master track.");
       return;
     }
-    if (!isStudioStep1Complete({ title, lyrics, language })) {
+    if (!canProceed) {
       toast.error(STEP1_INCOMPLETE_MESSAGE);
       return;
     }
@@ -2137,6 +2098,8 @@ export function AudioStudio() {
         style: styleLine,
         vocalProfile: activeVocalProfile(),
         audioUrl,
+        vocalUrl: stems?.vocalUrl,
+        instrumentalUrl: stems?.instrumentalUrl,
       };
       setResult(finished);
       setBusy(false);
@@ -2662,11 +2625,7 @@ export function AudioStudio() {
                   aria-selected={index === studioStep}
                   aria-current={index === studioStep ? "step" : undefined}
                   onClick={() => {
-                    if (
-                      studioStep === 0 &&
-                      index > 0 &&
-                      !isStudioStep1Complete({ title, lyrics, language })
-                    ) {
+                    if (studioStep === 0 && index > 0 && !canProceed) {
                       toast.error(STEP1_INCOMPLETE_MESSAGE);
                       return;
                     }
@@ -2714,14 +2673,13 @@ export function AudioStudio() {
             <Label htmlFor="studio-language" className="text-base font-semibold text-foreground">
               Language
             </Label>
-            <StudioLanguagePicker
+            <StudioLanguageSelect
               id="studio-language"
               value={language}
-              onValueChange={applyLanguage}
-              fullWidth
+              onChange={applyLanguage}
             />
             <p className="text-xs text-muted-foreground">
-              Sets lyric pronunciation for Co-Produce and generate. Defaults to English.
+              Sets lyric pronunciation for Co-Producer and generate. Defaults to English.
             </p>
           </div>
 
@@ -2736,14 +2694,15 @@ export function AudioStudio() {
                 size="sm"
                 variant="secondary"
                 disabled={aiBusy !== null}
+                aria-busy={aiBusy === "lyrics"}
                 onClick={() => void handleWriteLyrics()}
               >
-                  {aiBusy === "lyrics" ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Sparkles className="mr-2 size-4" aria-hidden />
-                  )}
-                  Co-Produce
+                {aiBusy === "lyrics" ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+                ) : (
+                  <Sparkles className="mr-2 size-4" aria-hidden />
+                )}
+                Co-Producer
               </Button>
             </div>
 
@@ -3666,18 +3625,16 @@ export function AudioStudio() {
                 <Button
                   type="button"
                   className="h-auto min-h-12 flex-1 text-sm sm:text-base"
+                  disabled={studioStep === 0 ? !canProceed : false}
                   onClick={() => {
-                    if (
-                      studioStep === 0 &&
-                      !isStudioStep1Complete({ title, lyrics, language })
-                    ) {
-                      toast.error(STEP1_INCOMPLETE_MESSAGE);
+                    if (studioStep === 0) {
+                      handleStep1Next();
                       return;
                     }
                     setStudioStep((step) => Math.min(STUDIO_STEPS.length - 1, step + 1));
                   }}
                 >
-                  Continue
+                  {studioStep === 0 ? "Continue to Step 2" : "Continue"}
                 </Button>
               ) : (
               <Button
@@ -3798,10 +3755,32 @@ export function AudioStudio() {
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  void downloadTrack(result.audioUrl, result.title);
+                  void downloadTrack(result.audioUrl, `${result.title} (Mastered)`);
                 }}
               >
-                <Download className="size-4" aria-hidden /> Download MP3
+                <Download className="size-4" aria-hidden /> Full Mastered Track
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!result.vocalUrl}
+                onClick={() => {
+                  if (!result.vocalUrl) return;
+                  void downloadTrack(result.vocalUrl, `${result.title} (Converted Vocal)`);
+                }}
+              >
+                <Download className="size-4" aria-hidden /> Converted Vocal Stem
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!result.instrumentalUrl}
+                onClick={() => {
+                  if (!result.instrumentalUrl) return;
+                  void downloadTrack(result.instrumentalUrl, `${result.title} (Instrumental)`);
+                }}
+              >
+                <Download className="size-4" aria-hidden /> Instrumental Stem
               </Button>
               <Button type="button" variant="ghost" onClick={newTrack}>
                 <Plus className="size-4" aria-hidden /> Create New Track

@@ -39,7 +39,7 @@ function stereo(label: string, extra = ""): string {
 }
 
 /**
- * Mix graph: 30s ElevenLabs intro, then MiniMax instrumental under Fish/ACE vocals.
+ * Mix graph: 30s intro (optional), then Demucs instrumental under Fish vocals.
  * Missing stems are skipped so a partial render still produces a file.
  */
 export function buildHybridMixFilterComplex(

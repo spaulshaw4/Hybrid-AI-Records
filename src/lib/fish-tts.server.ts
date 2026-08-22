@@ -13,7 +13,8 @@ import { samplePathFromUrl } from "@/lib/instant-voice";
 import { buildVocalClonePayload } from "@/lib/vocal-clone-payload";
 import type { ApiframeResult } from "@/lib/apiframe.server";
 
-const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
+export const FISH_AUDIO_API_BASE = "https://api.fish.audio";
+const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
 const FISH_MODEL = "s2-pro";
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
@@ -54,29 +55,27 @@ function cloneErrorMessage(status: number): string {
   return "Vocal generation failed.";
 }
 
-export async function cloneVocalsFromBytes(
-  input: {
-    audioBytes: Uint8Array;
-    lyrics: string;
-    audioFormat?: "mp3" | "wav";
-    title?: string;
-    userId: string;
-    taskId: string;
-  },
-): Promise<ApiframeResult> {
+export async function convertVocalsWithStems(input: {
+  lyrics: string;
+  isolatedVocal?: Uint8Array;
+  referenceAudio?: Uint8Array;
+  audioFormat?: "mp3" | "wav";
+  title?: string;
+  userId: string;
+  taskId: string;
+}): Promise<ApiframeResult> {
   const text = lyricsForCloneSpeech(input.lyrics);
   if (!text) {
-    throw new Error("Add lyrics before cloning vocals from your take.");
-  }
-  if (input.audioBytes.byteLength < 256) {
-    throw new Error("That vocal take is empty. Record a cleaner clip.");
+    throw new Error("Add lyrics before generating vocals.");
   }
 
   const format = input.audioFormat === "wav" ? "wav" : "mp3";
+  const extraReferences = input.referenceAudio ? [input.referenceAudio] : [];
   const body = encode(
     buildVocalClonePayload({
       text,
-      audio: input.audioBytes,
+      audio: input.isolatedVocal,
+      extraReferences,
       format,
     }),
   );
@@ -123,8 +122,31 @@ export async function cloneVocalsFromBytes(
         duration: null,
       },
     ],
-    raw: { cloned: true },
+    raw: { cloned: true, fish: true },
   };
+}
+
+export async function cloneVocalsFromBytes(
+  input: {
+    audioBytes: Uint8Array;
+    lyrics: string;
+    audioFormat?: "mp3" | "wav";
+    title?: string;
+    userId: string;
+    taskId: string;
+  },
+): Promise<ApiframeResult> {
+  if (input.audioBytes.byteLength < 256) {
+    throw new Error("That vocal take is empty. Record a cleaner clip.");
+  }
+  return convertVocalsWithStems({
+    lyrics: input.lyrics,
+    referenceAudio: input.audioBytes,
+    audioFormat: input.audioFormat,
+    title: input.title,
+    userId: input.userId,
+    taskId: input.taskId,
+  });
 }
 
 export async function cloneVocalsFromSample(

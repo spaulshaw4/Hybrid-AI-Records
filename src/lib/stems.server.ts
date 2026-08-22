@@ -10,18 +10,33 @@
  *    vocal instead of the full mix;
  *  - the rhythmic stem drives downbeat detection so scene cuts land on the
  *    track's real bar grid.
+ *
+ * Predictions request T4 GPU when the API accepts a hardware SKU, and always
+ * carry a 120s Cancel-After deadline so a stalled worker cannot bill GPU time.
  */
 
 import { replicateBaseUrl } from "@/lib/ai-provider.server";
 import { requireStageKey } from "@/lib/env";
+import {
+  communityPredictionBody,
+  REPLICATE_COST_EFFECTIVE_GPU,
+  REPLICATE_PREDICTION_TIMEOUT_MS,
+  replicateRunHeaders,
+} from "@/lib/replicate-predictions";
+import { parseDemucsOutput, type DemucsStemUrls } from "@/lib/stem-urls";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
 
 const DEMUCS_MODEL = process.env["DEMUCS_MODEL"] || "ryan5453/demucs";
+const DEMUCS_HARDWARE = process.env["DEMUCS_HARDWARE"]?.trim() || REPLICATE_COST_EFFECTIVE_GPU;
+const DEMUCS_DEPLOYMENT = process.env["DEMUCS_DEPLOYMENT"]?.trim();
 
-export type StemResult = {
-  vocals: string | null;
-  drums: string | null;
-  other: string | null;
+export type StemResult = DemucsStemUrls;
+
+type PredictionState = {
+  id?: string;
+  status?: string;
+  output?: unknown;
+  error?: unknown;
 };
 
 function credentials() {
@@ -45,10 +60,12 @@ async function bail(response: Response, what: string): Promise<never> {
 async function uploadTrack(bytes: Uint8Array, filename: string): Promise<string> {
   const form = new FormData();
   form.append("content", new Blob([bytes.slice().buffer], { type: "audio/mpeg" }), filename);
+  const headers = credentials();
+  delete (headers as { "Content-Type"?: string })["Content-Type"];
   const response = await resilientFetch(
     `${replicateBaseUrl()}/files`,
-    { method: "POST", headers: credentials(), body: form },
-    { label: "stem audio upload", timeoutMs: 180_000, retries: 0 },
+    { method: "POST", headers, body: form },
+    { label: "stem audio upload", timeoutMs: 120_000, retries: 0 },
   );
   if (!response.ok) await bail(response, "audio upload");
   const payload = (await response.json()) as { urls?: { get?: string } };
@@ -62,7 +79,7 @@ async function latestVersion(): Promise<string> {
   const response = await resilientFetch(
     `${replicateBaseUrl()}/models/${DEMUCS_MODEL}`,
     { headers: credentials() },
-    { label: "demucs model lookup", timeoutMs: 60_000, retries: 0 },
+    { label: "demucs model lookup", timeoutMs: 30_000, retries: 0 },
   );
   if (!response.ok) await bail(response, "model lookup");
   const payload = (await response.json()) as { latest_version?: { id?: string } };
@@ -72,16 +89,19 @@ async function latestVersion(): Promise<string> {
 }
 
 function pickStems(output: unknown): StemResult {
-  const pick = (value: unknown) => (typeof value === "string" && value.startsWith("http") ? value : null);
-  if (output && typeof output === "object" && !Array.isArray(output)) {
-    const map = output as Record<string, unknown>;
-    return {
-      vocals: pick(map["vocals"]),
-      drums: pick(map["drums"]),
-      other: pick(map["other"]) ?? pick(map["bass"]),
-    };
-  }
-  return { vocals: null, drums: null, other: null };
+  return parseDemucsOutput(output);
+}
+
+async function cancelPrediction(id: string): Promise<void> {
+  await resilientFetch(
+    `${replicateBaseUrl()}/predictions/${encodeURIComponent(id)}/cancel`,
+    { method: "POST", headers: credentials() },
+    { label: "stem separation cancel", timeoutMs: 15_000, retries: 0 },
+  ).catch(() => undefined);
+}
+
+function isTerminalFailure(status: string | undefined): boolean {
+  return status === "failed" || status === "canceled" || status === "aborted";
 }
 
 /**
@@ -93,40 +113,67 @@ export async function separateStems(input: {
   filename: string;
 }): Promise<StemResult> {
   const audioUrl = await uploadTrack(input.audio, input.filename);
-  const version = await latestVersion();
+  const inputPayload = { audio: audioUrl, output_format: "mp3" };
 
-  const created = await resilientFetch(
-    `${replicateBaseUrl()}/predictions`,
-    {
-      method: "POST",
-      headers: { ...credentials(), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        version,
-        input: { audio: audioUrl, stem: "vocals", output_format: "mp3" },
-      }),
-    },
-    { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 120_000, retries: 0 },
-  );
+  const createUrl = DEMUCS_DEPLOYMENT
+    ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
+    : `${replicateBaseUrl()}/predictions`;
+  const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
+  const withHardware = DEMUCS_DEPLOYMENT
+    ? { input: inputPayload }
+    : communityPredictionBody(version!, inputPayload, { hardware: DEMUCS_HARDWARE });
+  const withoutHardware = DEMUCS_DEPLOYMENT
+    ? { input: inputPayload }
+    : communityPredictionBody(version!, inputPayload);
+
+  const dispatch = (payload: unknown) =>
+    resilientFetch(
+      createUrl,
+      {
+        method: "POST",
+        headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
+        body: JSON.stringify(payload),
+      },
+      { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
+    );
+
+  let created = await dispatch(withHardware);
+  // Public models ignore/reject a hardware SKU; retry without it.
+  if (!created.ok && (created.status === 400 || created.status === 422) && !DEMUCS_DEPLOYMENT) {
+    created = await dispatch(withoutHardware);
+  }
   if (!created.ok) await bail(created, "dispatch");
 
-  const prediction = (await created.json()) as { id?: string };
+  let prediction = (await created.json()) as PredictionState;
   const id = prediction.id;
   if (!id) throw new Error("The stem worker returned no job id.");
 
-  // Separation on a 3-minute song usually lands inside 2 minutes.
-  for (let attempt = 0; attempt < 90; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 3000 : 5000));
+  const deadline = Date.now() + REPLICATE_PREDICTION_TIMEOUT_MS;
+
+  const settle = async (state: PredictionState): Promise<StemResult | null> => {
+    if (state.status === "succeeded") return pickStems(state.output);
+    if (isTerminalFailure(state.status)) {
+      throw new Error(String(state.error ?? "Stem separation failed for this track."));
+    }
+    return null;
+  };
+
+  const immediate = await settle(prediction);
+  if (immediate) return immediate;
+
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
     const poll = await resilientFetch(
       `${replicateBaseUrl()}/predictions/${id}`,
       { headers: credentials() },
-      { label: "stem separation poll", timeoutMs: 45_000, retries: 0, baseDelayMs: 1000 },
+      { label: "stem separation poll", timeoutMs: 20_000, retries: 0, baseDelayMs: 1000 },
     );
     if (!poll.ok) await bail(poll, "poll");
-    const state = (await poll.json()) as { status?: string; output?: unknown; error?: unknown };
-    if (state.status === "succeeded") return pickStems(state.output);
-    if (state.status === "failed" || state.status === "canceled") {
-      throw new Error(String(state.error ?? "Stem separation failed for this track."));
-    }
+    prediction = (await poll.json()) as PredictionState;
+    const done = await settle(prediction);
+    if (done) return done;
   }
+
+  await cancelPrediction(id);
   throw new Error("Stem separation timed out for this track.");
 }

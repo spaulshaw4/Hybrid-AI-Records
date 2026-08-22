@@ -2,6 +2,8 @@
  * Request body for instant vocal clone (MessagePack on the wire).
  * Enhancement flags stay on so a phone take is cleaned before the mixer.
  */
+export type VocalCloneReference = { audio: Uint8Array; text: string };
+
 export type VocalClonePayload = {
   text: string;
   format: "mp3" | "wav";
@@ -10,14 +12,22 @@ export type VocalClonePayload = {
   latency: "normal";
   features: ["quality-guard"];
   prosody: { normalize_loudness: true };
-  references: Array<{ audio: Uint8Array; text: "" }>;
+  references?: VocalCloneReference[];
 };
 
 export function buildVocalClonePayload(opts: {
   text: string;
-  audio: Uint8Array;
+  audio?: Uint8Array;
+  extraReferences?: Uint8Array[];
   format: "mp3" | "wav";
 }): VocalClonePayload {
+  const references: VocalCloneReference[] = [];
+  if (opts.audio && opts.audio.byteLength >= 256) {
+    references.push({ audio: opts.audio, text: opts.text.slice(0, 500) });
+  }
+  for (const extra of opts.extraReferences ?? []) {
+    if (extra.byteLength >= 256) references.push({ audio: extra, text: "" });
+  }
   return {
     text: opts.text,
     format: opts.format,
@@ -26,6 +36,6 @@ export function buildVocalClonePayload(opts: {
     latency: "normal",
     features: ["quality-guard"],
     prosody: { normalize_loudness: true },
-    references: [{ audio: opts.audio, text: "" }],
+    ...(references.length > 0 ? { references } : {}),
   };
 }

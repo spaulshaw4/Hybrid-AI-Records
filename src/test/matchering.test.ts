@@ -38,6 +38,16 @@ describe("Matchering 2.0 mix + master contract", () => {
     expect(graph).toContain("[intro][core]concat=n=2:v=0:a=1[out]");
   });
 
+  it("mixes Demucs backing with Fish vocals when there is no intro", () => {
+    const graph = buildHybridMixFilterComplex([
+      { kind: "instrumental", path: "b" },
+      { kind: "vocal", path: "c" },
+    ]);
+    expect(graph).toContain("[inst][voc]amix=inputs=2:duration=longest");
+    expect(graph).toContain("[core]anull[out]");
+    expect(graph).not.toContain("concat=");
+  });
+
   it("encodes the mix as 24-bit 44.1 kHz stereo PCM", () => {
     const args = buildHybridMixArgs(
       { introPath: "i.wav", instrumentalPath: "m.wav", vocalPath: "v.wav" },

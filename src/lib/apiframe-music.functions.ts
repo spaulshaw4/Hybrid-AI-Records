@@ -314,29 +314,31 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       })),
     );
 
-    const vocalUrl = tracks[0]?.audioUrl ?? null;
-    const instrumentalUrl = null;
-    const introUrl = null;
+    const archivedBase = tracks[0]?.audioUrl ?? null;
+    if (!archivedBase) {
+      throw new Error("Suno 5.5: no audio URL was returned.");
+    }
 
-    const sourceMasterUrl = vocalUrl;
-    let masterUrl = sourceMasterUrl;
+    const { runHybridMasterPipeline } = await import("@/lib/hybrid-master-pipeline.server");
+    const pipeline = await runHybridMasterPipeline({
+      baseAudioUrl: archivedBase,
+      lyrics: lyricContent,
+      instrumental: payload.instrumental,
+      referenceSampleUrl,
+      audioFormat: payload.audioFormat,
+      title: payload.title || "Studio Master",
+      userId: context.userId,
+      taskId: started.taskId,
+    });
+
+    const vocalUrl = pipeline.vocalUrl;
+    const instrumentalUrl = pipeline.instrumentalUrl;
+    const introUrl = null;
+    let masterUrl = pipeline.masterUrl;
     const taskId = started.taskId;
 
-    try {
-      const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
-      const mastered = await mixAndMasterHybridTrack({
-        introUrl,
-        instrumentalUrl,
-        vocalUrl,
-        userId: context.userId,
-        taskId,
-      });
-      if (mastered.masterUrl) masterUrl = mastered.masterUrl;
-    } catch (error) {
-      console.warn(
-        "[matchering] generate fallback to raw stem",
-        error instanceof Error ? error.message : error,
-      );
+    if (!masterUrl || !pipeline.mixed) {
+      throw new Error("Mastering did not finish. Try generating again.");
     }
 
     if (payload.vaultId && masterUrl) {
@@ -370,7 +372,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       id: payload.vaultId,
       title: payload.title || "Untitled Track",
       style: genre,
-      status: masterUrl ? "completed" : "processing",
+      status: "completed",
       masterUrl,
       instrumentalUrl,
       vocalUrl,
@@ -396,8 +398,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       });
     }
 
-    const playableTracks = masterUrl
-      ? [
+    const playableTracks = [
           {
             id: `${taskId}-master`,
             title: payload.title || "Mastered track",
@@ -405,13 +406,11 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
             imageUrl: null,
             duration: durationSeconds,
           },
-          ...tracks,
-        ]
-      : tracks;
+        ];
 
     return {
       taskId,
-      status: masterUrl ? "completed" : "processing",
+      status: "completed" as const,
       tracks: playableTracks,
       stems: {
         masterUrl,

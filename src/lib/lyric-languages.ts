@@ -10,9 +10,6 @@ export const LYRIC_LANGUAGES = [
   { value: "fr", label: "French (Français)", instruction: "French (Français)" },
   { value: "de", label: "German (Deutsch)", instruction: "German (Deutsch)" },
   { value: "ja", label: "Japanese (日本語)", instruction: "Japanese (日本語)" },
-  { value: "pt", label: "Portuguese (Português)", instruction: "Portuguese (Português)" },
-  { value: "it", label: "Italian (Italiano)", instruction: "Italian (Italiano)" },
-  { value: "sw", label: "Swahili (Kiswahili)", instruction: "Swahili (Kiswahili)" },
 ] as const;
 
 export const VALID_LYRIC_LANGUAGE_VALUES = LYRIC_LANGUAGES.map((l) => l.value);
@@ -46,11 +43,11 @@ export function lyricLanguageInstruction(value: string, custom?: string): string
   return LYRIC_LANGUAGES.find((l) => l.value === value)?.instruction || custom?.trim() || "English";
 }
 
-/** Step 1 may continue only when title, lyrics, and a language are all set. */
+/** Step 1 may continue when title and lyrics are populated. Language defaults to English. */
 export function isStudioStep1Complete(input: {
   title: string;
   lyrics: string;
-  language: string;
+  language?: string;
 }): boolean {
-  return Boolean(input.title.trim() && input.lyrics.trim() && isValidLyricLanguage(input.language));
+  return Boolean(input.title.trim() && input.lyrics.trim());
 }

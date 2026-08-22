@@ -1,7 +1,10 @@
 import { aiChatFetch } from "@/lib/ai-chat.server";
 import { aiFastModel } from "@/lib/ai-provider.server";
+import { REPLICATE_GEMINI_MODEL, replicateChat } from "@/lib/replicate-llm.server";
 
 /** Server-only lyric writer used by both the studio button and the engine fallback. */
+
+export const COPRODUCER_GEMINI_MODEL = REPLICATE_GEMINI_MODEL;
 
 export type LyricBrief = {
   concept: string;
@@ -10,50 +13,42 @@ export type LyricBrief = {
   language?: string | undefined;
 };
 
-const SYSTEM_PROMPT =
-  "You are the Executive Co-Producer and Lyricist for Hybrid Engine 1.0.\n" +
-  "- Take the user's song concept and the target language from the request.\n" +
-  "- Generate a complete, commercial-ready song arrangement formatted specifically for AI audio generation.\n" +
-  "- If a specific foreign language or dialect is selected, write natural, authentic lyrics with clean syllable pacing and rhythmic cadence.\n" +
-  "- If a bilingual mode is selected, seamlessly blend the languages (e.g., English hooks for global reach, paired with native language verses and ad-libs).\n" +
-  "- Automatically structure the output using standard bracketed metatags: [Intro], [Verse 1 - {Language}], [Pre-Chorus], [Chorus - {Language/Bilingual}], [Verse 2 - {Language}], [Bridge], [Instrumental Solo], [Double Chorus], and [Outro].\n" +
-  "- Ensure balanced line lengths and syllable counts to prevent audio engine dropouts and maintain clean phonetic articulation.\n" +
-  "Return only the lyrics, no commentary. Never copy existing songs.";
+function coProducerSystemPrompt(language: string, trackTitle: string): string {
+  return (
+    `You are an expert music lyricist and co-producer. Write full, structured song lyrics in ${language} ` +
+    `(with [Verse], [Chorus], [Bridge], [Outro] tags) for a song titled '${trackTitle}'. ` +
+    `Maintain rhythmic cadence and authentic phrasing in ${language}. ` +
+    `Return only the lyrics, no commentary. Never copy existing songs.`
+  );
+}
 
 export async function writeLyrics(brief: LyricBrief): Promise<string> {
-
-  const prompt = [
-    `Concept: ${brief.concept}`,
-    `Target language: ${brief.language?.trim() || "English"}`,
-    brief.style ? `Style tags: ${brief.style}` : null,
-    brief.title ? `Working title: ${brief.title}` : null,
+  const language = brief.language?.trim() || "English";
+  const trackTitle = brief.title?.trim() || "Untitled";
+  const genre = brief.style?.trim() || "";
+  const user = [
+    `Language: ${language}`,
+    `Title: ${trackTitle}`,
+    genre ? `Genre / style: ${genre}` : null,
+    brief.concept.trim() ? `Brief / existing lyrics:\n${brief.concept.trim()}` : null,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join("\n\n");
 
-
-  const response = await aiChatFetch(
-    // FREE Hybrid tier — never billed against the paid key.
+  const lyrics = await replicateChat(
+    [
+      { role: "system", content: coProducerSystemPrompt(language, trackTitle) },
+      { role: "user", content: user },
+    ],
     {
-    body: JSON.stringify({
-      model: aiFastModel(),
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
-
-  if (response.status === 429) throw new Error("The lyric writer is busy right now. Try again in a moment.");
-  if (response.status === 402) throw new Error("AI credits are exhausted. Add credits and try again.");
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Lyric writer failed [${response.status}]: ${body.slice(0, 300)}`);
-  }
-
-  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const lyrics = payload.choices?.[0]?.message?.content?.trim();
-  if (!lyrics) throw new Error("The lyric writer returned nothing. Try a richer brief.");
+      label: "Co-Producer",
+      model: COPRODUCER_GEMINI_MODEL,
+      temperature: 0.7,
+      maxTokens: 4096,
+      timeoutMs: 120_000,
+    },
+  );
+  if (!lyrics) throw new Error("Co-Producer returned nothing. Try a richer brief.");
   return lyrics;
 }
 

@@ -23,9 +23,6 @@ describe("lyric language picker", () => {
       "fr",
       "de",
       "ja",
-      "pt",
-      "it",
-      "sw",
     ]);
     for (const code of VALID_LYRIC_LANGUAGE_VALUES) {
       expect(isValidLyricLanguage(code)).toBe(true);
@@ -44,20 +41,17 @@ describe("lyric language picker", () => {
   it("maps picker values to Gemini language names", () => {
     expect(lyricLanguageInstruction("en")).toBe("English");
     expect(lyricLanguageInstruction("lt")).toBe("Lithuanian (Lietuvių)");
-    expect(lyricLanguageInstruction("sw")).toBe("Swahili (Kiswahili)");
+    expect(lyricLanguageInstruction("ja")).toBe("Japanese (日本語)");
   });
 });
 
 describe("isStudioStep1Complete", () => {
-  it("requires title, lyrics, and a supported language", () => {
+  it("requires title and lyrics only", () => {
     expect(isStudioStep1Complete({ title: "Night Drive", lyrics: "[Verse]\nGo", language: "en" })).toBe(
       true,
     );
     expect(isStudioStep1Complete({ title: "  ", lyrics: "words", language: "en" })).toBe(false);
     expect(isStudioStep1Complete({ title: "Night Drive", lyrics: "  ", language: "en" })).toBe(false);
-    expect(isStudioStep1Complete({ title: "Night Drive", lyrics: "words", language: "" })).toBe(false);
-    expect(isStudioStep1Complete({ title: "Night Drive", lyrics: "words", language: "auto" })).toBe(
-      false,
-    );
+    expect(isStudioStep1Complete({ title: "Night Drive", lyrics: "words", language: "" })).toBe(true);
   });
 });
