@@ -88,5 +88,19 @@ describe("buildMiniMaxPayload", () => {
     expect(result.input.prompt).toContain("[Tempo: 102 BPM]");
     expect(result.input.prompt).not.toContain("emotive contemporary");
     expect(result.settings.voice_id).toBe("voice_keep");
+    expect(result.input.audio_url).toBe("voice_keep");
+  });
+
+  it("keeps a MiniMax style prompt locked and attaches audio_url from a reference take", () => {
+    const result = buildMiniMaxPayload({
+      prompt: "Nu-Metal, 102 BPM, Male vocal, studio recording",
+      lyrics: "[Verse 1]\nGo",
+      language: "lt",
+      referenceAudioUrl: "https://cdn.example/voice.wav",
+    });
+    expect(result.input.prompt).toBe("Nu-Metal, 102 BPM, Male vocal, studio recording");
+    expect(result.input.prompt).not.toContain("Lithuanian");
+    expect(result.input.lyrics).toBe("[Verse 1]\nGo");
+    expect(result.input.audio_url).toBe("https://cdn.example/voice.wav");
   });
 });

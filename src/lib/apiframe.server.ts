@@ -539,9 +539,7 @@ export async function requestApiframeGeneration(
     "./engine-directive-guard"
   );
   const { buildMiniMaxPayload } = await import("./minimax-payload");
-  const { concatStylePromptWithLyrics, isDynamicStylePrompt, logApiPayload } = await import(
-    "./generation-style-prompt"
-  );
+  const { isDynamicStylePrompt, logApiPayload } = await import("./generation-style-prompt");
 
 
   engineLog("info", "generate.start", correlationId, {
@@ -608,7 +606,9 @@ export async function requestApiframeGeneration(
       ? buildInstrumentalEnginePrompt(cleanStyle, cleanPrompt)
       : buildEnginePrompt(cleanStyle, cleanPrompt);
   // Instrumentals get the no-vocals variant of the directive.
-  const prompt = applyDirectiveToPrompt(basePrompt, profile, instrumental);
+  const prompt = preserveUserPrompt
+    ? basePrompt
+    : applyDirectiveToPrompt(basePrompt, profile, instrumental);
 
   const audit = auditDirectivePlacement({ prompt, lyrics, profile, instrumental });
   if (audit.violations.length) {
@@ -639,18 +639,22 @@ export async function requestApiframeGeneration(
     instrumental,
     audioFormat,
     voiceId: input.voiceId,
+    referenceAudioUrl: input.referenceAudioUrl,
   });
 
   const body = { input: payload.input };
 
   logApiPayload({
     ...body,
-    prompt: concatStylePromptWithLyrics(prompt, lyrics),
+    prompt: payload.input.prompt,
     lyrics,
     voice_id: input.voiceId ?? null,
     reference_audio: input.referenceAudioUrl ?? null,
+    audio_url: payload.input.audio_url ?? null,
     settings: payload.settings,
   });
+  console.log("[MINIMAX_STYLE_PROMPT]", payload.input.prompt);
+  console.log("[MINIMAX_DISPATCH_PAYLOAD]", JSON.stringify(body, null, 2));
 
   logEnginePayload(correlationId, {
     prompt,
@@ -807,7 +811,7 @@ export async function requestAceStepGeneration(
   correlationId: string = newCorrelationId("gen-ace"),
 ): Promise<ApiframeResult> {
   const { ACE_STEP_MODEL, buildAceStepPayload } = await import("./ace-step-payload");
-  const { concatStylePromptWithLyrics, logApiPayload } = await import("./generation-style-prompt");
+  const { logApiPayload } = await import("./generation-style-prompt");
   const payload = buildAceStepPayload({
     prompt: input.prompt,
     lyrics: input.lyrics,
@@ -822,11 +826,13 @@ export async function requestAceStepGeneration(
   const wireBody = communityPredictionBody(version, aceInput);
   logApiPayload({
     ...wireBody,
-    prompt: concatStylePromptWithLyrics(payload.input.prompt, payload.input.lyrics),
+    prompt: payload.input.prompt,
     lyrics: payload.input.lyrics,
     voice_id: input.voiceId ?? aceVoiceId ?? null,
     reference_audio: input.referenceAudioUrl ?? payload.input.reference_audio ?? null,
   });
+  console.log("[MINIMAX_STYLE_PROMPT]", payload.input.prompt);
+  console.log("[MINIMAX_DISPATCH_PAYLOAD]", JSON.stringify(wireBody, null, 2));
   engineLog("info", "generate.acestep.start", correlationId, {
     promptLength: payload.input.prompt.length,
     lyricsLength: payload.input.lyrics.length,

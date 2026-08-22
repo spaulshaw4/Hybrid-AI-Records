@@ -57,6 +57,7 @@ export function planTimedHybridTrack(input: {
       instrumental: true,
       audioFormat: input.audioFormat,
       voiceId: input.voiceId,
+      referenceAudioUrl: input.referenceAudioUrl,
     }),
     acestep: buildAceStepPayload({
       prompt: style,

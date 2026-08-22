@@ -15,6 +15,72 @@ import {
 import { DEFAULT_LYRIC_LANGUAGE, lyricLanguageSchema } from "@/lib/lyric-languages";
 import { DEFAULT_LONGFORM_SECONDS, MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
 
+export interface MusicGenerationRequest {
+  genre: string;
+  subGenre?: string;
+  mood?: string;
+  bpm?: number | string;
+  instruments?: string[];
+  vocalGender?: "Male" | "Female" | "Duet" | string;
+  vocalTimbre?: string;
+  vocalStyle?: string;
+  lyrics: string;
+  voiceId?: string;
+  referenceAudioUrl?: string;
+  isInstrumental?: boolean;
+}
+
+export function buildMiniMaxPayload(request: MusicGenerationRequest) {
+  // 1. Build a strict, comma-separated style prompt (Target: 10 - 300 chars)
+  const promptParts = [
+    request.genre,
+    request.subGenre,
+    request.bpm ? `${request.bpm} BPM` : null,
+    request.mood,
+    request.instruments && request.instruments.length > 0 ? request.instruments.join(", ") : null,
+    request.vocalGender ? `${request.vocalGender} vocal` : "Male vocal",
+    request.vocalStyle,
+    request.vocalTimbre,
+    "studio recording",
+  ].filter(Boolean);
+  const stylePrompt = promptParts.join(", ");
+  // 2. Separate style metadata from lyrics
+  const payload: Record<string, any> = {
+    model: "music-2.6",
+    prompt: stylePrompt,
+    lyrics: request.lyrics || "",
+    is_instrumental: Boolean(request.isInstrumental),
+    sample_rate: 44100,
+    bitrate: 256000,
+    audio_format: "mp3",
+  };
+  // 3. Attach custom voice cloning / reference if provided
+  if (request.referenceAudioUrl || request.voiceId) {
+    payload.audio_url = request.referenceAudioUrl || request.voiceId;
+  }
+  // 4. Log the exact outgoing payload
+  console.log("[MINIMAX_STYLE_PROMPT]", stylePrompt);
+  console.log("[MINIMAX_DISPATCH_PAYLOAD]", JSON.stringify(payload, null, 2));
+  return payload;
+}
+
+function vocalGenderFromProfile(profile: string): string | undefined {
+  const value = profile.toLowerCase();
+  if (/\bfemale\b/.test(value) && /\bmale\b/.test(value)) return "Duet";
+  if (/\bfemale\b/.test(value)) return "Female";
+  if (/\bduet\b/.test(value)) return "Duet";
+  if (/\bmale\b/.test(value)) return "Male";
+  return undefined;
+}
+
+function vocalStyleFromProfile(profile: string): string | undefined {
+  const withoutGender = profile
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => !/^(male|female) vocal$/i.test(part))
+    .join(", ");
+  return withoutGender || undefined;
+}
 
 export const SUNO_MODELS = ["V3_5", "V4", "V4_5"] as const;
 
@@ -61,10 +127,14 @@ const generateSchema = z.object({
   controls: controlsSchema.optional(),
   /** Core style/genre tags from the studio — not rewritten to a stock genre. */
   genre: z.string().trim().max(600).optional(),
+  subGenre: z.string().trim().max(400).optional(),
   mood: z.string().trim().max(400).optional(),
   instruments: z.array(z.string().trim().min(1).max(80)).max(24).optional(),
   /** Default-AI vocal character (Aggressive Rock Vocal, Female Vocal, …). */
   vocalProfile: z.string().trim().max(400).optional(),
+  vocalGender: z.string().trim().max(40).optional(),
+  vocalTimbre: z.string().trim().max(400).optional(),
+  vocalStyle: z.string().trim().max(400).optional(),
   /** Direct sample URL when the client already resolved the cloned take. */
   referenceAudioUrl: z.string().trim().max(2000).optional(),
   /** Open `user_vault` row to flip from processing → completed. */
@@ -111,15 +181,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     const {
       archiveGeneratedAudio,
-      checkApiframeHealth,
       newCorrelationId,
     } = await import("@/lib/apiframe.server");
-    const { engineCreditErrorMessage } = await import("@/lib/engine-credits");
-    const {
-      buildDynamicStylePrompt,
-      concatStylePromptWithLyrics,
-      logApiPayload,
-    } = await import("@/lib/generation-style-prompt");
+    const { logApiPayload } = await import("@/lib/generation-style-prompt");
     const {
       controls,
       durationSeconds: requestedSeconds,
@@ -137,16 +201,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const mood = payload.mood?.trim() || "";
     const instruments = (payload.instruments ?? []).map((item) => item.trim()).filter(Boolean);
     const vocalProfile = payload.vocalProfile?.trim() || "";
-    const stylePrompt = buildDynamicStylePrompt({
-      genre,
-      bpm,
-      mood,
-      instruments,
-      vocalProfile: payload.instrumental ? undefined : vocalProfile,
-    });
     const lyricContent = payload.instrumental ? "" : payload.lyrics;
-    const combinedPrompt = concatStylePromptWithLyrics(stylePrompt, lyricContent);
-    const { generateTimedHybridTrack } = await import("@/lib/hybrid-track-pipeline.server");
     const correlationId = newCorrelationId("gen");
 
     let referenceSampleUrl = payload.referenceAudioUrl?.trim() || undefined;
@@ -172,9 +227,29 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       }
     }
 
+    const minimaxDispatch = buildMiniMaxPayload({
+      genre,
+      subGenre: payload.subGenre?.trim() || undefined,
+      mood: mood || undefined,
+      bpm,
+      instruments,
+      vocalGender: payload.instrumental
+        ? undefined
+        : payload.vocalGender?.trim() || vocalGenderFromProfile(vocalProfile),
+      vocalTimbre: payload.instrumental ? undefined : payload.vocalTimbre?.trim() || undefined,
+      vocalStyle: payload.instrumental
+        ? undefined
+        : payload.vocalStyle?.trim() || vocalStyleFromProfile(vocalProfile),
+      lyrics: lyricContent,
+      voiceId,
+      referenceAudioUrl: referenceSampleUrl,
+      isInstrumental: payload.instrumental,
+    });
+    const stylePrompt = String(minimaxDispatch.prompt ?? "");
+
     logApiPayload({
       stylePrompt,
-      prompt: combinedPrompt,
+      prompt: stylePrompt,
       lyrics: lyricContent,
       genre,
       bpm: bpm ?? null,
@@ -183,6 +258,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       vocalProfile: vocalProfile || null,
       voice_id: voiceId ?? null,
       reference_audio: referenceSampleUrl ?? null,
+      audio_url: minimaxDispatch.audio_url ?? null,
       instrumental: payload.instrumental,
       language: payload.language,
       customLanguage: payload.customLanguage,
@@ -190,55 +266,36 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       durationSeconds,
     });
 
-    // Platform render credits are a separate meter from Hybrid Tokens. Check
-    // them before starting so an exhausted account produces an accurate,
-    // token-safe warning instead of a hard mid-render failure.
-    const health = await checkApiframeHealth(correlationId).catch(() => null);
-    if (health?.creditsExhausted) {
-      throw new Error(engineCreditErrorMessage(health.reason));
+    const { generateStudioTrack, waitForStudioTrack } = await import("@/lib/music-generation");
+    const started = await generateStudioTrack({
+      genre,
+      subGenre: payload.subGenre?.trim() || undefined,
+      mood: mood || undefined,
+      bpm,
+      instruments,
+      vocalTimbre: payload.vocalTimbre?.trim() || undefined,
+      vocalGender: payload.instrumental
+        ? undefined
+        : payload.vocalGender?.trim() || vocalGenderFromProfile(vocalProfile),
+      lyrics: lyricContent,
+      title: payload.title || "Hybrid Master",
+      isInstrumental: payload.instrumental,
+    });
+    const finished = await waitForStudioTrack(started.taskId);
+    const sonicUrl = finished.audioUrl;
+    if (!sonicUrl) {
+      throw new Error("Suno 5.5: no audio URL was returned.");
     }
 
-    const timed = await generateTimedHybridTrack(
-      {
-        introPrompt: `${stylePrompt}. 30-second producer tag intro, radio ident.`,
-        mainStylePrompt: stylePrompt,
-        lyricContent,
-        totalDurationSec: durationSeconds,
-        audioFormat: payload.audioFormat,
-        title: payload.title,
-        language: payload.language,
-        customLanguage: payload.customLanguage,
-        userId: context.userId,
-        voiceId,
-        referenceSampleUrl,
-        bpm,
-        preserveUserPrompt: true,
-      },
-      correlationId,
-    );
     const rawTracks = [
       {
-        id: timed.taskIds.vocals,
-        title: payload.title || "Vocal stem",
-        audioUrl: timed.vocalStem,
-        imageUrl: null,
+        id: started.taskId,
+        title: finished.title || payload.title || "Mastered track",
+        audioUrl: sonicUrl,
+        imageUrl: finished.imageUrl,
         duration: durationSeconds,
       },
-      {
-        id: timed.taskIds.instrumental,
-        title: payload.title ? `${payload.title} instrumental` : "Instrumental",
-        audioUrl: timed.instrumentalStem,
-        imageUrl: null,
-        duration: durationSeconds,
-      },
-      {
-        id: timed.taskIds.intro,
-        title: payload.title ? `${payload.title} intro` : "Intro tag",
-        audioUrl: timed.introStem,
-        imageUrl: null,
-        duration: 30,
-      },
-    ].filter((track) => track.audioUrl);
+    ];
     const tracks = await Promise.all(
       rawTracks.map(async (track) => ({
         ...track,
@@ -252,15 +309,13 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       })),
     );
 
-    const urlFor = (taskId: string | null) =>
-      tracks.find((track) => track.id === taskId)?.audioUrl ?? null;
-    const vocalUrl = urlFor(timed.taskIds.vocals);
-    const instrumentalUrl = urlFor(timed.taskIds.instrumental);
-    const introUrl = urlFor(timed.taskIds.intro);
+    const vocalUrl = tracks[0]?.audioUrl ?? null;
+    const instrumentalUrl = null;
+    const introUrl = null;
 
-    const sourceMasterUrl = vocalUrl ?? instrumentalUrl ?? introUrl;
+    const sourceMasterUrl = vocalUrl;
     let masterUrl = sourceMasterUrl;
-    const taskId = timed.taskIds.vocals ?? timed.taskIds.instrumental ?? timed.taskIds.intro ?? correlationId;
+    const taskId = started.taskId;
 
     try {
       const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
@@ -361,8 +416,8 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       },
       correlationId,
       cached: false,
-      engine: "hybrid" as const,
-      requestedEngine: "hybrid" as const,
+      engine: "suno" as const,
+      requestedEngine: "suno" as const,
       durationSeconds,
       routingNote: null,
     };
@@ -374,24 +429,40 @@ export const getEngineTrackTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => taskSchema.parse(data))
   .handler(async ({ data, context }) => {
+    const { fetchStudioTrackTask } = await import("@/lib/music-generation");
     const { archiveGeneratedAudio, fetchApiframeTask, newCorrelationId } = await import("@/lib/apiframe.server");
     const correlationId = newCorrelationId("poll");
-    const result = await fetchApiframeTask(data.taskId, correlationId);
-    const tracks = await Promise.all(
-      result.tracks.map(async (track) => ({
-        ...track,
-        audioUrl: track.audioUrl
-          ? await archiveGeneratedAudio(track.audioUrl, context.userId, data.taskId).catch(() => null)
-          : null,
-      })),
-    );
+    try {
+      const sonic = await fetchStudioTrackTask(data.taskId);
+      const audioUrl = sonic.audioUrl
+        ? await archiveGeneratedAudio(sonic.audioUrl, context.userId, data.taskId).catch(() => sonic.audioUrl)
+        : null;
+      return {
+        taskId: sonic.taskId,
+        status: sonic.status === "completed" ? "succeeded" : sonic.status,
+        tracks: audioUrl
+          ? [{ id: sonic.taskId, title: sonic.title || "Mastered track", audioUrl, imageUrl: sonic.imageUrl, duration: null }]
+          : [],
+        correlationId,
+      };
+    } catch {
+      const result = await fetchApiframeTask(data.taskId, correlationId);
+      const tracks = await Promise.all(
+        result.tracks.map(async (track) => ({
+          ...track,
+          audioUrl: track.audioUrl
+            ? await archiveGeneratedAudio(track.audioUrl, context.userId, data.taskId).catch(() => null)
+            : null,
+        })),
+      );
 
-    return {
-      taskId: result.taskId ?? data.taskId,
-      status: result.status,
-      tracks,
-      correlationId,
-    };
+      return {
+        taskId: result.taskId ?? data.taskId,
+        status: result.status,
+        tracks,
+        correlationId,
+      };
+    }
   });
 
 /** Preflight check so the studio can warn before anyone starts a generation. */

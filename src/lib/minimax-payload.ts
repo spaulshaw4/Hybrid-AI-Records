@@ -30,6 +30,8 @@ export interface GenerationRequestPayload {
   audioFormat?: AudioFormat;
   /** Cloned / selected voice id — logged and kept on the payload when present. */
   voiceId?: string;
+  /** Cloned take URL — mapped to MiniMax `audio_url`. */
+  referenceAudioUrl?: string;
 }
 
 export interface MiniMaxPayload {
@@ -40,6 +42,7 @@ export interface MiniMaxPayload {
     is_instrumental: boolean;
     lyrics_optimizer: true;
     audio_format: AudioFormat;
+    audio_url?: string;
   };
   /**
    * Internal rendering metadata. Not sent to the model directly — these are
@@ -70,9 +73,15 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
   const directive = directiveForMode(profile, instrumental);
 
   const voiceId = req.voiceId?.trim();
+  const audioUrl = req.referenceAudioUrl?.trim() || voiceId;
   const userPrompt = req.prompt.trim();
   const genreHint = req.genre?.trim();
-  const alreadyTagged = /\[Style:/i.test(userPrompt);
+  const lockedStyle =
+    /\[Style:/i.test(userPrompt) ||
+    /\d+\s*BPM\b/i.test(userPrompt) ||
+    /studio recording/i.test(userPrompt) ||
+    /\b(male|female|duet) vocal\b/i.test(userPrompt);
+  const alreadyTagged = lockedStyle;
   const basePrompt = [
     userPrompt,
     !alreadyTagged && genreHint && !userPrompt.includes(genreHint) ? genreHint : "",
@@ -80,9 +89,11 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
     .filter(Boolean)
     .join(" ")
     .trim();
-  const prompt = [basePrompt, basePrompt.includes(directive) ? "" : directive]
-    .filter(Boolean)
-    .join(" ")
+  const prompt = (
+    lockedStyle
+      ? basePrompt
+      : [basePrompt, basePrompt.includes(directive) ? "" : directive].filter(Boolean).join(" ")
+  )
     .replace(/\s{2,}/g, " ")
     .slice(0, 6000);
 
@@ -98,6 +109,7 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
       is_instrumental: instrumental,
       lyrics_optimizer: true,
       audio_format: audioFormat,
+      ...(audioUrl ? { audio_url: audioUrl } : {}),
     },
     settings: {
       sample_rate: 44100,

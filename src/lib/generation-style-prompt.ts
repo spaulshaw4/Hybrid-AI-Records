@@ -44,7 +44,8 @@ export function isDynamicStylePrompt(text: string | null | undefined): boolean {
   return (
     /\[Style:/i.test(value) ||
     /\d+\s*BPM\b/i.test(value) ||
-    /\bvocals\b/i.test(value)
+    /\bvocals?\b/i.test(value) ||
+    /studio recording/i.test(value)
   );
 }
 

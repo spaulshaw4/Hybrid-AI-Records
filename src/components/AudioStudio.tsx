@@ -1918,26 +1918,42 @@ export function AudioStudio() {
 
       setStatusText("Mastering track…");
 
-      const genre = styles.filter(Boolean).join(", ");
+      const selectedStyles = styles.filter(Boolean);
+      const genre = selectedStyles[0] || styleLine;
+      const subGenre = selectedStyles.slice(1).join(", ");
+      const genderPreset = vocalPresets.find((preset) =>
+        GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]),
+      );
+      const vocalGender =
+        genderPreset === "Female Vocal" ? "Female" : genderPreset === "Male Vocal" ? "Male" : undefined;
+      const vocalStyle = vocalPresets
+        .filter((preset) => !GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]))
+        .filter(Boolean)
+        .join(", ");
       const vocalProfile = usesDefaultAiVocal(withVocals, vocalSource)
         ? vocalPresets.filter(Boolean).join(", ")
         : "";
       const mood = vocalPrompt.trim();
       const stylePrompt = buildDynamicStylePrompt({
         genre,
+        subGenre: subGenre || undefined,
         bpm,
         mood,
         instruments: [],
         vocalProfile: withVocals ? vocalProfile : undefined,
+        vocalStyle: withVocals ? vocalStyle || undefined : undefined,
       });
       const started = await startGeneration({
         data: {
           prompt: stylePrompt || genre,
           style: genre,
           genre,
+          ...(subGenre ? { subGenre } : {}),
           ...(mood ? { mood } : {}),
           instruments: [],
           ...(vocalProfile ? { vocalProfile } : {}),
+          ...(withVocals && vocalGender ? { vocalGender } : {}),
+          ...(withVocals && vocalStyle ? { vocalStyle } : {}),
           title: trackTitle,
           lyrics: withVocals
             ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)

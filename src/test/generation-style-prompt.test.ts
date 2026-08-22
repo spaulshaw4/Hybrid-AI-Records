@@ -49,6 +49,7 @@ describe("isDynamicStylePrompt", () => {
   it("detects artist style tags and BPM descriptors", () => {
     expect(isDynamicStylePrompt("[Style: Pop] [Tempo: 118 BPM]")).toBe(true);
     expect(isDynamicStylePrompt("pop, 118 BPM, bright")).toBe(true);
+    expect(isDynamicStylePrompt("Nu-Metal, Male vocal, studio recording")).toBe(true);
     expect(isDynamicStylePrompt("just a vibe")).toBe(false);
   });
 });
