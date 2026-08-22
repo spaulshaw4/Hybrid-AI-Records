@@ -30,11 +30,18 @@ export async function writeLyrics(brief: LyricBrief): Promise<string> {
   const trackTitle = brief.title?.trim() || "Untitled";
   const style = brief.style?.trim() || "Rock/Alternative";
   const modelString = COPRODUCER_GEMINI_MODEL;
+  const systemPrompt =
+    `You are an elite music co-producer and lyricist. Write full, structured song lyrics in ${language || "English"} ` +
+    `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
+    `Style: ${style || "Rock/Alternative"}.`;
   const input = {
-    prompt:
-      `You are an elite music co-producer and lyricist. Write full, structured song lyrics in ${language || "English"} ` +
-      `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
-      `Style: ${style || "Rock/Alternative"}.`,
+    prompt: systemPrompt,
+    images: [] as unknown[],
+    videos: [] as unknown[],
+    temperature: 1,
+    top_p: 0.95,
+    max_output_tokens: 4096,
+    dynamic_thinking: false,
   };
 
   console.log("[CO_PRODUCER]", { trackTitle, language, model: modelString, style });

@@ -40,16 +40,29 @@ describe("Co-Producer Gemini lyrics via Replicate", () => {
     expect(runMock).toHaveBeenCalledTimes(1);
     const [model, options] = runMock.mock.calls[0] as [
       string,
-      { input: { prompt: string; temperature?: number; max_output_tokens?: number; max_tokens?: number } },
+      {
+        input: {
+          prompt: string;
+          images: unknown[];
+          videos: unknown[];
+          temperature: number;
+          top_p: number;
+          max_output_tokens: number;
+          dynamic_thinking: boolean;
+        };
+      },
     ];
-    expect(model).toBe(COPRODUCER_GEMINI_MODEL);
+    expect(model).toBe("google/gemini-2.5-flash");
     expect(model).not.toMatch(/llama/i);
     expect(options.input).toEqual({
       prompt: expect.stringContaining("elite music co-producer"),
+      images: [],
+      videos: [],
+      temperature: 1,
+      top_p: 0.95,
+      max_output_tokens: 4096,
+      dynamic_thinking: false,
     });
-    expect(options.input).not.toHaveProperty("max_output_tokens");
-    expect(options.input).not.toHaveProperty("max_tokens");
-    expect(options.input).not.toHaveProperty("temperature");
     expect(options.input.prompt).toContain("Lithuanian (Lietuvių)");
     expect(options.input.prompt).toContain("Night Drive");
     expect(options.input.prompt).toContain("Nu-Metal");

@@ -14,14 +14,21 @@ export async function POST(req: Request): Promise<Response> {
 
     const { trackTitle, language, style } = await req.json();
     const replicate = new Replicate({ auth: token });
-    const prompt =
+    const systemPrompt =
       `You are an elite music co-producer. Write structured song lyrics in ${language || "English"} ` +
       `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
       `Style: ${style || "Rock/Alternative"}.`;
+    const input = {
+      prompt: systemPrompt,
+      images: [],
+      videos: [],
+      temperature: 1,
+      top_p: 0.95,
+      max_output_tokens: 4096,
+      dynamic_thinking: false,
+    };
 
-    const output = await replicate.run("google/gemini-3-flash", {
-      input: { prompt },
-    });
+    const output = await replicate.run("google/gemini-2.5-flash", { input });
     const lyrics = Array.isArray(output) ? output.join("") : String(output);
     return Response.json({ lyrics });
   } catch (error) {
