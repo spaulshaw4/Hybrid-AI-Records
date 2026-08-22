@@ -13,8 +13,7 @@ const Input = z.object({
 });
 
 /**
- * Writes song lyrics through Replicate Google Gemini only
- * (`REPLICATE_API_TOKEN` + `google/gemini-2.5-flash`). Never Llama.
+ * Writes song lyrics through native Gemini (`GEMINI_API_KEY` + `gemini-2.5-flash`).
  */
 export const generateLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))
@@ -35,7 +34,7 @@ export const generateLyrics = createServerFn({ method: "POST" })
       console.log("[CO_PRODUCER]", { lyricsLength: lyrics.length });
       return { lyrics };
     } catch (error) {
-      console.error("[GEMINI_REPLICATE_ERROR]", error);
+      console.error("[GEMINI_COPRODUCER_ERROR]", error);
       throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
     }
   });

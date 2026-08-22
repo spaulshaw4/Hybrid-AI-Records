@@ -120,9 +120,14 @@ export async function runHybridMasterPipeline(input: {
           });
       convertedVocalUrl = converted.tracks.find((track) => track.audioUrl)?.audioUrl ?? null;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Missing FISH_API_KEY|FISH_AUDIO_API_KEY is undefined/i.test(message)) {
+        console.error("[FISH_AUDIO] vocal conversion aborted — API key missing");
+        throw error instanceof Error ? error : new Error(message);
+      }
       console.warn(
         "[pipeline] Fish Audio vocals skipped",
-        error instanceof Error ? error.message : error,
+        message,
       );
     }
   }

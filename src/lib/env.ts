@@ -4,6 +4,11 @@ dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env.development" });
 dotenv.config({ path: ".env" });
 
+console.log(
+  "[ENV_CHECK] Fish Audio Key loaded:",
+  Boolean(process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY),
+);
+
 /**
  * Pipeline env lookup for TanStack Start / Vite.
  *
@@ -18,11 +23,14 @@ export type PipelineStage =
   | "Mastering";
 
 const KEY_ALIASES: Record<string, readonly string[]> = {
-  MUSIC_API_KEY: ["SONIC_API_KEY", "MUSICAPI_KEY"],
+  MUSIC_API_KEY: ["SONIC_API_KEY", "MUSICAPI_KEY", "AIMUSIC_API_KEY", "AI_MUSIC_API_KEY"],
+  AIMUSIC_API_KEY: ["AI_MUSIC_API_KEY", "MUSIC_API_KEY", "MUSICAPI_KEY", "SONIC_API_KEY"],
+  AI_MUSIC_API_KEY: ["AIMUSIC_API_KEY", "MUSIC_API_KEY", "MUSICAPI_KEY", "SONIC_API_KEY"],
   FISH_AUDIO_API_KEY: ["FISH_API_KEY"],
   FISH_API_KEY: ["FISH_AUDIO_API_KEY"],
   REPLICATE_API_TOKEN: ["REPLICATE_API_KEY"],
   REPLICATE_API_KEY: ["REPLICATE_API_TOKEN"],
+  GEMINI_API_KEY: ["GOOGLE_API_KEY"],
 };
 
 function trimEnv(value: unknown): string | undefined {
@@ -86,4 +94,24 @@ export function requireStageKey(keyName: string, stage: string): string {
 
 export function getEnvKey(keyName: string, stage = keyName): string {
   return requireStageKey(keyName, stage);
+}
+
+/** Official Fish Audio key. Prefers FISH_API_KEY, then FISH_AUDIO_API_KEY. */
+export function getFishApiKey(): string | undefined {
+  const direct =
+    typeof process !== "undefined"
+      ? (process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY)?.trim()
+      : undefined;
+  return direct || readEnv("FISH_API_KEY") || readEnv("FISH_AUDIO_API_KEY");
+}
+
+export function requireFishApiKey(): string {
+  const apiKey = getFishApiKey();
+  if (!apiKey) {
+    console.error(
+      "[FISH_AUDIO] FISH_API_KEY / FISH_AUDIO_API_KEY is undefined — add it to .env.local",
+    );
+    throw new Error("Missing FISH_API_KEY in .env.local");
+  }
+  return apiKey;
 }

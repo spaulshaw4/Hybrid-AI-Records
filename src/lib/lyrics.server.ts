@@ -1,13 +1,12 @@
+import { GoogleGenAI } from "@google/genai";
 import { aiChatFetch } from "@/lib/ai-chat.server";
 import { aiFastModel } from "@/lib/ai-provider.server";
-import Replicate from "replicate";
 
 /** Server-only lyric writer used by both the studio button and the engine fallback. */
 
-/** Locked to Gemini Flash on Replicate. Override only via REPLICATE_GEMINI_MODEL. */
+/** Native Gemini Flash via GEMINI_API_KEY. Override with GEMINI_MODEL. */
 export const COPRODUCER_GEMINI_MODEL =
-  (typeof process !== "undefined" && process.env["REPLICATE_GEMINI_MODEL"]?.trim()) ||
-  "google/gemini-2.5-flash";
+  (typeof process !== "undefined" && process.env["GEMINI_MODEL"]?.trim()) || "gemini-2.5-flash";
 
 export type LyricBrief = {
   concept: string;
@@ -16,47 +15,44 @@ export type LyricBrief = {
   language?: string | undefined;
 };
 
-function replicateToken(): string {
-  const token =
-    (typeof process !== "undefined" && process.env["REPLICATE_API_TOKEN"]?.trim()) || "";
-  if (!token) {
-    throw new Error("REPLICATE_API_TOKEN is missing on server");
+function geminiApiKey(): string {
+  const key =
+    (typeof process !== "undefined" && process.env["GEMINI_API_KEY"]?.trim()) ||
+    (typeof process !== "undefined" && process.env["GOOGLE_API_KEY"]?.trim()) ||
+    "";
+  if (!key) {
+    console.error("[CO_PRODUCER] GEMINI_API_KEY is undefined — add it to .env.local");
+    throw new Error("Missing GEMINI_API_KEY in .env.local");
   }
-  return token;
+  return key;
 }
 
 export async function writeLyrics(brief: LyricBrief): Promise<string> {
+  const apiKey = geminiApiKey();
   const language = brief.language?.trim() || "English";
   const trackTitle = brief.title?.trim() || "Untitled";
   const style = brief.style?.trim() || "Rock/Alternative";
-  const modelString = COPRODUCER_GEMINI_MODEL;
-  const systemPrompt =
+  const prompt =
     `You are an elite music co-producer and lyricist. Write full, structured song lyrics in ${language || "English"} ` +
     `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
     `Style: ${style || "Rock/Alternative"}.`;
-  const input = {
-    prompt: systemPrompt,
-    images: [] as unknown[],
-    videos: [] as unknown[],
-    temperature: 1,
-    top_p: 0.95,
-    max_output_tokens: 4096,
-    dynamic_thinking: false,
-  };
 
-  console.log("[CO_PRODUCER]", { trackTitle, language, model: modelString, style });
+  console.log("[CO_PRODUCER]", { trackTitle, language, model: COPRODUCER_GEMINI_MODEL, style });
 
   try {
-    const replicate = new Replicate({ auth: replicateToken() });
-    const output = await replicate.run(modelString as `${string}/${string}`, { input });
-    const lyricsText = Array.isArray(output) ? output.join("") : String(output);
-    const lyrics = lyricsText.trim();
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: COPRODUCER_GEMINI_MODEL,
+      contents: prompt,
+      config: { maxOutputTokens: 8192 },
+    });
+    const lyrics = (response.text ?? "").trim();
     if (!lyrics || lyrics === "undefined" || lyrics === "null") {
       throw new Error("Co-Producer returned nothing. Try a richer brief.");
     }
     return lyrics;
   } catch (error) {
-    console.error("[GEMINI_REPLICATE_ERROR]", error);
+    console.error("[GEMINI_COPRODUCER_ERROR]", error);
     throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
   }
 }

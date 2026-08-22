@@ -6,7 +6,7 @@
  * the mixer. Provider names never leave this file.
  */
 import { encode } from "@msgpack/msgpack";
-import { requireStageKey } from "@/lib/env";
+import { requireFishApiKey } from "@/lib/env";
 import { describeFetchError } from "@/lib/safe-fetch";
 import { lyricsForCloneSpeech } from "@/lib/clone-lyrics";
 import { samplePathFromUrl } from "@/lib/instant-voice";
@@ -14,12 +14,12 @@ import { buildVocalClonePayload } from "@/lib/vocal-clone-payload";
 import type { ApiframeResult } from "@/lib/apiframe.server";
 
 export const FISH_AUDIO_API_BASE = "https://api.fish.audio";
-const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
+export const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
 const FISH_MODEL = "s2-pro";
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
 function fishApiKey(): string {
-  return requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)");
+  return requireFishApiKey();
 }
 
 async function loadReferenceAudio(sampleUrl: string): Promise<Uint8Array> {
@@ -80,12 +80,13 @@ export async function convertVocalsWithStems(input: {
     }),
   );
 
+  const apiKey = fishApiKey();
   let response: Response | undefined;
   try {
     response = await fetch(FISH_TTS_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${fishApiKey()}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/msgpack",
         model: FISH_MODEL,
       },

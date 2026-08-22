@@ -1212,6 +1212,8 @@ export function AudioStudio() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"concept" | "lyrics" | "vocal" | "style" | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [coProducerHint, setCoProducerHint] = useState<string | null>(null);
   const [language, setLanguage] = useState<LyricLanguage>(readSavedLanguage);
   const [customLanguage, setCustomLanguage] = useState(readSavedCustomLanguage);
   const trippedRef = useRef<Set<string>>(new Set());
@@ -1273,6 +1275,44 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
+
+  async function handleGenerateLyrics(event?: { preventDefault(): void; stopPropagation(): void }) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const resolvedTitle = title.trim() || "Untitled";
+    if (!title.trim()) {
+      setTitle("Untitled");
+      setCoProducerHint(
+        "No track title entered — generating lyrics for “Untitled”. You can rename it anytime.",
+      );
+    } else {
+      setCoProducerHint(null);
+    }
+
+    console.log("[CO_PRODUCER_CLICKED]", { trackTitle: resolvedTitle, language: targetLanguage });
+
+    try {
+      setIsLoading(true);
+      const res = await fetch("/api/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackTitle: resolvedTitle, language: targetLanguage || "English" }),
+      });
+      const data = await res.json();
+      console.log("[CO_PRODUCER_RESPONSE]", data);
+      if (data?.lyrics) {
+        setLyrics(String(data.lyrics).slice(0, PROMPT_MAX));
+        setLyricWarnings([]);
+      } else if (data?.error) {
+        setCoProducerHint(String(data.error));
+      }
+    } catch (err) {
+      console.error("[CO_PRODUCER_CLIENT_ERROR]", err);
+      setCoProducerHint("Co-Producer could not reach the server. Check the browser console.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
@@ -2520,6 +2560,8 @@ export function AudioStudio() {
     setTitle("");
     setResult(null);
     setStatusText(null);
+    setCoProducerHint(null);
+    setIsLoading(false);
     // Explicit reset wins over the restored session draft.
     clearEngineDraft();
   }
@@ -2649,67 +2691,28 @@ export function AudioStudio() {
             </p>
           </div>
 
-          <button
-            type="button"
-            id="coproducer-generate-btn"
-            style={{
-              position: "relative",
-              zIndex: 999999,
-              pointerEvents: "auto",
-              cursor: "pointer",
-            }}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow-lg"
-            onClick={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-
-              const titleVal =
-                trackTitle ||
-                (document.querySelector(
-                  'input[name="title"], input[placeholder*="Title"]',
-                ) as HTMLInputElement | null)?.value;
-              if (!titleVal?.trim()) {
-                alert("Please enter a track title first.");
-                return;
-              }
-              const btn = e.currentTarget;
-              btn.innerText = "Generating...";
-              btn.disabled = true;
-              try {
-                const res = await fetch("/api/coproducer", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    trackTitle: titleVal.trim(),
-                    language: targetLanguage || "English",
-                  }),
-                });
-                const data = (await res.json()) as { lyrics?: string; error?: string };
-
-                if (data.lyrics) {
-                  const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
-                  setLyrics(nextLyrics);
-                  setLyricWarnings([]);
-                  const txt = document.querySelector(
-                    `#${SONG_LYRICS_INPUT_ID}, textarea[name="lyrics"], textarea[placeholder*="Lyrics"]`,
-                  ) as HTMLTextAreaElement | null;
-                  if (txt) {
-                    txt.value = nextLyrics;
-                    txt.dispatchEvent(new Event("input", { bubbles: true }));
-                  }
-                } else {
-                  alert("Error: " + (data.error || "Failed to generate lyrics"));
-                }
-              } catch (err) {
-                alert("Network Error: " + (err instanceof Error ? err.message : "unknown error"));
-              } finally {
-                btn.innerText = "Co-Producer";
-                btn.disabled = false;
-              }
-            }}
-          >
-            Co-Producer
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              id="coproducer-generate-btn"
+              onClick={handleGenerateLyrics}
+              disabled={isLoading}
+              style={{
+                position: "relative",
+                zIndex: 999999,
+                pointerEvents: isLoading ? "none" : "auto",
+                cursor: isLoading ? "wait" : "pointer",
+              }}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white font-bold rounded shadow-lg"
+            >
+              {isLoading ? "Generating..." : "Co-Producer"}
+            </button>
+            {coProducerHint ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                {coProducerHint}
+              </p>
+            ) : null}
+          </div>
 
           {/* 2. Lyrics box */}
           <div className="space-y-2">

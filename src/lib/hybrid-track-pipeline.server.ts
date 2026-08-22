@@ -3,11 +3,10 @@
  *
  * 1. ElevenLabs Music — 30s producer-tag intro.
  * 2. MiniMax 2.6 — core instrumental foundation.
- * 3. Vocal stem — instant clone from the artist's take when one is saved,
- *    otherwise ACE-Step arrangement.
+ * 3. Fish Audio native TTS (`https://api.fish.audio/v1/tts`) — vocal stem.
+ *    Never falls back to Replicate ACE-Step.
  */
 import {
-  requestAceStepGeneration,
   requestApiframeGeneration,
   requestElevenLabsMusic,
   waitForMusicPrediction,
@@ -108,33 +107,39 @@ export async function generateTimedHybridTrack(
   );
 
   const customVoice = Boolean(input.referenceSampleUrl && input.lyricContent.trim() && input.userId);
-  const vocalJob = customVoice
-      ? import("@/lib/fish-tts.server").then(({ cloneVocalsFromSample }) =>
-          cloneVocalsFromSample({
+  const vocalJob = !input.lyricContent.trim()
+    ? Promise.resolve({
+        taskId: `${correlationId}-fish-vocals`,
+        status: "succeeded" as const,
+        tracks: [],
+        raw: { skipped: true },
+      } satisfies ApiframeResult)
+    : import("@/lib/fish-tts.server").then(({ cloneVocalsFromSample, convertVocalsWithStems }) => {
+        if (!input.userId) {
+          console.error("[FISH_AUDIO] vocal conversion aborted — signed-in user required");
+          throw new Error("Fish Audio vocals need a signed-in user.");
+        }
+        if (customVoice) {
+          return cloneVocalsFromSample({
             sampleUrl: input.referenceSampleUrl as string,
             lyrics: input.lyricContent,
             language: input.language,
             customLanguage: input.customLanguage,
             audioFormat: input.audioFormat,
             title: input.title || "Vocal stem",
-            userId: input.userId as string,
+            userId: input.userId,
             taskId: `${correlationId}-clone`,
             voiceId: input.voiceId,
-          }),
-        )
-      : requestAceStepGeneration(
-          {
-            prompt: input.mainStylePrompt,
-            lyrics: input.lyricContent,
-            durationSeconds: plan.coreSeconds,
-            audioFormat: input.audioFormat,
-            title: input.title || "Vocal stem",
-            bpm: input.bpm,
-            voiceId: input.voiceId,
-            referenceAudioUrl: input.referenceSampleUrl,
-          },
-          `${correlationId}-ace`,
-        );
+          });
+        }
+        return convertVocalsWithStems({
+          lyrics: input.lyricContent,
+          audioFormat: input.audioFormat,
+          title: input.title || "Vocal stem",
+          userId: input.userId,
+          taskId: `${correlationId}-fish-vocals`,
+        });
+      });
 
   const [introStarted, instrumentalStarted, vocalStarted] = await Promise.all([
     introJob,
@@ -145,7 +150,7 @@ export async function generateTimedHybridTrack(
   const [intro, instrumental, vocals] = await Promise.all([
     settle(introStarted, `${correlationId}-intro`),
     settle(instrumentalStarted, `${correlationId}-minimax`),
-    settle(vocalStarted, `${correlationId}-ace`),
+    settle(vocalStarted, `${correlationId}-fish`),
   ]);
 
   const result: TimedHybridTrackResult = {

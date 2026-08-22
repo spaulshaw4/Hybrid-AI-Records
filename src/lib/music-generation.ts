@@ -12,7 +12,7 @@
  * Reads Node `process.env`; never import this from client components.
  */
 
-import { requireStageKey } from "@/lib/env";
+import { readEnv, requireStageKey } from "@/lib/env";
 
 export const SONIC_CREATE_URL = "https://api.musicapi.ai/api/v1/sonic/create";
 export const SONIC_TASK_URL = "https://api.musicapi.ai/api/v1/sonic/task";
@@ -65,7 +65,19 @@ export type StudioTrackResult = {
 const MUSIC_STAGE = "MusicAPI (Base Arrangement)" as const;
 
 export function getMusicApiKey(): string {
-  return requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+  const apiKey =
+    (typeof process !== "undefined" && process.env.AIMUSIC_API_KEY?.trim()) ||
+    (typeof process !== "undefined" && process.env.AI_MUSIC_API_KEY?.trim()) ||
+    readEnv("AIMUSIC_API_KEY") ||
+    readEnv("AI_MUSIC_API_KEY") ||
+    readEnv("MUSIC_API_KEY");
+  if (!apiKey) {
+    console.error(
+      "[MUSICAPI] AIMUSIC_API_KEY / AI_MUSIC_API_KEY is undefined — add it to .env.local",
+    );
+    return requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+  }
+  return apiKey;
 }
 
 export function musicApiKey(): string {
@@ -224,7 +236,7 @@ async function postSonicCreate(
 }
 
 export async function generateStudioTrack(options: StudioTrackOptions): Promise<StudioTrackStart> {
-  const apiKey = requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+  const apiKey = getMusicApiKey();
 
   const base = {
     task_type: "create_music" as const,
@@ -270,7 +282,7 @@ export async function generateStudioTrack(options: StudioTrackOptions): Promise<
 }
 
 export async function fetchStudioTrackTask(taskId: string): Promise<StudioTrackResult> {
-  const apiKey = requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
+  const apiKey = getMusicApiKey();
   const response = await fetch(`${SONIC_TASK_URL}/${encodeURIComponent(taskId)}`, {
     method: "GET",
     headers: {

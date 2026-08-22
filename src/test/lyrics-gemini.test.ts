@@ -1,28 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { runMock } = vi.hoisted(() => ({ runMock: vi.fn() }));
+const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
 
-vi.mock("replicate", () => ({
-  default: class Replicate {
-    constructor(_opts?: { auth?: string }) {}
-    run = (...args: unknown[]) => runMock(...args);
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    constructor(_opts?: { apiKey?: string }) {}
+    models = { generateContent: generateContentMock };
   },
 }));
 
 import { COPRODUCER_GEMINI_MODEL, writeLyrics } from "@/lib/lyrics.server";
 
-describe("Co-Producer Gemini lyrics via Replicate", () => {
-  const originalToken = process.env.REPLICATE_API_TOKEN;
+describe("Co-Producer Gemini lyrics via @google/genai", () => {
+  const originalKey = process.env.GEMINI_API_KEY;
+  const originalGoogleKey = process.env.GOOGLE_API_KEY;
 
   afterEach(() => {
-    if (originalToken === undefined) delete process.env.REPLICATE_API_TOKEN;
-    else process.env.REPLICATE_API_TOKEN = originalToken;
+    if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalKey;
+    if (originalGoogleKey === undefined) delete process.env.GOOGLE_API_KEY;
+    else process.env.GOOGLE_API_KEY = originalGoogleKey;
     vi.clearAllMocks();
   });
 
-  it("runs google/gemini-2.5-flash and joins an output array", async () => {
-    process.env.REPLICATE_API_TOKEN = "test-replicate-token";
-    runMock.mockResolvedValue(["[Verse 1]\nGo\n", "[Chorus]\nHold the line"]);
+  it("runs gemini-2.5-flash with 8192 max tokens and returns response.text", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    generateContentMock.mockResolvedValue({ text: "[Verse 1]\nGo\n[Chorus]\nHold the line" });
 
     const lyrics = await writeLyrics({
       concept: "night drive",
@@ -33,56 +36,40 @@ describe("Co-Producer Gemini lyrics via Replicate", () => {
 
     expect(lyrics).toContain("[Verse 1]");
     expect(lyrics).toContain("[Chorus]\nHold the line");
-    expect(COPRODUCER_GEMINI_MODEL).toBe(
-      process.env.REPLICATE_GEMINI_MODEL?.trim() || "google/gemini-2.5-flash",
-    );
-    expect(COPRODUCER_GEMINI_MODEL).not.toMatch(/llama/i);
-    expect(runMock).toHaveBeenCalledTimes(1);
-    const [model, options] = runMock.mock.calls[0] as [
-      string,
-      {
-        input: {
-          prompt: string;
-          images: unknown[];
-          videos: unknown[];
-          temperature: number;
-          top_p: number;
-          max_output_tokens: number;
-          dynamic_thinking: boolean;
-        };
-      },
+    expect(COPRODUCER_GEMINI_MODEL).toBe("gemini-2.5-flash");
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    const [params] = generateContentMock.mock.calls[0] as [
+      { model: string; contents: string; config: { maxOutputTokens: number } },
     ];
-    expect(model).toBe("google/gemini-2.5-flash");
-    expect(model).not.toMatch(/llama/i);
-    expect(options.input).toEqual({
-      prompt: expect.stringContaining("elite music co-producer"),
-      images: [],
-      videos: [],
-      temperature: 1,
-      top_p: 0.95,
-      max_output_tokens: 4096,
-      dynamic_thinking: false,
-    });
-    expect(options.input.prompt).toContain("Lithuanian (Lietuvių)");
-    expect(options.input.prompt).toContain("Night Drive");
-    expect(options.input.prompt).toContain("Nu-Metal");
+    expect(params.model).toBe("gemini-2.5-flash");
+    expect(params.config.maxOutputTokens).toBe(8192);
+    expect(params.contents).toContain("elite music co-producer");
+    expect(params.contents).toContain("Lithuanian (Lietuvių)");
+    expect(params.contents).toContain("Night Drive");
+    expect(params.contents).toContain("Nu-Metal");
   });
 
-  it("throws when REPLICATE_API_TOKEN is missing on the server", async () => {
-    delete process.env.REPLICATE_API_TOKEN;
-    await expect(
-      writeLyrics({
-        concept: "night drive",
-        title: "Night Drive",
-        language: "English",
-      }),
-    ).rejects.toThrow("REPLICATE_API_TOKEN is missing on server");
-  });
-
-  it("logs GEMINI_REPLICATE_ERROR and does not fall back when Replicate fails", async () => {
-    process.env.REPLICATE_API_TOKEN = "test-replicate-token";
+  it("throws when GEMINI_API_KEY is missing on the server", async () => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    runMock.mockRejectedValue(new Error("model not found"));
+    await expect(
+      writeLyrics({
+        concept: "night drive",
+        title: "Night Drive",
+        language: "English",
+      }),
+    ).rejects.toThrow("Missing GEMINI_API_KEY in .env.local");
+    expect(logged).toHaveBeenCalledWith(
+      "[CO_PRODUCER] GEMINI_API_KEY is undefined — add it to .env.local",
+    );
+    logged.mockRestore();
+  });
+
+  it("logs GEMINI_COPRODUCER_ERROR and does not fall back when Gemini fails", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    generateContentMock.mockRejectedValue(new Error("quota exceeded"));
 
     await expect(
       writeLyrics({
@@ -90,9 +77,9 @@ describe("Co-Producer Gemini lyrics via Replicate", () => {
         title: "Night Drive",
         language: "English",
       }),
-    ).rejects.toThrow("model not found");
+    ).rejects.toThrow("quota exceeded");
 
-    expect(logged).toHaveBeenCalledWith("[GEMINI_REPLICATE_ERROR]", expect.any(Error));
+    expect(logged).toHaveBeenCalledWith("[GEMINI_COPRODUCER_ERROR]", expect.any(Error));
     logged.mockRestore();
   });
 });

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readEnv, requireStageKey } from "@/lib/env";
+import { getFishApiKey, readEnv, requireFishApiKey, requireStageKey } from "@/lib/env";
 
 const KEYS = [
   "MUSIC_API_KEY",
   "VITE_MUSIC_API_KEY",
   "SONIC_API_KEY",
   "MUSICAPI_KEY",
+  "AIMUSIC_API_KEY",
+  "AI_MUSIC_API_KEY",
   "REPLICATE_API_TOKEN",
   "REPLICATE_API_KEY",
   "FISH_AUDIO_API_KEY",
@@ -19,6 +21,8 @@ describe("requireStageKey", () => {
     VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
+    AIMUSIC_API_KEY: process.env.AIMUSIC_API_KEY,
+    AI_MUSIC_API_KEY: process.env.AI_MUSIC_API_KEY,
     REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN,
     REPLICATE_API_KEY: process.env.REPLICATE_API_KEY,
     FISH_AUDIO_API_KEY: process.env.FISH_AUDIO_API_KEY,
@@ -38,20 +42,67 @@ describe("requireStageKey", () => {
     for (const name of keys) delete process.env[name];
   }
 
-  it("reads MUSIC_API_KEY for the MusicAPI stage", () => {
-    clear(["MUSIC_API_KEY", "VITE_MUSIC_API_KEY", "SONIC_API_KEY", "MUSICAPI_KEY"]);
+    it("reads MUSIC_API_KEY for the MusicAPI stage", () => {
+    clear([
+      "MUSIC_API_KEY",
+      "VITE_MUSIC_API_KEY",
+      "SONIC_API_KEY",
+      "MUSICAPI_KEY",
+      "AIMUSIC_API_KEY",
+      "AI_MUSIC_API_KEY",
+    ]);
     process.env.MUSIC_API_KEY = "music-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("music-key");
   });
 
   it("falls back to VITE_MUSIC_API_KEY", () => {
-    clear(["MUSIC_API_KEY", "VITE_MUSIC_API_KEY", "SONIC_API_KEY", "MUSICAPI_KEY"]);
+    clear([
+      "MUSIC_API_KEY",
+      "VITE_MUSIC_API_KEY",
+      "SONIC_API_KEY",
+      "MUSICAPI_KEY",
+      "AIMUSIC_API_KEY",
+      "AI_MUSIC_API_KEY",
+    ]);
     process.env.VITE_MUSIC_API_KEY = "vite-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("vite-key");
   });
 
+  it("accepts AIMUSIC_API_KEY as an alias for MusicAPI", () => {
+    clear([
+      "MUSIC_API_KEY",
+      "VITE_MUSIC_API_KEY",
+      "SONIC_API_KEY",
+      "MUSICAPI_KEY",
+      "AIMUSIC_API_KEY",
+      "AI_MUSIC_API_KEY",
+    ]);
+    process.env.AIMUSIC_API_KEY = "aimusic-key";
+    expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("aimusic-key");
+  });
+
+  it("accepts AI_MUSIC_API_KEY as an alias for MusicAPI", () => {
+    clear([
+      "MUSIC_API_KEY",
+      "VITE_MUSIC_API_KEY",
+      "SONIC_API_KEY",
+      "MUSICAPI_KEY",
+      "AIMUSIC_API_KEY",
+      "AI_MUSIC_API_KEY",
+    ]);
+    process.env.AI_MUSIC_API_KEY = "ai-music-key";
+    expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("ai-music-key");
+  });
+
   it("names the failing MusicAPI stage when the key is missing", () => {
-    clear(["MUSIC_API_KEY", "VITE_MUSIC_API_KEY", "SONIC_API_KEY", "MUSICAPI_KEY"]);
+    clear([
+      "MUSIC_API_KEY",
+      "VITE_MUSIC_API_KEY",
+      "SONIC_API_KEY",
+      "MUSICAPI_KEY",
+      "AIMUSIC_API_KEY",
+      "AI_MUSIC_API_KEY",
+    ]);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const message =
       "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
@@ -73,6 +124,28 @@ describe("requireStageKey", () => {
     clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
     process.env.FISH_API_KEY = "fish-key";
     expect(requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)")).toBe("fish-key");
+  });
+
+  it("prefers FISH_API_KEY over FISH_AUDIO_API_KEY and trims whitespace", () => {
+    clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
+    process.env.FISH_API_KEY = "  primary-fish  ";
+    process.env.FISH_AUDIO_API_KEY = "alias-fish";
+    expect(getFishApiKey()).toBe("primary-fish");
+  });
+
+  it("reads FISH_AUDIO_API_KEY when FISH_API_KEY is unset", () => {
+    clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
+    process.env.FISH_AUDIO_API_KEY = "  audio-fish  ";
+    expect(getFishApiKey()).toBe("audio-fish");
+  });
+
+  it("throws a clear Fish Audio error when both vocal keys are missing", () => {
+    clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => requireFishApiKey()).toThrow("Missing FISH_API_KEY in .env.local");
+    expect(error).toHaveBeenCalledWith(
+      "[FISH_AUDIO] FISH_API_KEY / FISH_AUDIO_API_KEY is undefined — add it to .env.local",
+    );
   });
 
   it("names Fish Audio when both vocal keys are missing", () => {
