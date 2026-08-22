@@ -6,6 +6,7 @@
  * the mixer. Provider names never leave this file.
  */
 import { encode } from "@msgpack/msgpack";
+import { requireStageKey } from "@/lib/env";
 import { describeFetchError } from "@/lib/safe-fetch";
 import { lyricsForCloneSpeech } from "@/lib/clone-lyrics";
 import { samplePathFromUrl } from "@/lib/instant-voice";
@@ -16,23 +17,8 @@ const FISH_TTS_URL = "https://api.fish.audio/v1/tts";
 const FISH_MODEL = "s2-pro";
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
-function env(name: string): string | undefined {
-  if (typeof process === "undefined" || !process.env) return undefined;
-  const direct = process.env[name];
-  if (direct?.trim()) return direct.trim();
-  const wanted = name.toLowerCase();
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.toLowerCase() === wanted && value?.trim()) return value.trim();
-  }
-  return undefined;
-}
-
 function fishApiKey(): string {
-  const key = env("FISH_API_KEY") ?? env("FISH_AUDIO_API_KEY");
-  if (!key) {
-    throw new Error("Voice cloning is not configured yet.");
-  }
-  return key;
+  return requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)");
 }
 
 async function loadReferenceAudio(sampleUrl: string): Promise<Uint8Array> {

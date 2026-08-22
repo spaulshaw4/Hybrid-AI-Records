@@ -7,11 +7,12 @@ import {
   waitForStudioTrack,
 } from "@/lib/music-generation";
 
-const KEY_NAMES = ["MUSIC_API_KEY", "MUSICAPI_KEY", "SONIC_API_KEY"] as const;
+const KEY_NAMES = ["MUSIC_API_KEY", "VITE_MUSIC_API_KEY", "MUSICAPI_KEY", "SONIC_API_KEY"] as const;
 
 describe("MusicAPI sonic workflow", () => {
   const originalKeys: Record<(typeof KEY_NAMES)[number], string | undefined> = {
     MUSIC_API_KEY: process.env.MUSIC_API_KEY,
+    VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
   };
@@ -115,6 +116,20 @@ describe("MusicAPI sonic workflow", () => {
     expect(headers.Authorization).toBe("Bearer alias-musicapi-key");
   });
 
+  it("uses VITE_MUSIC_API_KEY when MUSIC_API_KEY is unset", async () => {
+    clearMusicKeys();
+    process.env.VITE_MUSIC_API_KEY = "vite-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-vite");
+
+    await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
+    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers.Authorization).toBe("Bearer vite-music-key");
+  });
+
   it("uses SONIC_API_KEY when the other names are unset", async () => {
     clearMusicKeys();
     process.env.SONIC_API_KEY = "alias-sonic-key";
@@ -129,11 +144,14 @@ describe("MusicAPI sonic workflow", () => {
     expect(headers.Authorization).toBe("Bearer alias-sonic-key");
   });
 
-  it("logs ENV_ERROR and throws when no music API key is configured", () => {
+  it("logs PIPELINE_INIT_FAILED when no music API key is configured", () => {
     clearMusicKeys();
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(() => musicApiKey()).toThrow("Music API key is not configured");
-    expect(error).toHaveBeenCalledWith("[ENV_ERROR] Music API key not found in process.env");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const message =
+      "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Environment variable 'MUSIC_API_KEY' is missing.";
+    expect(() => musicApiKey()).toThrow(message);
+    expect(error).toHaveBeenCalledWith(message);
   });
 
   it("uses female vocal gender and the female negative tag set", async () => {

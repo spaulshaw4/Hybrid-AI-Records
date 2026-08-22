@@ -12,7 +12,8 @@
  *    track's real bar grid.
  */
 
-import { replicateBaseUrl, replicateHeaders } from "@/lib/ai-provider.server";
+import { replicateBaseUrl } from "@/lib/ai-provider.server";
+import { requireStageKey } from "@/lib/env";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
 
 const DEMUCS_MODEL = process.env["DEMUCS_MODEL"] || "ryan5453/demucs";
@@ -24,7 +25,11 @@ export type StemResult = {
 };
 
 function credentials() {
-  return replicateHeaders("The stem separation worker");
+  const token = requireStageKey("REPLICATE_API_TOKEN", "Stem Separation");
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  };
 }
 
 async function bail(response: Response, what: string): Promise<never> {

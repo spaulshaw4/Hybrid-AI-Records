@@ -24,6 +24,7 @@ import {
   masteredPcmPath,
   type HybridStemInputs,
 } from "@/lib/matchering";
+import { readEnv } from "@/lib/env";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,7 +75,7 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 export function resolveMatcheringReferencePath(cwd: string = process.cwd()): string | null {
-  const fromEnv = process.env.MATCHERING_REFERENCE_PATH?.trim();
+  const fromEnv = readEnv("MATCHERING_REFERENCE_PATH");
   if (fromEnv) return fromEnv;
   return join(cwd, MATCHERING_REFERENCE_RELATIVE);
 }
@@ -97,10 +98,9 @@ async function runMatcheringPython(input: {
   outWav: string;
 }): Promise<boolean> {
   const scriptArgs = matcheringPythonArgs(input);
+  const pythonFromEnv = readEnv("MATCHERING_PYTHON");
   const binaries: Array<{ bin: string; prefix: string[] }> = [
-    ...(process.env.MATCHERING_PYTHON
-      ? [{ bin: process.env.MATCHERING_PYTHON, prefix: [] as string[] }]
-      : []),
+    ...(pythonFromEnv ? [{ bin: pythonFromEnv, prefix: [] as string[] }] : []),
     { bin: "python3", prefix: [] },
     { bin: "python", prefix: [] },
     { bin: "py", prefix: ["-3"] },

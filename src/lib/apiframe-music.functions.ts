@@ -167,10 +167,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
   })
   .handler(async ({ data, context }) => {
-    const { generateStudioTrack, musicApiKey, waitForStudioTrack } = await import(
-      "@/lib/music-generation"
-    );
-    musicApiKey();
+    const { requireStageKey } = await import("@/lib/env");
+    requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)");
+    const { generateStudioTrack, waitForStudioTrack } = await import("@/lib/music-generation");
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
     const { DEV_TEST_VOICE_ID, isDevAuthBypass } = await import("@/lib/dev-auth");
     if (!isDevAuthBypass()) {
