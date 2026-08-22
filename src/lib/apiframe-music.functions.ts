@@ -153,6 +153,10 @@ const generateSchema = z.object({
 
 const taskSchema = z.object({ taskId: z.string().trim().min(1).max(200) });
 
+/**
+ * Studio generate — TanStack Start server function (Node `process.env`).
+ * The browser calls this through `useServerFn`; MusicAPI secrets never ship to the client.
+ */
 export const generateEngineTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => {
@@ -163,6 +167,10 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
   })
   .handler(async ({ data, context }) => {
+    const { generateStudioTrack, musicApiKey, waitForStudioTrack } = await import(
+      "@/lib/music-generation"
+    );
+    musicApiKey();
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
     const { DEV_TEST_VOICE_ID, isDevAuthBypass } = await import("@/lib/dev-auth");
     if (!isDevAuthBypass()) {
@@ -266,7 +274,6 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       durationSeconds,
     });
 
-    const { generateStudioTrack, waitForStudioTrack } = await import("@/lib/music-generation");
     const started = await generateStudioTrack({
       genre,
       subGenre: payload.subGenre?.trim() || undefined,
@@ -278,7 +285,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
         ? undefined
         : payload.vocalGender?.trim() || vocalGenderFromProfile(vocalProfile),
       lyrics: lyricContent,
-      title: payload.title || "Hybrid Master",
+      title: payload.title || "Studio Master",
       isInstrumental: payload.instrumental,
     });
     const finished = await waitForStudioTrack(started.taskId);
