@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AIMUSICAPI_HEADER_FORMAT,
   generateStudioTrack,
   musicApiKey,
   SONIC_CREATE_URL,
@@ -8,22 +9,26 @@ import {
 } from "@/lib/music-generation";
 
 const KEY_NAMES = [
+  "AIMUSICAPI_KEY",
   "MUSIC_API_KEY",
   "VITE_MUSIC_API_KEY",
   "MUSICAPI_KEY",
   "SONIC_API_KEY",
   "AIMUSIC_API_KEY",
   "AI_MUSIC_API_KEY",
+  "ENGINE_API_KEY",
 ] as const;
 
 describe("MusicAPI sonic workflow", () => {
   const originalKeys: Record<(typeof KEY_NAMES)[number], string | undefined> = {
+    AIMUSICAPI_KEY: process.env.AIMUSICAPI_KEY,
     MUSIC_API_KEY: process.env.MUSIC_API_KEY,
     VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
     AIMUSIC_API_KEY: process.env.AIMUSIC_API_KEY,
     AI_MUSIC_API_KEY: process.env.AI_MUSIC_API_KEY,
+    ENGINE_API_KEY: process.env.ENGINE_API_KEY,
   };
 
   afterEach(() => {
@@ -92,6 +97,9 @@ describe("MusicAPI sonic workflow", () => {
     expect(headers.Authorization).toBe("Bearer test-music-key");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body.task_type).toBe("create_music");
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Target URL:", SONIC_CREATE_URL);
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Using key prefix:", "test-mus...");
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
     expect(log).toHaveBeenCalledWith(
       "[MUSICAPI_CREATE_REQUEST]",
       expect.stringContaining('"task_type": "create_music"'),
@@ -100,6 +108,58 @@ describe("MusicAPI sonic workflow", () => {
       "[MUSICAPI_CREATE_RESPONSE]",
       200,
       expect.stringContaining('"task_id": "task-55"'),
+    );
+  });
+
+  it("prefers AIMUSICAPI_KEY over MUSIC_API_KEY and ENGINE_API_KEY", async () => {
+    clearMusicKeys();
+    process.env.AIMUSICAPI_KEY = "primary-aimusicapi-key";
+    process.env.MUSIC_API_KEY = "secondary-music-key";
+    process.env.ENGINE_API_KEY = "engine-fallback-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-primary");
+
+    await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers.Authorization).toBe("Bearer primary-aimusicapi-key");
+  });
+
+  it("uses ENGINE_API_KEY when music-specific keys are unset", async () => {
+    clearMusicKeys();
+    process.env.ENGINE_API_KEY = "engine-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-engine");
+
+    await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
+    const headers = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers.Authorization).toBe("Bearer engine-music-key");
+  });
+
+  it("logs the full upstream body when create returns a non-200 status", async () => {
+    clearMusicKeys();
+    process.env.AIMUSICAPI_KEY = "diag-music-key";
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ type: "unauthorized", error: "Invalid API key" }, 401),
+      ),
+    );
+
+    await expect(generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" })).rejects.toThrow(
+      "Music engine: Invalid API key",
+    );
+    expect(error).toHaveBeenCalledWith(
+      "[AIMUSICAPI_ERROR]",
+      401,
+      expect.stringContaining("Invalid API key"),
     );
   });
 
@@ -190,7 +250,7 @@ describe("MusicAPI sonic workflow", () => {
       "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
     expect(() => musicApiKey()).toThrow(message);
     expect(error).toHaveBeenCalledWith(
-      "[MUSICAPI] AIMUSIC_API_KEY / AI_MUSIC_API_KEY is undefined — add it to .env.local",
+      "[AIMUSICAPI] AIMUSICAPI_KEY / AI_MUSIC_API_KEY / MUSIC_API_KEY / ENGINE_API_KEY is undefined — add it to .env.local",
     );
     expect(error).toHaveBeenCalledWith(message);
   });
@@ -238,6 +298,9 @@ describe("MusicAPI sonic workflow", () => {
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).toEqual({
       Authorization: "Bearer test-music-key",
     });
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Target URL:", `${SONIC_TASK_URL}/task-poll`);
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Using key prefix:", "test-mus...");
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
     expect(log).toHaveBeenCalledWith(
       "[MUSICAPI_POLL_RESPONSE]",
       200,

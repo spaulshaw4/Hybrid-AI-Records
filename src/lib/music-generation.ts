@@ -1,8 +1,12 @@
 /**
- * Suno / Sonic studio generation (MusicAPI).
+ * Sonic studio generation (AIMusicAPI / MusicAPI).
  *
  * Two-step workflow: POST /sonic/create, then poll GET /sonic/task/{id}
  * until `data.status` is succeeded or failed.
+ *
+ * Official host is `api.aimusicapi.ai`. Auth is Bearer
+ * (`Authorization: Bearer ${apiKey}`). Custom-mode body is Sonic, not MiniMax:
+ * lyrics go in `prompt`, style in `tags`, model in `mv`.
  *
  * `mv` is MusicAPI's model id. Standard v5 is `sonic-v5`. `sonic-v5-5` is
  * attempted first when requested, then we fall back to `sonic-v5` if the
@@ -14,8 +18,11 @@
 
 import { readEnv, requireStageKey } from "@/lib/env";
 
-export const SONIC_CREATE_URL = "https://api.musicapi.ai/api/v1/sonic/create";
-export const SONIC_TASK_URL = "https://api.musicapi.ai/api/v1/sonic/task";
+export const AIMUSICAPI_BASE_URL = "https://api.aimusicapi.ai";
+export const SONIC_CREATE_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/create`;
+export const SONIC_TASK_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/task`;
+/** Official AIMusicAPI auth scheme — not `x-api-key` or a raw key header. */
+export const AIMUSICAPI_HEADER_FORMAT = "Authorization: Bearer";
 /** Standard MusicAPI v5 model. */
 export const SONIC_MODEL = "sonic-v5";
 /** Newer id — some accounts reject this; we retry with SONIC_MODEL. */
@@ -64,20 +71,43 @@ export type StudioTrackResult = {
 
 const MUSIC_STAGE = "MusicAPI (Base Arrangement)" as const;
 
+function trimProcessEnv(name: string): string | undefined {
+  if (typeof process === "undefined" || !process.env) return undefined;
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
+/**
+ * Preferred names first, then historic aliases, then ENGINE_API_KEY last
+ * so a Replicate token is not used when a music-specific key exists.
+ */
 export function getMusicApiKey(): string {
   const apiKey =
-    (typeof process !== "undefined" && process.env.AIMUSIC_API_KEY?.trim()) ||
-    (typeof process !== "undefined" && process.env.AI_MUSIC_API_KEY?.trim()) ||
-    readEnv("AIMUSIC_API_KEY") ||
+    trimProcessEnv("AIMUSICAPI_KEY") ||
+    trimProcessEnv("AI_MUSIC_API_KEY") ||
+    trimProcessEnv("MUSIC_API_KEY") ||
+    readEnv("AIMUSICAPI_KEY") ||
     readEnv("AI_MUSIC_API_KEY") ||
-    readEnv("MUSIC_API_KEY");
+    readEnv("MUSIC_API_KEY") ||
+    readEnv("AIMUSIC_API_KEY") ||
+    trimProcessEnv("ENGINE_API_KEY");
   if (!apiKey) {
     console.error(
-      "[MUSICAPI] AIMUSIC_API_KEY / AI_MUSIC_API_KEY is undefined — add it to .env.local",
+      "[AIMUSICAPI] AIMUSICAPI_KEY / AI_MUSIC_API_KEY / MUSIC_API_KEY / ENGINE_API_KEY is undefined — add it to .env.local",
     );
     return requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
   }
   return apiKey;
+}
+
+function musicApiKeyPrefix(apiKey: string | undefined): string {
+  return apiKey ? `${apiKey.slice(0, 8)}...` : "NONE_FOUND";
+}
+
+function logAimusicRequest(targetUrl: string, apiKey: string | undefined): void {
+  console.log("[AIMUSICAPI] Target URL:", targetUrl);
+  console.log("[AIMUSICAPI] Using key prefix:", musicApiKeyPrefix(apiKey));
+  console.log("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
 }
 
 export function musicApiKey(): string {
@@ -222,6 +252,7 @@ async function postSonicCreate(
   apiKey: string,
 ): Promise<{ response: Response; raw: unknown }> {
   console.log("[MUSICAPI_CREATE_REQUEST]", JSON.stringify(payload, null, 2));
+  logAimusicRequest(SONIC_CREATE_URL, apiKey);
   const response = await fetch(SONIC_CREATE_URL, {
     method: "POST",
     headers: {
@@ -232,6 +263,9 @@ async function postSonicCreate(
   });
   const raw = await readResponseBody(response);
   console.log("[MUSICAPI_CREATE_RESPONSE]", response.status, previewBody(raw));
+  if (!response.ok) {
+    console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+  }
   return { response, raw };
 }
 
@@ -283,7 +317,9 @@ export async function generateStudioTrack(options: StudioTrackOptions): Promise<
 
 export async function fetchStudioTrackTask(taskId: string): Promise<StudioTrackResult> {
   const apiKey = getMusicApiKey();
-  const response = await fetch(`${SONIC_TASK_URL}/${encodeURIComponent(taskId)}`, {
+  const targetUrl = `${SONIC_TASK_URL}/${encodeURIComponent(taskId)}`;
+  logAimusicRequest(targetUrl, apiKey);
+  const response = await fetch(targetUrl, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -291,6 +327,9 @@ export async function fetchStudioTrackTask(taskId: string): Promise<StudioTrackR
   });
   const raw = await readResponseBody(response);
   console.log("[MUSICAPI_POLL_RESPONSE]", response.status, previewBody(raw));
+  if (!response.ok && response.status !== 202) {
+    console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+  }
   if (response.status === 202) {
     return { taskId, status: "processing", audioUrl: null, imageUrl: null, title: null };
   }

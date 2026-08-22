@@ -6,6 +6,7 @@ const KEYS = [
   "VITE_MUSIC_API_KEY",
   "SONIC_API_KEY",
   "MUSICAPI_KEY",
+  "AIMUSICAPI_KEY",
   "AIMUSIC_API_KEY",
   "AI_MUSIC_API_KEY",
   "REPLICATE_API_TOKEN",
@@ -23,6 +24,7 @@ describe("requireStageKey", () => {
     VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
+    AIMUSICAPI_KEY: process.env.AIMUSICAPI_KEY,
     AIMUSIC_API_KEY: process.env.AIMUSIC_API_KEY,
     AI_MUSIC_API_KEY: process.env.AI_MUSIC_API_KEY,
     REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN,
@@ -46,67 +48,48 @@ describe("requireStageKey", () => {
     for (const name of keys) delete process.env[name];
   }
 
+  const MUSIC_KEYS = [
+    "MUSIC_API_KEY",
+    "VITE_MUSIC_API_KEY",
+    "SONIC_API_KEY",
+    "MUSICAPI_KEY",
+    "AIMUSICAPI_KEY",
+    "AIMUSIC_API_KEY",
+    "AI_MUSIC_API_KEY",
+  ] as const;
+
     it("reads MUSIC_API_KEY for the MusicAPI stage", () => {
-    clear([
-      "MUSIC_API_KEY",
-      "VITE_MUSIC_API_KEY",
-      "SONIC_API_KEY",
-      "MUSICAPI_KEY",
-      "AIMUSIC_API_KEY",
-      "AI_MUSIC_API_KEY",
-    ]);
+    clear(MUSIC_KEYS);
     process.env.MUSIC_API_KEY = "music-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("music-key");
   });
 
   it("falls back to VITE_MUSIC_API_KEY", () => {
-    clear([
-      "MUSIC_API_KEY",
-      "VITE_MUSIC_API_KEY",
-      "SONIC_API_KEY",
-      "MUSICAPI_KEY",
-      "AIMUSIC_API_KEY",
-      "AI_MUSIC_API_KEY",
-    ]);
+    clear(MUSIC_KEYS);
     process.env.VITE_MUSIC_API_KEY = "vite-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("vite-key");
   });
 
+  it("accepts AIMUSICAPI_KEY as an alias for MusicAPI", () => {
+    clear(MUSIC_KEYS);
+    process.env.AIMUSICAPI_KEY = "aimusicapi-key";
+    expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("aimusicapi-key");
+  });
+
   it("accepts AIMUSIC_API_KEY as an alias for MusicAPI", () => {
-    clear([
-      "MUSIC_API_KEY",
-      "VITE_MUSIC_API_KEY",
-      "SONIC_API_KEY",
-      "MUSICAPI_KEY",
-      "AIMUSIC_API_KEY",
-      "AI_MUSIC_API_KEY",
-    ]);
+    clear(MUSIC_KEYS);
     process.env.AIMUSIC_API_KEY = "aimusic-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("aimusic-key");
   });
 
   it("accepts AI_MUSIC_API_KEY as an alias for MusicAPI", () => {
-    clear([
-      "MUSIC_API_KEY",
-      "VITE_MUSIC_API_KEY",
-      "SONIC_API_KEY",
-      "MUSICAPI_KEY",
-      "AIMUSIC_API_KEY",
-      "AI_MUSIC_API_KEY",
-    ]);
+    clear(MUSIC_KEYS);
     process.env.AI_MUSIC_API_KEY = "ai-music-key";
     expect(requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toBe("ai-music-key");
   });
 
   it("names the failing MusicAPI stage when the key is missing", () => {
-    clear([
-      "MUSIC_API_KEY",
-      "VITE_MUSIC_API_KEY",
-      "SONIC_API_KEY",
-      "MUSICAPI_KEY",
-      "AIMUSIC_API_KEY",
-      "AI_MUSIC_API_KEY",
-    ]);
+    clear(MUSIC_KEYS);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const message =
       "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
