@@ -1,9 +1,15 @@
 /**
- * Server-only Hybrid Engine finish: Demucs split → Fish vocals → Matchering.
+ * Server-only Hybrid Engine finish: stem split → vocal conversion → Matchering.
  *
  * Completed masters are uploaded only after Matchering (or its loudnorm
  * fallback) writes a premaster. Callers must not mark the job complete with
  * the raw Stage 1 mix.
+ *
+ * A vocal render halts on the first failure rather than degrading. Returning
+ * the untouched engine mix would hand the artist a track that still carries
+ * the original vocal, which is indistinguishable from success until they
+ * listen. The caller charges the token only after this resolves, so throwing
+ * leaves the artist unbilled.
  */
 import { backingStemUrl } from "@/lib/stem-urls";
 
@@ -24,6 +30,32 @@ async function downloadAudioBytes(url: string): Promise<Uint8Array> {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength < 1024) throw new Error("Downloaded audio was empty.");
   return bytes;
+}
+
+/**
+ * Copy for a halted vocal render. Both stay vendor-neutral, and both promise
+ * the token is safe: the caller charges only after this pipeline resolves, so
+ * throwing here means the artist was never billed.
+ */
+const VOCAL_FAILURE_MESSAGE = "Vocal conversion failed. Your hybrid tokens have not been charged.";
+const VOCAL_TIMEOUT_MESSAGE = "Vocal processing engine timed out. Please try your render again.";
+
+function isTimeout(error: unknown): boolean {
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /timed\s?out|timeout/i.test(message);
+}
+
+/**
+ * Halts a vocal render. The provider-specific cause goes to the server log;
+ * the artist gets neutral copy that names the stage, not the vendor.
+ */
+function haltVocalRender(stage: string, error: unknown): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`[pipeline] ${stage} failed — halting render:`, detail);
+  return new Error(isTimeout(error) ? VOCAL_TIMEOUT_MESSAGE : VOCAL_FAILURE_MESSAGE);
 }
 
 async function archiveUrl(
@@ -62,6 +94,8 @@ export async function runHybridMasterPipeline(input: {
   let isolatedVocalUrl: string | null = null;
   let convertedVocalUrl: string | null = null;
 
+  const wantsVocals = !input.instrumental && input.lyrics.trim().length > 0;
+
   try {
     const baseBytes = await downloadAudioBytes(input.baseAudioUrl);
     const { separateStems } = await import("@/lib/stems.server");
@@ -76,27 +110,33 @@ export async function runHybridMasterPipeline(input: {
     )) ?? instrumentalUrl;
     isolatedVocalUrl = await archiveUrl(stems.vocals, input.userId, `${input.taskId}-demucs-vocals`);
   } catch (error) {
+    // An instrumental render masters the base mix directly, so a failed split
+    // costs nothing. A vocal render has no backing track to sing over without
+    // it, and mastering the raw mix would hand back a track with the original
+    // vocal still in it.
+    if (wantsVocals) throw haltVocalRender("stem isolation", error);
     console.warn(
-      "[pipeline] Demucs split skipped",
+      "[pipeline] stem split skipped for instrumental render",
       error instanceof Error ? error.message : error,
     );
   }
 
-  if (!input.instrumental && input.lyrics.trim()) {
+  if (wantsVocals) {
     try {
       const { convertVocalsWithStems, cloneVocalsFromSample } = await import("@/lib/fish-tts.server");
+      // These downloads used to swallow failures, which quietly demoted a
+      // voice-converted render to plain text-to-speech, or dropped the
+      // artist's own reference take without telling them.
       let isolatedVocal: Uint8Array | undefined;
       if (isolatedVocalUrl) {
-        isolatedVocal = await downloadAudioBytes(isolatedVocalUrl).catch(() => undefined);
+        isolatedVocal = await downloadAudioBytes(isolatedVocalUrl);
       }
       const converted = input.referenceSampleUrl
         ? isolatedVocal
           ? await convertVocalsWithStems({
               lyrics: input.lyrics,
               isolatedVocal,
-              referenceAudio: await downloadAudioBytes(input.referenceSampleUrl).catch(
-                () => undefined,
-              ),
+              referenceAudio: await downloadAudioBytes(input.referenceSampleUrl),
               audioFormat: input.audioFormat,
               title: `${input.title} vocals`,
               userId: input.userId,
@@ -120,15 +160,14 @@ export async function runHybridMasterPipeline(input: {
           });
       convertedVocalUrl = converted.tracks.find((track) => track.audioUrl)?.audioUrl ?? null;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/Missing FISH_API_KEY|FISH_AUDIO_API_KEY is undefined/i.test(message)) {
-        console.error("[FISH_AUDIO] vocal conversion aborted — API key missing");
-        throw error instanceof Error ? error : new Error(message);
-      }
-      console.warn(
-        "[pipeline] Fish Audio vocals skipped",
-        message,
-      );
+      throw haltVocalRender("vocal conversion", error);
+    }
+
+    // A response with no usable audio is still a failed conversion. Falling
+    // through here would master the untouched engine vocal and pass it off as
+    // the converted one.
+    if (!convertedVocalUrl) {
+      throw haltVocalRender("vocal conversion", new Error("no converted vocal was returned"));
     }
   }
 

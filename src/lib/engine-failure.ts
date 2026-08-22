@@ -13,6 +13,7 @@ export type EngineFailureKind =
   | "credits"
   | "payload"
   | "timeout"
+  | "vocal"
   | "network"
   | "auth"
   | "storage"
@@ -43,6 +44,18 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
       kind: "cancelled",
       headline: "Render canceled",
       message: `Render canceled. ${TOKEN_SAFE}`,
+      retryable: true,
+    };
+  }
+
+  // Must precede the timeout branch. A halted vocal stage says "timed out",
+  // but the render is over — telling the artist to reconnect to a still-running
+  // job would be wrong. These messages already carry their own token line.
+  if (lower.startsWith("vocal conversion failed") || lower.startsWith("vocal processing engine")) {
+    return {
+      kind: "vocal",
+      headline: "Vocal processing did not finish",
+      message: text,
       retryable: true,
     };
   }
