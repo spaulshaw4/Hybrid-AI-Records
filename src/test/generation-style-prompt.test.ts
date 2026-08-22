@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildDynamicStylePrompt, isDynamicStylePrompt } from "@/lib/generation-style-prompt";
+import {
+  buildDynamicStylePrompt,
+  concatStylePromptWithLyrics,
+  isDynamicStylePrompt,
+} from "@/lib/generation-style-prompt";
 
 describe("buildDynamicStylePrompt", () => {
   it("uses the request genre, BPM, mood, and instruments verbatim", () => {
@@ -25,6 +29,19 @@ describe("buildDynamicStylePrompt", () => {
         vocalProfile: "Aggressive Rock Vocal",
       }),
     ).toBe("Heavy Rock, 92 BPM, Aggressive Rock Vocal vocals");
+  });
+});
+
+describe("concatStylePromptWithLyrics", () => {
+  it("concatenates stylePrompt directly with the user's lyrics", () => {
+    expect(
+      concatStylePromptWithLyrics("Nu-Metal, 102 BPM", "[Verse]\nNight drive"),
+    ).toBe("Nu-Metal, 102 BPM\n\n[Verse]\nNight drive");
+  });
+
+  it("returns lyrics alone when there is no style prompt", () => {
+    expect(concatStylePromptWithLyrics("", "[Chorus]\nGo")).toBe("[Chorus]\nGo");
+    expect(concatStylePromptWithLyrics(null, "")).toBe("");
   });
 });
 

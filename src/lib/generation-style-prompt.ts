@@ -48,6 +48,17 @@ export function isDynamicStylePrompt(text: string | null | undefined): boolean {
   );
 }
 
+/**
+ * Joins style tags with lyrics for a single prompt field.
+ * MiniMax / ACE-Step still keep lyrics on the dedicated lyrics key.
+ */
+export function concatStylePromptWithLyrics(
+  stylePrompt?: string | null,
+  lyrics?: string | null,
+): string {
+  return stylePrompt ? `${stylePrompt}\n\n${lyrics || ""}`.trim() : lyrics || "";
+}
+
 /** Logs the exact JSON posted to a music API (no audio bytes). */
 export function logApiPayload(payload: unknown): void {
   console.log("[API_PAYLOAD]", JSON.stringify(payload, null, 2));
