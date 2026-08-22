@@ -82,3 +82,62 @@ export async function uploadEngineMaster(
   const { saveLocalAudioFile } = await import("@/lib/local-vault.server");
   return saveLocalAudioFile(bytes, objectPath, fileType);
 }
+
+/**
+ * Marks the generate as completed in Supabase the moment a playable master
+ * URL exists. Writes `user_vault` and `studio_tracks`, and best-effort
+ * `generation_tasks` (same contract: status + audio_url).
+ */
+export async function completeGenerationTask(input: {
+  taskId?: string | null;
+  userId: string;
+  audioUrl: string;
+}): Promise<void> {
+  const taskId = input.taskId?.trim();
+  const audioUrl = input.audioUrl.trim();
+  if (!taskId || !audioUrl) return;
+  const supabase = createEngineSupabaseClient();
+  if (!supabase) {
+    console.warn("[engine] completeGenerationTask skipped — no admin client");
+    return;
+  }
+  const now = new Date().toISOString();
+
+  const { error: vaultError } = await supabase
+    .from("user_vault")
+    .update({ status: "completed", master_url: audioUrl })
+    .eq("id", taskId)
+    .eq("user_id", input.userId);
+  if (vaultError) {
+    console.warn("[engine] user_vault completion update failed", vaultError.message);
+  }
+
+  const { error: studioError } = await supabase
+    .from("studio_tracks")
+    .update({
+      audio_url: audioUrl,
+      mastered_status: "ready",
+      updated_at: now,
+    })
+    .eq("id", taskId)
+    .eq("user_id", input.userId);
+  if (studioError) {
+    console.warn("[engine] studio_tracks completion update failed", studioError.message);
+  }
+
+  const taskClient = supabase as unknown as {
+    from: (table: string) => {
+      update: (values: Record<string, string>) => {
+        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+      };
+    };
+  };
+  const { error: taskError } = await taskClient.from("generation_tasks").update({
+    status: "completed",
+    audio_url: audioUrl,
+    updated_at: now,
+  }).eq("id", taskId);
+  if (taskError && !/schema cache|does not exist|Could not find the table/i.test(taskError.message)) {
+    console.warn("[engine] generation_tasks completion update failed", taskError.message);
+  }
+}

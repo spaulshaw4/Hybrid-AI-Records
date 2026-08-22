@@ -27,7 +27,9 @@ export function isPlayableVaultAudioUrl(url: unknown): url is string {
   if (typeof url !== "string") return false;
   const trimmed = url.trim();
   if (!trimmed || trimmed === "null" || trimmed === "undefined") return false;
-  return /^(https?:\/\/|blob:|data:audio\/)/i.test(trimmed);
+  if (/^(https?:\/\/|blob:|data:audio\/)/i.test(trimmed)) return true;
+  // Local vault / temp master fallbacks are same-origin paths.
+  return trimmed.startsWith("/");
 }
 
 function playableOrNull(url: unknown): string | null {
@@ -50,7 +52,7 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
     if (!id) continue;
 
     const status = asVaultTrackStatus(row.status);
-    const masterUrl = playableOrNull(row.master_url ?? row.masterUrl);
+    const masterUrl = playableOrNull(row.master_url ?? row.masterUrl ?? row.audio_url ?? row.audioUrl);
     const instrumentalUrl = playableOrNull(row.instrumental_url ?? row.instrumentalUrl);
     const vocalUrl = playableOrNull(row.vocal_url ?? row.vocalUrl);
     const createdAt =
@@ -60,10 +62,13 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
           ? row.createdAt
           : new Date(0).toISOString();
 
-    // Completed-but-silent rows used to render an empty <audio src>. Keep them
-    // as failed so the artist can delete them without a broken player.
-    const nextStatus: VaultTrackStatus =
-      status === "completed" && !masterUrl ? "failed" : status;
+    // A playable master always wins over a stale processing/failed flag so the
+    // vault never hides a finished render or paints a phantom failure.
+    const nextStatus: VaultTrackStatus = masterUrl
+      ? "completed"
+      : status === "completed"
+        ? "failed"
+        : status;
 
     out.push({
       id,

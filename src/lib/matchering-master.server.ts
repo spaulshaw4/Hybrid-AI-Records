@@ -264,6 +264,19 @@ async function mixAndMasterOnce(options: {
     console.log("[master] Uploading to vault & preparing player...");
     const masterUrl = await uploadMasteredBytes(new Uint8Array(mp3), playableObject, "mp3");
     console.log("[master] vault upload ready", playableObject);
+    try {
+      const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
+      await completeGenerationTask({
+        taskId: options.taskId,
+        userId: options.userId,
+        audioUrl: masterUrl,
+      });
+    } catch (error) {
+      console.warn(
+        "[master] generation_tasks completion skipped",
+        error instanceof Error ? error.message : error,
+      );
+    }
     if (wav && wav.byteLength > 1024) {
       await uploadMasteredBytes(
         new Uint8Array(wav),

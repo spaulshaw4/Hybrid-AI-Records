@@ -4,7 +4,7 @@ import { sanitizeVaultTracks, type SanitizedVaultTrack } from "@/lib/vault-track
 
 export const VAULT_API_URL = "/api/studio/vault";
 export const VAULT_NEW_GENERATION_EVENT = "hybrid:vault-new-generation";
-export const VAULT_POLL_MS = 5_000;
+export const VAULT_POLL_MS = 2_000;
 
 export type VaultTrackPayload = SanitizedVaultTrack;
 
@@ -65,16 +65,21 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
   id?: string;
   title?: string;
   style?: string;
+  status?: "processing" | "completed" | "failed";
+  masterUrl?: string | null;
+  instrumentalUrl?: string | null;
+  vocalUrl?: string | null;
 }) {
   if (typeof window === "undefined") return;
+  const status = tempTrackData.status ?? "processing";
   const track: VaultTrackPayload = {
     id: tempTrackData.id || `temp-${Date.now()}`,
     title: tempTrackData.title || "New Generation",
     style: tempTrackData.style || "Custom",
-    status: "processing",
-    master_url: null,
-    instrumental_url: null,
-    vocal_url: null,
+    status,
+    master_url: tempTrackData.masterUrl ?? null,
+    instrumental_url: tempTrackData.instrumentalUrl ?? null,
+    vocal_url: tempTrackData.vocalUrl ?? null,
     created_at: new Date().toISOString(),
   };
   window.dispatchEvent(new CustomEvent(VAULT_NEW_GENERATION_EVENT, { detail: track }));

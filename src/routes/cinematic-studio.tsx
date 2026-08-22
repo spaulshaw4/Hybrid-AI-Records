@@ -1434,23 +1434,7 @@ function CinematicStudioPage() {
             </CardHeader>
             <CardContent className="space-y-5">
               {autoPhase === "running" && autoStage ? (
-                <>
-                  <AutoPipelineBar stage={autoStage} />
-                  {isGenerating && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => void handleCancelRender()}
-                      disabled={canceling}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Square className="size-4" aria-hidden />
-                        {canceling ? "Cancelling…" : "Cancel generation"}
-                      </span>
-                    </Button>
-                  )}
-                </>
+                <AutoPipelineBar stage={autoStage} />
               ) : (
                 <OneClickIngest
                   timing={audioTiming}
@@ -1876,20 +1860,6 @@ function CinematicStudioPage() {
                 )}
 
 
-                {isGenerating && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => void handleCancelRender()}
-                    disabled={canceling}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Square className="size-4" aria-hidden />
-                      {canceling ? "Cancelling…" : "Cancel generation"}
-                    </span>
-                  </Button>
-                )}
 
                 {progress && (
                   <CinematicRenderProgress

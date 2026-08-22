@@ -99,7 +99,7 @@ function upsertProcessing(previous: UserVaultRow[], incoming: UserVaultRow): Use
       !(
         row.id.startsWith("temp-") &&
         row.title === incoming.title &&
-        row.status === "processing"
+        (row.status === "processing" || incoming.status === "completed")
       ),
   );
   if (withoutTemps.some((row) => row.id === incoming.id)) {
@@ -168,10 +168,13 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       const detail = (event as CustomEvent<VaultTrackPayload>).detail;
       if (!detail?.id) return;
       setRows((prev) => upsertProcessing(prev, fromApi(detail)));
+      if (detail.status === "completed" || detail.master_url) {
+        void refresh();
+      }
     };
     window.addEventListener(VAULT_NEW_GENERATION_EVENT, onNewGeneration);
     return () => window.removeEventListener(VAULT_NEW_GENERATION_EVENT, onNewGeneration);
-  }, []);
+  }, [refresh]);
 
   const processing = rows.some((row) => row.status === "processing");
   useEffect(() => {
@@ -224,29 +227,29 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }
 
   return (
-    <div className="vault-container space-y-4 rounded-xl border border-border bg-card/90 p-6">
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <h3 className="text-lg font-bold text-foreground">Your Audio Vault</h3>
-        <span className="text-xs text-muted-foreground">Manage, stream, and export stems</span>
+    <div className="vault-container bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50 p-6">
+      <div className="mb-1 flex items-center justify-between gap-3 pb-4">
+        <h3 className="text-lg font-bold text-zinc-100">Your Audio Vault</h3>
+        <span className="text-xs text-zinc-400">Manage, stream, and export stems</span>
       </div>
 
-      <div id="vault-track-list" className="space-y-3">
+      <div id="vault-track-list" className="divide-y divide-zinc-800/50">
         {!signedIn ? (
-          <p className="text-sm text-muted-foreground">Sign in to keep every generate in your vault.</p>
+          <p className="py-3 text-sm text-zinc-400">Sign in to keep every generate in your vault.</p>
         ) : loading && rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Loading vault assets…</p>
+          <p className="py-3 text-sm text-zinc-400">Loading vault assets…</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tracks saved. Hit Generate to start.</p>
+          <p className="py-3 text-sm text-zinc-400">No tracks saved. Hit Generate to start.</p>
         ) : (
           rows.map((row) => (
             <div
               key={row.id}
               id={`vault-track-${row.id}`}
-              className="track-row flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between"
+              className="track-row flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-foreground">{row.title}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="truncate text-sm font-semibold text-zinc-100">{row.title}</p>
+                <p className="text-xs text-zinc-400">
                   Generated: {relativeStamp(row.createdAt)} • Status:{" "}
                   {row.status === "processing" ? (
                     <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
@@ -262,7 +265,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                {row.status === "completed" && isPlayableVaultAudioUrl(row.masterUrl) ? (
+                {isPlayableVaultAudioUrl(row.masterUrl) ? (
                   <>
                     <audio controls className="h-8 max-w-[200px]" src={row.masterUrl} preload="none">
                       <track kind="captions" />
@@ -329,6 +332,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                   </span>
                 ) : null}
 
+                {row.status !== "processing" ? (
                 <Button
                   type="button"
                   size="sm"
@@ -344,6 +348,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                   )}
                   Delete
                 </Button>
+                ) : null}
               </div>
             </div>
           ))

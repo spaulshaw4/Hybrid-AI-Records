@@ -75,15 +75,17 @@ export async function persistLocalVaultTrack(
 ): Promise<string> {
   const rows = await loadCatalog();
   const id = stems.id || randomUUID();
+  const existing = rows.find((row) => row.id === id);
+  const masterUrl = stems.masterUrl?.trim() || existing?.master_url || null;
   const next: UserVaultApiTrack = {
     id,
-    title: stems.title.trim() || "Untitled Track",
-    style: stems.style?.trim() || "Custom",
-    status: asVaultStatus(stems.status),
-    master_url: stems.masterUrl || null,
-    instrumental_url: stems.instrumentalUrl || null,
-    vocal_url: stems.vocalUrl || null,
-    created_at: new Date().toISOString(),
+    title: stems.title.trim() || existing?.title || "Untitled Track",
+    style: stems.style?.trim() || existing?.style || "Custom",
+    status: masterUrl ? "completed" : asVaultStatus(stems.status),
+    master_url: masterUrl,
+    instrumental_url: stems.instrumentalUrl || existing?.instrumental_url || null,
+    vocal_url: stems.vocalUrl || existing?.vocal_url || null,
+    created_at: existing?.created_at || new Date().toISOString(),
   };
   const without = rows.filter((row) => row.id !== id);
   await writeCatalog([next, ...without]);

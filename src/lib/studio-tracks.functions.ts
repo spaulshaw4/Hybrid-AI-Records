@@ -55,6 +55,7 @@ export const finalizeStudioTrack = createServerFn({ method: "POST" })
     const { storagePathFromUrl, refreshTrackAudio } = await import("./track-refresh.server");
     // Temporary third-party engine URLs never reach the database: they are
     // copied into our own bucket first, and only that path/URL is stored.
+    const { isPlayableVaultAudioUrl } = await import("@/lib/vault-tracks");
     let permanentUrl: string | null = null;
     if (data.audioUrl) {
       permanentUrl = storagePathFromUrl(data.audioUrl) ? data.audioUrl : null;
@@ -64,9 +65,26 @@ export const finalizeStudioTrack = createServerFn({ method: "POST" })
           permanentUrl = rescued.audioUrl;
         }
       }
+      // Local vault / temp masters are already playable same-origin URLs.
+      if (!permanentUrl && isPlayableVaultAudioUrl(data.audioUrl)) {
+        permanentUrl = data.audioUrl;
+      }
     }
     const storagePath = permanentUrl ? storagePathFromUrl(permanentUrl) : null;
     const failedArchive = Boolean(data.audioUrl) && !permanentUrl;
+
+    if (data.status === "failed" && !permanentUrl) {
+      const { data: existing } = await context.supabase
+        .from("studio_tracks")
+        .select("audio_url")
+        .eq("id", data.id)
+        .eq("user_id", context.userId)
+        .maybeSingle();
+      if (existing?.audio_url) {
+        return { ok: true, audioUrl: existing.audio_url };
+      }
+    }
+
     const { error } = await context.supabase
       .from("studio_tracks")
       .update({

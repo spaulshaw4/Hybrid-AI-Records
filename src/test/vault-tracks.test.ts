@@ -12,7 +12,7 @@ describe("sanitizeVaultTracks", () => {
     expect(sanitizeVaultTracks([{ title: "no id" }])).toEqual([]);
   });
 
-  it("keeps processing rows but strips audio so the player is not mounted", () => {
+  it("promotes a processing row with a playable master to completed", () => {
     const [row] = sanitizeVaultTracks([
       {
         id: "temp-1",
@@ -22,8 +22,8 @@ describe("sanitizeVaultTracks", () => {
         created_at: "2026-08-22T00:00:00.000Z",
       },
     ]);
-    expect(row?.status).toBe("processing");
-    expect(row?.master_url).toBeNull();
+    expect(row?.status).toBe("completed");
+    expect(row?.master_url).toBe("https://cdn.example/master.mp3");
   });
 
   it("treats completed rows with a null audio_url as failed, not playable", () => {
@@ -53,6 +53,20 @@ describe("sanitizeVaultTracks", () => {
     expect(row?.status).toBe("completed");
     expect(row?.master_url).toBe("https://cdn.example/master.mp3");
   });
+
+  it("treats same-origin local vault paths as playable completed masters", () => {
+    const [row] = sanitizeVaultTracks([
+      {
+        id: "local-1",
+        title: "Local master",
+        status: "processing",
+        master_url: "/api/local-vault/masters/track_master.mp3",
+        created_at: "2026-08-22T00:00:00.000Z",
+      },
+    ]);
+    expect(row?.status).toBe("completed");
+    expect(row?.master_url).toBe("/api/local-vault/masters/track_master.mp3");
+  });
 });
 
 describe("isPlayableVaultAudioUrl", () => {
@@ -61,5 +75,13 @@ describe("isPlayableVaultAudioUrl", () => {
     expect(isPlayableVaultAudioUrl("null")).toBe(false);
     expect(isPlayableVaultAudioUrl("not-a-url")).toBe(false);
     expect(asVaultTrackStatus("bogus")).toBe("processing");
+  });
+
+  it("accepts https, blob, data, and relative vault paths", () => {
+    expect(isPlayableVaultAudioUrl("https://cdn.example/a.mp3")).toBe(true);
+    expect(isPlayableVaultAudioUrl("blob:https://localhost/1")).toBe(true);
+    expect(isPlayableVaultAudioUrl("data:audio/mpeg;base64,AAA")).toBe(true);
+    expect(isPlayableVaultAudioUrl("/api/local-vault/x.mp3")).toBe(true);
+    expect(isPlayableVaultAudioUrl("/temp_masters/x.mp3")).toBe(true);
   });
 });

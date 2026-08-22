@@ -37,39 +37,100 @@ export async function persistUserVault(
   userId: string,
   stems: UserVaultStems,
 ): Promise<string | null> {
-  const row = {
+  const masterUrl = stems.masterUrl?.trim() || null;
+  // A playable master always wins. Never write a phantom `failed` over audio
+  // that already landed, and never null out an existing master_url.
+  let status: UserVaultStatus = masterUrl ? "completed" : stems.status;
+  const patch: {
+    user_id: string;
+    title: string;
+    style: string | null;
+    status: UserVaultStatus;
+    master_url?: string | null;
+    instrumental_url?: string | null;
+    vocal_url?: string | null;
+  } = {
     user_id: userId,
     title: stems.title.trim() || "Untitled Track",
     style: stems.style?.trim() || null,
-    status: stems.status,
-    master_url: stems.masterUrl || null,
-    instrumental_url: stems.instrumentalUrl || null,
-    vocal_url: stems.vocalUrl || null,
+    status,
   };
+  if (masterUrl) patch.master_url = masterUrl;
+  if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl;
+  if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl;
 
   if (stems.id) {
+    if (!masterUrl && stems.status === "failed") {
+      const { data: existing } = await supabase
+        .from("user_vault")
+        .select("master_url")
+        .eq("id", stems.id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (existing?.master_url) {
+        status = "completed";
+        patch.status = "completed";
+        patch.master_url = existing.master_url;
+      }
+    }
     const { error } = await supabase
       .from("user_vault")
-      .update(row)
+      .update(patch)
       .eq("id", stems.id)
       .eq("user_id", userId);
     if (error) {
       console.warn("[user_vault] update failed", error.message);
       return stems.id;
     }
+    if (status === "completed") {
+      const audioUrl = masterUrl || patch.master_url || null;
+      if (audioUrl) {
+        try {
+          const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
+          await completeGenerationTask({
+            taskId: stems.id,
+            userId,
+            audioUrl,
+          });
+        } catch (error) {
+          console.warn(
+            "[user_vault] completion sync skipped",
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+    }
     return stems.id;
   }
 
+  const insertRow = {
+    ...patch,
+    master_url: masterUrl,
+    instrumental_url: stems.instrumentalUrl || null,
+    vocal_url: stems.vocalUrl || null,
+  };
   const { data, error } = await supabase
     .from("user_vault")
-    .insert(row)
+    .insert(insertRow)
     .select("id")
     .maybeSingle();
   if (error) {
     console.warn("[user_vault] insert failed", error.message);
     return null;
   }
-  return data?.id ?? null;
+  const id = data?.id ?? null;
+  if (id && masterUrl) {
+    try {
+      const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
+      await completeGenerationTask({ taskId: id, userId, audioUrl: masterUrl });
+    } catch (error) {
+      console.warn(
+        "[user_vault] completion sync skipped",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+  return id;
 }
 
 async function toApiTracks(
@@ -121,6 +182,7 @@ export async function listUserVaultApiTracks(userId: string): Promise<UserVaultA
         .from("user_vault")
         .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
         .eq("user_id", userId)
+        .or("status.eq.completed,status.eq.processing,master_url.not.is.null")
         .order("created_at", { ascending: false });
       if (error) {
         console.warn("[user_vault] list failed", error.message);
@@ -138,7 +200,7 @@ export async function listUserVaultApiTracks(userId: string): Promise<UserVaultA
     const { listLocalVaultTracks } = await import("@/lib/local-vault.server");
     const local = await listLocalVaultTracks();
     const ids = new Set(remote.map((row) => row.id));
-    return [...local.filter((row) => !ids.has(row.id)), ...remote];
+    return sanitizeVaultTracks([...local.filter((row) => !ids.has(row.id)), ...remote]);
   } catch {
     return remote;
   }

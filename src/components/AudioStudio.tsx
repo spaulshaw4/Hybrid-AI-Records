@@ -1179,8 +1179,7 @@ export function AudioStudio() {
   const [creditsOut, setCreditsOut] = useState(false);
   const [creditCheckBusy, setCreditCheckBusy] = useState(false);
 
-  const [cancelling, setCancelling] = useState(false);
-  // Flipped by "Cancel Render"; every polling loop checks it between attempts.
+  // Cancel is hidden while a render runs; this flag is only for dropped jobs.
   const cancelRef = useRef(false);
   const [result, setResult] = useState<Result | null>(null);
   const [exportingUrl, setExportingUrl] = useState<string | null>(null);
@@ -1778,7 +1777,6 @@ export function AudioStudio() {
 
     cancelRef.current = false;
     runningRef.current = true;
-    setCancelling(false);
     setBusy(true);
     setResult(null);
     setStatusText("Checking your Hybrid Tokens…");
@@ -2035,11 +2033,10 @@ export function AudioStudio() {
 
       // Persist first, then play from our own permanent storage URL only.
       const saved = await recordVault({ status: "ready", audioUrl: engineUrl, title });
-      if (vaultId && !saved?.audioUrl) {
-        // Storage copy or database commit failed — nothing is charged.
+      const audioUrl = saved?.audioUrl || engineUrl;
+      if (!isPlayableAudioSource(audioUrl)) {
         throw new Error(GENERATION_FAIL_MESSAGE);
       }
-      const audioUrl = saved?.audioUrl || engineUrl;
       const stems =
         started && typeof started === "object" && "stems" in started
           ? (started.stems as {
@@ -2080,17 +2077,56 @@ export function AudioStudio() {
         audioUrl,
       };
       setResult(finished);
-      updateHistory(runId, { title, audioUrl, status: "ready", error: undefined });
+      setBusy(false);
       setStatusText(null);
+      notifyVaultOfNewGeneration({
+        id: audioVaultId ?? undefined,
+        title,
+        style: styleLine || "Custom",
+        status: "completed",
+        masterUrl: audioUrl,
+        instrumentalUrl: stems?.instrumentalUrl,
+        vocalUrl: stems?.vocalUrl,
+      });
+      updateHistory(runId, { title, audioUrl, status: "ready", error: undefined });
       setVaultTick((tick) => tick + 1);
       toast.success("Master track ready.");
 
     } catch (err) {
       setStatusText(null);
-      setResult(null);
       const raw = err instanceof Error ? err.message : GENERATION_FAIL_MESSAGE;
       const message = readableEngineError(raw);
       const cancelled = message === CANCELLED_MESSAGE;
+      const recoveredAudio =
+        !cancelled && stageAudio && isPlayableAudioSource(stageAudio) ? stageAudio : null;
+      if (recoveredAudio) {
+        const recoveredTitle = stageTitle || trackTitle;
+        setResult({
+          title: recoveredTitle,
+          style: styleLine,
+          vocalProfile: activeVocalProfile(),
+          audioUrl: recoveredAudio,
+        });
+        setBusy(false);
+        updateHistory(runId, { title: recoveredTitle, audioUrl: recoveredAudio, status: "ready" });
+        await recordVault({ status: "ready", audioUrl: recoveredAudio, title: recoveredTitle });
+        await recordAudioVault({
+          status: "completed",
+          title: recoveredTitle,
+          masterUrl: recoveredAudio,
+        });
+        notifyVaultOfNewGeneration({
+          id: audioVaultId ?? undefined,
+          title: recoveredTitle,
+          style: styleLine || "Custom",
+          status: "completed",
+          masterUrl: recoveredAudio,
+        });
+        setVaultTick((tick) => tick + 1);
+        toast.success("Master track ready.");
+        return;
+      }
+      setResult(null);
       updateHistory(runId, { status: "failed", error: message });
       await recordVault({ status: "failed", error: message });
       await recordAudioVault({ status: "failed", title: trackTitle });
@@ -2161,7 +2197,6 @@ export function AudioStudio() {
       clearPendingJob();
       setBusy(false);
       runningRef.current = false;
-      setCancelling(false);
     }
   }
 
@@ -2175,7 +2210,6 @@ export function AudioStudio() {
       if (runningRef.current) return;
       cancelRef.current = false;
       runningRef.current = true;
-      setCancelling(false);
       setBusy(true);
       setRollbackNotice(null);
       setRetryPlan(null);
@@ -2218,8 +2252,7 @@ export function AudioStudio() {
           const saved = (await closeVaultTrack({
             data: { id: job.vaultId, status: "ready", audioUrl: engineUrl, title: finalTitle },
           })) as { ok: boolean; audioUrl?: string | null };
-          if (!saved?.audioUrl) throw new Error(GENERATION_FAIL_MESSAGE);
-          audioUrl = saved.audioUrl;
+          audioUrl = saved?.audioUrl || engineUrl;
         }
 
         if (isDevAuthBypass()) {
@@ -2242,6 +2275,7 @@ export function AudioStudio() {
           vocalProfile: job.vocalProfile,
           audioUrl,
         });
+        setBusy(false);
         updateHistory(job.runId, {
           title: finalTitle,
           audioUrl,
@@ -2249,6 +2283,14 @@ export function AudioStudio() {
           error: undefined,
         });
         setStatusText(null);
+        notifyVaultOfNewGeneration({
+          id: job.vaultId ?? undefined,
+          title: finalTitle,
+          style: job.styleLine || "Custom",
+          status: "completed",
+          masterUrl: audioUrl,
+        });
+        setVaultTick((tick) => tick + 1);
         toast.success("Master track ready.");
       } catch (err) {
         setStatusText(null);
@@ -2256,6 +2298,41 @@ export function AudioStudio() {
         const message = readableEngineError(raw);
         const cancelled = message === CANCELLED_MESSAGE;
         if (isEngineCreditsError(raw)) setCreditsOut(true);
+
+        if (gotAudio && !cancelled && isPlayableAudioSource(gotAudio)) {
+          setResult({
+            title: gotTitle,
+            style: job.styleLine,
+            vocalProfile: job.vocalProfile,
+            audioUrl: gotAudio,
+          });
+          updateHistory(job.runId, {
+            title: gotTitle,
+            audioUrl: gotAudio,
+            status: "ready",
+            error: undefined,
+          });
+          if (job.vaultId) {
+            try {
+              await closeVaultTrack({
+                data: { id: job.vaultId, status: "ready", audioUrl: gotAudio, title: gotTitle },
+              });
+            } catch {
+              /* vault write is best-effort */
+            }
+          }
+          notifyVaultOfNewGeneration({
+            id: job.vaultId ?? undefined,
+            title: gotTitle,
+            style: job.styleLine || "Custom",
+            status: "completed",
+            masterUrl: gotAudio,
+          });
+          setVaultTick((tick) => tick + 1);
+          toast.success("Master track ready.");
+          return;
+        }
+
         updateHistory(job.runId, { status: "failed", error: message });
 
         if (job.vaultId) {
@@ -2296,7 +2373,6 @@ export function AudioStudio() {
         clearPendingJob();
         setBusy(false);
         runningRef.current = false;
-        setCancelling(false);
       }
 
     },
@@ -2309,19 +2385,6 @@ export function AudioStudio() {
    * only re-archived and charged, and a truly dead run starts over. Tokens are
    * never charged twice because the charge is the final step in every path.
    */
-  /**
-   * Stops the current render. The pending job is dropped immediately so a
-   * refresh can never reconnect to it, and the polling loop bails out on its
-   * next tick. Nothing is charged: the token is only spent on success.
-   */
-  function handleCancelRender() {
-    if (!busy || cancelRef.current) return;
-    cancelRef.current = true;
-    setCancelling(true);
-    clearPendingJob();
-    setStatusText("Canceling render…");
-  }
-
   async function handleRetry() {
     const plan = retryPlan;
     if (!plan || busy || runningRef.current) return;
@@ -2475,7 +2538,7 @@ export function AudioStudio() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <Card className="engine-wizard-card relative border border-zinc-800 bg-zinc-950 shadow-[0_18px_50px_-24px_rgb(0_0_0/0.9)]">
+      <Card className="engine-wizard-card relative bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50">
         <CardContent className="relative space-y-5 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold tracking-tight">Hybrid Engine 1.0</h2>
@@ -3531,10 +3594,10 @@ export function AudioStudio() {
                 id={GENERATE_TRACK_BTN_ID}
                 size="lg"
                 className="h-auto min-h-12 flex-1 whitespace-normal px-4 py-3 text-sm leading-tight sm:text-base"
-                disabled={busy}
+                disabled={busy && !result}
                 onClick={() => void handleGenerate()}
               >
-                {busy ? (
+                {busy && !result ? (
                   <>
                     <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
                     <span className="min-w-0 truncate">{statusText ?? "Working…"}</span>
@@ -3549,23 +3612,10 @@ export function AudioStudio() {
               )}
             </div>
 
-          {busy && statusText ? (
+          {busy && !result && statusText ? (
             <p className="text-center text-xs text-muted-foreground" role="status">
               {statusText}
             </p>
-          ) : null}
-          {busy ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full"
-              disabled={cancelling}
-              onClick={handleCancelRender}
-            >
-              <X className="size-4" aria-hidden />
-              {cancelling ? "Canceling…" : "Cancel Render"}
-            </Button>
           ) : null}
 
           {creditsOut ? (
@@ -3619,7 +3669,7 @@ export function AudioStudio() {
       </Card>
 
       {result ? (
-        <Card className="border-border/70 bg-card/90 backdrop-blur">
+        <Card className="engine-result-card bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50">
           <CardContent className="space-y-4 p-6">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="space-y-1">
@@ -3640,7 +3690,7 @@ export function AudioStudio() {
               title={result.title}
               onUrlRepaired={applyRepairedUrl}
               onRegenerate={() => void handleGenerate()}
-              regenerating={busy}
+              regenerating={busy && !result}
             />
 
 

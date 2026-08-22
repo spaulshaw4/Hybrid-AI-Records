@@ -1,64 +1,51 @@
 /**
- * Builds the Hybrid Engine style prompt from the artist's exact request
+ * Builds the Hybrid Engine style descriptor from the artist's exact request
  * fields. Genre-lock templates and slider defaults must not rewrite BPM,
- * genre, mood, instruments, or vocal profile.
+ * genre, mood, instruments, or vocal style.
  */
 
-export type DynamicStylePromptInput = {
-  genre?: string | null;
-  bpm?: number | null;
-  mood?: string | null;
-  instruments?: string[] | null;
+import {
+  logDynamicPayloadDispatch,
+  serializeDynamicTags,
+  type DynamicTagRequest,
+} from "@/lib/engine-pipeline";
+
+export type DynamicStylePromptInput = DynamicTagRequest & {
+  /** @deprecated Prefer vocalStyle — kept so older callers still serialize. */
   vocalProfile?: string | null;
 };
+
+export { serializeDynamicTags, logDynamicPayloadDispatch };
+export type { DynamicTagRequest };
 
 function trimText(value: string | null | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function cleanInstruments(value: string[] | null | undefined): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => item.trim()).filter(Boolean);
-}
-
-function exactBpm(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.round(value);
-}
-
 /**
- * `[Style: …] [Tempo: … BPM] [Mood: …] [Instruments: …]` from request fields.
- * Empty optional tags are omitted so we never invent a default mood or kit.
+ * Comma-separated style tags for MiniMax `prompt` / ACE-Step `prompt`.
+ * Lyrics stay in the dedicated lyrics field.
  */
 export function buildDynamicStylePrompt(input: DynamicStylePromptInput): string {
-  const genre = trimText(input.genre);
-  const bpm = exactBpm(input.bpm);
-  const mood = trimText(input.mood);
-  const instruments = cleanInstruments(input.instruments);
-  const vocalProfile = trimText(input.vocalProfile);
-
-  const parts: string[] = [];
-  if (genre) parts.push(`[Style: ${genre}]`);
-  if (bpm != null) parts.push(`[Tempo: ${bpm} BPM]`);
-  if (mood) parts.push(`[Mood: ${mood}]`);
-  if (instruments.length) parts.push(`[Instruments: ${instruments.join(", ")}]`);
-  if (vocalProfile) parts.push(`[Vocals: ${vocalProfile}]`);
-  return parts.join(" ");
+  return serializeDynamicTags({
+    genre: input.genre,
+    subGenre: input.subGenre,
+    mood: input.mood,
+    bpm: input.bpm,
+    instruments: input.instruments,
+    vocalStyle: input.vocalStyle || input.vocalProfile,
+  });
 }
 
-/** True when the prompt already carries the artist's Style/Tempo tags. */
+/** True when the string is already artist-authored style tags, not a genre lock. */
 export function isDynamicStylePrompt(text: string | null | undefined): boolean {
   const value = trimText(text);
-  return /\[Style:/i.test(value) && /\[Tempo:/i.test(value);
-}
-
-/** Concatenates style metadata with lyrics for the generation API payload. */
-export function concatStylePromptWithLyrics(stylePrompt: string, lyrics: string): string {
-  const style = trimText(stylePrompt);
-  const words = trimText(lyrics);
-  if (!style) return words;
-  if (!words) return style;
-  return `${style}\n\n${words}`;
+  if (!value) return false;
+  return (
+    /\[Style:/i.test(value) ||
+    /\d+\s*BPM\b/i.test(value) ||
+    /\bvocals\b/i.test(value)
+  );
 }
 
 /** Logs the exact JSON posted to a music API (no audio bytes). */

@@ -310,11 +310,19 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       id: payload.vaultId,
       title: payload.title || "Untitled Track",
       style: genre,
-      status: "completed",
+      status: masterUrl ? "completed" : "processing",
       masterUrl,
       instrumentalUrl,
       vocalUrl,
     });
+    if (masterUrl) {
+      const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
+      await completeGenerationTask({
+        taskId: payload.vaultId ?? vaultId ?? taskId,
+        userId: context.userId,
+        audioUrl: masterUrl,
+      });
+    }
     if (!vaultId && masterUrl) {
       const { persistLocalVaultTrack } = await import("@/lib/local-vault.server");
       await persistLocalVaultTrack(context.userId, {
@@ -343,7 +351,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     return {
       taskId,
-      status: "succeeded",
+      status: masterUrl ? "completed" : "processing",
       tracks: playableTracks,
       stems: {
         masterUrl,
