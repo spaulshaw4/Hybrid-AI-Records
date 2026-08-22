@@ -1321,29 +1321,34 @@ export function AudioStudio() {
 
   /** Compact language picker rendered beside each Gemini Co-Producer button. */
   function renderLanguagePicker(idPrefix: string) {
+    const applyLyricLanguage = (value: string) => {
+      // Language only steers Co-Produce / generate pronunciation.
+      // Never clear title, lyrics, or Step 1 validation when the menu changes.
+      if (isValidLyricLanguage(value)) {
+        setSelectedLanguage(value);
+        return;
+      }
+      toast.error("Selected language is not supported.");
+      setSelectedLanguage(DEFAULT_LYRIC_LANGUAGE);
+    };
+
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor={`${idPrefix}-language`} className="sr-only">
           Lyric language
         </Label>
-        <Select
-          value={selectedLanguage}
-          onValueChange={(v) => {
-            if (isValidLyricLanguage(v)) {
-              setSelectedLanguage(v);
-            } else {
-              toast.error("Selected language is not supported.");
-              setSelectedLanguage(DEFAULT_LYRIC_LANGUAGE);
-            }
-          }}
-        >
+        <Select value={selectedLanguage} onValueChange={applyLyricLanguage}>
           <SelectTrigger
             id={`${idPrefix}-language`}
+            type="button"
             className="h-8 w-[210px] border-border bg-secondary text-xs text-secondary-foreground shadow-sm hover:bg-secondary/80"
           >
             <SelectValue placeholder="Language" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent
+            position="popper"
+            className="engine-opaque-menu z-[300] border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl"
+          >
             <SelectGroup>
               <SelectLabel>Lyric language</SelectLabel>
               {LYRIC_LANGUAGES.map((l) => (
@@ -2631,7 +2636,7 @@ export function AudioStudio() {
 
           <div className="relative space-y-5">
           {studioStep === 0 ? (
-          <>
+          <div className="relative space-y-5 overflow-visible">
           {/* 1. Track title */}
           <div className="space-y-2">
             <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
@@ -2715,7 +2720,7 @@ export function AudioStudio() {
               use [Verse] / [Chorus] / [Bridge] tags to shape the structure.
             </p>
           </div>
-          </>
+          </div>
           ) : null}
 
           {/* Settings: one step at a time */}
