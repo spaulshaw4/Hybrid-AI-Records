@@ -39,7 +39,7 @@ import {
   readableEngineError,
 } from "@/lib/engine-credits";
 import { getTokenBalance, spendTokens } from "@/lib/tokens.functions";
-import { generateLyrics, generateVocalPrompt } from "@/lib/lyrics-ai.functions";
+import { generateVocalPrompt } from "@/lib/lyrics-ai.functions";
 import { repairLyricStructure } from "@/lib/lyric-repair";
 import {
   DEFAULT_LYRIC_LANGUAGE,
@@ -1212,6 +1212,7 @@ export function AudioStudio() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"concept" | "lyrics" | "vocal" | "style" | null>(null);
+  const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [language, setLanguage] = useState<LyricLanguage>(readSavedLanguage);
   const [customLanguage, setCustomLanguage] = useState(readSavedCustomLanguage);
   const trippedRef = useRef<Set<string>>(new Set());
@@ -1259,7 +1260,6 @@ export function AudioStudio() {
 
 
 
-  const writeLyrics = useServerFn(generateLyrics);
   const writeVocalPrompt = useServerFn(generateVocalPrompt);
   const openVaultTrack = useServerFn(createStudioTrack);
   const closeVaultTrack = useServerFn(finalizeStudioTrack);
@@ -1274,49 +1274,6 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
-  const isGeneratingLyrics = aiBusy === "lyrics";
-  const isPending = isGeneratingLyrics;
-
-  /** Gemini fills the lyrics box from the title, style and any existing lyrics. */
-  async function handleCoProducer() {
-    console.log("[DEBUG_COPRODUCER_TRIGGER]", { trackTitle, language, isPending });
-    if (isGeneratingLyrics) {
-      console.log("[CO_PRODUCER_SKIPPED]", { reason: "already pending", aiBusy });
-      return;
-    }
-    if (!title.trim()) {
-      console.warn("[CO_PRODUCER_SKIPPED]", { reason: "missing title" });
-      toast.error("Add a track title first.");
-      return;
-    }
-    if (!isValidLyricLanguage(language)) {
-      console.warn("[CO_PRODUCER_SKIPPED]", { reason: "invalid language", language });
-      toast.error("Invalid language selection.");
-      setLanguage(DEFAULT_LYRIC_LANGUAGE);
-      return;
-    }
-    setAiBusy("lyrics");
-    try {
-      const out = await writeLyrics({
-        data: {
-          concept: (lyrics.trim() || styleLine || title.trim()).slice(0, 600),
-          style: styleLine || undefined,
-          title: title.trim(),
-          language: targetLanguage,
-        },
-      });
-      setLyrics((out.lyrics ?? "").slice(0, PROMPT_MAX));
-      setLyricWarnings([]);
-      toast.success("Co-Producer wrote your lyrics.");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "The Co-Producer could not write lyrics.";
-      console.error("[GEMINI_REPLICATE_ERROR]", error);
-      toast.error(message);
-    } finally {
-      setAiBusy(null);
-    }
-  }
 
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
@@ -2706,11 +2663,35 @@ export function AudioStudio() {
                   buttonVariants({ size: "sm", variant: "secondary" }),
                   "pointer-events-auto disabled:pointer-events-auto",
                 )}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log("[DIRECT_DOM_CLICK]");
-                  void handleCoProducer();
+                  console.log("--> FORCE CLICKED CO-PRODUCER", { trackTitle, language });
+                  if (!trackTitle?.trim()) {
+                    alert("Please enter a Track Title first.");
+                    return;
+                  }
+                  setIsGeneratingLyrics(true);
+                  try {
+                    const res = await fetch("/api/coproducer", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        trackTitle,
+                        language: targetLanguage,
+                        style: styleLine || "Rock/Alternative",
+                      }),
+                    });
+                    const data = (await res.json()) as { lyrics?: string; error?: string };
+                    if (!res.ok) throw new Error(data.error || "Failed to generate lyrics");
+                    setLyrics(String(data.lyrics ?? "").slice(0, PROMPT_MAX));
+                    setLyricWarnings([]);
+                  } catch (err) {
+                    console.error("Co-Producer Error:", err);
+                    alert(err instanceof Error ? err.message : "Failed to connect to Co-Producer");
+                  } finally {
+                    setIsGeneratingLyrics(false);
+                  }
                 }}
               >
                 {isGeneratingLyrics ? (
