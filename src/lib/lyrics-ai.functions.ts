@@ -39,6 +39,22 @@ export const generateLyrics = createServerFn({ method: "POST" })
     }
   });
 
+const CoProducerInput = z.object({
+  trackTitle: z.string().trim().max(120).optional(),
+  language: z.string().trim().max(120).optional(),
+});
+
+/**
+ * Step 1 Co-Producer — TanStack server function calling Gemini directly.
+ * `@google/genai` stays inside the handler so it never ships to the browser.
+ */
+export const generateLyricsServerFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => CoProducerInput.parse(data ?? {}))
+  .handler(async ({ data }) => {
+    const { writeLyricsWithStudio } = await import("@/lib/coproducer");
+    return writeLyricsWithStudio(data.trackTitle || "Untitled Track", data.language || "English");
+  });
+
 
 const ConceptInput = z.object({
   seed: z.string().trim().max(600).optional(),

@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
+const { createInteractionMock } = vi.hoisted(() => ({ createInteractionMock: vi.fn() }));
 
 vi.mock("@google/genai", () => ({
   GoogleGenAI: class {
     constructor(_opts?: { apiKey?: string }) {}
-    models = { generateContent: generateContentMock };
+    interactions = { create: createInteractionMock };
   },
 }));
 
-import { COPRODUCER_GEMINI_MODEL, writeLyrics } from "@/lib/lyrics.server";
+import { COPRODUCER_GEMINI_MODEL, writeLyricsWithStudio } from "@/lib/coproducer";
+import { writeLyrics } from "@/lib/lyrics.server";
 
-describe("Co-Producer Gemini lyrics via @google/genai", () => {
+describe("Co-Producer Google Interactions API", () => {
   const originalKey = process.env.GEMINI_API_KEY;
   const originalGoogleKey = process.env.GOOGLE_API_KEY;
 
@@ -23,66 +24,52 @@ describe("Co-Producer Gemini lyrics via @google/genai", () => {
     vi.clearAllMocks();
   });
 
-  it("runs gemini-2.5-flash and returns response.text", async () => {
+  it("creates a gemini-3.7-flash interaction and returns output_text", async () => {
     process.env.GEMINI_API_KEY = "test-gemini-key";
-    generateContentMock.mockResolvedValue({ text: "[Verse 1]\nGo\n[Chorus]\nHold the line" });
-
-    const lyrics = await writeLyrics({
-      concept: "night drive",
-      title: "Night Drive",
-      style: "Nu-Metal",
-      language: "Lithuanian (Lietuvių)",
+    createInteractionMock.mockResolvedValue({
+      output_text: "[Verse 1]\nGo\n[Chorus]\nHold the line",
     });
 
-    expect(lyrics).toContain("[Verse 1]");
-    expect(lyrics).toContain("[Chorus]\nHold the line");
-    expect(COPRODUCER_GEMINI_MODEL).toBe("gemini-2.5-flash");
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
-    const [params] = generateContentMock.mock.calls[0] as [
-      { model: string; contents: string; config?: { maxOutputTokens: number } },
-    ];
-    expect(params.model).toBe("gemini-2.5-flash");
-    expect(params.contents).toContain("Write complete song lyrics");
-    expect(params.contents).toContain("[Verse]");
-    expect(params.contents).toContain("[Chorus]");
-    expect(params.contents).toContain("[Bridge]");
-    expect(params.contents).toContain("[Outro]");
-    expect(params.contents).toContain("Lithuanian (Lietuvių)");
-    expect(params.contents).toContain("Night Drive");
+    const result = await writeLyricsWithStudio("Night Drive", "Lithuanian (Lietuvių)");
+
+    expect(result.lyrics).toContain("[Verse 1]");
+    expect(result.lyrics).toContain("[Chorus]\nHold the line");
+    expect(COPRODUCER_GEMINI_MODEL).toBe("gemini-3.7-flash");
+    expect(createInteractionMock).toHaveBeenCalledTimes(1);
+    const [params] = createInteractionMock.mock.calls[0] as [{ model: string; input: string }];
+    expect(params.model).toBe("gemini-3.7-flash");
+    expect(params.input).toContain("elite music co-producer");
+    expect(params.input).toContain("[Verse 1]");
+    expect(params.input).toContain("[Chorus]");
+    expect(params.input).toContain("[Bridge]");
+    expect(params.input).toContain("[Outro]");
+    expect(params.input).toContain("Lithuanian (Lietuvių)");
+    expect(params.input).toContain("Night Drive");
   });
 
   it("throws when GEMINI_API_KEY is missing on the server", async () => {
     delete process.env.GEMINI_API_KEY;
     delete process.env.GOOGLE_API_KEY;
-    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    await expect(
-      writeLyrics({
-        concept: "night drive",
-        title: "Night Drive",
-        language: "English",
-      }),
-    ).rejects.toThrow("Missing GEMINI_API_KEY in .env.local");
-    expect(logged).toHaveBeenCalledWith(
-      "[GEMINI_DIRECT_ERROR]",
-      "GEMINI_API_KEY is undefined — add it to .env.local",
+    await expect(writeLyricsWithStudio("Night Drive", "English")).rejects.toThrow(
+      "GEMINI_API_KEY is not defined in .env.local",
     );
+  });
+
+  it("logs STUDIO_INTERACTIONS_ERROR and rethrows", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    createInteractionMock.mockRejectedValue(new Error("quota exceeded"));
+
+    await expect(writeLyricsWithStudio("Night Drive", "English")).rejects.toThrow("quota exceeded");
+    expect(logged).toHaveBeenCalledWith("[STUDIO_INTERACTIONS_ERROR]", expect.any(Error));
     logged.mockRestore();
   });
 
-  it("logs GEMINI_DIRECT_ERROR and does not fall back when Gemini fails", async () => {
+  it("writeLyrics still returns the lyric string for engine callers", async () => {
     process.env.GEMINI_API_KEY = "test-gemini-key";
-    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    generateContentMock.mockRejectedValue(new Error("quota exceeded"));
-
+    createInteractionMock.mockResolvedValue({ output_text: "[Chorus]\nGo" });
     await expect(
-      writeLyrics({
-        concept: "night drive",
-        title: "Night Drive",
-        language: "English",
-      }),
-    ).rejects.toThrow("quota exceeded");
-
-    expect(logged).toHaveBeenCalledWith("[GEMINI_DIRECT_ERROR]", expect.any(Error));
-    logged.mockRestore();
+      writeLyrics({ concept: "night drive", title: "Night Drive", language: "English" }),
+    ).resolves.toBe("[Chorus]\nGo");
   });
 });

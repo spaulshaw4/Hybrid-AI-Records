@@ -1,12 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
 import { aiChatFetch } from "@/lib/ai-chat.server";
 import { aiFastModel } from "@/lib/ai-provider.server";
+import { COPRODUCER_GEMINI_MODEL } from "@/lib/coproducer";
 
 /** Server-only lyric writer used by both the studio button and the engine fallback. */
 
-/** Native Gemini Flash via GEMINI_API_KEY. Override with GEMINI_MODEL. */
-export const COPRODUCER_GEMINI_MODEL =
-  (typeof process !== "undefined" && process.env["GEMINI_MODEL"]?.trim()) || "gemini-2.5-flash";
+export { COPRODUCER_GEMINI_MODEL };
 
 export type LyricBrief = {
   concept: string;
@@ -15,41 +13,17 @@ export type LyricBrief = {
   language?: string | undefined;
 };
 
-function geminiApiKey(): string {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  const trimmed = typeof key === "string" ? key.trim() : "";
-  if (!trimmed) {
-    console.error("[GEMINI_DIRECT_ERROR]", "GEMINI_API_KEY is undefined — add it to .env.local");
-    throw new Error("Missing GEMINI_API_KEY in .env.local");
-  }
-  return trimmed;
-}
-
 export async function writeLyrics(brief: LyricBrief): Promise<string> {
-  geminiApiKey();
-  const language = brief.language?.trim() || "English";
-  const trackTitle = brief.title?.trim() || "Untitled";
-
-  console.log("[CO_PRODUCER]", { trackTitle, language, model: COPRODUCER_GEMINI_MODEL });
-
-  try {
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
-    });
-    const response = await ai.models.generateContent({
-      model: COPRODUCER_GEMINI_MODEL,
-      contents: `Write complete song lyrics with [Verse], [Chorus], [Bridge], [Outro] in ${language} for a track titled "${trackTitle}".`,
-      config: { maxOutputTokens: 8192 },
-    });
-    const lyrics = (response.text ?? "").trim();
-    if (!lyrics || lyrics === "undefined" || lyrics === "null") {
-      throw new Error("Co-Producer returned nothing. Try a richer brief.");
-    }
-    return lyrics;
-  } catch (error) {
-    console.error("[GEMINI_DIRECT_ERROR]", error);
-    throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
+  const { writeLyricsWithStudio } = await import("@/lib/coproducer");
+  const { lyrics } = await writeLyricsWithStudio(
+    brief.title?.trim() || "Untitled",
+    brief.language?.trim() || "English",
+  );
+  const next = lyrics.trim();
+  if (!next || next === "undefined" || next === "null") {
+    throw new Error("Co-Producer returned nothing. Try a richer brief.");
   }
+  return next;
 }
 
 const CONCEPT_SYSTEM_PROMPT =

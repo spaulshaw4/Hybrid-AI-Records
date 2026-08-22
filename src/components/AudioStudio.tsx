@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
@@ -39,7 +39,7 @@ import {
   readableEngineError,
 } from "@/lib/engine-credits";
 import { getTokenBalance, spendTokens } from "@/lib/tokens.functions";
-import { generateVocalPrompt } from "@/lib/lyrics-ai.functions";
+import { generateLyricsServerFn as generateLyricsOnServerFn, generateVocalPrompt } from "@/lib/lyrics-ai.functions";
 import { repairLyricStructure } from "@/lib/lyric-repair";
 import {
   DEFAULT_LYRIC_LANGUAGE,
@@ -1212,6 +1212,7 @@ export function AudioStudio() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"concept" | "lyrics" | "vocal" | "style" | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [language, setLanguage] = useState<LyricLanguage>(readSavedLanguage);
   const [customLanguage, setCustomLanguage] = useState(readSavedCustomLanguage);
   const trippedRef = useRef<Set<string>>(new Set());
@@ -1260,6 +1261,7 @@ export function AudioStudio() {
 
 
   const writeVocalPrompt = useServerFn(generateVocalPrompt);
+  const generateLyricsServerFn = useServerFn(generateLyricsOnServerFn);
   const openVaultTrack = useServerFn(createStudioTrack);
   const closeVaultTrack = useServerFn(finalizeStudioTrack);
   const loadVaultTracks = useServerFn(listStudioTracks);
@@ -1273,6 +1275,31 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
+
+  async function handleCoProducerClick(e: MouseEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isGenerating) return;
+    try {
+      setIsGenerating(true);
+      const res = await generateLyricsServerFn({
+        data: {
+          trackTitle: trackTitle || "Untitled Track",
+          language: targetLanguage || language || "en",
+        },
+      });
+      const lyrics = res?.lyrics;
+      if (lyrics) {
+        setLyrics(String(lyrics).slice(0, PROMPT_MAX));
+        setLyricWarnings([]);
+      }
+    } catch (err: unknown) {
+      console.error("Co-Producer Generation Error:", err);
+      alert(err instanceof Error ? err.message : "Failed to generate lyrics. Check terminal.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
 
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
@@ -2520,6 +2547,7 @@ export function AudioStudio() {
     setTitle("");
     setResult(null);
     setStatusText(null);
+    setIsGenerating(false);
     // Explicit reset wins over the restored session draft.
     clearEngineDraft();
   }
@@ -2651,40 +2679,13 @@ export function AudioStudio() {
 
           <button
             type="button"
-            id="coproducer-generate-btn"
-            style={{ position: "relative", zIndex: 9999, pointerEvents: "auto", cursor: "pointer" }}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded shadow-lg"
-            onClick={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              console.log("[DEBUG_CLICK] Co-Producer directly clicked");
-              try {
-                const res = await fetch("/api/coproducer", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    trackTitle: trackTitle || "Demo Title",
-                    language: targetLanguage || language || "en",
-                  }),
-                });
-                const data = await res.json();
-                console.log("[DEBUG_RESPONSE]", data);
-                if (data?.lyrics) {
-                  const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
-                  setLyrics(nextLyrics);
-                  setLyricWarnings([]);
-                  const txt = document.getElementById(SONG_LYRICS_INPUT_ID) as HTMLTextAreaElement | null;
-                  if (txt) txt.value = nextLyrics;
-                } else if (data?.error) {
-                  alert("Server Error: " + data.error);
-                }
-              } catch (err) {
-                console.error("[DEBUG_FETCH_FAILED]", err);
-                alert("Network / Client Error: " + (err instanceof Error ? err.message : String(err)));
-              }
-            }}
+            id="coproducer-action-btn"
+            disabled={isGenerating}
+            onClick={handleCoProducerClick}
+            className="inline-flex items-center justify-center px-4 py-2 font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+            style={{ position: "relative", zIndex: 50, pointerEvents: "auto", cursor: "pointer" }}
           >
-            Co-Producer
+            {isGenerating ? "Co-Producer Writing..." : "Co-Producer"}
           </button>
 
           {/* 2. Lyrics box */}
