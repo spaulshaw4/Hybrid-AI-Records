@@ -1,10 +1,10 @@
 import { aiChatFetch } from "@/lib/ai-chat.server";
 import { aiFastModel } from "@/lib/ai-provider.server";
-import { COPRODUCER_GEMINI_MODEL } from "@/lib/coproducer";
+import { COPRODUCER_REPLICATE_MODEL } from "@/lib/coproducer";
 
 /** Server-only lyric writer used by both the studio button and the engine fallback. */
 
-export { COPRODUCER_GEMINI_MODEL };
+export { COPRODUCER_REPLICATE_MODEL };
 
 export type LyricBrief = {
   concept: string;

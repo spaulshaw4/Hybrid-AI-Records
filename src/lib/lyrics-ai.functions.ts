@@ -13,7 +13,7 @@ const Input = z.object({
 });
 
 /**
- * Writes song lyrics through Google Interactions API (`GEMINI_API_KEY` + gemini-3.7-flash).
+ * Writes song lyrics through the Replicate instruction-tuned LLM.
  */
 export const generateLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))
@@ -34,7 +34,7 @@ export const generateLyrics = createServerFn({ method: "POST" })
       console.log("[CO_PRODUCER]", { lyricsLength: lyrics.length });
       return { lyrics };
     } catch (error) {
-      console.error("[GEMINI_DIRECT_ERROR]", error);
+      console.error("[LYRIC_ENGINE_ERROR]", error);
       throw error instanceof Error ? error : new Error("Co-Producer request failed.");
     }
   });
@@ -45,14 +45,21 @@ const CoProducerInput = z.object({
 });
 
 /**
- * Step 1 Co-Producer — TanStack server function calling Gemini directly.
- * `@google/genai` stays inside the handler so it never ships to the browser.
+ * Step 1 Co-Producer — TanStack server function calling Replicate.
+ * The Replicate client stays inside the handler so it never ships to the browser.
  */
 export const generateLyricsServerFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => CoProducerInput.parse(data ?? {}))
   .handler(async ({ data }) => {
-    const { writeLyricsWithStudio } = await import("@/lib/coproducer");
-    return writeLyricsWithStudio(data.trackTitle || "Untitled Track", data.language || "English");
+    const { isLyricEngineTimeout, LYRIC_ENGINE_TIMEOUT_MESSAGE, writeLyricsWithStudio } = await import("@/lib/coproducer");
+    try {
+      return await writeLyricsWithStudio(data.trackTitle || "Untitled Track", data.language || "English");
+    } catch (error) {
+      if (isLyricEngineTimeout(error)) {
+        throw new Error(LYRIC_ENGINE_TIMEOUT_MESSAGE);
+      }
+      throw error;
+    }
   });
 
 

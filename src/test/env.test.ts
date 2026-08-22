@@ -10,6 +10,8 @@ const KEYS = [
   "AI_MUSIC_API_KEY",
   "REPLICATE_API_TOKEN",
   "REPLICATE_API_KEY",
+  "ENGINE_API_KEY",
+  "LYRIC_ENGINE_API_KEY",
   "FISH_AUDIO_API_KEY",
   "FISH_API_KEY",
   "MATCHERING_PYTHON",
@@ -25,6 +27,8 @@ describe("requireStageKey", () => {
     AI_MUSIC_API_KEY: process.env.AI_MUSIC_API_KEY,
     REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN,
     REPLICATE_API_KEY: process.env.REPLICATE_API_KEY,
+    ENGINE_API_KEY: process.env.ENGINE_API_KEY,
+    LYRIC_ENGINE_API_KEY: process.env.LYRIC_ENGINE_API_KEY,
     FISH_AUDIO_API_KEY: process.env.FISH_AUDIO_API_KEY,
     FISH_API_KEY: process.env.FISH_API_KEY,
     MATCHERING_PYTHON: process.env.MATCHERING_PYTHON,
@@ -111,7 +115,7 @@ describe("requireStageKey", () => {
   });
 
   it("names Stem Separation when REPLICATE_API_TOKEN is missing", () => {
-    clear(["REPLICATE_API_TOKEN", "REPLICATE_API_KEY"]);
+    clear(["REPLICATE_API_TOKEN", "REPLICATE_API_KEY", "ENGINE_API_KEY", "LYRIC_ENGINE_API_KEY"]);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const message =

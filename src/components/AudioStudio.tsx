@@ -1282,7 +1282,10 @@ export function AudioStudio() {
     if (coproducerLock.current || isGeneratingLyrics) return;
     coproducerLock.current = true;
     setIsGeneratingLyrics(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
     try {
+      console.log("[LYRIC_GEN] Starting request...");
       const res = await fetch("/api/coproducer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1290,11 +1293,13 @@ export function AudioStudio() {
           trackTitle: trackTitle || "Untitled Track",
           language: targetLanguage || language || "English",
         }),
+        signal: controller.signal,
       });
-      const data = (await res.json()) as { lyrics?: string; error?: string };
-      const nextLyrics = String(data?.lyrics ?? "").trim();
-      if (nextLyrics) {
-        setLyrics(nextLyrics.slice(0, PROMPT_MAX));
+      const data = (await res.json()) as { lyrics?: string; text?: string; error?: string };
+      console.log("[LYRIC_GEN] Received response:", data);
+      const responseLyrics = data.lyrics ?? data.text;
+      if (typeof responseLyrics === "string" && responseLyrics.trim()) {
+        setLyrics(responseLyrics);
         setLyricWarnings([]);
       } else if (data?.error) {
         toast.error(String(data.error));
@@ -1303,8 +1308,12 @@ export function AudioStudio() {
       }
     } catch (err) {
       console.error("[FETCH_ERR]", err);
-      toast.error(err instanceof Error ? err.message : "Co-Producer request failed.");
+      const timedOut =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && /aborted|timed out/i.test(err.message));
+      toast.error(timedOut ? "Lyric engine timed out" : err instanceof Error ? err.message : "Co-Producer request failed.");
     } finally {
+      window.clearTimeout(timeoutId);
       coproducerLock.current = false;
       setIsGeneratingLyrics(false);
     }

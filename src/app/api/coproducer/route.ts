@@ -1,8 +1,12 @@
-import { writeLyricsWithStudio } from "@/lib/coproducer";
+import {
+  isLyricEngineTimeout,
+  LYRIC_ENGINE_TIMEOUT_MESSAGE,
+  writeLyricsWithStudio,
+} from "@/lib/coproducer";
 
 /**
- * Co-Producer lyrics: Google Interactions API via GEMINI_API_KEY.
- * Never routes through Replicate.
+ * Co-Producer lyrics: google/gemini-2.5-flash on Replicate via
+ * LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY / ENGINE_API_KEY.
  */
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -11,10 +15,14 @@ export async function POST(req: Request): Promise<Response> {
       String(body.trackTitle ?? "Untitled Track"),
       String(body.language || "English"),
     );
-    return Response.json({ lyrics: result.lyrics });
+    return Response.json({ lyrics: result.lyrics ?? "" });
   } catch (error) {
-    console.error("[STUDIO_INTERACTIONS_ERROR]", error);
-    const message = error instanceof Error ? error.message : "Failed to generate lyrics";
+    console.error("[LYRIC_ENGINE_ERROR]", error);
+    if (isLyricEngineTimeout(error)) {
+      return Response.json({ error: LYRIC_ENGINE_TIMEOUT_MESSAGE }, { status: 504 });
+    }
+    const message =
+      error instanceof Error ? error.message : "The Co-Producer could not write lyrics. Please try again.";
     return Response.json({ error: message }, { status: 500 });
   }
 }

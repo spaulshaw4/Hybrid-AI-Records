@@ -36,10 +36,10 @@ function env(name: string): string | undefined {
 
 /** The single platform token. Accepts either canonical spelling. */
 export function replicateLlmToken(label = "The AI writer"): string {
-  const token = env("REPLICATE_API_TOKEN") ?? env("REPLICATE_API_KEY");
+  const token =
+    env("LYRIC_ENGINE_API_KEY") ?? env("REPLICATE_API_KEY") ?? env("ENGINE_API_KEY") ?? env("REPLICATE_API_TOKEN");
   console.log("[Replicate LLM] Using platform token:", Boolean(token));
-  if (!token)
-    throw new Error(`${label} is not configured: save REPLICATE_API_TOKEN in the secrets vault.`);
+  if (!token) throw new Error(`${label} is not configured. Add the lyric engine API key to .env.local.`);
   return token;
 }
 
@@ -63,9 +63,10 @@ function toReplicateInput(messages: ChatMessage[]) {
   return { system, prompt };
 }
 
-function joinOutput(output: unknown): string {
+/** Joins a Replicate output stream, array, or object into plain text. */
+export function joinReplicateOutput(output: unknown): string {
   if (typeof output === "string") return output;
-  if (Array.isArray(output)) return output.map((chunk) => joinOutput(chunk)).join("");
+  if (Array.isArray(output)) return output.map((chunk) => joinReplicateOutput(chunk)).join("");
   if (output && typeof output === "object") {
     const row = output as Record<string, unknown>;
     if (typeof row.text === "string") return row.text;
@@ -169,7 +170,73 @@ export async function replicateChat(
   if (prediction.status !== "succeeded")
     throw new Error(`${label} failed: ${prediction.error ?? prediction.status ?? "unknown error"}`);
 
-  return joinOutput(prediction.output).trim();
+  return joinReplicateOutput(prediction.output).trim();
+}
+
+export const REPLICATE_GEMINI_FLASH = "google/gemini-2.5-flash";
+
+/**
+ * Co-Producer lyrics on Gemini 2.5 Flash via Replicate.
+ * Authorization uses LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY / ENGINE_API_KEY.
+ */
+export async function replicateGeminiFlashLyrics(input: {
+  prompt: string;
+  systemInstruction: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  const label = "Co-Producer";
+  const base = replicateBaseUrl();
+  const create = await resilientFetch(
+    `${base}/models/${REPLICATE_GEMINI_FLASH}/predictions`,
+    {
+      method: "POST",
+      headers: headers(label),
+      body: JSON.stringify({
+        input: {
+          prompt: input.prompt,
+          system_instruction: input.systemInstruction,
+          max_output_tokens: 2048,
+          temperature: 0.7,
+        },
+      }),
+    },
+    { label, retries: 2, timeoutMs: 30_000, baseDelayMs: 1500, respectRetryAfter: true },
+  );
+
+  if (!create.ok) {
+    const body = await create.text().catch(() => "");
+    throw new Error(`${label} failed [${create.status}]: ${body.slice(0, 400)}`);
+  }
+
+  let prediction = (await create.json()) as {
+    id?: string;
+    status?: string;
+    output?: unknown;
+    error?: string;
+  };
+
+  const deadline = Date.now() + (input.timeoutMs ?? 30_000);
+  while (
+    prediction.id &&
+    prediction.status &&
+    !["succeeded", "failed", "canceled"].includes(prediction.status)
+  ) {
+    if (Date.now() > deadline) throw new Error(`${label} timed out. Try again.`);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const poll = await resilientFetch(
+      `${base}/predictions/${prediction.id}`,
+      { method: "GET", headers: headers(label) },
+      { label, retries: 2, timeoutMs: 30_000, baseDelayMs: 1000 },
+    );
+    if (!poll.ok) continue;
+    prediction = (await poll.json()) as typeof prediction;
+  }
+
+  if (prediction.status !== "succeeded") {
+    throw new Error(`${label} failed: ${prediction.error ?? prediction.status ?? "unknown error"}`);
+  }
+
+  return joinReplicateOutput(prediction.output).trim();
 }
 
 /** Runs a completion and returns an OpenAI chat-completions shaped Response. */
