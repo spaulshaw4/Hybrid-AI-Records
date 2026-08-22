@@ -7,10 +7,8 @@ import { nitro } from "nitro/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig(({ command, mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  for (const [key, value] of Object.entries(env)) {
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
+  const env = loadEnv(mode || process.env.NODE_ENV || "development", process.cwd(), "");
+  Object.assign(process.env, env);
 
   return {
     envPrefix: ["VITE_", "NEXT_PUBLIC_"],

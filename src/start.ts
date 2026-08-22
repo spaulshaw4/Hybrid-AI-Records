@@ -1,3 +1,8 @@
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env.development" });
+dotenv.config({ path: ".env" });
+
 import { createStart, createMiddleware } from "@tanstack/react-start";
 
 import { recordCapturedError } from "./lib/error-capture";

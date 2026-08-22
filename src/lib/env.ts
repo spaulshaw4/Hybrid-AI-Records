@@ -1,14 +1,14 @@
 import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
-dotenv.config(); // fallback to .env
+dotenv.config({ path: ".env.development" });
+dotenv.config({ path: ".env" });
 
 /**
  * Pipeline env lookup for TanStack Start / Vite.
  *
- * dotenv loads `.env.local` then `.env` into Node `process.env`.
- * Dynamic `process.env[name]` access so Vite cannot statically replace
- * server secrets with `undefined`. Optional `VITE_` copies stay as fallbacks.
+ * Vite `loadEnv` copies `.env*` into `process.env` at config load.
+ * dotenv is a Node fallback when this module is imported outside Vite.
  */
 
 export type PipelineStage =
@@ -31,26 +31,29 @@ function trimEnv(value: unknown): string | undefined {
   return next || undefined;
 }
 
+function viteEnv(): Record<string, unknown> | undefined {
+  try {
+    return (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
+  } catch {
+    return undefined;
+  }
+}
+
 function fromProcess(name: string): string | undefined {
   if (typeof process === "undefined" || !process.env) return undefined;
   return trimEnv(process.env[name]);
 }
 
 function fromImportMeta(name: string): string | undefined {
-  try {
-    const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
-    return trimEnv(env?.[name]);
-  } catch {
-    return undefined;
-  }
+  return trimEnv(viteEnv()?.[name]);
 }
 
 function readNamedKey(keyName: string): string | undefined {
   return (
     fromProcess(keyName) ||
     fromProcess(`VITE_${keyName}`) ||
-    fromImportMeta(`VITE_${keyName}`) ||
-    fromImportMeta(keyName)
+    fromImportMeta(keyName) ||
+    fromImportMeta(`VITE_${keyName}`)
   );
 }
 
@@ -65,21 +68,22 @@ export function readEnv(keyName: string): string | undefined {
 }
 
 export function requireStageKey(keyName: string, stage: string): string {
+  const meta = viteEnv();
   const value =
     process.env[keyName] ||
     process.env[`VITE_${keyName}`] ||
-    (typeof import.meta !== "undefined" && import.meta.env?.[`VITE_${keyName}`]) ||
-    (typeof import.meta !== "undefined" && import.meta.env?.[keyName]) ||
+    (typeof import.meta !== "undefined" && meta?.[keyName]) ||
+    (typeof import.meta !== "undefined" && meta?.[`VITE_${keyName}`]) ||
     readEnv(keyName);
   const trimmed = trimEnv(value);
   if (!trimmed) {
-    const errorMsg = `[PIPELINE_INIT_FAILED] ${stage} failed: Environment variable '${keyName}' is missing.`;
+    const errorMsg = `[PIPELINE_INIT_FAILED] ${stage} failed: Missing ${keyName}`;
     console.error(errorMsg);
-    console.log(
-      "Available keys in process.env:",
-      Object.keys(process.env ?? {}).filter((k) => !k.includes("npm_") && !k.includes("SECRET")),
-    );
     throw new Error(errorMsg);
   }
   return trimmed;
+}
+
+export function getEnvKey(keyName: string, stage = keyName): string {
+  return requireStageKey(keyName, stage);
 }

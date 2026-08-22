@@ -149,7 +149,7 @@ describe("MusicAPI sonic workflow", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const message =
-      "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Environment variable 'MUSIC_API_KEY' is missing.";
+      "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
     expect(() => musicApiKey()).toThrow(message);
     expect(error).toHaveBeenCalledWith(message);
   });

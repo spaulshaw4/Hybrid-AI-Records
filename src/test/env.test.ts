@@ -53,12 +53,10 @@ describe("requireStageKey", () => {
   it("names the failing MusicAPI stage when the key is missing", () => {
     clear(["MUSIC_API_KEY", "VITE_MUSIC_API_KEY", "SONIC_API_KEY", "MUSICAPI_KEY"]);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const message =
-      "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Environment variable 'MUSIC_API_KEY' is missing.";
+      "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
     expect(() => requireStageKey("MUSIC_API_KEY", "MusicAPI (Base Arrangement)")).toThrow(message);
     expect(error).toHaveBeenCalledWith(message);
-    expect(log).toHaveBeenCalledWith("Available keys in process.env:", expect.any(Array));
   });
 
   it("names Stem Separation when REPLICATE_API_TOKEN is missing", () => {
@@ -66,7 +64,7 @@ describe("requireStageKey", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const message =
-      "[PIPELINE_INIT_FAILED] Stem Separation failed: Environment variable 'REPLICATE_API_TOKEN' is missing.";
+      "[PIPELINE_INIT_FAILED] Stem Separation failed: Missing REPLICATE_API_TOKEN";
     expect(() => requireStageKey("REPLICATE_API_TOKEN", "Stem Separation")).toThrow(message);
     expect(error).toHaveBeenCalledWith(message);
   });
@@ -82,7 +80,7 @@ describe("requireStageKey", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const message =
-      "[PIPELINE_INIT_FAILED] Fish Audio (Vocals) failed: Environment variable 'FISH_AUDIO_API_KEY' is missing.";
+      "[PIPELINE_INIT_FAILED] Fish Audio (Vocals) failed: Missing FISH_AUDIO_API_KEY";
     expect(() => requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)")).toThrow(message);
   });
 
