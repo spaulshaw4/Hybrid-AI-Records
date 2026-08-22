@@ -16,34 +16,29 @@ export type LyricBrief = {
 };
 
 function geminiApiKey(): string {
-  const key =
-    (typeof process !== "undefined" && process.env["GEMINI_API_KEY"]?.trim()) ||
-    (typeof process !== "undefined" && process.env["GOOGLE_API_KEY"]?.trim()) ||
-    "";
-  if (!key) {
-    console.error("[CO_PRODUCER] GEMINI_API_KEY is undefined — add it to .env.local");
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  if (!trimmed) {
+    console.error("[GEMINI_DIRECT_ERROR]", "GEMINI_API_KEY is undefined — add it to .env.local");
     throw new Error("Missing GEMINI_API_KEY in .env.local");
   }
-  return key;
+  return trimmed;
 }
 
 export async function writeLyrics(brief: LyricBrief): Promise<string> {
-  const apiKey = geminiApiKey();
+  geminiApiKey();
   const language = brief.language?.trim() || "English";
   const trackTitle = brief.title?.trim() || "Untitled";
-  const style = brief.style?.trim() || "Rock/Alternative";
-  const prompt =
-    `You are an elite music co-producer and lyricist. Write full, structured song lyrics in ${language || "English"} ` +
-    `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
-    `Style: ${style || "Rock/Alternative"}.`;
 
-  console.log("[CO_PRODUCER]", { trackTitle, language, model: COPRODUCER_GEMINI_MODEL, style });
+  console.log("[CO_PRODUCER]", { trackTitle, language, model: COPRODUCER_GEMINI_MODEL });
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+    });
     const response = await ai.models.generateContent({
       model: COPRODUCER_GEMINI_MODEL,
-      contents: prompt,
+      contents: `Write complete song lyrics with [Verse], [Chorus], [Bridge], [Outro] in ${language} for a track titled "${trackTitle}".`,
       config: { maxOutputTokens: 8192 },
     });
     const lyrics = (response.text ?? "").trim();
@@ -52,7 +47,7 @@ export async function writeLyrics(brief: LyricBrief): Promise<string> {
     }
     return lyrics;
   } catch (error) {
-    console.error("[GEMINI_COPRODUCER_ERROR]", error);
+    console.error("[GEMINI_DIRECT_ERROR]", error);
     throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
   }
 }

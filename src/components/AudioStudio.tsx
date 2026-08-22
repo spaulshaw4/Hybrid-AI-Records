@@ -1301,10 +1301,13 @@ export function AudioStudio() {
       const data = await res.json();
       console.log("[CO_PRODUCER_RESPONSE]", data);
       if (data?.lyrics) {
-        setLyrics(String(data.lyrics).slice(0, PROMPT_MAX));
+        const nextLyrics = String(data.lyrics).slice(0, PROMPT_MAX);
+        setLyrics(nextLyrics);
         setLyricWarnings([]);
-      } else if (data?.error) {
-        setCoProducerHint(String(data.error));
+        const txt = document.getElementById(SONG_LYRICS_INPUT_ID) as HTMLTextAreaElement | null;
+        if (txt) txt.value = nextLyrics;
+      } else {
+        setCoProducerHint(String(data?.error || `Co-Producer failed (${res.status})`));
       }
     } catch (err) {
       console.error("[CO_PRODUCER_CLIENT_ERROR]", err);

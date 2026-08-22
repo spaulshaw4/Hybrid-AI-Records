@@ -1,28 +1,31 @@
-import { writeLyrics } from "@/lib/lyrics.server";
+import { GoogleGenAI } from "@google/genai";
 
 /**
- * Co-Producer lyrics endpoint. The TanStack Start server entry intercepts
- * POST /api/coproducer and calls this handler.
- * Uses GEMINI_API_KEY with @google/genai (`gemini-2.5-flash`).
+ * Co-Producer lyrics: Google Gemini directly via GEMINI_API_KEY.
+ * Never routes through Replicate.
  */
 export async function POST(req: Request): Promise<Response> {
   try {
-    const key = process.env.GEMINI_API_KEY?.trim();
-    if (!key) {
-      console.error("[CO_PRODUCER] GEMINI_API_KEY is undefined — add it to .env.local");
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey?.trim()) {
+      console.error("[GEMINI_DIRECT_ERROR]", "GEMINI_API_KEY is undefined — add it to .env.local");
       return Response.json({ error: "Missing GEMINI_API_KEY in .env.local" }, { status: 500 });
     }
 
-    const { trackTitle, language, style } = await req.json();
-    const lyrics = await writeLyrics({
-      concept: String(trackTitle ?? "Untitled"),
-      title: String(trackTitle ?? "Untitled"),
-      language: String(language || "English"),
-      style: style ? String(style) : "Rock/Alternative",
+    const body = (await req.json()) as { trackTitle?: string; language?: string };
+    const trackTitle = String(body.trackTitle ?? "Untitled");
+    const language = String(body.language || "English");
+
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
     });
-    return Response.json({ lyrics });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Write complete song lyrics with [Verse], [Chorus], [Bridge], [Outro] in ${language} for a track titled "${trackTitle}".`,
+    });
+    return Response.json({ lyrics: response.text });
   } catch (error) {
-    console.error("[CO_PRODUCER_API_ERROR]", error);
+    console.error("[GEMINI_DIRECT_ERROR]", error);
     const message = error instanceof Error ? error.message : "Failed to generate lyrics";
     return Response.json({ error: message }, { status: 500 });
   }

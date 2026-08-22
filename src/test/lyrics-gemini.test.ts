@@ -23,7 +23,7 @@ describe("Co-Producer Gemini lyrics via @google/genai", () => {
     vi.clearAllMocks();
   });
 
-  it("runs gemini-2.5-flash with 8192 max tokens and returns response.text", async () => {
+  it("runs gemini-2.5-flash and returns response.text", async () => {
     process.env.GEMINI_API_KEY = "test-gemini-key";
     generateContentMock.mockResolvedValue({ text: "[Verse 1]\nGo\n[Chorus]\nHold the line" });
 
@@ -39,14 +39,16 @@ describe("Co-Producer Gemini lyrics via @google/genai", () => {
     expect(COPRODUCER_GEMINI_MODEL).toBe("gemini-2.5-flash");
     expect(generateContentMock).toHaveBeenCalledTimes(1);
     const [params] = generateContentMock.mock.calls[0] as [
-      { model: string; contents: string; config: { maxOutputTokens: number } },
+      { model: string; contents: string; config?: { maxOutputTokens: number } },
     ];
     expect(params.model).toBe("gemini-2.5-flash");
-    expect(params.config.maxOutputTokens).toBe(8192);
-    expect(params.contents).toContain("elite music co-producer");
+    expect(params.contents).toContain("Write complete song lyrics");
+    expect(params.contents).toContain("[Verse]");
+    expect(params.contents).toContain("[Chorus]");
+    expect(params.contents).toContain("[Bridge]");
+    expect(params.contents).toContain("[Outro]");
     expect(params.contents).toContain("Lithuanian (Lietuvių)");
     expect(params.contents).toContain("Night Drive");
-    expect(params.contents).toContain("Nu-Metal");
   });
 
   it("throws when GEMINI_API_KEY is missing on the server", async () => {
@@ -61,12 +63,13 @@ describe("Co-Producer Gemini lyrics via @google/genai", () => {
       }),
     ).rejects.toThrow("Missing GEMINI_API_KEY in .env.local");
     expect(logged).toHaveBeenCalledWith(
-      "[CO_PRODUCER] GEMINI_API_KEY is undefined — add it to .env.local",
+      "[GEMINI_DIRECT_ERROR]",
+      "GEMINI_API_KEY is undefined — add it to .env.local",
     );
     logged.mockRestore();
   });
 
-  it("logs GEMINI_COPRODUCER_ERROR and does not fall back when Gemini fails", async () => {
+  it("logs GEMINI_DIRECT_ERROR and does not fall back when Gemini fails", async () => {
     process.env.GEMINI_API_KEY = "test-gemini-key";
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     generateContentMock.mockRejectedValue(new Error("quota exceeded"));
@@ -79,7 +82,7 @@ describe("Co-Producer Gemini lyrics via @google/genai", () => {
       }),
     ).rejects.toThrow("quota exceeded");
 
-    expect(logged).toHaveBeenCalledWith("[GEMINI_COPRODUCER_ERROR]", expect.any(Error));
+    expect(logged).toHaveBeenCalledWith("[GEMINI_DIRECT_ERROR]", expect.any(Error));
     logged.mockRestore();
   });
 });

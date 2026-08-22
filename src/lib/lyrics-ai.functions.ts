@@ -34,7 +34,7 @@ export const generateLyrics = createServerFn({ method: "POST" })
       console.log("[CO_PRODUCER]", { lyricsLength: lyrics.length });
       return { lyrics };
     } catch (error) {
-      console.error("[GEMINI_COPRODUCER_ERROR]", error);
+      console.error("[GEMINI_DIRECT_ERROR]", error);
       throw error instanceof Error ? error : new Error("Co-Producer Gemini request failed.");
     }
   });
