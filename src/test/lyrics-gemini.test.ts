@@ -40,16 +40,30 @@ describe("Co-Producer Gemini lyrics via Replicate", () => {
     expect(runMock).toHaveBeenCalledTimes(1);
     const [model, options] = runMock.mock.calls[0] as [
       string,
-      { input: { prompt: string; temperature: number; max_output_tokens: number } },
+      { input: { prompt: string; temperature?: number; max_output_tokens?: number; max_tokens?: number } },
     ];
     expect(model).toBe(COPRODUCER_GEMINI_MODEL);
     expect(model).not.toMatch(/llama/i);
-    expect(options.input.temperature).toBe(0.75);
-    expect(options.input.max_output_tokens).toBe(2048);
-    expect(options.input.prompt).toContain("elite music co-producer");
+    expect(options.input).toEqual({
+      prompt: expect.stringContaining("elite music co-producer"),
+    });
+    expect(options.input).not.toHaveProperty("max_output_tokens");
+    expect(options.input).not.toHaveProperty("max_tokens");
+    expect(options.input).not.toHaveProperty("temperature");
     expect(options.input.prompt).toContain("Lithuanian (Lietuvių)");
     expect(options.input.prompt).toContain("Night Drive");
     expect(options.input.prompt).toContain("Nu-Metal");
+  });
+
+  it("throws when REPLICATE_API_TOKEN is missing on the server", async () => {
+    delete process.env.REPLICATE_API_TOKEN;
+    await expect(
+      writeLyrics({
+        concept: "night drive",
+        title: "Night Drive",
+        language: "English",
+      }),
+    ).rejects.toThrow("REPLICATE_API_TOKEN is missing on server");
   });
 
   it("logs GEMINI_REPLICATE_ERROR and does not fall back when Replicate fails", async () => {

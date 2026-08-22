@@ -20,7 +20,7 @@ function replicateToken(): string {
   const token =
     (typeof process !== "undefined" && process.env["REPLICATE_API_TOKEN"]?.trim()) || "";
   if (!token) {
-    throw new Error("Co-Producer is not configured: set REPLICATE_API_TOKEN.");
+    throw new Error("REPLICATE_API_TOKEN is missing on server");
   }
   return token;
 }
@@ -30,18 +30,18 @@ export async function writeLyrics(brief: LyricBrief): Promise<string> {
   const trackTitle = brief.title?.trim() || "Untitled";
   const style = brief.style?.trim() || "Rock/Alternative";
   const modelString = COPRODUCER_GEMINI_MODEL;
-  const systemPrompt =
-    `You are an elite music co-producer and lyricist. Write structured song lyrics in ${language} ` +
-    `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
-    `Style: ${style}.`;
+  const input = {
+    prompt:
+      `You are an elite music co-producer and lyricist. Write full, structured song lyrics in ${language || "English"} ` +
+      `with section markers ([Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]) for a song titled "${trackTitle}". ` +
+      `Style: ${style || "Rock/Alternative"}.`,
+  };
 
   console.log("[CO_PRODUCER]", { trackTitle, language, model: modelString, style });
 
   try {
     const replicate = new Replicate({ auth: replicateToken() });
-    const output = await replicate.run(modelString as `${string}/${string}`, {
-      input: { prompt: systemPrompt, temperature: 0.75, max_output_tokens: 2048 },
-    });
+    const output = await replicate.run(modelString as `${string}/${string}`, { input });
     const lyricsText = Array.isArray(output) ? output.join("") : String(output);
     const lyrics = lyricsText.trim();
     if (!lyrics || lyrics === "undefined" || lyrics === "null") {

@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
@@ -6,7 +8,8 @@ import { toast } from "sonner";
 
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
 import { LegalDisclaimer } from "@/components/LegalDisclaimer";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -1271,12 +1274,13 @@ export function AudioStudio() {
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
-  const isPending = aiBusy === "lyrics";
+  const isGeneratingLyrics = aiBusy === "lyrics";
+  const isPending = isGeneratingLyrics;
 
   /** Gemini fills the lyrics box from the title, style and any existing lyrics. */
   async function handleCoProducer() {
-    console.log("[CO_PRODUCER_CLICKED]", { trackTitle, language, isPending });
-    if (aiBusy) {
+    console.log("[DEBUG_COPRODUCER_TRIGGER]", { trackTitle, language, isPending });
+    if (isGeneratingLyrics) {
       console.log("[CO_PRODUCER_SKIPPED]", { reason: "already pending", aiBusy });
       return;
     }
@@ -1293,11 +1297,6 @@ export function AudioStudio() {
     }
     setAiBusy("lyrics");
     try {
-      console.log("[CO_PRODUCER_REQUEST]", {
-        title: title.trim(),
-        language: targetLanguage,
-        style: styleLine || null,
-      });
       const out = await writeLyrics({
         data: {
           concept: (lyrics.trim() || styleLine || title.trim()).slice(0, 600),
@@ -1306,13 +1305,14 @@ export function AudioStudio() {
           language: targetLanguage,
         },
       });
-      console.log("[CO_PRODUCER_RESPONSE]", { lyricsLength: out.lyrics?.length ?? 0 });
       setLyrics((out.lyrics ?? "").slice(0, PROMPT_MAX));
       setLyricWarnings([]);
       toast.success("Co-Producer wrote your lyrics.");
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "The Co-Producer could not write lyrics.";
       console.error("[GEMINI_REPLICATE_ERROR]", error);
-      toast.error(error instanceof Error ? error.message : "The Co-Producer could not write lyrics.");
+      toast.error(message);
     } finally {
       setAiBusy(null);
     }
@@ -2698,24 +2698,28 @@ export function AudioStudio() {
               <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
                 Lyrics
               </Label>
-              <Button
+              <button
                 type="button"
-                size="sm"
-                variant="secondary"
-                disabled={aiBusy !== null}
-                aria-busy={aiBusy === "lyrics"}
+                disabled={isGeneratingLyrics}
+                aria-busy={isGeneratingLyrics}
+                className={cn(
+                  buttonVariants({ size: "sm", variant: "secondary" }),
+                  "pointer-events-auto disabled:pointer-events-auto",
+                )}
                 onClick={(e) => {
                   e.preventDefault();
+                  e.stopPropagation();
+                  console.log("[DIRECT_DOM_CLICK]");
                   void handleCoProducer();
                 }}
               >
-                {aiBusy === "lyrics" ? (
+                {isGeneratingLyrics ? (
                   <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
                 ) : (
                   <Sparkles className="mr-2 size-4" aria-hidden />
                 )}
                 Co-Producer
-              </Button>
+              </button>
             </div>
 
             <Textarea
