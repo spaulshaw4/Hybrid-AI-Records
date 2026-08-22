@@ -69,8 +69,9 @@ const generateSchema = z.object({
       ? trimmed
       : undefined;
   }, z.string().uuid().optional()),
+  /** Same key the studio uses to charge on Generate, so a retry cannot double-spend. */
+  idempotencyKey: z.string().trim().max(120).optional(),
 });
-
 
 const taskSchema = z.object({ taskId: z.string().trim().min(1).max(200) });
 

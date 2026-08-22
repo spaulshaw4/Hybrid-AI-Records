@@ -2,6 +2,7 @@
  * Server-only: mix Hybrid Engine stems, Matchering 2.0 master, LUFS finish.
  * Failures never throw to the generator — the raw stem URL is returned instead.
  */
+import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -108,30 +109,83 @@ async function runMatcheringPython(input: {
   ];
 
   for (const candidate of binaries) {
-    try {
-      await execFileAsync(candidate.bin, [...candidate.prefix, ...scriptArgs], {
-        timeout: MATCHERING_PROCESS_TIMEOUT_MS,
-        maxBuffer: 8 * 1024 * 1024,
-        windowsHide: true,
-      });
-      return true;
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException & { status?: number; stderr?: string };
-      if (err.code === "ENOENT") continue;
-      const exitCode = typeof err.code === "number" ? err.code : undefined;
-      if (exitCode === 2 || /matchering is not installed/i.test(err.stderr ?? "")) {
-        console.warn("[matchering] Python package missing — using FFmpeg loudnorm fallback");
-        return false;
-      }
-      console.warn(
-        "[matchering] process failed",
-        err.stderr || err.message,
-      );
-      return false;
-    }
+    const ok = await spawnMatchering(candidate.bin, [...candidate.prefix, ...scriptArgs]);
+    if (ok === "missing-bin") continue;
+    return ok === "ok";
   }
   console.warn("[matchering] Python runtime not found — using FFmpeg loudnorm fallback");
   return false;
+}
+
+type MatcheringSpawnResult = "ok" | "fallback" | "missing-bin";
+
+function spawnMatchering(bin: string, args: string[]): Promise<MatcheringSpawnResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: MatcheringSpawnResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    console.log("[master] spawning Matchering 2.0");
+    const child = spawn(bin, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.on("error", (error) => {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        finish("missing-bin");
+        return;
+      }
+      console.warn("[matchering] process failed", err.message);
+      finish("fallback");
+    });
+    child.stdout?.on("data", (chunk: Buffer) => {
+      process.stdout.write(chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      process.stderr.write(chunk);
+    });
+
+    const timer = setTimeout(() => {
+      console.warn(
+        `[matchering] ${MATCHERING_PROCESS_TIMEOUT_MS / 1000}s limit — aborting for FFmpeg loudnorm fallback`,
+      );
+      killMatcheringChild(child);
+      finish("fallback");
+    }, MATCHERING_PROCESS_TIMEOUT_MS);
+
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        finish("ok");
+        return;
+      }
+      if (code === 2) {
+        console.warn("[matchering] Python package missing — using FFmpeg loudnorm fallback");
+        finish("fallback");
+        return;
+      }
+      if (code === 3) {
+        console.warn("[matchering] script hit the 30s cap — using FFmpeg loudnorm fallback");
+        finish("fallback");
+        return;
+      }
+      if (settled) return;
+      console.warn("[matchering] process exited", code);
+      finish("fallback");
+    });
+  });
+}
+
+function killMatcheringChild(child: ReturnType<typeof spawn>): void {
+  if (child.pid && process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    return;
+  }
+  child.kill("SIGKILL");
 }
 
 async function uploadMasteredBytes(
@@ -184,6 +238,7 @@ async function mixAndMasterOnce(options: {
     if (options.instrumentalUrl) downloads.push(downloadStem(options.instrumentalUrl, instrumentalPath));
     if (options.vocalUrl) downloads.push(downloadStem(options.vocalUrl, vocalPath));
     if (downloads.length === 0) return { masterUrl: null, matched: false, mixed: false };
+    console.log("[master] downloading stems");
     await Promise.all(downloads);
 
     const stems: HybridStemInputs = {
@@ -195,6 +250,7 @@ async function mixAndMasterOnce(options: {
       return { masterUrl: null, matched: false, mixed: false };
     }
 
+    console.log("[master] Mixing audio stems (FFmpeg)...");
     await runFfmpeg(buildHybridMixArgs(stems, mixPath), MATCHERING_MIX_TIMEOUT_MS);
 
     const cwd = process.cwd();
@@ -202,25 +258,34 @@ async function mixAndMasterOnce(options: {
     let masteredWav = mixPath;
     let matched = false;
     if (reference && (await fileExists(reference))) {
+      console.log("[master] Running Matchering 2.0 mastering pass...");
       matched = await runMatcheringPython({
         scriptPath: join(cwd, MATCHERING_SCRIPT_RELATIVE),
         target: mixPath,
         reference,
         outWav: matchedPath,
       });
-      if (matched && (await fileExists(matchedPath))) masteredWav = matchedPath;
+      if (matched && (await fileExists(matchedPath))) {
+        masteredWav = matchedPath;
+        console.log("[master] Matchering 2.0 finished");
+      } else {
+        console.warn("[master] Matchering skipped — applying FFmpeg loudnorm + alimiter");
+      }
     } else {
       console.warn(
         `[matchering] no reference at ${MATCHERING_REFERENCE_RELATIVE} — skip Matchering, loudnorm only`,
       );
     }
 
+    console.log("[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter");
     await runFfmpeg(matcheringFinishArgs(masteredWav, playablePath), MATCHERING_MIX_TIMEOUT_MS);
 
     const mp3 = await readFile(playablePath);
     const wav = await readFile(masteredWav).catch(() => null);
     const playableObject = masteredPlayablePath(options.userId, options.taskId);
+    console.log("[master] Uploading to vault & preparing player...");
     const masterUrl = await uploadMasteredBytes(new Uint8Array(mp3), playableObject, "mp3");
+    console.log("[master] vault upload ready", playableObject);
     if (wav && wav.byteLength > 1024) {
       await uploadMasteredBytes(
         new Uint8Array(wav),

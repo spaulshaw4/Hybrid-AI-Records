@@ -64,6 +64,8 @@ describe("Matchering 2.0 mix + master contract", () => {
       "public/references/master_reference.wav",
       "--out-wav",
       "master.wav",
+      "--timeout",
+      "30",
     ]);
   });
 
@@ -97,6 +99,6 @@ describe("Matchering 2.0 mix + master contract", () => {
   });
 
   it("caps the pipeline so a stuck worker cannot hang generation", () => {
-    expect(MATCHERING_PIPELINE_TIMEOUT_MS).toBe(180_000);
+    expect(MATCHERING_PIPELINE_TIMEOUT_MS).toBe(90_000);
   });
 });

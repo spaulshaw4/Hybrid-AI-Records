@@ -3,9 +3,10 @@ import { LOUDNORM_FILTER } from "@/lib/loudnorm";
 import { masteredTrackObjectPath } from "@/lib/audio-vault";
 
 /** Hard cap so a stuck Python/FFmpeg child never hangs a generation. */
-export const MATCHERING_PIPELINE_TIMEOUT_MS = 180_000;
-export const MATCHERING_PROCESS_TIMEOUT_MS = 120_000;
-export const MATCHERING_MIX_TIMEOUT_MS = 90_000;
+export const MATCHERING_PIPELINE_TIMEOUT_MS = 90_000;
+/** Matchering 2.0 itself: after 30s abort and finish with FFmpeg loudnorm. */
+export const MATCHERING_PROCESS_TIMEOUT_MS = 30_000;
+export const MATCHERING_MIX_TIMEOUT_MS = 60_000;
 
 export const MATCHERING_REFERENCE_RELATIVE = "public/references/master_reference.wav";
 export const MATCHERING_SCRIPT_RELATIVE = "scripts/matchering_master.py";
@@ -123,7 +124,12 @@ export function matcheringPythonArgs(input: {
   target: string;
   reference: string;
   outWav: string;
+  timeoutSeconds?: number;
 }): string[] {
+  const timeoutSeconds = Math.max(
+    1,
+    Math.round((input.timeoutSeconds ?? MATCHERING_PROCESS_TIMEOUT_MS / 1000) * 10) / 10,
+  );
   return [
     input.scriptPath,
     "--target",
@@ -132,6 +138,8 @@ export function matcheringPythonArgs(input: {
     input.reference,
     "--out-wav",
     input.outWav,
+    "--timeout",
+    String(timeoutSeconds),
   ];
 }
 
