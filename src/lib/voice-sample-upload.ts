@@ -9,6 +9,16 @@ import { logUploadAction } from "@/lib/upload-audit";
 export const VOICE_SAMPLE_BUCKET = "voice-samples";
 export const VOICE_SAMPLE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 export const VOICE_SAMPLE_ACCEPT = ".mp3,.wav,audio/mpeg,audio/wav,audio/webm";
+
+/** Raw mic capture — no browser DSP, so the clone hears the actual take. */
+export const VOICE_CAPTURE_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: 1,
+  },
+};
 const ALLOWED_EXTENSIONS = [".mp3", ".wav", ".webm", ".m4a"];
 /** Long enough for the clone job to fetch the clip. */
 const SIGNED_URL_SECONDS = 60 * 60 * 2;

@@ -36,7 +36,7 @@ import { useVocalLiability } from "@/hooks/use-vocal-liability";
 import { ACTIVE_VOICE_KEY, notifyActiveVoiceChange } from "@/lib/active-voice";
 import { readStoredVocalConsent } from "@/lib/vocal-consent";
 import { usePersistentState } from "@/lib/studio-persist";
-import { uploadVoiceSample, VOICE_SAMPLE_ACCEPT } from "@/lib/voice-sample-upload";
+import { uploadVoiceSample, VOICE_CAPTURE_CONSTRAINTS, VOICE_SAMPLE_ACCEPT } from "@/lib/voice-sample-upload";
 import { ClipMetadataPanel } from "@/components/ClipMetadataPanel";
 import { ClipMetadataDiff } from "@/components/ClipMetadataDiff";
 
@@ -368,7 +368,7 @@ export function VoiceLibrary() {
   async function startRecording() {
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_CONSTRAINTS);
     } catch {
       toast.error("Microphone access is needed to record a voice sample.");
       return;

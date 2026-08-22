@@ -6,6 +6,12 @@
  */
 
 export const ACE_STEP_MODEL = "fishaudio/ace-step-1.5";
+/**
+ * ACE-Step is a community model. Replicate's `/models/{owner}/{name}/predictions`
+ * route is official-models only and 404s here — create via `/predictions` with
+ * a version hash instead (same pattern as Demucs stem separation).
+ */
+export const ACE_STEP_PREDICTIONS_PATH = "/predictions";
 export const ACE_STEP_PROMPT_MAX = 512;
 export const ACE_STEP_LYRICS_MAX = 4096;
 export const ACE_STEP_DURATION_MIN = 10;

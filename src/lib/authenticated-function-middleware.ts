@@ -5,6 +5,11 @@ import { notifySessionExpired, refreshAccessToken } from "@/lib/session-auth";
 /** Adds the active app session to RPCs and retries one 401 after a silent refresh. */
 export const authenticatedFunctionMiddleware = createMiddleware({ type: "function" }).client(
   async ({ next }) => {
+    const { isDevAuthBypass } = await import("@/lib/dev-auth");
+    if (isDevAuthBypass()) {
+      return next({ headers: {}, fetch });
+    }
+
     const { data } = await supabase.auth.getSession();
     const initialToken = data.session?.access_token;
     const authFetch: typeof fetch = async (input, init) => {

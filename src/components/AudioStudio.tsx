@@ -21,6 +21,7 @@ import { QuickVocalRecorder } from "@/components/QuickVocalRecorder";
 import { AudioVault } from "@/components/AudioVault";
 
 import { supabase } from "@/integrations/supabase/client";
+import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_VOICE_ID, isDevAuthBypass } from "@/lib/dev-auth";
 
 import { checkEngineHealth, generateEngineTrack, getEngineTrackTask } from "@/lib/apiframe-music.functions";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
@@ -1160,8 +1161,10 @@ export function AudioStudio() {
   const [customVocalFile, setCustomVocalFile] = useState<File | Blob | null>(null);
 
 
-  const [balance, setBalance] = useState<number | null>(null);
-  const [signedIn, setSignedIn] = useState(false);
+  const [balance, setBalance] = useState<number | null>(
+    isDevAuthBypass() ? DEV_TEST_TOKEN_BALANCE : null,
+  );
+  const [signedIn, setSignedIn] = useState(isDevAuthBypass());
   const [topUpOpen, setTopUpOpen] = useState(false);
 
   const [busy, setBusy] = useState(false);
@@ -1504,6 +1507,10 @@ export function AudioStudio() {
 
 
   const refreshBalance = useCallback(async () => {
+    if (isDevAuthBypass()) {
+      setBalance((prev) => prev ?? DEV_TEST_TOKEN_BALANCE);
+      return;
+    }
     // Retry once: a single dropped request must not make the studio think the
     // artist is out of Hybrid Tokens.
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1519,6 +1526,11 @@ export function AudioStudio() {
 
 
   useEffect(() => {
+    if (isDevAuthBypass()) {
+      setSignedIn(true);
+      setBalance((prev) => prev ?? DEV_TEST_TOKEN_BALANCE);
+      return;
+    }
     void supabase.auth.getSession().then(({ data }) => {
       setSignedIn(Boolean(data.session));
       if (data.session) void refreshBalance();
@@ -1876,7 +1888,7 @@ export function AudioStudio() {
       // generated, archived to storage and committed to the vault.
       // A hiccup on this read must not cancel the render: the spend step at
       // the end is the real guard and it can never overdraw.
-      let current: number | null = null;
+      let current: number | null = isDevAuthBypass() ? DEV_TEST_TOKEN_BALANCE : null;
       for (let attempt = 0; attempt < 2 && current === null; attempt += 1) {
         try {
           current = (await fetchBalance({ data: undefined })).balance;
@@ -1934,7 +1946,12 @@ export function AudioStudio() {
           language: selectedLanguage,
           customLanguage: customLanguage.trim(),
           audioFormat: "mp3" as const,
-          ...(withVocals && usesCustomVocal(studioPayload) && voiceId ? { voiceId } : {}),
+          ...(withVocals &&
+          usesCustomVocal(studioPayload) &&
+          voiceId &&
+          voiceId !== DEV_TEST_VOICE_ID
+            ? { voiceId }
+            : {}),
           termsAccepted:
             studioPayload.vocal_config.type === "custom"
               ? studioPayload.vocal_config.terms_accepted
@@ -2043,6 +2060,9 @@ export function AudioStudio() {
       // Everything landed: audio rendered, archived and committed. Charge now.
       // Keyed on the run id: a retried or resumed run is charged exactly once,
       // no matter how many times this step is reached.
+      if (isDevAuthBypass()) {
+        setBalance((prev) => Math.max(0, (prev ?? DEV_TEST_TOKEN_BALANCE) - 1));
+      } else {
       const spend = await spendToken({
         data: { amount: 1, idempotencyKey: `gen:${runId}`, note: title },
       });
@@ -2051,6 +2071,7 @@ export function AudioStudio() {
         window.dispatchEvent(
           new CustomEvent("hybrid:tokens-changed", { detail: { balance: spend.balance } }),
         );
+      }
       }
 
       const finished: Result = {
@@ -2202,6 +2223,9 @@ export function AudioStudio() {
           audioUrl = saved.audioUrl;
         }
 
+        if (isDevAuthBypass()) {
+          setBalance((prev) => Math.max(0, (prev ?? DEV_TEST_TOKEN_BALANCE) - 1));
+        } else {
         const spend = await spendToken({
           data: { amount: 1, idempotencyKey: `gen:${job.runId}`, note: finalTitle },
         });
@@ -2210,6 +2234,7 @@ export function AudioStudio() {
           window.dispatchEvent(
             new CustomEvent("hybrid:tokens-changed", { detail: { balance: spend.balance } }),
           );
+        }
         }
 
         setResult({
@@ -2329,6 +2354,9 @@ export function AudioStudio() {
         audioUrl = saved.audioUrl;
       }
 
+      if (isDevAuthBypass()) {
+        setBalance((prev) => Math.max(0, (prev ?? DEV_TEST_TOKEN_BALANCE) - 1));
+      } else {
       const spend = await spendToken({
         data: { amount: 1, idempotencyKey: `gen:${plan.runId}`, note: plan.title },
       });
@@ -2337,6 +2365,7 @@ export function AudioStudio() {
         window.dispatchEvent(
           new CustomEvent("hybrid:tokens-changed", { detail: { balance: spend.balance } }),
         );
+      }
       }
 
       setResult({
@@ -3392,6 +3421,7 @@ export function AudioStudio() {
                   <QuickVocalRecorder
                     voiceId={voiceId}
                     vocalMode={vocalSource}
+                    signedIn={signedIn}
                     onVoiceIdChange={(id) => {
                       setVoiceId(id);
                       if (id) setVocalSource("custom-upload");

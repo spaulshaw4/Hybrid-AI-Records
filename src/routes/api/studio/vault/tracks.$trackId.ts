@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { studioUserIdFromRequest } from "@/lib/studio-request-auth.server";
+import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
 
 /**
  * GET  /api/studio/vault/tracks/:trackId — one row for status polling.
@@ -33,10 +33,8 @@ async function handleGetOne({
   request: Request;
   params: { trackId: string };
 }): Promise<Response> {
-  let userId: string;
-  try {
-    userId = await studioUserIdFromRequest(request);
-  } catch {
+  const userId = await studioUserIdFromRequestOrDev(request);
+  if (!userId) {
     return Response.json({ status: "error", message: "Sign in to load your vault." }, { status: 401 });
   }
 
@@ -53,8 +51,8 @@ async function handleGetOne({
     }
     return Response.json(track);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load vault item";
-    return Response.json({ status: "error", message }, { status: 500 });
+    console.warn("[vault] get failed", error instanceof Error ? error.message : error);
+    return Response.json({ status: "error", message: "Track not found." }, { status: 404 });
   }
 }
 
@@ -65,10 +63,8 @@ async function handleDelete({
   request: Request;
   params: { trackId: string };
 }): Promise<Response> {
-  let userId: string;
-  try {
-    userId = await studioUserIdFromRequest(request);
-  } catch {
+  const userId = await studioUserIdFromRequestOrDev(request);
+  if (!userId) {
     return Response.json({ status: "error", message: "Sign in to delete vault tracks." }, { status: 401 });
   }
 

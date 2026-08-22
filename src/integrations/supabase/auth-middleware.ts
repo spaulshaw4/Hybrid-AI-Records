@@ -32,7 +32,18 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 
 export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {
-    
+    const { DEV_TEST_USER, DEV_TEST_USER_UUID, isDevAuthBypass } = await import('@/lib/dev-auth');
+    if (isDevAuthBypass()) {
+      const { supabaseAdmin } = await import('@/integrations/supabase/client.server');
+      return next({
+        context: {
+          supabase: supabaseAdmin,
+          userId: DEV_TEST_USER_UUID,
+          claims: { sub: DEV_TEST_USER_UUID, email: DEV_TEST_USER.email },
+        },
+      });
+    }
+
     const SUPABASE_URL = process.env['SUPABASE_URL'];
     const SUPABASE_PUBLISHABLE_KEY = process.env['SUPABASE_PUBLISHABLE_KEY'];
 

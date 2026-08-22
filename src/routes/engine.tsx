@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { AudioStudio } from "@/components/AudioStudio";
+import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_USER, isDevAuthBypass } from "@/lib/dev-auth";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
@@ -95,6 +96,12 @@ function EnginePage() {
           <p className="mt-1 text-sm text-gray-400">
             Your sound, your workflow. Choose pure AI generation or build hybrid tracks with tailored vocals and master-grade finishing.
           </p>
+          {isDevAuthBypass() ? (
+            <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-200">
+              Dev test mode — signed in as {DEV_TEST_USER.email} · {DEV_TEST_TOKEN_BALANCE}{" "}
+              Hybrid Tokens. Login is skipped on this route.
+            </p>
+          ) : null}
         </div>
       </div>
 

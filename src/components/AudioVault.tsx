@@ -36,6 +36,7 @@ import {
   VAULT_POLL_MS,
   type VaultTrackPayload,
 } from "@/lib/vault-client";
+import { isPlayableVaultAudioUrl, sanitizeVaultTracks } from "@/lib/vault-tracks";
 
 type Props = {
   /** Bump after Generate starts or finishes so the list refreshes immediately. */
@@ -68,15 +69,16 @@ function stemFileName(title: string, stem: StemKind, ext: "mp3" | "wav"): string
 }
 
 function fromApi(track: VaultTrackPayload): UserVaultRow {
+  const [clean] = sanitizeVaultTracks([track]);
   return {
-    id: track.id,
-    title: track.title || "Untitled Track",
-    style: track.style || "Custom",
-    status: track.status,
-    masterUrl: track.master_url ?? "",
-    instrumentalUrl: track.instrumental_url ?? "",
-    vocalUrl: track.vocal_url ?? "",
-    createdAt: track.created_at,
+    id: clean?.id ?? track.id,
+    title: clean?.title || "Untitled Track",
+    style: clean?.style || "Custom",
+    status: clean?.status ?? "processing",
+    masterUrl: clean?.master_url ?? "",
+    instrumentalUrl: clean?.instrumental_url ?? "",
+    vocalUrl: clean?.vocal_url ?? "",
+    createdAt: clean?.created_at ?? track.created_at,
   };
 }
 
@@ -121,7 +123,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const removeVault = useServerFn(deleteUserVaultTrack);
   const [rows, setRows] = useState<UserVaultRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<UserVaultRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
@@ -130,15 +131,17 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     if (!signedIn) return;
     try {
       const tracks = await fetchVaultTracks();
-      setLoadError(false);
       setRows((prev) => mergeVaultRows(tracks.map(fromApi), prev));
     } catch {
       try {
         const fallback = await loadVault({ data: undefined });
-        setLoadError(false);
         setRows((prev) => mergeVaultRows(fallback, prev));
-      } catch {
-        setLoadError(true);
+      } catch (error) {
+        console.warn(
+          "[vault] Engine catalog unavailable",
+          error instanceof Error ? error.message : error,
+        );
+        setRows((prev) => mergeVaultRows([], prev));
       }
     }
   }, [loadVault, signedIn]);
@@ -147,7 +150,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     if (!signedIn) {
       setRows([]);
       setLoading(false);
-      setLoadError(false);
       return;
     }
     let cancelled = false;
@@ -233,8 +235,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           <p className="text-sm text-muted-foreground">Sign in to keep every generate in your vault.</p>
         ) : loading && rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">Loading vault assets…</p>
-        ) : loadError && rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Error loading vault. Please refresh.</p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No tracks saved. Hit Generate to start.</p>
         ) : (
@@ -262,7 +262,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                {row.status === "completed" && row.masterUrl ? (
+                {row.status === "completed" && isPlayableVaultAudioUrl(row.masterUrl) ? (
                   <>
                     <audio controls className="h-8 max-w-[200px]" src={row.masterUrl} preload="none">
                       <track kind="captions" />

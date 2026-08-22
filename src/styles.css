@@ -349,12 +349,20 @@
 }
 
 /* Engine wizard: everything stays in document flow. No sticky/fixed chrome. */
-.engine-wizard-card,
-.engine-wizard-card.studio-glass {
+.engine-wizard-card .vocal-preview-btn,
+#engine-workspace .vocal-preview-btn {
   background: #09090b !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border-color: #27272a;
+  color: #fafafa !important;
+  -webkit-text-fill-color: #fafafa !important;
+  border: 1px solid #71717a !important;
+}
+
+.engine-wizard-card .vocal-use-btn,
+#engine-workspace .vocal-use-btn {
+  background: #e11d48 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #e11d48 !important;
 }
 
 #engine-workspace #studio-step-progress,

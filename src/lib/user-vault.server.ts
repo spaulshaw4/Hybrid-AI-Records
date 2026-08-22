@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sanitizeVaultTracks } from "@/lib/vault-tracks";
 
 export type UserVaultStatus = "processing" | "completed" | "failed";
 
@@ -83,50 +84,81 @@ async function toApiTracks(
     created_at: string;
   }>,
 ): Promise<UserVaultApiTrack[]> {
-  const { signedUrlsForStored } = await import("@/lib/track-refresh.server");
-  const signed = await signedUrlsForStored(
-    rows.flatMap((row) => [row.master_url, row.instrumental_url, row.vocal_url]),
-  );
+  let signed = new Map<string, string>();
+  try {
+    const { signedUrlsForStored } = await import("@/lib/track-refresh.server");
+    signed = await signedUrlsForStored(
+      rows.flatMap((row) => [row.master_url, row.instrumental_url, row.vocal_url]),
+    );
+  } catch (error) {
+    console.warn(
+      "[user_vault] signed URL refresh skipped",
+      error instanceof Error ? error.message : error,
+    );
+  }
   const resolve = (url: string | null) => (url ? (signed.get(url) ?? url) : null);
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title || "Untitled Generation",
-    style: row.style || "Custom",
-    status: asVaultStatus(row.status),
-    master_url: resolve(row.master_url),
-    instrumental_url: resolve(row.instrumental_url),
-    vocal_url: resolve(row.vocal_url),
-    created_at: row.created_at,
-  }));
+  return sanitizeVaultTracks(
+    rows.map((row) => ({
+      id: row.id,
+      title: row.title || "Untitled Generation",
+      style: row.style || "Custom",
+      status: asVaultStatus(row.status),
+      master_url: resolve(row.master_url),
+      instrumental_url: resolve(row.instrumental_url),
+      vocal_url: resolve(row.vocal_url),
+      created_at: row.created_at,
+    })),
+  );
 }
 
 export async function listUserVaultApiTracks(userId: string): Promise<UserVaultApiTrack[]> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
-    .from("user_vault")
-    .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error("Failed to load vault items");
-
-  return toApiTracks(data ?? []);
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("user_vault")
+      .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("[user_vault] list failed", error.message);
+      return [];
+    }
+    return toApiTracks(data ?? []);
+  } catch (error) {
+    console.warn(
+      "[user_vault] list failed",
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
 }
 
 export async function getUserVaultApiTrack(
   userId: string,
   trackId: string,
 ): Promise<UserVaultApiTrack | null> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin
-    .from("user_vault")
-    .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
-    .eq("user_id", userId)
-    .eq("id", trackId)
-    .maybeSingle();
-  if (error) throw new Error("Failed to load vault item");
-  if (!data) return null;
-  const [track] = await toApiTracks([data]);
-  return track ?? null;
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("user_vault")
+      .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
+      .eq("user_id", userId)
+      .eq("id", trackId)
+      .maybeSingle();
+    if (error) {
+      console.warn("[user_vault] get failed", error.message);
+      return null;
+    }
+    if (!data) return null;
+    const [track] = await toApiTracks([data]);
+    return track ?? null;
+  } catch (error) {
+    console.warn(
+      "[user_vault] get failed",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
 }
 
 export async function deleteUserVaultApiTrack(userId: string, trackId: string): Promise<boolean> {

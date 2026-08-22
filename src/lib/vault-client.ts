@@ -1,19 +1,12 @@
 import { supabase } from "@/integrations/supabase/client";
+import { isDevAuthBypass } from "@/lib/dev-auth";
+import { sanitizeVaultTracks, type SanitizedVaultTrack } from "@/lib/vault-tracks";
 
 export const VAULT_API_URL = "/api/studio/vault";
 export const VAULT_NEW_GENERATION_EVENT = "hybrid:vault-new-generation";
 export const VAULT_POLL_MS = 5_000;
 
-export type VaultTrackPayload = {
-  id: string;
-  title: string;
-  style: string;
-  status: "processing" | "completed" | "failed";
-  master_url?: string | null;
-  instrumental_url?: string | null;
-  vocal_url?: string | null;
-  created_at: string;
-};
+export type VaultTrackPayload = SanitizedVaultTrack;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -25,17 +18,26 @@ async function vaultAuthHeaders(): Promise<Headers> {
   return headers;
 }
 
-/** GET /api/studio/vault/tracks — signed-in artist's catalog. */
+/** GET /api/studio/vault/tracks — signed-in artist's catalog. Never throws. */
 export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
-  const response = await fetch(`${VAULT_API_URL}/tracks`, {
-    headers: await vaultAuthHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(response.status === 401 ? "Sign in to load your vault." : "Failed to load vault items");
+  try {
+    const response = await fetch(`${VAULT_API_URL}/tracks`, {
+      headers: await vaultAuthHeaders(),
+    });
+    if (!response.ok) {
+      if (isDevAuthBypass() || response.status === 401) {
+        console.warn("[vault] catalog unavailable", response.status);
+        return [];
+      }
+      console.warn("[vault] catalog request failed", response.status);
+      return [];
+    }
+    const body: unknown = await response.json().catch(() => []);
+    return sanitizeVaultTracks(body);
+  } catch (error) {
+    console.warn("[vault] catalog fetch failed", error instanceof Error ? error.message : error);
+    return [];
   }
-  const body: unknown = await response.json();
-  if (!Array.isArray(body)) throw new Error("Failed to load vault items");
-  return body as VaultTrackPayload[];
 }
 
 /** DELETE /api/studio/vault/tracks/:id — row + storage objects. */
@@ -70,6 +72,9 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
     title: tempTrackData.title || "New Generation",
     style: tempTrackData.style || "Custom",
     status: "processing",
+    master_url: null,
+    instrumental_url: null,
+    vocal_url: null,
     created_at: new Date().toISOString(),
   };
   window.dispatchEvent(new CustomEvent(VAULT_NEW_GENERATION_EVENT, { detail: track }));

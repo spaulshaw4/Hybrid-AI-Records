@@ -60,7 +60,15 @@ const generateSchema = z.object({
   allowReslice: z.boolean().optional(),
   controls: controlsSchema.optional(),
   /** Open `user_vault` row to flip from processing → completed. */
-  vaultId: z.string().uuid().optional(),
+  vaultId: z.preprocess((value) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+      ? trimmed
+      : undefined;
+  }, z.string().uuid().optional()),
 });
 
 
@@ -68,9 +76,17 @@ const taskSchema = z.object({ taskId: z.string().trim().min(1).max(200) });
 
 export const generateEngineTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => generateSchema.parse(data))
+  .inputValidator((data: unknown) => {
+    const parsed = generateSchema.safeParse(data);
+    if (parsed.success) return parsed.data;
+    const issue = parsed.error.issues[0];
+    const path = issue?.path?.length ? issue.path.join(".") : "payload";
+    throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
+  })
   .handler(async ({ data, context }) => {
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
+    const { isDevAuthBypass } = await import("@/lib/dev-auth");
+    if (!isDevAuthBypass()) {
     // Entitlement gate. Tokens are charged only after a successful render, but
     // the render itself costs real money, so the server refuses to start one
     // for an account with no balance instead of trusting the browser's check.
@@ -81,6 +97,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       .maybeSingle();
     if ((balanceRow?.balance ?? 0) < 1) {
       throw new Error("You need at least 1 Hybrid Token to generate a track.");
+    }
     }
 
     const {

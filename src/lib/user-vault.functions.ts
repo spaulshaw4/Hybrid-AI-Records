@@ -66,18 +66,26 @@ export const finalizeUserVaultTrack = createServerFn({ method: "POST" })
 export const listUserVaultTracks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<UserVaultRow[]> => {
-    const { listUserVaultApiTracks } = await import("@/lib/user-vault.server");
-    const tracks = await listUserVaultApiTracks(context.userId);
-    return tracks.map((row) => ({
-      id: row.id,
-      title: row.title,
-      style: row.style,
-      status: row.status,
-      masterUrl: row.master_url ?? "",
-      instrumentalUrl: row.instrumental_url ?? "",
-      vocalUrl: row.vocal_url ?? "",
-      createdAt: row.created_at,
-    }));
+    try {
+      const { listUserVaultApiTracks } = await import("@/lib/user-vault.server");
+      const tracks = await listUserVaultApiTracks(context.userId);
+      return tracks.map((row) => ({
+        id: row.id,
+        title: row.title,
+        style: row.style,
+        status: row.status,
+        masterUrl: row.master_url ?? "",
+        instrumentalUrl: row.instrumental_url ?? "",
+        vocalUrl: row.vocal_url ?? "",
+        createdAt: row.created_at,
+      }));
+    } catch (error) {
+      console.warn(
+        "[user_vault] catalog fallback empty",
+        error instanceof Error ? error.message : error,
+      );
+      return [];
+    }
   });
 
 /** Deletes the vault row and purges master + stem files from storage. */

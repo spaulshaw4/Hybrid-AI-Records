@@ -30,6 +30,10 @@ export type EngineFailure = {
 
 const TOKEN_SAFE = "Your Hybrid Token was not charged.";
 
+function hasHttpStatus(lower: string, code: number): boolean {
+  return new RegExp(`\\b${code}\\b`).test(lower);
+}
+
 export function explainEngineFailure(raw: unknown): EngineFailure {
   const text = (raw instanceof Error ? raw.message : String(raw ?? "")).trim();
   const lower = text.toLowerCase();
@@ -43,7 +47,7 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
     };
   }
 
-  if (lower.includes("unauthorized") || lower.includes("401") || lower.includes("sign in")) {
+  if (lower.includes("unauthorized") || hasHttpStatus(lower, 401) || lower.includes("sign in")) {
     return {
       kind: "auth",
       headline: "Session expired",
@@ -52,19 +56,35 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
     };
   }
 
+  if (lower.includes("invalid audio")) {
+    return {
+      kind: "storage",
+      headline: "The track could not be saved",
+      message: `The audio came back in a format we could not store. Retry the render. ${TOKEN_SAFE}`,
+      retryable: true,
+    };
+  }
+
+  if (lower.includes("lyrics are required")) {
+    return {
+      kind: "payload",
+      headline: "Lyrics are missing",
+      message: `Add lyrics (or a title so we can write them) and run it again. ${TOKEN_SAFE}`,
+      retryable: true,
+    };
+  }
+
   if (
-    lower.includes("invalid") ||
-    lower.includes("validation") ||
-    lower.includes("must be") ||
-    lower.includes("required") ||
-    lower.includes("400") ||
-    lower.includes("422") ||
-    lower.includes("rejected the request")
+    lower.includes("out of range") ||
+    lower.includes("too small") ||
+    lower.includes("too big") ||
+    lower.includes("track setup:") ||
+    (lower.includes("control") && (lower.includes("invalid") || lower.includes("range")))
   ) {
     return {
       kind: "payload",
       headline: "The engine rejected this brief",
-      message: `The engine rejected this brief (a prompt, lyric or control value was out of range). Adjust the wording or the sliders and run it again. ${TOKEN_SAFE}`,
+      message: `${text || "A prompt, lyric or control value was out of range."} ${TOKEN_SAFE}`,
       retryable: true,
     };
   }
@@ -86,16 +106,24 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
   if (
     lower.includes("failed to fetch") ||
     lower.includes("network") ||
-    lower.includes("connection") ||
     lower.includes("offline") ||
-    lower.includes("502") ||
-    lower.includes("503") ||
-    lower.includes("504")
+    hasHttpStatus(lower, 502) ||
+    hasHttpStatus(lower, 503) ||
+    hasHttpStatus(lower, 504)
   ) {
     return {
       kind: "network",
       headline: "Lost the connection to the engine",
       message: `The connection to the engine dropped mid-render. Your render may still be running — use Retry to reconnect. ${TOKEN_SAFE}`,
+      retryable: true,
+    };
+  }
+
+  if (lower.startsWith("music engine:") || hasHttpStatus(lower, 422) || hasHttpStatus(lower, 400)) {
+    return {
+      kind: "payload",
+      headline: "The music engine rejected this request",
+      message: `${text} ${TOKEN_SAFE}`,
       retryable: true,
     };
   }

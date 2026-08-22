@@ -46,3 +46,18 @@ export async function studioUserIdFromRequest(request: Request): Promise<string>
   if (error || !data?.claims?.sub) throw new Error("Unauthorized");
   return data.claims.sub;
 }
+
+/**
+ * Vault catalog lookup: real JWT when present, otherwise the local-dev user
+ * so Engine / Vault never 401s while `isDevAuthBypass()` is on.
+ */
+export async function studioUserIdFromRequestOrDev(request: Request): Promise<string | null> {
+  try {
+    return await studioUserIdFromRequest(request);
+  } catch {
+    const { DEV_TEST_USER_UUID, isDevAuthBypass } = await import("@/lib/dev-auth");
+    if (isDevAuthBypass()) return DEV_TEST_USER_UUID;
+    return null;
+  }
+}
+

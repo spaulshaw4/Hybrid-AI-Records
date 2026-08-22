@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useState } from "react";
 
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
 import { supabase } from "@/integrations/supabase/client";
+import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
 import { getTokenBalance } from "@/lib/tokens.functions";
 
 /**
@@ -13,10 +14,16 @@ import { getTokenBalance } from "@/lib/tokens.functions";
  */
 function HeaderTokenBalanceBase({ className = "" }: { className?: string }) {
   const fetchBalance = useServerFn(getTokenBalance);
-  const [signedIn, setSignedIn] = useState(false);
-  const [balance, setBalance] = useState<number | null>(null);
+  const [signedIn, setSignedIn] = useState(isDevAuthBypass());
+  const [balance, setBalance] = useState<number | null>(
+    isDevAuthBypass() ? DEV_TEST_TOKEN_BALANCE : null,
+  );
 
   const refresh = useCallback(async () => {
+    if (isDevAuthBypass()) {
+      setBalance((prev) => prev ?? DEV_TEST_TOKEN_BALANCE);
+      return;
+    }
     try {
       const result = await fetchBalance({ data: undefined });
       setBalance(result.balance);
@@ -26,6 +33,11 @@ function HeaderTokenBalanceBase({ className = "" }: { className?: string }) {
   }, [fetchBalance]);
 
   useEffect(() => {
+    if (isDevAuthBypass()) {
+      setSignedIn(true);
+      setBalance((prev) => prev ?? DEV_TEST_TOKEN_BALANCE);
+      return;
+    }
     void supabase.auth.getSession().then(({ data }) => {
       setSignedIn(Boolean(data.session));
       if (data.session) void refresh();

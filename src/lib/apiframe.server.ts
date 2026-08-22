@@ -1,6 +1,11 @@
-import { replicateApiKey, replicateBaseUrl } from "@/lib/ai-provider.server";
 /** Replicate music generation client (server-only). Model: minimax/music-2.6 */
-
+import { replicateApiKey, replicateBaseUrl } from "@/lib/ai-provider.server";
+import { elevenLabsMusicOutputFormat } from "@/lib/elevenlabs-music-format";
+import {
+  REPLICATE_COMMUNITY_PREDICTIONS_PATH,
+  communityPredictionBody,
+  officialModelPredictionsPath,
+} from "@/lib/replicate-predictions";
 import { engineLog, logEnginePayload, newCorrelationId } from "@/lib/engine-log.server";
 import { incCounter, observeBackoff, setGauge } from "@/lib/engine-metrics.server";
 import {
@@ -12,8 +17,8 @@ import {
 export { newCorrelationId };
 
 
-const MODEL_PREDICTIONS_PATH = "/models/minimax/music-2.6/predictions";
-const PREDICTIONS_PATH = "/predictions";
+const MODEL_PREDICTIONS_PATH = officialModelPredictionsPath("minimax/music-2.6");
+const PREDICTIONS_PATH = REPLICATE_COMMUNITY_PREDICTIONS_PATH;
 
 export type EngineTarget = { name: string; base: string };
 
@@ -679,7 +684,7 @@ export type ElevenLabsMusicInput = {
   audioFormat?: "mp3" | "wav";
 };
 
-const ELEVENLABS_MUSIC_PATH = "/models/elevenlabs/music/predictions";
+const ELEVENLABS_MUSIC_PATH = officialModelPredictionsPath("elevenlabs/music");
 
 /**
  * Second engine: ElevenLabs Music, reached through the same Replicate gateway
@@ -696,7 +701,7 @@ export async function requestElevenLabsMusic(
       prompt: input.prompt,
       music_length_ms: lengthMs,
       force_instrumental: input.instrumental === true,
-      output_format: input.audioFormat === "wav" ? "wav_cd_quality" : "mp3_44100_128",
+      output_format: elevenLabsMusicOutputFormat(input.audioFormat),
     },
   };
 
@@ -750,7 +755,38 @@ export async function waitForMusicPrediction(
   }
 }
 
-const ACE_STEP_PATH = "/models/fishaudio/ace-step-1.5/predictions";
+const communityVersionCache = new Map<string, { id: string; at: number }>();
+const COMMUNITY_VERSION_TTL_MS = 10 * 60 * 1000;
+
+/** Latest runnable version hash for a community model (`owner/name`). */
+async function resolveCommunityModelVersion(
+  model: string,
+  correlationId: string,
+): Promise<string> {
+  const cached = communityVersionCache.get(model);
+  if (cached && Date.now() - cached.at < COMMUNITY_VERSION_TTL_MS) return cached.id;
+
+  const { connectionApiKey } = getReplicateCredentials();
+  const response = await fetchWithRetry(
+    `/models/${model}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${connectionApiKey}`,
+        Accept: "application/json",
+      },
+    },
+    correlationId,
+  );
+  if (!response.ok) {
+    throw new Error("Music engine: the vocal model could not be loaded.");
+  }
+  const body = (await response.json()) as { latest_version?: { id?: string } };
+  const id = body.latest_version?.id;
+  if (!id) throw new Error("Music engine: the vocal model has no runnable version.");
+  communityVersionCache.set(model, { id, at: Date.now() });
+  return id;
+}
 
 export type AceStepGenerateInput = {
   prompt: string;
@@ -765,21 +801,26 @@ export async function requestAceStepGeneration(
   input: AceStepGenerateInput,
   correlationId: string = newCorrelationId("gen-ace"),
 ): Promise<ApiframeResult> {
-  const { buildAceStepPayload } = await import("./ace-step-payload");
+  const { ACE_STEP_MODEL, buildAceStepPayload } = await import("./ace-step-payload");
   const payload = buildAceStepPayload({
     prompt: input.prompt,
     lyrics: input.lyrics,
     durationSeconds: input.durationSeconds,
     audioFormat: input.audioFormat,
   });
+  const version = await resolveCommunityModelVersion(ACE_STEP_MODEL, correlationId);
   engineLog("info", "generate.acestep.start", correlationId, {
     promptLength: payload.input.prompt.length,
     lyricsLength: payload.input.lyrics.length,
     duration: payload.input.duration,
+    version,
   });
   return call(
-    ACE_STEP_PATH,
-    { method: "POST", body: JSON.stringify({ input: payload.input }) },
+    REPLICATE_COMMUNITY_PREDICTIONS_PATH,
+    {
+      method: "POST",
+      body: JSON.stringify(communityPredictionBody(version, { ...payload.input })),
+    },
     input.title || null,
     correlationId,
   );

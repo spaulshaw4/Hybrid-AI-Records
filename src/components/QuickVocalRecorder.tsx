@@ -14,6 +14,7 @@ import {
   trimVoiceSample,
 } from "@/lib/voice-sample-trim";
 import {
+  VOICE_CAPTURE_CONSTRAINTS,
   VOICE_SAMPLE_ACCEPT,
   VOICE_SAMPLE_MAX_BYTES,
   uploadVoiceSample,
@@ -36,6 +37,7 @@ import {
 import { VocalLiabilityModal } from "@/components/VocalLiabilityModal";
 import { useVocalLiability } from "@/hooks/use-vocal-liability";
 import { CUSTOM_AUDIO_FILE_INPUT_ID, type VocalMode } from "@/lib/studio-payload";
+import { DEV_TEST_VOICE_ID, isDevAuthBypass } from "@/lib/dev-auth";
 
 const MAX_SECONDS = 15;
 const POLL_MS = 4000;
@@ -47,6 +49,8 @@ type Props = {
   /** Cloned voice currently applied to the generation, or "" for the AI voice. */
   voiceId: string;
   vocalMode?: VocalMode;
+  /** Recording and clone-save require a signed-in account. */
+  signedIn?: boolean;
   onVoiceIdChange: (voiceId: string) => void;
   /** Fired after the session liability modal is accepted. */
   onTermsAcceptedChange?: (accepted: boolean) => void;
@@ -62,11 +66,13 @@ type Props = {
  */
 export function QuickVocalRecorder({
   voiceId,
+  signedIn = false,
   onVoiceIdChange,
   onTermsAcceptedChange,
   onCustomVocalIntent,
   onCustomFileChange,
 }: Props) {
+  const canUseVoice = signedIn || isDevAuthBypass();
   const { modalOpen, runOrPrompt, handleAccepted, handleOpenChange } =
     useVocalLiability(onTermsAcceptedChange);
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
@@ -210,6 +216,10 @@ export function QuickVocalRecorder({
   }
 
   function handleCustomVocalAttempt(actionType: "record" | "upload") {
+    if (!canUseVoice) {
+      toast.error("Sign in to record or upload a voice.");
+      return;
+    }
     onCustomVocalIntent?.();
     runOrPrompt(() => {
       if (actionType === "record") void startRecording();
@@ -221,9 +231,7 @@ export function QuickVocalRecorder({
     if (recording) return;
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
+      stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_CONSTRAINTS);
     } catch {
       toast.error("Microphone access is needed to record your vocals.");
       return;
@@ -319,17 +327,28 @@ export function QuickVocalRecorder({
 
   async function useMyVoice() {
     if (!clip || busy) return;
+    if (!canUseVoice) {
+      toast.error("Sign in to save and use your voice.");
+      return;
+    }
     setBusy(true);
     try {
-      setStatus("Uploading your take…");
       const file = new File([clip.blob], clip.fileName ?? `vocal-take-${Date.now()}.webm`, {
         type: clip.blob.type || "audio/webm",
       });
       const trimmed = await trimVoiceSample(file, trimStart, effectiveLength);
       if (!trimmed.ok) throw new Error(trimmed.message);
+      onCustomFileChange?.(trimmed.file);
+
+      if (isDevAuthBypass()) {
+        onVoiceIdChange(DEV_TEST_VOICE_ID);
+        toast.success("Dev test mode — this take is ready. No cloud clone ran.");
+        return;
+      }
+
+      setStatus("Uploading your take…");
       const upload = await uploadVoiceSample(trimmed.file);
       if (!upload.ok) throw new Error(upload.message);
-
 
       setStatus("Saving your take…");
       let job = await startClone({ data: { sampleUrl: upload.url } });
@@ -441,8 +460,10 @@ export function QuickVocalRecorder({
         onChange={(e) => pickFile(e.target.files?.[0])}
       />
 
-      <p className="text-center text-xs text-muted-foreground">
-        Record or upload a take, then tap Use my voice — or pick a saved voice above.
+      <p className="text-center text-xs text-zinc-300">
+        {canUseVoice
+          ? "Record or upload a take, then tap Use my voice — or pick a saved voice above."
+          : "Sign in to record or upload a voice. Guest clips are not stored or generated."}
       </p>
 
       {clip ? (
@@ -562,8 +583,15 @@ export function QuickVocalRecorder({
                 />
               </div>
 
-              <Button type="button" variant="outline" size="sm" onClick={previewSelection}>
-                Preview selection
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={previewSelection}
+                className="vocal-preview-btn h-10 border border-zinc-500 bg-zinc-950 px-4 font-bold text-zinc-50 hover:bg-zinc-800 hover:text-white"
+                style={{ backgroundColor: "#09090b", color: "#fafafa", WebkitTextFillColor: "#fafafa" }}
+              >
+                Play this clip
               </Button>
             </div>
           ) : null}
@@ -574,8 +602,16 @@ export function QuickVocalRecorder({
               placeholder="Name this voice (optional)"
               onChange={(e) => setName(e.target.value)}
               aria-label="Voice name"
+              className="border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-400"
+              style={{ backgroundColor: "#09090b", color: "#fafafa" }}
             />
-            <Button type="button" onClick={() => void useMyVoice()} disabled={busy}>
+            <Button
+              type="button"
+              onClick={() => void useMyVoice()}
+              disabled={busy}
+              className="vocal-use-btn h-11 shrink-0 bg-[#e11d48] px-5 font-bold text-white hover:bg-[#be123c] hover:text-white"
+              style={{ backgroundColor: "#e11d48", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+            >
               {busy ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Use my voice
             </Button>
