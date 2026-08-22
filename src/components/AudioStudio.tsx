@@ -1301,6 +1301,16 @@ export function AudioStudio() {
     },
   });
 
+  useEffect(() => {
+    const btn = document.getElementById("coproducer-generate-btn");
+    if (!btn) return;
+    const handleNativeClick = () => {
+      console.log("[NATIVE_DOM_COPRODUCER_FIRED]");
+    };
+    btn.addEventListener("click", handleNativeClick);
+    return () => btn.removeEventListener("click", handleNativeClick);
+  }, [studioStep]);
+
   /** Gemini fills the vocal prompt box from the lyrics, style and title. */
   async function handleWriteVocalPrompt() {
     if (aiBusy) return;
@@ -2646,6 +2656,7 @@ export function AudioStudio() {
             </Label>
             <Input
               id="studio-title"
+              name="title"
               value={title}
               maxLength={120}
               placeholder="Enter your track title"
@@ -2683,22 +2694,28 @@ export function AudioStudio() {
               </Label>
               <button
                 type="button"
+                id="coproducer-generate-btn"
+                style={{ position: "relative", zIndex: 9999, pointerEvents: "auto" }}
                 disabled={lyricMutation.isPending}
                 aria-busy={lyricMutation.isPending}
                 className={cn(
                   buttonVariants({ size: "sm", variant: "secondary" }),
-                  "pointer-events-auto disabled:pointer-events-auto",
+                  "relative z-50 pointer-events-auto disabled:pointer-events-auto",
                 )}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (!trackTitle?.trim()) {
+                  console.log("[COPRODUCER_CLICK_TRIGGERED]");
+                  const currentTitle =
+                    trackTitle ||
+                    (document.querySelector('input[name="title"]') as HTMLInputElement | null)?.value;
+                  if (!currentTitle?.trim()) {
                     alert("Please enter a track title first.");
                     return;
                   }
                   lyricMutation.mutate({
-                    title: trackTitle,
-                    lang: targetLanguage || "English",
+                    title: currentTitle,
+                    lang: targetLanguage || language || "English",
                     style: styleLine || "Rock/Alternative",
                   });
                 }}
