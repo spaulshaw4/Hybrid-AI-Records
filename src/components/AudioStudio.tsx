@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
@@ -39,7 +39,7 @@ import {
   readableEngineError,
 } from "@/lib/engine-credits";
 import { getTokenBalance, spendTokens } from "@/lib/tokens.functions";
-import { generateLyricsServerFn as generateLyricsOnServerFn, generateVocalPrompt } from "@/lib/lyrics-ai.functions";
+import { generateVocalPrompt } from "@/lib/lyrics-ai.functions";
 import { repairLyricStructure } from "@/lib/lyric-repair";
 import {
   DEFAULT_LYRIC_LANGUAGE,
@@ -1212,7 +1212,7 @@ export function AudioStudio() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"concept" | "lyrics" | "vocal" | "style" | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [language, setLanguage] = useState<LyricLanguage>(readSavedLanguage);
   const [customLanguage, setCustomLanguage] = useState(readSavedCustomLanguage);
   const trippedRef = useRef<Set<string>>(new Set());
@@ -1261,7 +1261,6 @@ export function AudioStudio() {
 
 
   const writeVocalPrompt = useServerFn(generateVocalPrompt);
-  const generateLyricsServerFn = useServerFn(generateLyricsOnServerFn);
   const openVaultTrack = useServerFn(createStudioTrack);
   const closeVaultTrack = useServerFn(finalizeStudioTrack);
   const loadVaultTracks = useServerFn(listStudioTracks);
@@ -1276,28 +1275,37 @@ export function AudioStudio() {
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
 
-  async function handleCoProducerClick(e: MouseEvent<HTMLButtonElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isGenerating) return;
+  const coproducerLock = useRef(false);
+
+  async function handleCoProducerClick() {
+    if (coproducerLock.current || isGeneratingLyrics) return;
+    coproducerLock.current = true;
+    setIsGeneratingLyrics(true);
     try {
-      setIsGenerating(true);
-      const res = await generateLyricsServerFn({
-        data: {
+      const res = await fetch("/api/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           trackTitle: trackTitle || "Untitled Track",
-          language: targetLanguage || language || "en",
-        },
+          language: targetLanguage || language || "English",
+        }),
       });
-      const lyrics = res?.lyrics;
-      if (lyrics) {
-        setLyrics(String(lyrics).slice(0, PROMPT_MAX));
+      const data = (await res.json()) as { lyrics?: string; error?: string };
+      const nextLyrics = String(data?.lyrics ?? "").trim();
+      if (nextLyrics) {
+        setLyrics(nextLyrics.slice(0, PROMPT_MAX));
         setLyricWarnings([]);
+      } else if (data?.error) {
+        toast.error(String(data.error));
+      } else {
+        toast.error("Co-Producer returned no lyrics. Try again.");
       }
-    } catch (err: unknown) {
-      console.error("Co-Producer Generation Error:", err);
-      alert(err instanceof Error ? err.message : "Failed to generate lyrics. Check terminal.");
+    } catch (err) {
+      console.error("[FETCH_ERR]", err);
+      toast.error(err instanceof Error ? err.message : "Co-Producer request failed.");
     } finally {
-      setIsGenerating(false);
+      coproducerLock.current = false;
+      setIsGeneratingLyrics(false);
     }
   }
 
@@ -2547,7 +2555,7 @@ export function AudioStudio() {
     setTitle("");
     setResult(null);
     setStatusText(null);
-    setIsGenerating(false);
+    setIsGeneratingLyrics(false);
     // Explicit reset wins over the restored session draft.
     clearEngineDraft();
   }
@@ -2556,8 +2564,11 @@ export function AudioStudio() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <Card className="engine-wizard-card relative bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50">
-        <CardContent className="relative space-y-5 p-4 sm:p-6">
+      <Card
+        className="engine-wizard-card bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50"
+        style={{ position: "relative", zIndex: 50 }}
+      >
+        <CardContent className="space-y-5 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold tracking-tight">Hybrid Engine 1.0</h2>
             <div className="flex items-center gap-2">
@@ -2642,9 +2653,21 @@ export function AudioStudio() {
           <div className="space-y-5 overflow-visible">
           {/* 1. Track title */}
           <div className="space-y-2">
-            <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
-              Track Title
-            </Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
+                Track Title
+              </Label>
+              <button
+                type="button"
+                id="coproducer-submit-btn"
+                onClick={handleCoProducerClick}
+                disabled={isGeneratingLyrics}
+                style={{ position: "relative", zIndex: 100, pointerEvents: "auto", cursor: "pointer" }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded"
+              >
+                {isGeneratingLyrics ? "Co-Producer Writing..." : "Co-Producer"}
+              </button>
+            </div>
             <Input
               id="studio-title"
               name="title"
@@ -2676,17 +2699,6 @@ export function AudioStudio() {
               Sets lyric pronunciation for Co-Producer and generate. Defaults to English.
             </p>
           </div>
-
-          <button
-            type="button"
-            id="coproducer-action-btn"
-            disabled={isGenerating}
-            onClick={handleCoProducerClick}
-            className="inline-flex items-center justify-center px-4 py-2 font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
-            style={{ position: "relative", zIndex: 50, pointerEvents: "auto", cursor: "pointer" }}
-          >
-            {isGenerating ? "Co-Producer Writing..." : "Co-Producer"}
-          </button>
 
           {/* 2. Lyrics box */}
           <div className="space-y-2">

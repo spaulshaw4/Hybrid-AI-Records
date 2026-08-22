@@ -191,7 +191,7 @@ function SiteDock() {
     <nav
       data-site-nav="dock"
       aria-label="Primary"
-      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-50 rounded-none border-t border-white/10 bg-black/80 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] lg:hidden"
+      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-30 rounded-none border-t border-white/10 bg-black/80 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] lg:hidden"
     >
       <div className="grid grid-cols-5 items-stretch gap-1">
         {SITE_NAV.map((item) => (

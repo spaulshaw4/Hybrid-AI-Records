@@ -348,7 +348,17 @@
   border-bottom-color: rgb(255 255 255 / 0.1);
 }
 
-/* Engine wizard: everything stays in document flow. No sticky/fixed chrome. */
+/* Engine wizard: Step 1 card sits above decorative overlays and the mobile dock. */
+#engine-workspace {
+  position: relative;
+  z-index: 40;
+}
+
+#engine-workspace .engine-wizard-card {
+  position: relative;
+  z-index: 50;
+}
+
 .engine-wizard-card .vocal-preview-btn,
 #engine-workspace .vocal-preview-btn {
   background: #09090b !important;
@@ -523,12 +533,15 @@ html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
 
 
 
-  #root, main, header, footer { position: relative; z-index: 1; }
+#root {
+  position: relative;
+  z-index: 1;
+}
 
-
-
-  /* Ensure app content sits above the grid overlay */
-  #root, main, header, footer { position: relative; z-index: 1; }
+footer {
+  position: relative;
+  z-index: 1;
+}
 
 
 
@@ -719,9 +732,13 @@ html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
    Living background: cinematic dark canvas + one watermark crest at a time.
    The four division logos are not tiled across the screen.
 --------------------------------------------------------------------------- */
-.living-bg {
+.living-bg,
+.living-bg.flowing-patriotic-bg {
   contain: none;
-  z-index: -1;
+  position: fixed !important;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none !important;
   background-color: transparent;
 }
 
@@ -843,6 +860,7 @@ html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
 /* Veil: dark scrim so copy stays readable without washing out the mesh. */
 .living-bg-veil {
   display: block;
+  pointer-events: none;
   background: linear-gradient(
     180deg,
     rgb(7 9 15 / 0.38) 0%,

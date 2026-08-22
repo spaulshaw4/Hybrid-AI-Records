@@ -24,13 +24,12 @@ export type PortalCrumb = {
 export function PortalBreadcrumb({
   trail = [],
   backTo = "/",
-  backLabel = "Home",
   end,
 }: {
   trail?: PortalCrumb[];
   /** Where back navigation lands when there is no in-app history. */
   backTo?: string;
-  /** Label shown on the mobile back control. */
+  /** Kept for callers; Home in the trail is the visible affordance. */
   backLabel?: string;
   /** Optional control shown beside the trail (token balance, etc.). */
   end?: React.ReactNode;
@@ -75,25 +74,15 @@ export function PortalBreadcrumb({
 
       <nav
         aria-label="Breadcrumb"
-        className="-mx-1 mb-6 flex flex-col gap-2 sm:flex-row sm:items-center"
+        className="-mx-1 mb-2 flex flex-wrap items-center gap-2"
       >
-        {/* Mobile-first explicit back control; the trail carries desktop nav. */}
-        <button
-          type="button"
-          onClick={goBack}
-          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-border px-3 font-mono text-[11px] uppercase tracking-[0.18em] text-white transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
-        >
-          <ChevronLeft size={14} aria-hidden="true" />
-          <span>Back to {backLabel.toLowerCase()}</span>
-        </button>
-
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
           <ol className="flex min-w-max items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <li>
               <Link
                 to="/"
                 preload="intent"
-                className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Home size={14} aria-hidden="true" className="shrink-0" />
                 <span>Home</span>
@@ -109,14 +98,14 @@ export function PortalBreadcrumb({
                       to={crumb.to}
                       search={crumb.search as never}
                       preload="intent"
-                      className="inline-flex min-h-11 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex h-9 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {crumb.label}
                     </Link>
                   ) : (
                     <span
                       aria-current={isLast ? "page" : undefined}
-                      className="inline-flex min-h-11 items-center px-2 text-white"
+                      className="inline-flex h-9 items-center px-2 text-white"
                     >
                       {crumb.label}
                     </span>

@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { AudioStudio } from "@/components/AudioStudio";
 import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_USER, isDevAuthBypass } from "@/lib/dev-auth";
@@ -82,27 +81,19 @@ function EnginePage() {
   return (
     <main
       id="engine-workspace"
-      className="relative z-10 min-h-[calc(100dvh-var(--site-header-height)-var(--site-dock-height))] bg-[#0d0d11] py-6 text-white sm:py-8"
+      className="relative z-40 bg-[#0d0d11] py-3 text-white"
     >
-      <div className="mx-auto mb-8 w-full max-w-7xl px-4 sm:px-6">
+      <div className="mx-auto mb-3 w-full max-w-7xl px-4 sm:px-6">
+        <h1 className="sr-only">Hybrid Engine 1.0</h1>
         <PortalBreadcrumb
           trail={[{ label: "Hybrid Engine 1.0" }]}
-          end={<HeaderTokenBalance />}
         />
-        <div className="mt-4 border-b border-white/10 pb-4">
-          <h1 className="text-2xl font-black uppercase tracking-wider text-red-500">
-            Hybrid Engine 1.0
-          </h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Your sound, your workflow. Choose pure AI generation or build hybrid tracks with tailored vocals and master-grade finishing.
+        {isDevAuthBypass() ? (
+          <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-200">
+            Dev test mode — signed in as {DEV_TEST_USER.email} · {DEV_TEST_TOKEN_BALANCE}{" "}
+            Hybrid Tokens. Login is skipped on this route.
           </p>
-          {isDevAuthBypass() ? (
-            <p className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-200">
-              Dev test mode — signed in as {DEV_TEST_USER.email} · {DEV_TEST_TOKEN_BALANCE}{" "}
-              Hybrid Tokens. Login is skipped on this route.
-            </p>
-          ) : null}
-        </div>
+        ) : null}
       </div>
 
       <section className="w-full px-4 sm:px-6">

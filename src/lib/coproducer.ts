@@ -12,12 +12,10 @@ export async function writeLyricsWithStudio(trackTitle: string, language: string
   const ai = new GoogleGenAI({ apiKey });
   try {
     const interaction = await ai.interactions.create({
-      model: COPRODUCER_GEMINI_MODEL,
-      input: `You are an elite music co-producer. Write complete, structured song lyrics with [Verse 1], [Chorus], [Verse 2], [Bridge], and [Outro] in ${language || "English"} for a track titled "${trackTitle || "Untitled Track"}". Return only the lyrics text.`,
+      model: "gemini-3.7-flash",
+      input: `You are an elite music co-producer. Write complete song lyrics in ${language || "English"} with section markers ([Verse], [Chorus], [Bridge], [Outro]) for a track titled "${trackTitle || "Untitled Track"}". Return only the lyrics.`,
     });
-    const lyrics = interaction.output_text || "";
-    console.log("[STUDIO_SUCCESS] Generated lyrics length:", lyrics.length);
-    return { lyrics };
+    return { lyrics: interaction.output_text || "" };
   } catch (error: unknown) {
     console.error("[STUDIO_INTERACTIONS_ERROR]", error);
     throw error;

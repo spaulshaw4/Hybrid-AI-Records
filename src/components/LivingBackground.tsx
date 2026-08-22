@@ -169,16 +169,17 @@ export function LivingBackground() {
       data-paused={hidden ? "true" : "false"}
       data-active={DIVISION_WATERMARKS[active]?.name}
       data-testid="logo-wallpaper"
-      className="living-bg flowing-patriotic-bg app-bg pointer-events-none fixed inset-0 min-h-dvh select-none overflow-hidden"
+      className="living-bg flowing-patriotic-bg app-bg pointer-events-none fixed inset-0 z-0 min-h-dvh select-none overflow-hidden"
+      style={{ pointerEvents: "none" }}
     >
-      <div className="living-bg-cinematic absolute inset-0" />
-      <div className="living-bg-glow absolute inset-0" />
-      <div className="living-bg-matrix absolute inset-0" />
+      <div className="living-bg-cinematic pointer-events-none absolute inset-0" />
+      <div className="living-bg-glow pointer-events-none absolute inset-0" />
+      <div className="living-bg-matrix pointer-events-none absolute inset-0" />
 
       {DIVISION_WATERMARKS.map((crest, index) => (
         <div
           key={crest.name}
-          className={`living-bg-layer living-bg-watermark absolute inset-0${index === active ? " is-active" : ""}`}
+          className={`living-bg-layer living-bg-watermark pointer-events-none absolute inset-0${index === active ? " is-active" : ""}`}
           style={{
             backgroundImage: `url("${crest.src}")`,
             opacity: index === active && ready ? peak : 0,
@@ -186,7 +187,7 @@ export function LivingBackground() {
         />
       ))}
 
-      <div className="living-bg-veil absolute inset-0" />
+      <div className="living-bg-veil pointer-events-none absolute inset-0" />
     </div>
   );
 }

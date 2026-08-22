@@ -13,7 +13,7 @@ const Input = z.object({
 });
 
 /**
- * Writes song lyrics through native Gemini (`GEMINI_API_KEY` + `gemini-2.5-flash`).
+ * Writes song lyrics through Google Interactions API (`GEMINI_API_KEY` + gemini-3.7-flash).
  */
 export const generateLyrics = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => Input.parse(input))

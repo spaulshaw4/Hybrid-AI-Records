@@ -38,13 +38,9 @@ describe("Co-Producer Google Interactions API", () => {
     expect(createInteractionMock).toHaveBeenCalledTimes(1);
     const [params] = createInteractionMock.mock.calls[0] as [{ model: string; input: string }];
     expect(params.model).toBe("gemini-3.7-flash");
-    expect(params.input).toContain("elite music co-producer");
-    expect(params.input).toContain("[Verse 1]");
-    expect(params.input).toContain("[Chorus]");
-    expect(params.input).toContain("[Bridge]");
-    expect(params.input).toContain("[Outro]");
-    expect(params.input).toContain("Lithuanian (Lietuvių)");
-    expect(params.input).toContain("Night Drive");
+    expect(params.input).toBe(
+      'You are an elite music co-producer. Write complete song lyrics in Lithuanian (Lietuvių) with section markers ([Verse], [Chorus], [Bridge], [Outro]) for a track titled "Night Drive". Return only the lyrics.',
+    );
   });
 
   it("throws when GEMINI_API_KEY is missing on the server", async () => {
