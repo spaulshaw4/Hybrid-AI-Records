@@ -13,6 +13,7 @@ import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
 export const Route = createFileRoute("/diagnostics")({
   errorComponent: RouteErrorFallback,
+  staticData: { noindex: true },
   component: DiagnosticsPage,
   head: () => ({
     meta: [

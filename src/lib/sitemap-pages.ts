@@ -15,12 +15,22 @@ export type SitemapEntry = {
 };
 
 // Excluded on purpose (all noindex on the route itself):
-//  - /auth, /receipts, /order-status, /checkout/return
+//  - /auth, /account, /receipts, /order-status, /checkout/return, /reset-password
 //    (personal / transactional lookups)
+//  - /diagnostics (device-local error log)
 //  - /dev/*, /admin/*, /mcp, /.lovable/oauth/consent (internal)
 export const SITEMAP_ENTRIES: SitemapEntry[] = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
   { path: "/portal", changefreq: "weekly", priority: "0.9" },
+  { path: "/engine", changefreq: "weekly", priority: "0.9" },
+  { path: "/studio", changefreq: "weekly", priority: "0.8" },
+  { path: "/cinematic-studio", changefreq: "weekly", priority: "0.8" },
+  { path: "/artists", changefreq: "weekly", priority: "0.8" },
+  { path: "/tokens", changefreq: "weekly", priority: "0.8" },
+  { path: "/v-tokens", changefreq: "monthly", priority: "0.6" },
+  { path: "/prompts", changefreq: "monthly", priority: "0.6" },
+  { path: "/licensing", changefreq: "yearly", priority: "0.5" },
+  { path: "/privacy", changefreq: "yearly", priority: "0.5" },
   { path: "/start", changefreq: "weekly", priority: "0.9" },
   { path: "/start/onboarding", changefreq: "monthly", priority: "0.6" },
   ...SERVICES.map((s) => ({

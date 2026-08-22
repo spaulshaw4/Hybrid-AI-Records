@@ -78,9 +78,11 @@ export function buildMiniMaxPayload(req: GenerationRequestPayload): MiniMaxPaylo
   const genreHint = req.genre?.trim();
   const lockedStyle =
     /\[Style:/i.test(userPrompt) ||
-    /\d+\s*BPM\b/i.test(userPrompt) ||
-    /studio recording/i.test(userPrompt) ||
-    /\b(male|female|duet) vocal\b/i.test(userPrompt);
+    (
+      /studio recording/i.test(userPrompt) &&
+      /\d+\s*BPM\b/i.test(userPrompt) &&
+      /\b(male|female|duet) vocal\b/i.test(userPrompt)
+    );
   const alreadyTagged = lockedStyle;
   const basePrompt = [
     userPrompt,

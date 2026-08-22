@@ -44,7 +44,7 @@ describe("instant voice handle", () => {
 
 describe("buildVocalClonePayload", () => {
   it("turns on clip enhancement for the mixer stem", () => {
-    const audio = new Uint8Array([1, 2, 3, 4]);
+    const audio = new Uint8Array(256).fill(1);
     const payload = buildVocalClonePayload({
       text: "We own the night",
       audio,
@@ -54,7 +54,7 @@ describe("buildVocalClonePayload", () => {
     expect(payload.normalize).toBe(true);
     expect(payload.prosody.normalize_loudness).toBe(true);
     expect(payload.features).toEqual(["quality-guard"]);
-    expect(payload.references?.[0]?.text).toBe("");
+    expect(payload.references?.[0]?.text).toBe("We own the night");
     expect(payload.references?.[0]?.audio).toBe(audio);
   });
 });

@@ -1278,6 +1278,7 @@ export function AudioStudio() {
   const coproducerLock = useRef(false);
 
   async function handleCoProducerClick() {
+    console.log("[DEBUG] Co-Producer button clicked directly");
     if (coproducerLock.current || isGeneratingLyrics) return;
     coproducerLock.current = true;
     setIsGeneratingLyrics(true);
@@ -2691,19 +2692,33 @@ export function AudioStudio() {
             </p>
           </div>
 
-          {/* 2. Lyrics box */}
-          <div className="space-y-2">
-            <div className="mb-2 flex items-center justify-between gap-3">
+          {/* 2. Lyrics box — no fieldset / inert / aria-hidden ancestor. */}
+          <div className="relative space-y-2 overflow-visible" style={{ pointerEvents: "auto" }}>
+            <div className="relative mb-2 flex items-center justify-between gap-3 overflow-visible">
               <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
                 Lyrics
               </Label>
               <button
                 type="button"
                 id="coproducer-submit-btn"
-                onClick={handleCoProducerClick}
-                disabled={isGeneratingLyrics}
+                tabIndex={0}
+                aria-label="Generate lyrics with Co-Producer"
+                aria-busy={isGeneratingLyrics === true}
+                disabled={isGeneratingLyrics === true}
+                onMouseDown={() => console.log("Mouse down fired on Co-Producer")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void handleCoProducerClick();
+                  }
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handleCoProducerClick();
+                }}
                 className="rounded bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-                style={{ position: "relative", zIndex: 50, pointerEvents: "auto", cursor: "pointer" }}
+                style={{ pointerEvents: "auto", position: "relative", zIndex: 99999, cursor: "pointer" }}
               >
                 {isGeneratingLyrics ? "Co-Producer Writing..." : "Co-Producer"}
               </button>

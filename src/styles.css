@@ -352,11 +352,23 @@
 #engine-workspace {
   position: relative;
   z-index: 40;
+  pointer-events: auto;
+  overflow: visible;
 }
 
 #engine-workspace .engine-wizard-card {
   position: relative;
   z-index: 50;
+  pointer-events: auto;
+  overflow: visible;
+}
+
+#coproducer-submit-btn {
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 99999 !important;
+  cursor: pointer !important;
+  transform: none !important;
 }
 
 .engine-wizard-card .vocal-preview-btn,
