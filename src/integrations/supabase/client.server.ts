@@ -32,23 +32,26 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 }
 
 function createSupabaseAdminClient(): SupabaseClient<Database> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || backendSupabaseUrl();
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || backendServiceRoleKey();
+  const supabaseUrl =
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    backendSupabaseUrl();
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || backendServiceRoleKey();
 
-  if (!url || !serviceRole) {
-    const message =
-      "Missing process.env.NEXT_PUBLIC_SUPABASE_URL or process.env.SUPABASE_SERVICE_ROLE_KEY.";
+  if (!supabaseUrl || !serviceRoleKey) {
+    const message = "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for vault upload";
     if (isDevRuntime()) {
-      console.warn(`[supabase] ${message} Mastered tracks will use local vault storage.`);
+      console.warn(`[supabase] ${message}. Mastered tracks will use local vault storage.`);
     } else {
       console.error(`[supabase] ${message}`);
     }
     throw new Error(message);
   }
 
-  return createClient<Database>(url, serviceRole, {
+  return createClient<Database>(supabaseUrl, serviceRoleKey, {
     global: {
-      fetch: createSupabaseFetch(serviceRole),
+      fetch: createSupabaseFetch(serviceRoleKey),
     },
     auth: {
       storage: undefined,
@@ -84,6 +87,18 @@ export function tryGetSupabaseAdmin(): SupabaseClient<Database> | null {
   }
 }
 
+/**
+ * Standalone service-role client for vault / Gate 2 uploads.
+ * Throws when SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) or SERVICE_ROLE_KEY is missing.
+ */
+export function requireSupabaseAdmin(): SupabaseClient<Database> {
+  const client = tryGetSupabaseAdmin();
+  if (!client) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for vault upload");
+  }
+  return client;
+}
+
 /** User-scoped client for JWT checks (anon key, not the service role). */
 export function createSupabaseUserClient(accessToken: string): SupabaseClient<Database> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || backendSupabaseUrl();
@@ -110,9 +125,7 @@ export const supabaseAdmin = new Proxy({} as SupabaseClient<Database>, {
   get(_, prop, receiver) {
     const client = tryGetSupabaseAdmin();
     if (!client) {
-      throw new Error(
-        "Supabase admin client is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
-      );
+      throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for vault upload");
     }
     return Reflect.get(client, prop, receiver);
   },

@@ -6,6 +6,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { tryGetSupabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   AUDIO_VAULT_BUCKET,
   STUDIO_AUDIO_BUCKET,
@@ -19,12 +20,17 @@ import {
 const SIGNED_URL_TTL = 60 * 60 * 24 * 365;
 
 export function createEngineSupabaseClient(): SupabaseClient<Database> | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || backendSupabaseUrl();
+  // Prefer the shared service-role singleton (custom fetch + auth flags).
+  const admin = tryGetSupabaseAdmin();
+  if (admin) return admin;
+
+  const url =
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    backendSupabaseUrl();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || backendServiceRoleKey();
   if (!url || !key) {
-    console.warn(
-      "[engine] Missing process.env.NEXT_PUBLIC_SUPABASE_URL or process.env.SUPABASE_SERVICE_ROLE_KEY",
-    );
+    console.warn("[engine] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for vault upload");
     return null;
   }
   return createClient<Database>(url, key, {

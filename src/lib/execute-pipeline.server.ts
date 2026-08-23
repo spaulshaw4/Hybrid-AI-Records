@@ -4,7 +4,7 @@
  */
 
 import { AUDIO_VAULT_BUCKET } from "@/lib/audio-vault";
-import { createEngineSupabaseClient } from "@/lib/engine-pipeline.server";
+import { requireSupabaseAdmin } from "@/integrations/supabase/client.server";
 import { GATE_TIMEOUTS_MS, withTimeout } from "@/lib/pipeline-gate.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
 import {
@@ -308,10 +308,7 @@ export async function executePipeline(
         status: "processing",
       });
 
-      const supabase = createEngineSupabaseClient();
-      if (!supabase) {
-        throw new Error("[Gate 2 Error] Missing Supabase admin client for vault upload.");
-      }
+      const supabaseAdmin = requireSupabaseAdmin();
 
       // ── Gate 1: Base Generation (AIMusicAPI) ─────────────────────────────
       activeGate = 1;
@@ -393,21 +390,35 @@ export async function executePipeline(
       await beforeGate({ trackId, gate: 2, stage: "gate_2_vaulting" });
       reportPipelineProgress("vault", PIPELINE_PROGRESS.vault, undefined, gateMask);
       const rawPath = `raw/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp3`;
+      console.log(`[Gate 2/6] Vault ingest via supabaseAdmin → ${AUDIO_VAULT_BUCKET}/${rawPath}`);
       await withTimeout(
         (async () => {
-          const { error } = await supabase.storage.from(AUDIO_VAULT_BUCKET).upload(
-            rawPath,
-            rawAudioBuffer,
-            { contentType: "audio/mpeg", upsert: true },
-          );
-          if (error) throw new Error(`[Gate 2 Error] ${error.message}`);
+          try {
+            const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(
+              rawPath,
+              rawAudioBuffer,
+              { contentType: "audio/mpeg", upsert: true, cacheControl: "31536000" },
+            );
+            if (error) {
+              console.error("[Gate 2 Error] Supabase vault upload failed:", error.message, error);
+              throw new Error(`[Gate 2 Error] ${error.message}`);
+            }
+          } catch (uploadErr) {
+            if (uploadErr instanceof Error && uploadErr.message.startsWith("[Gate 2 Error]")) {
+              throw uploadErr;
+            }
+            console.error("[Gate 2 Error] Unexpected vault upload failure:", uploadErr);
+            throw new Error(
+              `[Gate 2 Error] ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`,
+            );
+          }
         })(),
         GATE_TIMEOUTS_MS[2],
         "Gate 2 (Supabase Upload)",
       );
       const {
         data: { publicUrl: publicAudioUrl },
-      } = supabase.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
+      } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
       if (
         !publicAudioUrl ||
         !publicAudioUrl.startsWith("http") ||
@@ -722,19 +733,29 @@ export async function executePipeline(
         const masterPath = `masters/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}_master.wav`;
         await withTimeout(
           (async () => {
-            const { error } = await supabase.storage.from(AUDIO_VAULT_BUCKET).upload(
-              masterPath,
-              masterBuffer,
-              { contentType: "audio/wav", upsert: true },
-            );
-            if (error) throw new Error(error.message);
+            try {
+              const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(
+                masterPath,
+                masterBuffer,
+                { contentType: "audio/wav", upsert: true, cacheControl: "31536000" },
+              );
+              if (error) {
+                console.error("[Gate 6 Error] Supabase master vault upload failed:", error.message, error);
+                throw new Error(error.message);
+              }
+            } catch (uploadErr) {
+              console.error("[Gate 6 Error] Unexpected master vault upload failure:", uploadErr);
+              throw uploadErr instanceof Error
+                ? uploadErr
+                : new Error(String(uploadErr));
+            }
           })(),
           30_000,
           "Gate 6 (Supabase Master Upload)",
         );
         const {
           data: { publicUrl },
-        } = supabase.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
+        } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
         if (publicUrl?.startsWith("http")) finalMasterUrl = publicUrl;
       } catch (err) {
         console.warn(

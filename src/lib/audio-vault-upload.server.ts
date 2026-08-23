@@ -37,11 +37,8 @@ async function persistVaultObject(
     return uploadEngineMaster(bytes, path, mimeType.includes("wav") ? "wav" : "mp3");
   }
 
-  const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const supabaseAdmin = tryGetSupabaseAdmin();
-  if (!supabaseAdmin) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
-  }
+  const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const supabaseAdmin = requireSupabaseAdmin();
   const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(path, body, {
     contentType: mimeType === "audio/wav" || mimeType.includes("wav")
       ? "audio/wav"
@@ -60,7 +57,10 @@ async function persistVaultObject(
             : mimeType,
     },
   });
-  if (error) throw new Error("The finished track could not be saved to the audio vault.");
+  if (error) {
+    console.error("[audio-vault] upload failed:", error.message, error);
+    throw new Error(`The finished track could not be saved to the audio vault: ${error.message}`);
+  }
 
   const { data, error: signError } = await supabaseAdmin.storage
     .from(AUDIO_VAULT_BUCKET)

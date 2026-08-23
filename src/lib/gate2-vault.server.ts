@@ -7,7 +7,7 @@
  */
 
 import { AUDIO_VAULT_BUCKET } from "@/lib/audio-vault";
-import { createEngineSupabaseClient } from "@/lib/engine-pipeline.server";
+import { requireSupabaseAdmin } from "@/integrations/supabase/client.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
 import { GATE_TIMEOUTS_MS, withTimeout } from "@/lib/pipeline-gate.server";
 
@@ -36,25 +36,33 @@ export async function runGate2SupabaseVault(input: {
   }
 
   const rawPath = rawObjectPath(input.trackId);
-  const supabase = createEngineSupabaseClient();
-  if (!supabase) {
-    throw new Error(
-      "[Circuit Breaker] Gate 2 failed: Missing Supabase admin client for vault upload.",
-    );
-  }
+  const supabaseAdmin = requireSupabaseAdmin();
 
   await withTimeout(
     (async () => {
-      const { error } = await supabase.storage
-        .from(AUDIO_VAULT_BUCKET)
-        .upload(rawPath, input.rawAudioBuffer, {
-          /** Gate 2 raw tracks are always MPEG. */
-          contentType: "audio/mpeg",
-          upsert: true,
-          cacheControl: "31536000",
-        });
-      if (error) {
-        throw new Error(`[Circuit Breaker] Gate 2 upload failed: ${error.message}`);
+      try {
+        const { error } = await supabaseAdmin.storage
+          .from(AUDIO_VAULT_BUCKET)
+          .upload(rawPath, input.rawAudioBuffer, {
+            /** Gate 2 raw tracks are always MPEG. */
+            contentType: "audio/mpeg",
+            upsert: true,
+            cacheControl: "31536000",
+          });
+        if (error) {
+          console.error("[Gate 2 Error] Supabase vault upload failed:", error.message, error);
+          throw new Error(`[Circuit Breaker] Gate 2 upload failed: ${error.message}`);
+        }
+      } catch (uploadErr) {
+        if (uploadErr instanceof Error && /Gate 2/.test(uploadErr.message)) {
+          throw uploadErr;
+        }
+        console.error("[Gate 2 Error] Unexpected vault upload failure:", uploadErr);
+        throw new Error(
+          `[Circuit Breaker] Gate 2 upload failed: ${
+            uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+          }`,
+        );
       }
     })(),
     GATE_TIMEOUTS_MS[2],
@@ -63,7 +71,7 @@ export async function runGate2SupabaseVault(input: {
 
   const {
     data: { publicUrl: publicAudioUrl },
-  } = supabase.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
+  } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
 
   if (!publicAudioUrl || !publicAudioUrl.startsWith("http") || !isPublicHttpAudioUrl(publicAudioUrl)) {
     throw new Error(
@@ -85,26 +93,34 @@ export async function commitMasterToVault(input: {
 }): Promise<string> {
   const id = input.trackId.replace(/[^a-zA-Z0-9_-]/g, "_") || "track";
   const masterPath = `masters/${id}_master.wav`;
-  const supabase = createEngineSupabaseClient();
-  if (!supabase) {
-    throw new Error(
-      "[Circuit Breaker] Gate 6 failed: Missing Supabase admin client for final commit.",
-    );
-  }
+  const supabaseAdmin = requireSupabaseAdmin();
 
   const contentType = "audio/wav";
   await withTimeout(
     (async () => {
-      const { error } = await supabase.storage
-        .from(AUDIO_VAULT_BUCKET)
-        .upload(masterPath, input.masterBuffer, {
-          /** Gate 6 masters are always WAV at the vault boundary. */
-          contentType,
-          upsert: true,
-          cacheControl: "31536000",
-        });
-      if (error) {
-        throw new Error(`[Circuit Breaker] Gate 6 final commit failed: ${error.message}`);
+      try {
+        const { error } = await supabaseAdmin.storage
+          .from(AUDIO_VAULT_BUCKET)
+          .upload(masterPath, input.masterBuffer, {
+            /** Gate 6 masters are always WAV at the vault boundary. */
+            contentType,
+            upsert: true,
+            cacheControl: "31536000",
+          });
+        if (error) {
+          console.error("[Gate 6 Error] Supabase master vault upload failed:", error.message, error);
+          throw new Error(`[Circuit Breaker] Gate 6 final commit failed: ${error.message}`);
+        }
+      } catch (uploadErr) {
+        if (uploadErr instanceof Error && /Gate 6/.test(uploadErr.message)) {
+          throw uploadErr;
+        }
+        console.error("[Gate 6 Error] Unexpected master vault upload failure:", uploadErr);
+        throw new Error(
+          `[Circuit Breaker] Gate 6 final commit failed: ${
+            uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+          }`,
+        );
       }
     })(),
     GATE_TIMEOUTS_MS[6],
@@ -113,7 +129,7 @@ export async function commitMasterToVault(input: {
 
   const {
     data: { publicUrl: finalMasterUrl },
-  } = supabase.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
+  } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
 
   if (!finalMasterUrl || !finalMasterUrl.startsWith("http") || !isPublicHttpAudioUrl(finalMasterUrl)) {
     throw new Error(
