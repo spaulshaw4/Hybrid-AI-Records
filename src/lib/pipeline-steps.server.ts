@@ -1,16 +1,17 @@
 /**
- * Five runtime gates of a studio generate. Lyrics are written earlier by the
+ * Six runtime gates of a studio generate. Lyrics are written earlier by the
  * Co-Producer and arrive in the payload, so they sit outside the numbering.
  * Logs are for the terminal only — artist-facing errors stay vendor-neutral.
  */
 
 export const PIPELINE_STEP_LOGS = {
   lyrics: ">>> [LYRICS] Gemini 2.5 on Replicate (Co-Producer)",
-  music: ">>> [1/5: BASE GENERATION] AIMusicAPI chirp-v5",
-  cwalo: ">>> [2/5: STRUCTURE] CWALO all-in-one music structure analysis",
-  stems: ">>> [3/5: STEMS] Replicate Demucs separation",
-  vocals: ">>> [4/5: VOCALS] Fish Audio Plus vocal synthesis",
-  mastering: ">>> [5/5: MASTERING] Matchering + FFmpeg remux (CWALO-guided)",
+  music: ">>> [1/6: BASE GENERATION] AIMusicAPI chirp-v5",
+  vault: ">>> [2/6: SUPABASE VAULT] Isolate Gate 1 audio to public HTTPS CDN",
+  cwalo: ">>> [3/6: STRUCTURE] CWALO all-in-one music structure analysis",
+  stems: ">>> [4/6: STEMS] Replicate Demucs separation",
+  vocals: ">>> [5/6: VOCALS] Fish Audio Plus vocal synthesis",
+  mastering: ">>> [6/6: MASTERING] FFmpeg remux + final Supabase commit",
 } as const;
 
 export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
@@ -18,10 +19,11 @@ export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
 const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   lyrics: "Replicate Gemini 2.5 Flash",
   music: "AIMusicAPI chirp-v5",
+  vault: "Supabase audio-vault",
   cwalo: "Replicate CWALO structure analysis",
   stems: "Replicate Demucs",
   vocals: "Fish Audio Plus",
-  mastering: "Matchering + FFmpeg",
+  mastering: "FFmpeg + Supabase vault",
 };
 
 export function logPipelineStep(step: PipelineStepId): void {
@@ -46,12 +48,12 @@ function trimEnv(name: string): string | undefined {
   return value || undefined;
 }
 
-/** Step 1 — lyrics. Isolated from ENGINE_API_KEY. */
+/** Lyrics — isolated from ENGINE_API_KEY. */
 export function lyricPipelineKey(): string | undefined {
   return trimEnv("LYRIC_ENGINE_API_KEY") || trimEnv("REPLICATE_API_KEY");
 }
 
-/** Step 2 — Sonic base audio. */
+/** Gate 1 — Sonic base audio. */
 export function musicPipelineKey(): string | undefined {
   return (
     trimEnv("AIMUSICAPI_KEY") ||
@@ -60,12 +62,12 @@ export function musicPipelineKey(): string | undefined {
   );
 }
 
-/** Step 4 — Fish Audio direct TTS. Never Replicate. */
+/** Gate 5 — Fish Audio direct TTS. Never Replicate. */
 export function vocalPipelineKey(): string | undefined {
   return trimEnv("FISH_AUDIO_API_KEY") || trimEnv("FISH_API_KEY");
 }
 
-/** Steps 2–3, 5 — Replicate CWALO + Demucs, then local mastering. */
+/** Gates 3–4 — Replicate CWALO + Demucs. */
 export function replicatePipelineKey(): string | undefined {
   return trimEnv("REPLICATE_API_KEY") || trimEnv("REPLICATE_API_TOKEN");
 }

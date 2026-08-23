@@ -146,6 +146,41 @@ export async function separateStems(input: {
   logPreConditionPassed("stems", "source audio buffer valid");
   logPipelineStep("stems");
 
+  try {
+    const audioUrl = await uploadTrack(input.audio, input.filename);
+    return await runDemucsPrediction(audioUrl);
+  } catch (error) {
+    recordPipelineFailure("stems", error);
+    logFailedStudioGate(error);
+    throw error;
+  }
+}
+
+/**
+ * Gate 4 — Demucs on an already-public HTTPS URL (Supabase vault CDN).
+ * Never uploads bytes to Replicate Files; Replicate fetches `publicAudioUrl` directly.
+ */
+export async function separateStemsFromPublicUrl(publicAudioUrl: string): Promise<StemResult> {
+  assertPipelineBreakerClosed("stems");
+  if (!isHttpAudioUrl(publicAudioUrl)) {
+    throwFailEarly("stems", "public audio URL was invalid");
+  }
+  if (/localhost|127\.0\.0\.1|\/api\/local-vault\//i.test(publicAudioUrl)) {
+    throwFailEarly("stems", "refused localhost / local-vault URL for Demucs");
+  }
+  logPreConditionPassed("stems", "public HTTPS audio URL valid");
+  logPipelineStep("stems");
+
+  try {
+    return await runDemucsPrediction(publicAudioUrl);
+  } catch (error) {
+    recordPipelineFailure("stems", error);
+    logFailedStudioGate(error);
+    throw error;
+  }
+}
+
+async function runDemucsPrediction(audioUrl: string): Promise<StemResult> {
   const finish = (stems: StemResult): StemResult => {
     recordPipelineSuccess("stems");
     if (isHttpAudioUrl(stems.vocals) && isHttpAudioUrl(backingStemUrl(stems))) {
@@ -155,71 +190,78 @@ export async function separateStems(input: {
     return stems;
   };
 
+  const inputPayload = { audio: audioUrl, output_format: "mp3" };
+
+  const createUrl = DEMUCS_DEPLOYMENT
+    ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
+    : `${replicateBaseUrl()}/predictions`;
+  const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
+  const body = DEMUCS_DEPLOYMENT
+    ? { input: inputPayload }
+    : communityPredictionBody(version!, inputPayload, {
+        ...(DEMUCS_HARDWARE ? { hardware: DEMUCS_HARDWARE } : {}),
+      });
+
+  const created = await resilientFetch(
+    createUrl,
+    {
+      method: "POST",
+      headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
+      body: JSON.stringify(body),
+    },
+    { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
+  );
+  if (!created.ok) await bail(created, "dispatch");
+
+  const initial = (await created.json()) as PredictionState;
+  const id = initial.id;
+  if (!id) throw new Error("The stem worker returned no job id.");
+
+  const { pollWithBreaker, isTerminalPollStatus } = await import(
+    "@/lib/poll-with-breaker.server"
+  );
+
+  let useInitial = true;
   try {
-    const audioUrl = await uploadTrack(input.audio, input.filename);
-    const inputPayload = { audio: audioUrl, output_format: "mp3" };
+    const stems = await pollWithBreaker<StemResult | null>(
+      async () => {
+        let prediction: PredictionState;
+        if (useInitial) {
+          useInitial = false;
+          prediction = initial;
+        } else {
+          const poll = await resilientFetch(
+            `${replicateBaseUrl()}/predictions/${id}`,
+            { headers: credentials() },
+            { label: "stem separation poll", timeoutMs: 20_000, retries: 0, baseDelayMs: 1000 },
+          );
+          if (!poll.ok) {
+            throw new Error(
+              `[Polling Gate 4 Demucs] HTTP ${poll.status} — aborting poll.`,
+            );
+          }
+          prediction = (await poll.json()) as PredictionState;
+        }
 
-    const createUrl = DEMUCS_DEPLOYMENT
-      ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
-      : `${replicateBaseUrl()}/predictions`;
-    const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
-    // A public model rejects a hardware SKU with 422, so only a private
-    // deployment's own hardware applies. Sending it cost a wasted round trip.
-    const body = DEMUCS_DEPLOYMENT
-      ? { input: inputPayload }
-      : communityPredictionBody(version!, inputPayload, {
-          ...(DEMUCS_HARDWARE ? { hardware: DEMUCS_HARDWARE } : {}),
-        });
-
-    const dispatch = (payload: unknown) =>
-      resilientFetch(
-        createUrl,
-        {
-          method: "POST",
-          headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
-          body: JSON.stringify(payload),
-        },
-        { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
-      );
-
-    const created = await dispatch(body);
-    if (!created.ok) await bail(created, "dispatch");
-
-    let prediction = (await created.json()) as PredictionState;
-    const id = prediction.id;
-    if (!id) throw new Error("The stem worker returned no job id.");
-
-    const deadline = Date.now() + REPLICATE_PREDICTION_TIMEOUT_MS;
-
-    const settle = async (state: PredictionState): Promise<StemResult | null> => {
-      if (state.status === "succeeded") return pickStems(state.output);
-      if (isTerminalFailure(state.status)) {
-        throw new Error(String(state.error ?? "Stem separation failed for this track."));
-      }
-      return null;
-    };
-
-    const immediate = await settle(prediction);
-    if (immediate) return finish(immediate);
-
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-      const poll = await resilientFetch(
-        `${replicateBaseUrl()}/predictions/${id}`,
-        { headers: credentials() },
-        { label: "stem separation poll", timeoutMs: 20_000, retries: 0, baseDelayMs: 1000 },
-      );
-      if (!poll.ok) await bail(poll, "poll");
-      prediction = (await poll.json()) as PredictionState;
-      const done = await settle(prediction);
-      if (done) return finish(done);
-    }
-
-    await cancelPrediction(id);
-    throw new Error("Stem separation timed out for this track.");
+        if (prediction.status === "succeeded") {
+          return pickStems(prediction.output);
+        }
+        if (isTerminalPollStatus(prediction.status) || isTerminalFailure(prediction.status)) {
+          throw new Error(String(prediction.error ?? "Stem separation failed for this track."));
+        }
+        return null;
+      },
+      (stems) => stems !== null,
+      () => false,
+      {
+        maxAttempts: 30,
+        intervalMs: 2000,
+        stepName: "Gate 4 Demucs",
+      },
+    );
+    return finish(stems!);
   } catch (error) {
-    recordPipelineFailure("stems", error);
-    logFailedStudioGate(error);
+    await cancelPrediction(id).catch(() => undefined);
     throw error;
   }
 }

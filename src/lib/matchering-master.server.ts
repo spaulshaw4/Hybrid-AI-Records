@@ -3,11 +3,9 @@
  * Failures never throw to the generator — the raw stem URL is returned instead.
  */
 import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { HYBRID_INTRO_SECONDS } from "@/lib/hybrid-track-pipeline";
 import {
@@ -40,8 +38,6 @@ import {
 import { assertSampleRateGate } from "@/lib/studio-pipeline-gates";
 import { shouldRethrowPipelineControlError } from "@/lib/studio-pipeline-error";
 
-const execFileAsync = promisify(execFile);
-
 export type MixAndMasterResult = {
   masterUrl: string | null;
   matched: boolean;
@@ -65,30 +61,92 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
-  try {
-    await execFileAsync("ffmpeg", args, {
-      timeout: timeoutMs,
-      maxBuffer: 32 * 1024 * 1024,
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", args, {
       windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException & { stderr?: string };
-    if (err.code === "ENOENT") throw new Error("FFmpeg is not installed on this host.");
-    const detail = (err.stderr || err.message || "unknown FFmpeg error").toString().slice(0, 800);
-    throw new Error(`FFmpeg failed: ${detail}`);
-  }
+
+    let settled = false;
+    let stderr = "";
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    const timer = setTimeout(() => {
+      console.error(`[Gate 5] FFmpeg timed out after ${timeoutMs}ms — killing child`);
+      killMatcheringChild(child);
+      finish(new Error(`FFmpeg timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.on("error", (error) => {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        finish(new Error("FFmpeg is not installed on this host."));
+        return;
+      }
+      finish(error);
+    });
+
+    // Drain pipes so a full buffer never blocks the child.
+    child.stdout?.on("data", () => undefined);
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderr.length < 16_000) stderr += chunk.toString("utf8");
+    });
+    child.stdout?.on("error", () => undefined);
+    child.stderr?.on("error", () => undefined);
+
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        finish();
+        return;
+      }
+      const detail = (stderr || signal || `exit ${code}`).toString().slice(0, 800);
+      finish(new Error(`FFmpeg failed: ${detail}`));
+    });
+  });
 }
 
 /** Probe WAV/MP3 duration so the finish pass can fade the last 4 seconds. */
 async function probeAudioDurationSeconds(path: string): Promise<number | null> {
   try {
-    const { stdout } = await execFileAsync(
-      "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-      { timeout: 15_000, windowsHide: true },
-    );
-    const seconds = Number.parseFloat(String(stdout).trim());
-    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+    const seconds = await new Promise<number | null>((resolve) => {
+      const child = spawn(
+        "ffprobe",
+        ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+        { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let stdout = "";
+      let settled = false;
+      const done = (value: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => {
+        killMatcheringChild(child);
+        done(null);
+      }, 15_000);
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8");
+      });
+      child.stderr?.on("data", () => undefined);
+      child.on("error", () => done(null));
+      child.on("close", (code) => {
+        if (code !== 0) {
+          done(null);
+          return;
+        }
+        const parsed = Number.parseFloat(stdout.trim());
+        done(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+      });
+    });
+    return seconds;
   } catch {
     return null;
   }
@@ -117,7 +175,9 @@ async function downloadStem(url: string, dest: string): Promise<void> {
   if (!response.ok) throw new Error(`Could not download a stem (${response.status}).`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength < 1024) throw new Error("A stem file was empty.");
-  await writeFile(dest, bytes);
+  const { writeAtomicAudioFile, waitForFileUnlock } = await import("@/lib/track-lock.server");
+  await writeAtomicAudioFile(dest, Buffer.from(bytes));
+  await waitForFileUnlock(dest);
 }
 
 async function runMatcheringPython(input: {
@@ -297,10 +357,37 @@ async function mixAndMasterOnce(options: {
       cwaloGuide: options.cwaloGuide ?? null,
       loudnormInMix: remuxLoudnorm,
     });
-    await runFfmpeg(
-      buildHybridMixArgs(stems, mixPath, options.remuxGains),
-      MATCHERING_MIX_TIMEOUT_MS,
+    const { produceAtomicAudioFile, waitForFileUnlock, cleanupAudioWriteResidue } = await import(
+      "@/lib/track-lock.server"
     );
+    try {
+      await produceAtomicAudioFile(mixPath, async (tmpMix) => {
+        await runFfmpeg(
+          buildHybridMixArgs(stems, tmpMix, options.remuxGains),
+          MATCHERING_MIX_TIMEOUT_MS,
+        );
+      });
+      await waitForFileUnlock(mixPath);
+    } catch (mixError) {
+      await cleanupAudioWriteResidue(mixPath);
+      // Section-aware remux failed — retry with static master filter when both stems exist.
+      if (stems.instrumentalPath && stems.vocalPath) {
+        console.warn(
+          "[Fallback Triggered] Section-aware remux failed — applying STATIC_MASTER_FFMPEG_FILTER",
+          mixError instanceof Error ? mixError.message : mixError,
+        );
+        const { buildStaticMasterFfmpegArgs } = await import("@/lib/pipeline-fallbacks.server");
+        await produceAtomicAudioFile(mixPath, async (tmpMix) => {
+          await runFfmpeg(
+            buildStaticMasterFfmpegArgs(stems.instrumentalPath!, stems.vocalPath!, tmpMix),
+            MATCHERING_MIX_TIMEOUT_MS,
+          );
+        });
+        await waitForFileUnlock(mixPath);
+      } else {
+        throw mixError;
+      }
+    }
 
     const cwd = process.cwd();
     const reference = resolveMatcheringReferencePath(cwd);
@@ -347,15 +434,18 @@ async function mixAndMasterOnce(options: {
       fadeOutSeconds: fadeSecs,
       note: "fade anchored at CWALO track_end when present — never at outro_start",
     });
-    await runFfmpeg(
-      matcheringFinishArgs(masteredWav, playablePath, options.maxSeconds, {
-        skipLoudnorm,
-        durationSeconds: probedDuration ?? undefined,
-        trackEnd: trackEnd ?? undefined,
-        fadeOutSeconds: fadeSecs,
-      }),
-      MATCHERING_MIX_TIMEOUT_MS,
-    );
+    await produceAtomicAudioFile(playablePath, async (tmpPlayable) => {
+      await runFfmpeg(
+        matcheringFinishArgs(masteredWav, tmpPlayable, options.maxSeconds, {
+          skipLoudnorm,
+          durationSeconds: probedDuration ?? undefined,
+          trackEnd: trackEnd ?? undefined,
+          fadeOutSeconds: fadeSecs,
+        }),
+        MATCHERING_MIX_TIMEOUT_MS,
+      );
+    });
+    await waitForFileUnlock(playablePath);
 
     const mp3 = await readFile(playablePath);
     const wav = await readFile(masteredWav).catch(() => null);

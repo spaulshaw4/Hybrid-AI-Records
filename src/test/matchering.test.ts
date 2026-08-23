@@ -97,10 +97,26 @@ describe("Matchering 2.0 mix + master contract", () => {
       "in.wav",
       "-af",
       MATCHERING_FINISH_FILTER,
+      "-ac",
+      "2",
+      "-ar",
+      "44100",
       "-b:a",
       "320k",
       "out.mp3",
     ]);
+  });
+
+  it("forces Gate 6 stereo 44.1 kHz and -shortest on multi-stem remux", () => {
+    const args = buildHybridMixArgs(
+      { instrumentalPath: "m.wav", vocalPath: "v.wav" },
+      "mix.wav",
+    );
+    expect(args).toContain("-shortest");
+    expect(args).toContain("-ac");
+    expect(args[args.indexOf("-ac") + 1]).toBe("2");
+    expect(args).toContain("-ar");
+    expect(args[args.indexOf("-ar") + 1]).toBe("44100");
   });
 
   it("cuts the master at the requested length with a fade into the cut", () => {

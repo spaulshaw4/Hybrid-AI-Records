@@ -194,10 +194,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     }
     }
 
-    const {
-      archiveGeneratedAudio,
-      newCorrelationId,
-    } = await import("@/lib/apiframe.server");
+    const { newCorrelationId } = await import("@/lib/apiframe.server");
     const { logApiPayload } = await import("@/lib/generation-style-prompt");
     const {
       controls,
@@ -309,86 +306,51 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       mv: "sonic-v5",
     });
     startedTaskId = started.taskId;
-    finished = await waitForStudioTrack(started.taskId);
+    const { withTimeout, GATE_TIMEOUTS_MS } = await import("@/lib/pipeline-gate.server");
+    console.log("[Gate 1/6] Base Generation...");
+    finished = await withTimeout(
+      waitForStudioTrack(started.taskId),
+      GATE_TIMEOUTS_MS[1],
+      "Gate 1 (AIMusicAPI)",
+    );
     const sonicUrl = finished.audioUrl;
     if (!sonicUrl) {
-      throw new Error("Music engine: no audio URL was returned.");
+      throw new Error("[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.");
     }
+    console.log("[Gate 1/6] Finished — audio_url ready");
 
-    const rawTracks = [
-      {
-        id: started.taskId,
-        title: finished.title || payload.title || "Mastered track",
-        audioUrl: sonicUrl,
-        imageUrl: finished.imageUrl,
-        duration: durationSeconds,
-      },
-    ];
-    const tracks = await Promise.all(
-      rawTracks.map(async (track) => ({
-        ...track,
-        audioUrl: track.audioUrl
-          ? await archiveGeneratedAudio(
-              track.audioUrl,
-              context.userId,
-              track.id ?? correlationId,
-            ).catch(() => null)
-          : null,
-      })),
-    );
-
-    const archivedBase = tracks[0]?.audioUrl ?? null;
-    // Prefer the Gate 1 CDN URL before the local-vault rewrite. Replicate
-    // (CWALO) cannot fetch http://localhost:8080/...
-    const { isHttpAudioUrl, isPublicHttpAudioUrl, preferPublicAudioUrl } = await import(
-      "@/lib/pipeline-contracts"
-    );
-    console.log(">>> [1/5: BASE URL READY] Gate 1 audio handed to CWALO / Demucs");
-    const publicGate1Url = preferPublicAudioUrl(sonicUrl, archivedBase);
-    // Local Demucs download can use localhost; CWALO must use the CDN (or upload).
-    const pipelineBase =
-      publicGate1Url ??
-      (isHttpAudioUrl(sonicUrl) ? sonicUrl : null) ??
-      (isHttpAudioUrl(archivedBase) ? archivedBase : null);
-    if (!pipelineBase) {
-      throw new Error("Music engine: no audio URL was returned.");
-    }
-    if (publicGate1Url && publicGate1Url !== archivedBase) {
-      console.warn("[PIPELINE] using public Gate 1 CDN URL for remote stages (not local vault)", {
-        archivedBase: String(archivedBase).slice(0, 96),
-        pipelineBase: publicGate1Url.slice(0, 96),
-        sonicPublic: isPublicHttpAudioUrl(sonicUrl),
-      });
-    } else if (!publicGate1Url) {
-      console.warn(
-        "[PIPELINE] no public Gate 1 CDN URL — CWALO will upload bytes to Replicate Files",
-        { pipelineBase: pipelineBase.slice(0, 96) },
-      );
-    }
-
-    const { runHybridMasterPipeline } = await import("@/lib/hybrid-master-pipeline.server");
-    const pipeline = await runHybridMasterPipeline({
-      baseAudioUrl: pipelineBase,
-      /** Always the pre-archive CDN when available — never a localhost vault URL. */
-      publicBaseAudioUrl: publicGate1Url ?? (isPublicHttpAudioUrl(sonicUrl) ? sonicUrl : undefined),
+    const { executePipeline } = await import("@/lib/execute-pipeline.server");
+    const pipeline = await executePipeline({
+      trackId: started.taskId,
+      prompt: lyricContent || genre,
+      style: genre,
+      userId: context.userId,
+      gate1AudioUrl: sonicUrl,
       lyrics: lyricContent,
       instrumental: payload.instrumental,
       referenceSampleUrl,
       audioFormat: payload.audioFormat,
       title: payload.title || "Studio Master",
-      userId: context.userId,
-      taskId: started.taskId,
       durationSeconds,
       language: payload.language,
       customLanguage: payload.customLanguage,
     });
 
+    const rawTracks = [
+      {
+        id: started.taskId,
+        title: finished.title || payload.title || "Mastered track",
+        audioUrl: pipeline.publicAudioUrl,
+        imageUrl: finished.imageUrl,
+        duration: durationSeconds,
+      },
+    ];
+    const tracks = rawTracks;
+
     const vocalUrl = pipeline.vocalUrl;
     const instrumentalUrl = pipeline.instrumentalUrl;
     const introUrl = null;
-    // Gate 1 output before stems and mastering. `archivedBase` is the stored
-    // copy; fall back to the upstream CDN URL when the archive is not addressable.
-    const rawAudioUrl = isHttpAudioUrl(archivedBase) ? archivedBase : pipelineBase;
+    const rawAudioUrl = pipeline.publicAudioUrl;
     let masterUrl = pipeline.masterUrl;
     const taskId = started.taskId;
 
@@ -467,7 +429,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     return {
       taskId,
-      status: "completed" as const,
+      status: pipeline.status === "completed_fallback" ? ("completed" as const) : ("completed" as const),
       tracks: playableTracks,
       stems: {
         masterUrl,
@@ -482,8 +444,21 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       requestedEngine: "suno" as const,
       durationSeconds,
       routingNote: null,
+      landing: {
+        status: pipeline.status,
+        trackId,
+        masterUrl,
+        duration: pipeline.duration,
+        structuralMarkers: pipeline.structuralMarkers,
+        fallbacksUsed: pipeline.fallbacksUsed,
+        executionTimeMs: pipeline.executionTimeMs,
+      },
     };
     } catch (error) {
+      const { TrackLockConflictError } = await import("@/lib/track-lock.server");
+      if (error instanceof TrackLockConflictError) {
+        throw error;
+      }
       const { logFailedStudioGate } = await import("@/lib/studio-pipeline-error");
       logFailedStudioGate(error);
       // A halted render must not leave the task row claiming it is still

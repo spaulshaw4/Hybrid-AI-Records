@@ -1,15 +1,16 @@
 /**
- * Shared studio generate progress map.
+ * Shared studio generate progress map (6-gate architecture).
  * Server stages call `reportPipelineProgress`; the studio bar reads the same percents.
  */
 
 export const PIPELINE_PROGRESS = {
-  lyrics: 15,
-  sonic: 35,
-  cwalo: 48,
-  stems: 60,
-  vocals: 75,
-  master: 90,
+  lyrics: 12,
+  sonic: 28,
+  vault: 40,
+  cwalo: 52,
+  stems: 65,
+  vocals: 78,
+  master: 92,
   complete: 100,
 } as const;
 
@@ -18,6 +19,7 @@ export type PipelineProgressStage = keyof typeof PIPELINE_PROGRESS;
 export const PIPELINE_PROGRESS_LABELS: Record<PipelineProgressStage, string> = {
   lyrics: "Writing lyrics…",
   sonic: "Building the base track…",
+  vault: "Vaulting audio to Supabase…",
   cwalo: "Analyzing structure (CWALO)…",
   stems: "Separating stems…",
   vocals: "Rendering vocals…",
@@ -31,6 +33,7 @@ export function normalizeProgressStage(stage: string): PipelineProgressStage | n
   const key = stage.trim().toLowerCase();
   if (key in PIPELINE_PROGRESS) return key as PipelineProgressStage;
   if (key === "music" || key === "base" || key === "base audio") return "sonic";
+  if (key === "vaulting" || key === "supabase" || key === "gate_2_vaulted") return "vault";
   if (key === "structure" || key === "analysis" || key === "cwalo structure") return "cwalo";
   if (key === "mastering" || key === "matchering") return "master";
   return null;

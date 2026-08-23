@@ -32,7 +32,7 @@ export const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
 /** Model tier for the `model` header. Enum: s1 | s2-pro | s2.1-pro | s2.1-pro-free. */
 const FISH_MODEL = "s2-pro";
 /** Synthesis of a full lyric sheet is slow, but it must never hang the render. */
-const FISH_REQUEST_TIMEOUT_MS = 120_000;
+const FISH_REQUEST_TIMEOUT_MS = 60_000;
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
 function fishApiKey(): string {

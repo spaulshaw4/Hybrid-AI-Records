@@ -3,7 +3,7 @@ import { LOUDNORM_FILTER } from "@/lib/loudnorm";
 import { masteredTrackObjectPath } from "@/lib/audio-vault";
 
 /** Hard cap so a stuck Python/FFmpeg child never hangs a generation. */
-export const MATCHERING_PIPELINE_TIMEOUT_MS = 90_000;
+export const MATCHERING_PIPELINE_TIMEOUT_MS = 60_000;
 /** Matchering 2.0 itself: after 30s abort and finish with FFmpeg loudnorm. */
 export const MATCHERING_PROCESS_TIMEOUT_MS = 30_000;
 export const MATCHERING_MIX_TIMEOUT_MS = 60_000;
@@ -19,11 +19,23 @@ export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${LOUDNORM_FILTER}
  * Gate 3 instrumental + Fish vocal remux — exact production filter:
  * amix duration=first, dropout_transition=0, normalize=0 (no auto ducking),
  * then loudnorm in the same chain.
+ *
+ * `duration=first` + CLI `-shortest` keep the master free of trailing dead air.
  */
 export const HYBRID_REMUX_AMIX =
   "amix=inputs=2:duration=first:dropout_transition=0:normalize=0";
 export const HYBRID_REMUX_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.5";
 export const HYBRID_REMUX_MIX_FILTER = `${HYBRID_REMUX_AMIX},${HYBRID_REMUX_LOUDNORM}`;
+
+/** Gate 6 forced output specs — every remux / finish encode must include these. */
+export const GATE_6_OUTPUT_SAMPLE_RATE = "44100";
+export const GATE_6_OUTPUT_CHANNELS = "2";
+export const GATE_6_OUTPUT_SPECS = [
+  "-ac",
+  GATE_6_OUTPUT_CHANNELS,
+  "-ar",
+  GATE_6_OUTPUT_SAMPLE_RATE,
+] as const;
 
 export type HybridStemKind = "intro" | "instrumental" | "vocal";
 
@@ -146,10 +158,7 @@ export function buildHybridMixArgs(
       "-hide_banner",
       "-nostdin",
       ...inputs,
-      "-ac",
-      "2",
-      "-ar",
-      "44100",
+      ...GATE_6_OUTPUT_SPECS,
       "-c:a",
       "pcm_s24le",
       outputWav,
@@ -164,10 +173,9 @@ export function buildHybridMixArgs(
     buildHybridMixFilterComplex(slots, HYBRID_INTRO_SECONDS, gains),
     "-map",
     "[out]",
-    "-ac",
-    "2",
-    "-ar",
-    "44100",
+    // End when the shortest contributing stem ends — no trailing dead air.
+    "-shortest",
+    ...GATE_6_OUTPUT_SPECS,
     "-c:a",
     "pcm_s24le",
     outputWav,
@@ -279,6 +287,7 @@ export function matcheringFinishArgs(
     ...(ceiling ? ["-t", String(ceiling)] : []),
     "-af",
     filter,
+    ...GATE_6_OUTPUT_SPECS,
     "-b:a",
     "320k",
     outputMp3,

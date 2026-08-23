@@ -11,6 +11,33 @@ import { renderErrorPage } from "./lib/error-page";
 import { logServerError, newErrorReference } from "./lib/server-error-log";
 import { isH3SwallowedErrorBody, unwrapSsrError } from "./lib/ssr-error";
 
+/** Pipeline contracts + Gate 6 output guards (re-exported for local orchestrator). */
+export type {
+  GateStage,
+  GateTelemetry,
+  Gate1Result,
+  Gate2Result,
+  Gate3Result,
+  Gate4Result,
+  Gate5Result,
+  Gate6Result,
+  PipelineResponse,
+  LandingSuccessResponse,
+  LandingAbortResponse,
+} from "./types/pipeline";
+export {
+  acquireTrackLock,
+  releaseTrackLock,
+  writeAtomicAudioFile,
+  waitForFileUnlock,
+} from "./lib/track-lock.server";
+export { executePipeline } from "./lib/execute-pipeline.server";
+export {
+  GATE_6_OUTPUT_SPECS,
+  GATE_6_OUTPUT_SAMPLE_RATE,
+  GATE_6_OUTPUT_CHANNELS,
+} from "./lib/matchering";
+
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };

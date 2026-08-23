@@ -9,7 +9,6 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   AUDIO_VAULT_BUCKET,
   STUDIO_AUDIO_BUCKET,
-  vaultMimeType,
 } from "@/lib/audio-vault";
 import {
   backendServiceRoleKey,
@@ -44,7 +43,9 @@ export async function uploadEngineMaster(
   fileType: "wav" | "mp3" = "mp3",
 ): Promise<string> {
   const client = createEngineSupabaseClient();
-  const mimeType = vaultMimeType(fileType);
+  // Explicit Content-Type: masters → audio/wav, raw/playable MPEG → audio/mpeg.
+  const mimeType: "audio/wav" | "audio/mpeg" =
+    fileType === "wav" ? "audio/wav" : "audio/mpeg";
   if (client) {
     const buckets = [AUDIO_VAULT_BUCKET, STUDIO_AUDIO_BUCKET];
     let lastError: unknown = null;

@@ -54,7 +54,9 @@ export async function saveLocalAudioFile(
   const ext = fileType.replace(/^\./, "") || "mp3";
   const safe = objectPath.replace(/[^a-zA-Z0-9/_-]/g, "_").replace(/\//g, "__");
   const fileName = `${safe}.${ext}`;
-  await writeFile(join(ROOT, fileName), bytes);
+  const target = join(ROOT, fileName);
+  const { writeAtomicAudioFile } = await import("@/lib/track-lock.server");
+  await writeAtomicAudioFile(target, Buffer.from(bytes));
   console.warn(`[local-vault] saved ${fileName} (${bytes.byteLength} bytes)`);
   return localVaultUrl(fileName);
 }

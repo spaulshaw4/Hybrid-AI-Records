@@ -103,15 +103,15 @@ async function archiveUrl(
 }
 
 /**
- * Stage 2–5: CWALO structure → one Demucs split → Fish vocals → remux over
- * the Gate 3 instrumental (guided by CWALO remux gains). Never re-run Demucs
- * after Fish.
+ * Gates 3–6: CWALO structure → Demucs → Fish vocals → FFmpeg remux/master.
+ * Gate 2 (Supabase vault) must already have produced a public HTTPS URL.
+ * Never re-run Demucs after Fish.
  */
 export async function runHybridMasterPipeline(input: {
   baseAudioUrl: string;
   /**
-   * Pre-archive Gate 1 CDN URL for Replicate (CWALO). Must be publicly
-   * fetchable — never a localhost / local-vault URL.
+   * Gate 2 public HTTPS CDN URL for Replicate (CWALO / Demucs). Must never
+   * be a localhost / local-vault path.
    */
   publicBaseAudioUrl?: string;
   lyrics: string;
@@ -135,26 +135,46 @@ export async function runHybridMasterPipeline(input: {
 
   const wantsVocals = !input.instrumental && input.lyrics.trim().length > 0;
 
-  if (!isHttpAudioUrl(input.baseAudioUrl)) {
-    logFailedStudioGate(new Error("FAIL_EARLY_GUARD: Stage 2: base audio URL was invalid"));
+  const { isPublicHttpAudioUrl, preferPublicAudioUrl } = await import(
+    "@/lib/pipeline-contracts"
+  );
+  const publicAudioUrl =
+    preferPublicAudioUrl(input.publicBaseAudioUrl, input.baseAudioUrl) ?? null;
+  if (!publicAudioUrl || !isPublicHttpAudioUrl(publicAudioUrl)) {
+    logFailedStudioGate(
+      new Error("FAIL_EARLY_GUARD: Gate 3: public HTTPS vault URL required (refused localhost)"),
+    );
+    throw haltVocalRender(
+      "stem isolation",
+      new Error("Gate 2 public HTTPS URL was missing before CWALO"),
+    );
+  }
+  if (!isHttpAudioUrl(input.baseAudioUrl) && !isHttpAudioUrl(publicAudioUrl)) {
+    logFailedStudioGate(new Error("FAIL_EARLY_GUARD: Gate 3: base audio URL was invalid"));
     throw haltVocalRender("stem isolation", new Error("base audio URL was invalid"));
   }
-  logPreConditionPassed("stems", "base audio URL valid");
+  logPreConditionPassed("stems", "public HTTPS vault URL valid");
   const { PIPELINE_PROGRESS, reportPipelineProgress } = await import("@/lib/pipeline-progress");
+  const pipelineAudioUrl = publicAudioUrl;
 
-  // Gate 2 — CWALO structure analysis on the Gate 1 mix (before Demucs).
+  // Gate 3 — CWALO structure analysis on the Gate 2 public CDN URL.
   try {
     reportPipelineProgress("cwalo", PIPELINE_PROGRESS.cwalo);
     const { logPipelineStep } = await import("@/lib/pipeline-steps.server");
     logPipelineStep("cwalo");
     const { analyzeMusicStructureWithCwalo } = await import("@/lib/cwalo-structure.server");
-    const { preferPublicAudioUrl } = await import("@/lib/pipeline-contracts");
-    const cwaloSource =
-      preferPublicAudioUrl(input.publicBaseAudioUrl, input.baseAudioUrl) ?? input.baseAudioUrl;
-    const structure = await analyzeMusicStructureWithCwalo(cwaloSource);
+    const { logGateStarting, logGateFinished, withGateTimeout } = await import(
+      "@/lib/pipeline-gate.server"
+    );
+    logGateStarting(3, pipelineAudioUrl.slice(0, 72));
+    const structure = await withGateTimeout(3, analyzeMusicStructureWithCwalo(pipelineAudioUrl));
+    logGateFinished(
+      3,
+      `sections=${structure.sections.length} trackEnd=${structure.trackEnd ?? "n/a"}`,
+    );
     remuxGains = structure.remux;
     masterPlan = structure.masterPlan;
-    console.warn("[GATE_2_CWALO] guiding Demucs remux + Gate 5 master", {
+    console.warn("[GATE_3_CWALO] guiding Demucs remux + Gate 6 master", {
       bpm: structure.bpm,
       sectionCount: structure.sections.length,
       energyPoints: structure.energyProfile.length,
@@ -168,9 +188,9 @@ export async function runHybridMasterPipeline(input: {
     logPipelineStepError("cwalo", error);
     logFailedStudioGate(error);
     // Soft-fail: Demucs + Fish remux still proceed with default gains so a
-    // CWALO outage cannot strand an otherwise healthy Gate 1 render.
+    // CWALO outage cannot strand an otherwise healthy Gate 1–2 render.
     console.warn(
-      "[GATE_2_CWALO] continuing with default remux gains",
+      "[GATE_3_CWALO] continuing with default remux gains",
       error instanceof Error ? error.message : error,
     );
   }
@@ -178,12 +198,22 @@ export async function runHybridMasterPipeline(input: {
   reportPipelineProgress("stems", PIPELINE_PROGRESS.stems);
 
   try {
-    const baseBytes = await downloadAudioBytes(input.baseAudioUrl);
+    const { logGateStarting, logGateFinished, withGateTimeout } = await import(
+      "@/lib/pipeline-gate.server"
+    );
+    logGateStarting(4);
     const { separateStems } = await import("@/lib/stems.server");
-    const stems = await separateStems({
-      audio: baseBytes,
-      filename: `${input.taskId}-base.mp3`,
-    });
+    const stems = await withGateTimeout(
+      4,
+      (async () => {
+        const baseBytes = await downloadAudioBytes(pipelineAudioUrl);
+        return separateStems({
+          audio: baseBytes,
+          filename: `${input.taskId}-base.mp3`,
+        });
+      })(),
+    );
+    logGateFinished(4, `vocals=${Boolean(stems.vocals)} backing=${Boolean(backingStemUrl(stems))}`);
     if (wantsVocals) {
       assertDemucsStemUrlGate(stems, { required: true });
     }
@@ -212,29 +242,34 @@ export async function runHybridMasterPipeline(input: {
   if (wantsVocals) {
     try {
       reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
+      const { logGateStarting, logGateFinished, withGateTimeout } = await import(
+        "@/lib/pipeline-gate.server"
+      );
+      logGateStarting(5);
       const { convertVocalsWithStems, cloneVocalsFromSample } = await import("@/lib/fish-tts.server");
-      // These downloads used to swallow failures, which quietly demoted a
-      // voice-converted render to plain text-to-speech, or dropped the
-      // artist's own reference take without telling them.
-      let isolatedVocal: Uint8Array | undefined;
-      if (isolatedVocalUrl) {
-        console.log("[GATE_4_DISPATCH] Sending vocal stem to Fish Audio:", isolatedVocalUrl);
-        isolatedVocal = await downloadAudioBytes(isolatedVocalUrl);
-      }
-      const converted = input.referenceSampleUrl
-        ? isolatedVocal
-          ? await convertVocalsWithStems({
-              lyrics: input.lyrics,
-              isolatedVocal,
-              referenceAudio: await downloadAudioBytes(input.referenceSampleUrl),
-              audioFormat: input.audioFormat,
-              title: `${input.title} vocals`,
-              userId: input.userId,
-              taskId: `${input.taskId}-fish-vocals`,
-              language: input.language,
-              customLanguage: input.customLanguage,
-            })
-          : await cloneVocalsFromSample({
+      const converted = await withGateTimeout(
+        5,
+        (async () => {
+          let isolatedVocal: Uint8Array | undefined;
+          if (isolatedVocalUrl) {
+            console.log("[GATE_5_DISPATCH] Sending vocal stem to Fish Audio:", isolatedVocalUrl);
+            isolatedVocal = await downloadAudioBytes(isolatedVocalUrl);
+          }
+          if (input.referenceSampleUrl) {
+            if (isolatedVocal) {
+              return convertVocalsWithStems({
+                lyrics: input.lyrics,
+                isolatedVocal,
+                referenceAudio: await downloadAudioBytes(input.referenceSampleUrl),
+                audioFormat: input.audioFormat,
+                title: `${input.title} vocals`,
+                userId: input.userId,
+                taskId: `${input.taskId}-fish-vocals`,
+                language: input.language,
+                customLanguage: input.customLanguage,
+              });
+            }
+            return cloneVocalsFromSample({
               sampleUrl: input.referenceSampleUrl,
               lyrics: input.lyrics,
               audioFormat: input.audioFormat,
@@ -243,8 +278,9 @@ export async function runHybridMasterPipeline(input: {
               taskId: `${input.taskId}-fish-vocals`,
               language: input.language,
               customLanguage: input.customLanguage,
-            })
-        : await convertVocalsWithStems({
+            });
+          }
+          return convertVocalsWithStems({
             lyrics: input.lyrics,
             isolatedVocal,
             audioFormat: input.audioFormat,
@@ -254,7 +290,10 @@ export async function runHybridMasterPipeline(input: {
             language: input.language,
             customLanguage: input.customLanguage,
           });
+        })(),
+      );
       convertedVocalUrl = converted.tracks.find((track) => track.audioUrl)?.audioUrl ?? null;
+      logGateFinished(5, convertedVocalUrl ? "vocal url ready" : "no vocal url");
     } catch (error) {
       const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
       logPipelineStepError("vocals", error);
@@ -271,23 +310,23 @@ export async function runHybridMasterPipeline(input: {
     }
   }
 
-  // Fish (or Demucs vocal fallback) over the original Gate 3 instrumental only.
+  // Fish (or Demucs vocal fallback) over the Gate 4 Demucs instrumental only.
   // Do not fall back to the full Gate 1 mix when stems exist — that reintroduces
   // the stock vocal and hollows the arrangement.
   const vocalUrl = convertedVocalUrl ?? isolatedVocalUrl;
-  const mixVocalUrl = vocalUrl ?? (instrumentalUrl ? null : input.baseAudioUrl);
+  const mixVocalUrl = vocalUrl ?? (instrumentalUrl ? null : pipelineAudioUrl);
   const mixInstrumentalUrl =
-    instrumentalUrl ?? (wantsVocals ? null : input.baseAudioUrl);
+    instrumentalUrl ?? (wantsVocals ? null : pipelineAudioUrl);
 
   if (wantsVocals && (!mixVocalUrl || !mixInstrumentalUrl)) {
     throw haltVocalRender(
       "vocal conversion",
-      new Error("missing Fish vocal or Gate 3 instrumental for remux"),
+      new Error("missing Fish vocal or Gate 4 instrumental for remux"),
     );
   }
 
-  console.warn("[GATE_5_REMUX]", {
-    instrumental: mixInstrumentalUrl ? "gate3-demucs" : "none",
+  console.warn("[GATE_6_REMUX]", {
+    instrumental: mixInstrumentalUrl ? "gate4-demucs" : "none",
     vocal: convertedVocalUrl ? "fish" : isolatedVocalUrl ? "demucs-vocal" : "none",
     amix: "duration=first:dropout_transition=0:normalize=0",
     remuxGains,
@@ -304,27 +343,35 @@ export async function runHybridMasterPipeline(input: {
 
   reportPipelineProgress("master", PIPELINE_PROGRESS.master);
   const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
-  const mastered = await mixAndMasterHybridTrack({
-    introUrl: null,
-    instrumentalUrl: mixInstrumentalUrl,
-    vocalUrl: mixVocalUrl,
-    userId: input.userId,
-    taskId: input.taskId,
-    maxSeconds: input.durationSeconds,
-    remuxGains: {
-      ...remuxGains,
-      instrumentalVolumeExpr: masterPlan?.instrumentalVolumeExpr,
-      vocalVolumeExpr: masterPlan?.vocalVolumeExpr,
-    },
-    cwaloGuide: masterPlan
-      ? {
-          trackEnd: masterPlan.trackEnd ?? undefined,
-          outroStart: masterPlan.outroStart ?? undefined,
-          fadeOutSeconds: masterPlan.fadeOutSeconds,
-          sectionCount: masterPlan.sections.length,
-        }
-      : undefined,
-  });
+  const { logGateStarting, logGateFinished, withGateTimeout } = await import(
+    "@/lib/pipeline-gate.server"
+  );
+  logGateStarting(6);
+  const mastered = await withGateTimeout(
+    6,
+    mixAndMasterHybridTrack({
+      introUrl: null,
+      instrumentalUrl: mixInstrumentalUrl,
+      vocalUrl: mixVocalUrl,
+      userId: input.userId,
+      taskId: input.taskId,
+      maxSeconds: input.durationSeconds,
+      remuxGains: {
+        ...remuxGains,
+        instrumentalVolumeExpr: masterPlan?.instrumentalVolumeExpr,
+        vocalVolumeExpr: masterPlan?.vocalVolumeExpr,
+      },
+      cwaloGuide: masterPlan
+        ? {
+            trackEnd: masterPlan.trackEnd ?? undefined,
+            outroStart: masterPlan.outroStart ?? undefined,
+            fadeOutSeconds: masterPlan.fadeOutSeconds,
+            sectionCount: masterPlan.sections.length,
+          }
+        : undefined,
+    }),
+  );
+  logGateFinished(6, mastered.masterUrl ? "master url ready" : "no master");
   const master = assertMasteringContractOutput(mastered.masterUrl);
   logPostConditionPassed("Mastered audio ready");
 

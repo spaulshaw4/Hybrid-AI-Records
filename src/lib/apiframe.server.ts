@@ -739,26 +739,31 @@ export async function fetchApiframeTask(
   );
 }
 
-/** Poll until a prediction succeeds, fails, or times out. */
+/** Poll until a prediction succeeds, fails, or the breaker trips (30 × 2s). */
 export async function waitForMusicPrediction(
   taskId: string,
   correlationId: string,
-  timeoutMs = 480_000,
+  _timeoutMs = 60_000,
 ): Promise<ApiframeResult> {
-  const started = Date.now();
-  let delay = 1500;
-  for (;;) {
-    const result = await fetchApiframeTask(taskId, correlationId);
-    if (result.status === "succeeded") return result;
-    if (result.status === "failed" || result.status === "canceled") {
-      throw new Error(`Music engine: ${result.status}`);
-    }
-    if (Date.now() - started > timeoutMs) {
-      throw new Error("Music engine: this render timed out. Try a shorter length.");
-    }
-    await sleep(delay);
-    delay = Math.min(Math.round(delay * 1.25), 5000);
-  }
+  const { pollWithBreaker, isTerminalPollStatus } = await import(
+    "@/lib/poll-with-breaker.server"
+  );
+  return pollWithBreaker(
+    async () => {
+      const result = await fetchApiframeTask(taskId, correlationId);
+      if (isTerminalPollStatus(result.status)) {
+        throw new Error(`Music engine: ${result.status}`);
+      }
+      return result;
+    },
+    (result) => result.status === "succeeded",
+    () => false,
+    {
+      maxAttempts: 30,
+      intervalMs: 2000,
+      stepName: "Gate 1 Music Prediction",
+    },
+  );
 }
 
 const communityVersionCache = new Map<string, { id: string; at: number }>();

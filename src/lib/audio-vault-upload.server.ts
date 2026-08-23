@@ -43,11 +43,22 @@ async function persistVaultObject(
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
   }
   const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(path, body, {
-    contentType: mimeType,
+    contentType: mimeType === "audio/wav" || mimeType.includes("wav")
+      ? "audio/wav"
+      : mimeType.includes("mpeg") || mimeType.includes("mp3")
+        ? "audio/mpeg"
+        : mimeType,
     upsert: true,
     cacheControl: "31536000",
     duplex: "half",
-    headers: { "content-type": mimeType },
+    headers: {
+      "content-type":
+        mimeType === "audio/wav" || mimeType.includes("wav")
+          ? "audio/wav"
+          : mimeType.includes("mpeg") || mimeType.includes("mp3")
+            ? "audio/mpeg"
+            : mimeType,
+    },
   });
   if (error) throw new Error("The finished track could not be saved to the audio vault.");
 

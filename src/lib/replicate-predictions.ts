@@ -15,10 +15,9 @@ export const REPLICATE_COST_EFFECTIVE_GPU = "gpu-t4";
 
 /**
  * Hard ceiling for a single stem/audio prediction so GPU time cannot hang.
- * Demucs on a full track can run past two minutes, and `Cancel-After` is a
- * server-side kill — too low and Replicate aborts a healthy separation.
+ * Kept at 90s so a stuck Demucs poll cannot freeze the studio orchestrator.
  */
-export const REPLICATE_PREDICTION_TIMEOUT_MS = 300_000;
+export const REPLICATE_PREDICTION_TIMEOUT_MS = 60_000;
 
 /**
  * Replicate headers for a prediction create.
