@@ -442,9 +442,18 @@ export function isInvalidMvRejection(status: number, raw: unknown): boolean {
 
 function musicApiAuthHeaders(apiKey: string): Record<string, string> {
   return {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${apiKey.trim()}`,
     "Content-Type": "application/json",
   };
+}
+
+/** Masked key check — never logs enough of the key to be reusable. */
+function logAuthDiagnostic(apiKey: string | undefined): void {
+  const rawKey = apiKey?.trim() ?? "";
+  const keyPreview = rawKey
+    ? `${rawKey.slice(0, 4)}...${rawKey.slice(-4)} (length: ${rawKey.length})`
+    : "MISSING/UNDEFINED";
+  console.log("[AUTH_DIAGNOSTIC] Server Key Status:", keyPreview);
 }
 
 async function postSonicCreate(
@@ -468,6 +477,7 @@ async function postSonicCreate(
 
   console.log("[AIMUSICAPI_DISPATCH]", JSON.stringify(dispatchPayload, null, 2));
   console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
+  logAuthDiagnostic(apiKey);
 
   const endpoints = [MUSICAPI_CREATE_URL, AIMUSICAPI_CREATE_URL];
   let lastError: unknown = null;
