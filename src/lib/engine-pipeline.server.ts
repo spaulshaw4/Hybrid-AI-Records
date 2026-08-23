@@ -137,3 +137,50 @@ export async function completeGenerationTask(input: {
     console.warn("[engine] generation_tasks completion update failed", taskError.message);
   }
 }
+
+/**
+ * Marks a render failed so a halted pipeline does not leave the row claiming it
+ * is still processing. Best-effort: a bookkeeping miss must not mask the real
+ * generate error the artist is being shown.
+ */
+export async function failGenerationTask(input: {
+  taskId?: string | null;
+  userId: string;
+  reason: string;
+}): Promise<void> {
+  const taskId = input.taskId?.trim();
+  if (!taskId) return;
+  const supabase = createEngineSupabaseClient();
+  if (!supabase) {
+    console.warn("[engine] failGenerationTask skipped — no admin client");
+    return;
+  }
+  const now = new Date().toISOString();
+  console.error("[GATE_FAIL] marking render failed", { taskId, reason: input.reason });
+
+  const { error: taskError } = await supabase
+    .from("generation_tasks")
+    .update({ status: "failed", updated_at: now })
+    .eq("id", taskId);
+  if (taskError) {
+    console.warn("[engine] generation_tasks failure update failed", taskError.message);
+  }
+
+  const { error: vaultError } = await supabase
+    .from("user_vault")
+    .update({ status: "failed" })
+    .eq("id", taskId)
+    .eq("user_id", input.userId);
+  if (vaultError) {
+    console.warn("[engine] user_vault failure update failed", vaultError.message);
+  }
+
+  const { error: studioError } = await supabase
+    .from("studio_tracks")
+    .update({ mastered_status: "failed", updated_at: now })
+    .eq("id", taskId)
+    .eq("user_id", input.userId);
+  if (studioError) {
+    console.warn("[engine] studio_tracks failure update failed", studioError.message);
+  }
+}

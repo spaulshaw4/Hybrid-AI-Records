@@ -31,6 +31,8 @@ export const FISH_AUDIO_API_BASE = "https://api.fish.audio";
 export const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
 /** Model tier for the `model` header. Enum: s1 | s2-pro | s2.1-pro | s2.1-pro-free. */
 const FISH_MODEL = "s2-pro";
+/** Synthesis of a full lyric sheet is slow, but it must never hang the render. */
+const FISH_REQUEST_TIMEOUT_MS = 120_000;
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
 function fishApiKey(): string {
@@ -205,6 +207,10 @@ export async function convertVocalsWithStems(input: {
   console.log("[FISH_AUDIO_DISPATCH] Processing vocal refinement...");
   logFishConfig();
   logPipelineStep("vocals");
+  console.log("[GATE_4_START_FETCH]", {
+    contentLength: requestBody.byteLength,
+    contentType,
+  });
   let response: Response | undefined;
   try {
     response = await fetch(FISH_TTS_URL, {
@@ -215,11 +221,13 @@ export async function convertVocalsWithStems(input: {
         model: fishModelTier(),
       },
       body: Buffer.from(requestBody),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(FISH_REQUEST_TIMEOUT_MS),
     });
+    console.log("[GATE_4_FETCH_STATUS]", response.status, response.statusText);
   } catch (error) {
     recordPipelineFailure("vocals", error);
     logFailedStudioGate(error);
+    console.error("[GATE_4_FAIL] vocal synthesis never returned", error);
     logFishError({ error });
     logPipelineStepError("vocals", error);
     throw new Error(`Voice cloning is unreachable — ${describeFetchError(error)}.`);
@@ -229,6 +237,7 @@ export async function convertVocalsWithStems(input: {
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
     recordPipelineHttp("vocals", response.status);
+    console.error("[GATE_4_FAIL]", response.status, response.statusText);
     logFishError({ status: response.status, statusText: response.statusText, data: errorBody });
     logPipelineStepError("vocals", new Error(cloneErrorMessage(response.status)), {
       status: response.status,

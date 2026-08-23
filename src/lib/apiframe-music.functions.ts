@@ -283,6 +283,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
     let started: Awaited<ReturnType<typeof generateStudioTrack>>;
     let finished: Awaited<ReturnType<typeof waitForStudioTrack>>;
+    let startedTaskId: string | null = null;
     try {
     started = await generateStudioTrack({
       genre,
@@ -300,6 +301,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       isInstrumental: payload.instrumental,
       mv: "sonic-v5",
     });
+    startedTaskId = started.taskId;
     finished = await waitForStudioTrack(started.taskId);
     const sonicUrl = finished.audioUrl;
     if (!sonicUrl) {
@@ -457,6 +459,14 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     } catch (error) {
       const { logFailedStudioGate } = await import("@/lib/studio-pipeline-error");
       logFailedStudioGate(error);
+      // A halted render must not leave the task row claiming it is still
+      // processing, or the vault badge spins forever.
+      const { failGenerationTask } = await import("@/lib/engine-pipeline.server");
+      await failGenerationTask({
+        taskId: startedTaskId,
+        userId: context.userId,
+        reason: error instanceof Error ? error.message : String(error ?? ""),
+      }).catch(() => undefined);
       throw error;
     }
   });
