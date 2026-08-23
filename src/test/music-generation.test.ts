@@ -3,6 +3,7 @@ import { resetPipelineBreakers } from "@/lib/pipeline-breaker";
 import {
   AIMUSICAPI_HEADER_FORMAT,
   AIMUSICAPI_MODEL,
+  extractAudioUrl,
   generateStudioTrack,
   MUSICAPI_CREATE_URL,
   musicApiKey,
@@ -444,6 +445,54 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(/\[SONIC_V5_POLL\] Task: task-poll \| Status: running \| Elapsed: \d+s/),
     );
+  });
+
+  it("completes when one clip of a multi-clip task has succeeded", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    // Sonic returns two clips that finish independently. The first staying at
+    // processing must not hide the second one's finished audio.
+    const mixed = {
+      data: [
+        {
+          state: "processing",
+          audio_url: "https://audiopipe.suno.ai/?item_id=still-rendering",
+        },
+        {
+          state: "succeeded",
+          audio_url: "https://musicapi-cdn.b-cdn.net/stems/done.mp3",
+          title: "Studio Master",
+          duration: 141,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes("/sonic/task/") ? jsonResponse(mixed) : jsonResponse({ ok: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const finished = await waitForStudioTrack("task-multi");
+
+    expect(finished.status).toBe("completed");
+    expect(finished.audioUrl).toBe("https://musicapi-cdn.b-cdn.net/stems/done.mp3");
+  });
+
+  it("reads audio from stream_url and clips response shapes", () => {
+    expect(extractAudioUrl({ stream_url: "https://cdn.example/stream.mp3" })).toBe(
+      "https://cdn.example/stream.mp3",
+    );
+    expect(extractAudioUrl({ clips: [{ audio_url: "https://cdn.example/clip.mp3" }] })).toBe(
+      "https://cdn.example/clip.mp3",
+    );
+    expect(extractAudioUrl({ data: [{ source_url: "https://cdn.example/source.mp3" }] })).toBe(
+      "https://cdn.example/source.mp3",
+    );
+    expect(extractAudioUrl({ output: { audio_url: "https://cdn.example/out.mp3" } })).toBe(
+      "https://cdn.example/out.mp3",
+    );
+    expect(extractAudioUrl({ data: [] })).toBeNull();
+    expect(extractAudioUrl(null)).toBeNull();
   });
 
   it("retries transient 429/500 poll failures instead of aborting immediately", async () => {

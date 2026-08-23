@@ -233,19 +233,52 @@ function asAudioUrl(value: unknown): string | null {
   return asAudioUrl(row.audio_url ?? row.audioUrl ?? row.url ?? row.output);
 }
 
-function firstDataRecord(body: unknown): Record<string, unknown> | null {
+const TERMINAL_SUCCESS_STATUSES = ["succeeded", "success", "completed", "complete"];
+const TERMINAL_FAILURE_STATUSES = ["failed", "fail", "error", "canceled", "cancelled"];
+
+function dataRecords(body: unknown): Record<string, unknown>[] {
   const row = asRecord(body);
-  if (!row) return null;
+  if (!row) return [];
   if (Array.isArray(row.data)) {
-    const first = row.data.find((item) => item && typeof item === "object");
-    return asRecord(first);
+    return row.data.map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => !!item);
   }
-  return asRecord(row.data);
+  const single = asRecord(row.data);
+  return single ? [single] : [];
 }
 
+function firstDataRecord(body: unknown): Record<string, unknown> | null {
+  return dataRecords(body)[0] ?? null;
+}
+
+function clipStatus(clip: Record<string, unknown>): string {
+  return String(clip.status ?? clip.state ?? "").toLowerCase();
+}
+
+/** A clip that finished and carries playable audio. */
+function succeededClip(body: unknown): Record<string, unknown> | null {
+  return (
+    dataRecords(body).find(
+      (clip) => TERMINAL_SUCCESS_STATUSES.includes(clipStatus(clip)) && !!asAudioUrl(clip.audio_url),
+    ) ?? null
+  );
+}
+
+/**
+ * Sonic returns two clips per task and they finish independently, so the first
+ * clip's status is not the task's status. One finished clip is enough to hand
+ * off to stems; only report failure when every clip has failed.
+ */
 function readTaskStatus(body: unknown): string {
   const row = asRecord(body);
-  const data = firstDataRecord(body);
+  const clips = dataRecords(body);
+  if (clips.length > 1) {
+    if (succeededClip(body)) return "succeeded";
+    const statuses = clips.map(clipStatus);
+    if (statuses.every((status) => TERMINAL_FAILURE_STATUSES.includes(status))) return "failed";
+    const pending = statuses.find((status) => status && !TERMINAL_FAILURE_STATUSES.includes(status));
+    if (pending) return pending;
+  }
+  const data = clips[0];
   const raw = data?.status ?? data?.state ?? row?.status ?? row?.state ?? "";
   return String(raw).toLowerCase();
 }
@@ -282,6 +315,44 @@ function readTrackIds(body: unknown, taskId: string): string[] {
   return [...ids];
 }
 
+/**
+ * AIMusicAPI, Suno and Sonic all report audio differently: top-level strings, a
+ * `data` array of clips, a `clips` array, or an `output` object. Prefer a
+ * finished clip's `audio_url` (a downloadable CDN file) over a `stream_url`,
+ * which is a live pipe that stems and mastering cannot fetch.
+ */
+export function extractAudioUrl(result: unknown): string | null {
+  const row = asRecord(result);
+  if (!row) return null;
+
+  const finished = succeededClip(result);
+  if (finished) {
+    const url = asAudioUrl(finished.audio_url ?? finished.source_url ?? finished.stream_url);
+    if (url) return url;
+  }
+
+  const direct = asAudioUrl(row.audio_url ?? row.audioUrl ?? row.stream_url);
+  if (direct) return direct;
+
+  for (const clip of dataRecords(result)) {
+    const url = asAudioUrl(
+      clip.audio_url ?? clip.audioUrl ?? clip.source_url ?? clip.stream_url ?? clip.output,
+    );
+    if (url) return url;
+  }
+
+  if (Array.isArray(row.clips)) {
+    for (const item of row.clips) {
+      const clip = asRecord(item);
+      if (!clip) continue;
+      const url = asAudioUrl(clip.audio_url ?? clip.audioUrl ?? clip.stream_url);
+      if (url) return url;
+    }
+  }
+
+  return asAudioUrl(row.output);
+}
+
 function readTaskResult(body: unknown): {
   audioUrl: string | null;
   imageUrl: string | null;
@@ -302,20 +373,8 @@ function readTaskResult(body: unknown): {
     };
   }
   const data = firstDataRecord(body);
-  const fromArray =
-    Array.isArray(row.data) && row.data[0] && typeof row.data[0] === "object"
-      ? asAudioUrl((row.data[0] as { audio_url?: unknown }).audio_url)
-      : null;
   const rawStatus = readTaskStatus(body) || "unknown";
-  const audioUrl = asAudioUrl(
-    fromArray ??
-      data?.audio_url ??
-      data?.audioUrl ??
-      data?.output ??
-      row.audio_url ??
-      row.audioUrl ??
-      row.output,
-  );
+  const audioUrl = extractAudioUrl(body);
   const duration = readTaskDuration(body);
   const imageUrl =
     (typeof data?.image_url === "string" && data.image_url) ||
@@ -706,6 +765,12 @@ export async function fetchStudioTrackTask(
     throw new Error(`Music engine: task poll failed (${response.status})`);
   }
   const clip = readTaskResult(raw);
+  if (TERMINAL_SUCCESS_STATUSES.includes(clip.rawStatus)) {
+    console.log("[GATE_2_RAW_POLL_RESULT]", JSON.stringify(raw, null, 2));
+    if (!clip.audioUrl) {
+      console.error("[GATE_2_PARSE_FAIL] Could not locate audio URL in:", raw);
+    }
+  }
   return {
     taskId,
     status: clip.status,
