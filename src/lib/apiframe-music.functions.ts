@@ -333,9 +333,22 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       throw new Error("Music engine: no audio URL was returned.");
     }
 
+    // The archive is a Supabase signed URL in production but a relative
+    // `/api/local-vault/...` path in dev. Stem separation runs on Replicate and
+    // has to fetch the audio over the internet, so hand it the upstream CDN URL
+    // whenever the archived copy is not absolute.
+    const { isHttpAudioUrl } = await import("@/lib/pipeline-contracts");
+    const pipelineBase = isHttpAudioUrl(archivedBase) ? archivedBase : sonicUrl;
+    if (pipelineBase !== archivedBase) {
+      console.warn(
+        "[PIPELINE] archived base is not fetchable remotely — using upstream URL for stems",
+        { archivedBase, pipelineBase },
+      );
+    }
+
     const { runHybridMasterPipeline } = await import("@/lib/hybrid-master-pipeline.server");
     const pipeline = await runHybridMasterPipeline({
-      baseAudioUrl: archivedBase,
+      baseAudioUrl: pipelineBase,
       lyrics: lyricContent,
       instrumental: payload.instrumental,
       referenceSampleUrl,

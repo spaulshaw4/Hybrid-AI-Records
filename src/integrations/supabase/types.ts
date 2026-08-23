@@ -296,6 +296,33 @@ export type Database = {
         }
         Relationships: []
       }
+      generation_tasks: {
+        Row: {
+          audio_url: string | null
+          created_at: string
+          id: string
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          audio_url?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          audio_url?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       index_coverage_snapshots: {
         Row: {
           captured_at: string

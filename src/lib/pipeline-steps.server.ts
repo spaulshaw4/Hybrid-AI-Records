@@ -6,9 +6,9 @@
 export const PIPELINE_STEP_LOGS = {
   lyrics: ">>> [1/5: LYRICS] Gemini 2.5 on Replicate",
   music: ">>> [2/5: BASE AUDIO] AIMusicAPI Sonic v5",
-  vocals: ">>> [3/5: VOCALS] Direct Fish.audio API dispatch",
-  stems: ">>> [4/5: STEMS] Replicate Demucs/Avalon separation",
-  mastering: ">>> [5/5: MASTERING] Replicate Matchering final pass",
+  stems: ">>> [3/5: STEMS] Replicate Demucs separation",
+  vocals: ">>> [4/5: VOCALS] Direct Fish.audio API dispatch",
+  mastering: ">>> [5/5: MASTERING] Local Matchering + FFmpeg final pass",
 } as const;
 
 export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
@@ -16,9 +16,9 @@ export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
 const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   lyrics: "Replicate Gemini 2.5 Flash",
   music: "AIMusicAPI Sonic v5",
+  stems: "Replicate Demucs",
   vocals: "Fish Audio",
-  stems: "Replicate Demucs/Avalon",
-  mastering: "Replicate Matchering",
+  mastering: "Local Matchering",
 };
 
 export function logPipelineStep(step: PipelineStepId): void {
@@ -57,12 +57,12 @@ export function musicPipelineKey(): string | undefined {
   );
 }
 
-/** Step 3 — Fish Audio direct TTS. Never Replicate. */
+/** Step 4 — Fish Audio direct TTS. Never Replicate. */
 export function vocalPipelineKey(): string | undefined {
   return trimEnv("FISH_AUDIO_API_KEY") || trimEnv("FISH_API_KEY");
 }
 
-/** Steps 4–5 — Replicate stems / Matchering. */
+/** Steps 3–5 — Replicate stems, then local mastering. */
 export function replicatePipelineKey(): string | undefined {
   return trimEnv("REPLICATE_API_KEY") || trimEnv("REPLICATE_API_TOKEN");
 }

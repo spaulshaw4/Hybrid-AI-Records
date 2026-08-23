@@ -98,6 +98,7 @@ export async function convertVocalsWithStems(input: {
   );
 
   const apiKey = fishApiKey();
+  console.log("[FISH_AUDIO_DISPATCH] Processing vocal refinement...");
   logPipelineStep("vocals");
   let response: Response | undefined;
   try {

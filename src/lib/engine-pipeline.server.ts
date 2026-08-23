@@ -125,19 +125,15 @@ export async function completeGenerationTask(input: {
     console.warn("[engine] studio_tracks completion update failed", studioError.message);
   }
 
-  const taskClient = supabase as unknown as {
-    from: (table: string) => {
-      update: (values: Record<string, string>) => {
-        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
-      };
-    };
-  };
-  const { error: taskError } = await taskClient.from("generation_tasks").update({
-    status: "completed",
-    audio_url: audioUrl,
-    updated_at: now,
-  }).eq("id", taskId);
-  if (taskError && !/schema cache|does not exist|Could not find the table/i.test(taskError.message)) {
+  const { error: taskError } = await supabase
+    .from("generation_tasks")
+    .update({
+      status: "completed",
+      audio_url: audioUrl,
+      updated_at: now,
+    })
+    .eq("id", taskId);
+  if (taskError) {
     console.warn("[engine] generation_tasks completion update failed", taskError.message);
   }
 }
