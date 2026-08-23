@@ -60,6 +60,20 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
     };
   }
 
+  if (
+    lower.includes("api key is incorrect") ||
+    lower.includes("invalid api key") ||
+    lower.includes("incorrect api key") ||
+    (lower.includes("api key") && (lower.includes("invalid") || lower.includes("incorrect")))
+  ) {
+    return {
+      kind: "auth",
+      headline: "Music engine credentials were rejected",
+      message: `MusicAPI rejected the server credentials. Your Hybrid Token was not charged. Confirm AIMUSICAPI_KEY / MUSICAPI_KEY in .env.local on the server (not a Vite client key), then restart the dev server.`,
+      retryable: false,
+    };
+  }
+
   if (lower.includes("unauthorized") || hasHttpStatus(lower, 401) || lower.includes("sign in")) {
     return {
       kind: "auth",

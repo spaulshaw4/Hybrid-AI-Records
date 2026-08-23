@@ -4,6 +4,8 @@ import { RATE_LIMITS, limitBy } from "@/lib/rate-limit";
 import { studioUserIdFromRequest } from "@/lib/studio-request-auth.server";
 
 const LYRICS_MAX = 6000;
+/** Minimum abort window for studio vocal dispatch HTTP calls. */
+export const STUDIO_VOCAL_FETCH_TIMEOUT_MS = 60_000;
 const MAX_BYTES = 25 * 1024 * 1024;
 const ALLOWED_TYPES = /^(audio\/(mpeg|wav|x-wav|wave|webm|mp4|aac)|video\/webm)$/i;
 const ALLOWED_NAME = /\.(mp3|wav|webm|m4a)$/i;

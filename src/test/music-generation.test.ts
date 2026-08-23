@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetPipelineBreakers } from "@/lib/pipeline-breaker";
 import {
   AIMUSICAPI_HEADER_FORMAT,
   generateStudioTrack,
@@ -12,6 +13,8 @@ const KEY_NAMES = [
   "AIMUSICAPI_KEY",
   "MUSIC_API_KEY",
   "VITE_MUSIC_API_KEY",
+  "VITE_AIMUSICAPI_KEY",
+  "VITE_MUSICAPI_KEY",
   "MUSICAPI_KEY",
   "SONIC_API_KEY",
   "AIMUSIC_API_KEY",
@@ -24,6 +27,8 @@ describe("MusicAPI sonic workflow", () => {
     AIMUSICAPI_KEY: process.env.AIMUSICAPI_KEY,
     MUSIC_API_KEY: process.env.MUSIC_API_KEY,
     VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
+    VITE_AIMUSICAPI_KEY: process.env.VITE_AIMUSICAPI_KEY,
+    VITE_MUSICAPI_KEY: process.env.VITE_MUSICAPI_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
     AIMUSIC_API_KEY: process.env.AIMUSIC_API_KEY,
@@ -39,6 +44,7 @@ describe("MusicAPI sonic workflow", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+    resetPipelineBreakers();
   });
 
   function clearMusicKeys() {
@@ -76,18 +82,14 @@ describe("MusicAPI sonic workflow", () => {
     });
 
     expect(started.taskId).toBe("task-55");
-    expect(started.payload.task_type).toBe("create_music");
     expect(started.payload.custom_mode).toBe(true);
     expect(started.payload.mv).toBe("sonic-v5");
     expect(started.payload.prompt).toBe("[Verse 1]\nNight drive");
     expect(started.payload.tags).toBe(
-      "Nu-Metal, Rap Rock, 102 BPM, distorted guitars, 808s, Authentic lead",
+      "Nu-Metal, Rap Rock, 102 BPM, distorted guitars, 808s, Authentic lead, male vocals",
     );
     expect(started.payload.title).toBe("Night Drive");
     expect(started.payload.vocal_gender).toBe("m");
-    expect(started.payload.negative_tags).toContain("female vocals");
-    expect(started.payload.make_instrumental).toBe(false);
-
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SONIC_CREATE_URL);
@@ -96,21 +98,31 @@ describe("MusicAPI sonic workflow", () => {
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers.Authorization).toBe("Bearer test-music-key");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.task_type).toBe("create_music");
     expect(body.mv).toBe("sonic-v5");
+    expect(body.custom_mode).toBe(true);
     expect(body.vocal_gender).toBe("m");
+    expect(body).not.toHaveProperty("customMode");
+    expect(body).not.toHaveProperty("model");
     expect(Object.values(body).every((value) => value !== undefined && value !== null)).toBe(true);
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Target URL:", SONIC_CREATE_URL);
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Using key prefix:", "test-mus...");
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
     expect(log).toHaveBeenCalledWith(
-      "[MUSICAPI_CREATE_REQUEST]",
-      expect.stringContaining('"task_type": "create_music"'),
+      "[EXACT_OUTBOUND_BODY]",
+      expect.stringContaining('"mv": "sonic-v5"'),
     );
     expect(log).toHaveBeenCalledWith(
-      "[MUSICAPI_CREATE_RESPONSE]",
-      200,
-      expect.stringContaining('"task_id": "task-55"'),
+      "[AIMUSICAPI_DISPATCH]",
+      expect.stringContaining('"mv": "sonic-v5"'),
+    );
+    expect(log).toHaveBeenCalledWith("[MUSICAPI_DISPATCH]", {
+      url: SONIC_CREATE_URL,
+      status: 200,
+    });
+    expect(log).toHaveBeenCalledWith("[AIMUSICAPI_RESPONSE_STATUS]", 200);
+    expect(log).toHaveBeenCalledWith(
+      "[AIMUSICAPI_RESPONSE_BODY]",
+      expect.stringContaining("task-55"),
     );
   });
 
@@ -253,7 +265,7 @@ describe("MusicAPI sonic workflow", () => {
       "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
     expect(() => musicApiKey()).toThrow(message);
     expect(error).toHaveBeenCalledWith(
-      "[AIMUSICAPI] AIMUSICAPI_KEY / AI_MUSIC_API_KEY / MUSIC_API_KEY / ENGINE_API_KEY is undefined — add it to .env.local",
+      "[MUSICAPI] AIMUSICAPI_KEY / MUSICAPI_KEY / MUSIC_API_KEY is undefined — add it to .env.local (server), not only a VITE_ client key",
     );
     expect(error).toHaveBeenCalledWith(message);
   });
@@ -272,13 +284,14 @@ describe("MusicAPI sonic workflow", () => {
     });
     expect(started.payload.mv).toBe("sonic-v5");
     expect(started.payload.vocal_gender).toBe("f");
-    expect(started.payload.negative_tags).toContain("male vocals");
     expect(started.payload.tags).toContain("raw acoustic studio recording");
+    expect(started.payload.tags).toContain("female vocals");
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
     expect(body.mv).toBe("sonic-v5");
     expect(body.vocal_gender).toBe("f");
+    expect(body.tags).toEqual(expect.stringContaining("female vocals"));
   });
 
   it("omits vocal_gender when no gender is selected", async () => {
@@ -290,17 +303,19 @@ describe("MusicAPI sonic workflow", () => {
     const started = await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
     expect(started.payload.mv).toBe("sonic-v5");
     expect(started.payload).not.toHaveProperty("vocal_gender");
+    expect(started.payload.tags).not.toContain("male vocals");
+    expect(started.payload.tags).not.toContain("female vocals");
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
     expect(body).not.toHaveProperty("vocal_gender");
   });
 
-  it("omits vocal_gender when the model does not support it", async () => {
+  it("locks mv to sonic-v5 even when a legacy model is requested", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const fetchMock = await stubCreateOk("task-legacy-mv");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-locked-v5");
 
     const started = await generateStudioTrack({
       genre: "Pop",
@@ -308,12 +323,40 @@ describe("MusicAPI sonic workflow", () => {
       lyrics: "[Chorus]\nGo",
       mv: "sonic-v4",
     });
-    expect(started.payload.mv).toBe("sonic-v4");
-    expect(started.payload).not.toHaveProperty("vocal_gender");
+    expect(started.payload.mv).toBe("sonic-v5");
+    expect(started.payload.vocal_gender).toBe("m");
+    expect(started.payload.tags).toContain("male vocals");
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
-    expect(body).not.toHaveProperty("vocal_gender");
+    expect(body.mv).toBe("sonic-v5");
+    expect(body.vocal_gender).toBe("m");
+    expect(body.tags).toEqual(expect.stringContaining("male vocals"));
+    expect(log).toHaveBeenCalledWith(
+      "[AIMUSICAPI_DISPATCH]",
+      expect.stringContaining('"mv": "sonic-v5"'),
+    );
+  });
+
+  it("sends vocal_gender m on sonic-v5 when male is selected via vocal_gender", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-chirp");
+
+    const started = await generateStudioTrack({
+      genre: "Pop",
+      vocal_gender: "male",
+      lyrics: "[Chorus]\nGo",
+      mv: "chirp-v5",
+    });
+    expect(started.payload.mv).toBe("sonic-v5");
+    expect(started.payload.vocal_gender).toBe("m");
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    expect(body.vocal_gender).toBe("m");
+    expect(body.mv).toBe("sonic-v5");
   });
 
   it("polls GET /sonic/task/:id every 4s until data.status is succeeded", async () => {
@@ -324,10 +367,15 @@ describe("MusicAPI sonic workflow", () => {
     const succeeded = {
       data: { status: "succeeded", audio_url: "https://cdn.example/track.mp3", title: "Studio Master" },
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(running))
-      .mockResolvedValueOnce(jsonResponse(succeeded));
+    let polls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (!url.includes("/sonic/task/")) {
+        return new Response(null, { status: 200 });
+      }
+      polls += 1;
+      return jsonResponse(polls === 1 ? running : succeeded);
+    });
     vi.stubGlobal("fetch", fetchMock);
     vi.useFakeTimers();
 
@@ -339,9 +387,13 @@ describe("MusicAPI sonic workflow", () => {
 
     expect(finished.status).toBe("completed");
     expect(finished.audioUrl).toBe("https://cdn.example/track.mp3");
+    expect(finished.title).toBe("Studio Master");
+    expect(finished.trackIds).toContain("task-poll");
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${SONIC_TASK_URL}/task-poll`);
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).toEqual({
+    const firstInit = (fetchMock.mock.calls[0] as unknown as [RequestInfo, RequestInit?] | undefined)?.[1];
+    expect(firstInit?.headers).toEqual({
       Authorization: "Bearer test-music-key",
+      "Content-Type": "application/json",
     });
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Target URL:", `${SONIC_TASK_URL}/task-poll`);
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Using key prefix:", "test-mus...");
@@ -356,6 +408,47 @@ describe("MusicAPI sonic workflow", () => {
       200,
       expect.stringContaining('"status": "succeeded"'),
     );
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/\[SONIC_V5_POLL\] Task: task-poll \| Status: running \| Elapsed: \d+s/),
+    );
+  });
+
+  it("retries transient 429/500 poll failures instead of aborting immediately", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let polls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (!url.includes("/sonic/task/")) {
+        return new Response(null, { status: 200 });
+      }
+      polls += 1;
+      if (polls === 1) return new Response("rate limited", { status: 429 });
+      if (polls === 2) return new Response("server error", { status: 500 });
+      return jsonResponse({
+        data: {
+          status: "succeeded",
+          audio_url: "https://cdn.example/recovered.mp3",
+          title: "Recovered",
+          id: "clip-9",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+
+    const pending = waitForStudioTrack("task-retry");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(4_000);
+    const finished = await pending;
+
+    expect(finished.audioUrl).toBe("https://cdn.example/recovered.mp3");
+    expect(finished.title).toBe("Recovered");
+    expect(finished.trackIds).toEqual(expect.arrayContaining(["task-retry", "clip-9"]));
+    expect(warn).toHaveBeenCalled();
   });
 
   it("returns data.output when succeeded and audio_url is missing", async () => {
@@ -364,9 +457,11 @@ describe("MusicAPI sonic workflow", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        jsonResponse({ data: { status: "succeeded", output: "https://cdn.example/out.mp3" } }),
-      ),
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (!url.includes("/sonic/task/")) return new Response(null, { status: 200 });
+        return jsonResponse({ data: { status: "succeeded", output: "https://cdn.example/out.mp3" } });
+      }),
     );
     const finished = await waitForStudioTrack("task-output");
     expect(finished.audioUrl).toBe("https://cdn.example/out.mp3");
@@ -381,5 +476,19 @@ describe("MusicAPI sonic workflow", () => {
       vi.fn(async () => jsonResponse({ data: { status: "failed" } })),
     );
     await expect(waitForStudioTrack("task-fail")).rejects.toThrow("Music engine: generation failed.");
+  });
+
+  it("aborts polling cleanly when the abort signal fires", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ data: { status: "running" } })),
+    );
+    const controller = new AbortController();
+    const pending = waitForStudioTrack("task-abort", { abortSignal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow("Render canceled");
   });
 });

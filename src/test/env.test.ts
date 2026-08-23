@@ -4,6 +4,8 @@ import { getFishApiKey, readEnv, requireFishApiKey, requireStageKey } from "@/li
 const KEYS = [
   "MUSIC_API_KEY",
   "VITE_MUSIC_API_KEY",
+  "VITE_AIMUSICAPI_KEY",
+  "VITE_MUSICAPI_KEY",
   "SONIC_API_KEY",
   "MUSICAPI_KEY",
   "AIMUSICAPI_KEY",
@@ -22,6 +24,8 @@ describe("requireStageKey", () => {
   const original: Record<(typeof KEYS)[number], string | undefined> = {
     MUSIC_API_KEY: process.env.MUSIC_API_KEY,
     VITE_MUSIC_API_KEY: process.env.VITE_MUSIC_API_KEY,
+    VITE_AIMUSICAPI_KEY: process.env.VITE_AIMUSICAPI_KEY,
+    VITE_MUSICAPI_KEY: process.env.VITE_MUSICAPI_KEY,
     SONIC_API_KEY: process.env.SONIC_API_KEY,
     MUSICAPI_KEY: process.env.MUSICAPI_KEY,
     AIMUSICAPI_KEY: process.env.AIMUSICAPI_KEY,
@@ -51,6 +55,8 @@ describe("requireStageKey", () => {
   const MUSIC_KEYS = [
     "MUSIC_API_KEY",
     "VITE_MUSIC_API_KEY",
+    "VITE_AIMUSICAPI_KEY",
+    "VITE_MUSICAPI_KEY",
     "SONIC_API_KEY",
     "MUSICAPI_KEY",
     "AIMUSICAPI_KEY",
@@ -113,10 +119,10 @@ describe("requireStageKey", () => {
     expect(requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)")).toBe("fish-key");
   });
 
-  it("prefers FISH_API_KEY over FISH_AUDIO_API_KEY and trims whitespace", () => {
+  it("prefers FISH_AUDIO_API_KEY over FISH_API_KEY and trims whitespace", () => {
     clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
-    process.env.FISH_API_KEY = "  primary-fish  ";
-    process.env.FISH_AUDIO_API_KEY = "alias-fish";
+    process.env.FISH_AUDIO_API_KEY = "  primary-fish  ";
+    process.env.FISH_API_KEY = "alias-fish";
     expect(getFishApiKey()).toBe("primary-fish");
   });
 

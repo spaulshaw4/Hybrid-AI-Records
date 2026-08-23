@@ -40,7 +40,7 @@ describe("Co-Producer Gemini 2.5 Flash on Replicate", () => {
   });
 
   it("sends the lyric prompt and system instruction to Gemini Flash", async () => {
-    process.env.ENGINE_API_KEY = "test-engine-key";
+    process.env.REPLICATE_API_KEY = "test-replicate-key";
     replicateGeminiFlashLyricsMock.mockResolvedValue("[Verse 1]\nGo\n[Chorus]\nHold the line");
 
     const result = await writeLyricsWithStudio("Night Drive", "Lithuanian (Lietuvių)");
@@ -84,7 +84,7 @@ describe("Co-Producer Gemini 2.5 Flash on Replicate", () => {
 
   it("fails fast when the lyric engine does not respond", async () => {
     vi.useFakeTimers();
-    process.env.ENGINE_API_KEY = "test-engine-key";
+    process.env.REPLICATE_API_KEY = "test-replicate-key";
     replicateGeminiFlashLyricsMock.mockReturnValue(new Promise(() => {}));
 
     const pending = writeLyricsWithStudio("Night Drive", "English");

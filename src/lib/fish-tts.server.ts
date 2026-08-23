@@ -7,6 +7,20 @@
  */
 import { encode } from "@msgpack/msgpack";
 import { requireFishApiKey } from "@/lib/env";
+import {
+  assertPipelineBreakerClosed,
+  recordPipelineFailure,
+  recordPipelineHttp,
+  recordPipelineSuccess,
+} from "@/lib/pipeline-breaker";
+import {
+  assertVocalContractInput,
+  assertVocalContractOutput,
+  logPostConditionPassed,
+  logPreConditionPassed,
+} from "@/lib/pipeline-contracts";
+import { logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.server";
+import { logFailedStudioGate } from "@/lib/studio-pipeline-error";
 import { describeFetchError } from "@/lib/safe-fetch";
 import { lyricsForCloneSpeech } from "@/lib/clone-lyrics";
 import { samplePathFromUrl } from "@/lib/instant-voice";
@@ -64,10 +78,13 @@ export async function convertVocalsWithStems(input: {
   userId: string;
   taskId: string;
 }): Promise<ApiframeResult> {
-  const text = lyricsForCloneSpeech(input.lyrics);
+  assertPipelineBreakerClosed("vocals");
+  const contract = assertVocalContractInput({ lyrics: input.lyrics, voiceId: input.taskId });
+  const text = lyricsForCloneSpeech(contract.lyrics);
   if (!text) {
     throw new Error("Add lyrics before generating vocals.");
   }
+  logPreConditionPassed("vocals", "target lyrics valid");
 
   const format = input.audioFormat === "wav" ? "wav" : "mp3";
   const extraReferences = input.referenceAudio ? [input.referenceAudio] : [];
@@ -81,6 +98,7 @@ export async function convertVocalsWithStems(input: {
   );
 
   const apiKey = fishApiKey();
+  logPipelineStep("vocals");
   let response: Response | undefined;
   try {
     response = await fetch(FISH_TTS_URL, {
@@ -94,11 +112,20 @@ export async function convertVocalsWithStems(input: {
       signal: AbortSignal.timeout(180_000),
     });
   } catch (error) {
+    recordPipelineFailure("vocals", error);
+    logFailedStudioGate(error);
+    logPipelineStepError("vocals", error);
     throw new Error(`Voice cloning is unreachable — ${describeFetchError(error)}.`);
   }
 
   if (!response) throw new Error("Voice cloning is unreachable — no response from the engine.");
   if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    recordPipelineHttp("vocals", response.status);
+    logPipelineStepError("vocals", new Error(cloneErrorMessage(response.status)), {
+      status: response.status,
+      body: errorBody,
+    });
     throw new Error(cloneErrorMessage(response.status));
   }
 
@@ -110,6 +137,9 @@ export async function convertVocalsWithStems(input: {
     input.taskId,
     format === "wav" ? "audio/wav" : "audio/mpeg",
   );
+  const output = assertVocalContractOutput(audioUrl);
+  recordPipelineSuccess("vocals");
+  logPostConditionPassed("Synth vocal ready for mastering");
 
   return {
     taskId: input.taskId,
@@ -118,7 +148,7 @@ export async function convertVocalsWithStems(input: {
       {
         id: input.taskId,
         title: input.title || "Vocal stem",
-        audioUrl,
+        audioUrl: output.synthVocalUrl,
         imageUrl: null,
         duration: null,
       },

@@ -43,10 +43,19 @@ export function replicateLlmToken(label = "The AI writer"): string {
   return token;
 }
 
-function headers(label?: string): Record<string, string> {
+/** Step 1 lyrics only — does not fall through to ENGINE_API_KEY. */
+export function lyricReplicateToken(): string {
+  const token = env("LYRIC_ENGINE_API_KEY") ?? env("REPLICATE_API_KEY");
+  if (!token) {
+    throw new Error("The Co-Producer is not configured. Add the lyric engine API key to .env.local.");
+  }
+  return token;
+}
+
+function headers(label?: string, token = replicateLlmToken(label)): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${replicateLlmToken(label)}`,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -177,7 +186,7 @@ export const REPLICATE_GEMINI_FLASH = "google/gemini-2.5-flash";
 
 /**
  * Co-Producer lyrics on Gemini 2.5 Flash via Replicate.
- * Authorization uses LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY / ENGINE_API_KEY.
+ * Authorization uses LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY only.
  */
 export async function replicateGeminiFlashLyrics(input: {
   prompt: string;
@@ -190,7 +199,7 @@ export async function replicateGeminiFlashLyrics(input: {
     `${base}/models/${REPLICATE_GEMINI_FLASH}/predictions`,
     {
       method: "POST",
-      headers: headers(label),
+      headers: headers(label, lyricReplicateToken()),
       body: JSON.stringify({
         input: {
           prompt: input.prompt,

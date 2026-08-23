@@ -23,6 +23,7 @@ export function parseDemucsOutput(output: unknown): DemucsStemUrls {
       other:
         httpUrl(map.no_vocals) ??
         httpUrl(map.accompaniment) ??
+        httpUrl(map.instrumental) ??
         httpUrl(map.other) ??
         httpUrl(map.bass),
     };
@@ -31,8 +32,10 @@ export function parseDemucsOutput(output: unknown): DemucsStemUrls {
 }
 
 /** Backing track for the Matchering premaster — never the isolated vocal. */
-export function backingStemUrl(stems: DemucsStemUrls): string | null {
-  return stems.other ?? stems.drums;
+export function backingStemUrl(
+  stems: DemucsStemUrls & { instrumental?: string | null },
+): string | null {
+  return httpUrl(stems.instrumental) ?? stems.other ?? stems.drums;
 }
 
 /** Generation is complete only after Matchering has mixed and uploaded a master. */

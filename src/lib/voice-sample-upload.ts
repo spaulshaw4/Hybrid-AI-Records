@@ -2,6 +2,9 @@
  * Uploads a short voice sample (mic recording or pre-recorded clip) to the
  * private "voice-samples" bucket and returns a signed https URL the MiniMax
  * cloning job can download from.
+ *
+ * When there is no Supabase session, returns a browser object URL instead of
+ * rejecting — studio generate can keep a local preview and still advance.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { logUploadAction } from "@/lib/upload-audit";
@@ -173,8 +176,26 @@ export async function uploadVoiceSample(
   }
 
   const { data: auth } = await supabase.auth.getUser();
-  const userId = auth.user?.id;
-  if (!userId) return { ok: false, message: "Sign in before uploading a voice sample." };
+  const user = auth.user;
+  const userId = user?.id;
+  console.log("[VOICE_UPLOAD] Checking user session:", user ? user.id : "GUEST/LOCAL");
+  console.log("[VOICE_UPLOAD] Proceeding with audio blob size:", file.size);
+
+  if (!userId) {
+    // Never throw for missing auth — callers keep a local object URL preview
+    // and the studio music step can still advance (Fish clone needs https later).
+    const localUrl = URL.createObjectURL(file);
+    console.log(
+      "[VOICE_UPLOAD] Guest/local — skipping Supabase; using object URL (no session abort)",
+    );
+    return {
+      ok: true,
+      url: localUrl,
+      name: file.name,
+      path: `local/${Date.now()}-${safeName(file.name)}`,
+      metadataPath: null,
+    };
+  }
 
   const path = `${userId}/${Date.now()}-${safeName(file.name)}`;
   const contentType = file.type || "audio/wav";

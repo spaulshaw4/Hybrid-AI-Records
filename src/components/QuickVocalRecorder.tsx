@@ -38,8 +38,20 @@ import { VocalLiabilityModal } from "@/components/VocalLiabilityModal";
 import { useVocalLiability } from "@/hooks/use-vocal-liability";
 import { CUSTOM_AUDIO_FILE_INPUT_ID, type VocalMode } from "@/lib/studio-payload";
 import { DEV_TEST_VOICE_ID, isDevAuthBypass } from "@/lib/dev-auth";
+import {
+  deleteVocalProfile,
+  formatVocalDuration,
+  listVocalProfiles,
+  readLastVocalProfileId,
+  saveVocalProfile,
+  vocalProfileStorageKey,
+  type LocalVocalProfile,
+  type VocalProfileGender,
+} from "@/lib/vocal-profile-store";
 
-const MAX_SECONDS = 15;
+const MIN_STOP_SECONDS = 5;
+const RECOMMENDED_SECONDS = 30;
+const MAX_RECORD_SECONDS = 90;
 const POLL_MS = 4000;
 const MAX_POLLS = 30;
 
@@ -58,11 +70,13 @@ type Props = {
   onCustomVocalIntent?: () => void;
   /** Current recorded/uploaded take, or null when discarded. */
   onCustomFileChange?: (file: File | Blob | null) => void;
+  selectedGender?: "" | "m" | "f";
+  onGenderChange?: (gender: "" | "m" | "f") => void;
 };
 
 /**
- * One-tap vocal capture: record up to 15 seconds, listen back, then turn the
- * take into a custom voice the studio sings with. No wizards, no tabs.
+ * One-tap vocal capture: record toward a 30s fidelity target, listen back,
+ * then save the take locally and optionally clone it for the studio.
  */
 export function QuickVocalRecorder({
   voiceId,
@@ -71,13 +85,17 @@ export function QuickVocalRecorder({
   onTermsAcceptedChange,
   onCustomVocalIntent,
   onCustomFileChange,
+  selectedGender = "",
+  onGenderChange,
 }: Props) {
   const canUseVoice = signedIn || isDevAuthBypass();
   const { modalOpen, runOrPrompt, handleAccepted, handleOpenChange } =
     useVocalLiability(onTermsAcceptedChange);
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
+  const [localVoices, setLocalVoices] = useState<LocalVocalProfile[]>([]);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [clip, setClip] = useState<{ blob: Blob; url: string; fileName?: string } | null>(null);
   const [name, setName] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -99,6 +117,8 @@ export function QuickVocalRecorder({
   const meterFillRef = useRef<HTMLDivElement | null>(null);
   const meterRootRef = useRef<HTMLDivElement | null>(null);
   const stopAtRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const restoredLocalRef = useRef(false);
 
 
   const effectiveLength = Math.min(
@@ -124,9 +144,57 @@ export function QuickVocalRecorder({
     }
   }, [listVoices]);
 
+  const loadLocalVoices = useCallback(async () => {
+    try {
+      setLocalVoices(await listVocalProfiles());
+    } catch {
+      setLocalVoices([]);
+    }
+  }, []);
+
+  const applyLocalVoice = useCallback(
+    (profile: LocalVocalProfile) => {
+      onCustomVocalIntent?.();
+      onCustomFileChange?.(profile.audioBlob);
+      onVoiceIdChange(vocalProfileStorageKey(profile.id));
+      const nextGender = profile.gender === "m" || profile.gender === "f" ? profile.gender : "";
+      onGenderChange?.(nextGender);
+      setClip((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return {
+          blob: profile.audioBlob,
+          url: URL.createObjectURL(profile.audioBlob),
+          fileName: profile.name,
+        };
+      });
+      setClipDuration(profile.duration);
+      setTrimStart(0);
+      setTrimLength(
+        Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, profile.duration || RECOMMENDED_SECONDS)),
+      );
+    },
+    [onCustomFileChange, onCustomVocalIntent, onGenderChange, onVoiceIdChange],
+  );
+
   useEffect(() => {
     void loadVoices();
   }, [loadVoices]);
+
+  useEffect(() => {
+    void loadLocalVoices();
+  }, [loadLocalVoices]);
+
+  useEffect(() => {
+    if (restoredLocalRef.current) return;
+    restoredLocalRef.current = true;
+    void (async () => {
+      const lastId = readLastVocalProfileId();
+      if (!lastId) return;
+      const profiles = await listVocalProfiles();
+      const last = profiles.find((row) => row.id === lastId) ?? profiles[0];
+      if (last) applyLocalVoice(last);
+    })();
+  }, [applyLocalVoice]);
 
   useEffect(() => {
     onCustomFileChange?.(clip ? clip.blob : null);
@@ -216,10 +284,8 @@ export function QuickVocalRecorder({
   }
 
   function handleCustomVocalAttempt(actionType: "record" | "upload") {
-    if (!canUseVoice) {
-      toast.error("Sign in to record or upload a voice.");
-      return;
-    }
+    // Local mic/file capture must work without a session so guests and local
+    // dev can build a preview blob. Cloud clone still checks auth in useMyVoice.
     onCustomVocalIntent?.();
     runOrPrompt(() => {
       if (actionType === "record") void startRecording();
@@ -229,10 +295,12 @@ export function QuickVocalRecorder({
 
   async function startRecording() {
     if (recording) return;
+    console.log("[MIC_RECORD] Requesting microphone access...");
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_CONSTRAINTS);
-    } catch {
+    } catch (error) {
+      console.error("[MIC_RECORD] Microphone access denied or unavailable", error);
       toast.error("Microphone access is needed to record your vocals.");
       return;
     }
@@ -244,11 +312,14 @@ export function QuickVocalRecorder({
       if (event.data.size > 0) chunksRef.current.push(event.data);
     };
     recorder.onstop = () => {
+      console.log("[MIC_RECORD] Recording started / stopped");
       stream.getTracks().forEach((track) => track.stop());
       stopMeter();
       stopTimer();
       setRecording(false);
+      recordingStartedAtRef.current = null;
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      console.log("[MIC_RECORD] Audio blob captured:", blob.size, "bytes");
       if (blob.size < 2048) {
         toast.error("That take was empty — try again a little closer to the mic.");
         return;
@@ -258,24 +329,40 @@ export function QuickVocalRecorder({
         if (prev) URL.revokeObjectURL(prev.url);
         return { blob, url: URL.createObjectURL(blob) };
       });
+      // Preserve immediately for the studio → Fish / stem path.
+      onCustomFileChange?.(blob);
     };
 
     setSeconds(0);
+    setElapsedMs(0);
     setPeak(0);
     setClipped(false);
     setRecording(true);
+    recordingStartedAtRef.current = Date.now();
     startMeter(stream);
     recorder.start();
+    console.log("[MIC_RECORD] Recording started / stopped");
     timerRef.current = window.setInterval(() => {
-      setSeconds((prev) => {
-        const next = prev + 1;
-        if (next >= MAX_SECONDS) recorder.stop();
-        return next;
-      });
-    }, 1000);
+      const started = recordingStartedAtRef.current;
+      if (!started) return;
+      const elapsed = (Date.now() - started) / 1000;
+      setElapsedMs(Date.now() - started);
+      setSeconds(Math.floor(elapsed));
+      if (elapsed >= MAX_RECORD_SECONDS) recorder.stop();
+    }, 100);
   }
 
   function stopRecording() {
+    const started = recordingStartedAtRef.current;
+    const elapsed = started ? (Date.now() - started) / 1000 : seconds;
+    if (elapsed < MIN_STOP_SECONDS) {
+      toast.error("Keep recording for at least 5 seconds.");
+      return;
+    }
+    if (elapsed < RECOMMENDED_SECONDS) {
+      toast.warning("Recommended: 30s minimum for vocal fidelity");
+    }
+    console.log("[MIC_RECORD] Recording started / stopped");
     recorderRef.current?.stop();
   }
 
@@ -327,10 +414,6 @@ export function QuickVocalRecorder({
 
   async function useMyVoice() {
     if (!clip || busy) return;
-    if (!canUseVoice) {
-      toast.error("Sign in to save and use your voice.");
-      return;
-    }
     setBusy(true);
     try {
       const file = new File([clip.blob], clip.fileName ?? `vocal-take-${Date.now()}.webm`, {
@@ -340,15 +423,35 @@ export function QuickVocalRecorder({
       if (!trimmed.ok) throw new Error(trimmed.message);
       onCustomFileChange?.(trimmed.file);
 
-      if (isDevAuthBypass()) {
-        onVoiceIdChange(DEV_TEST_VOICE_ID);
-        toast.success("Dev test mode — this take is ready. No cloud clone ran.");
+      const gender: VocalProfileGender =
+        selectedGender === "m" || selectedGender === "f" ? selectedGender : "auto";
+      const savedLocal = await saveVocalProfile({
+        name: name.trim() || undefined,
+        audioBlob: trimmed.file,
+        gender,
+        duration: trimmed.duration || clipDuration || effectiveLength,
+      });
+      onVoiceIdChange(vocalProfileStorageKey(savedLocal.id));
+      await loadLocalVoices();
+
+      if (isDevAuthBypass() || !canUseVoice) {
+        toast.success(
+          canUseVoice
+            ? "Voice saved on this device — ready for generate."
+            : "Voice saved locally — sign in later to sync a cloud clone.",
+        );
         return;
       }
 
       setStatus("Uploading your take…");
       const upload = await uploadVoiceSample(trimmed.file);
       if (!upload.ok) throw new Error(upload.message);
+
+      // Local object URLs are not fetchable by the clone job — stop after local save.
+      if (!/^https?:\/\//i.test(upload.url)) {
+        toast.success("Voice saved on this device — ready for generate.");
+        return;
+      }
 
       setStatus("Saving your take…");
       let job = await startClone({ data: { sampleUrl: upload.url } });
@@ -374,6 +477,7 @@ export function QuickVocalRecorder({
       setName("");
       discard();
       await loadVoices();
+      await loadLocalVoices();
       toast.success("Custom vocals ready — your next track sings in your voice.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not use that take.");
@@ -420,8 +524,22 @@ export function QuickVocalRecorder({
             <Square className="size-5 text-destructive" aria-hidden />
             <span className="text-sm font-semibold text-destructive">Stop recording</span>
             <span className="text-xs font-mono text-destructive">
-              {seconds}s / {MAX_SECONDS}s
+              {seconds}s / {MAX_RECORD_SECONDS}s
+              {seconds < RECOMMENDED_SECONDS
+                ? ` · aim for ${RECOMMENDED_SECONDS}s`
+                : ""}
             </span>
+            <div
+              className="mt-1 h-1.5 w-full max-w-[10rem] overflow-hidden rounded-full bg-destructive/20"
+              aria-hidden
+            >
+              <div
+                className="h-full bg-destructive transition-[width] duration-100"
+                style={{
+                  width: `${Math.min(100, (elapsedMs / (RECOMMENDED_SECONDS * 1000)) * 100)}%`,
+                }}
+              />
+            </div>
           </button>
         ) : (
           <button
@@ -463,7 +581,7 @@ export function QuickVocalRecorder({
       <p className="text-center text-xs text-zinc-300">
         {canUseVoice
           ? "Record or upload a take, then tap Use my voice — or pick a saved voice above."
-          : "Sign in to record or upload a voice. Guest clips are not stored or generated."}
+          : "Record a local take anytime. Sign in to sync a cloud voice clone."}
       </p>
 
       {clip ? (

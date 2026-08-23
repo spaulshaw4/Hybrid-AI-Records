@@ -106,9 +106,9 @@ export function getEnvKey(keyName: string, stage = keyName): string {
   return requireStageKey(keyName, stage);
 }
 
-/** Official Fish Audio key. Prefers FISH_API_KEY, then FISH_AUDIO_API_KEY. */
+/** Official Fish Audio key. Prefers FISH_AUDIO_API_KEY, then FISH_API_KEY. */
 export function getFishApiKey(): string | undefined {
-  return readEnv("FISH_API_KEY") || readEnv("FISH_AUDIO_API_KEY");
+  return readEnv("FISH_AUDIO_API_KEY") || readEnv("FISH_API_KEY");
 }
 
 export function requireFishApiKey(): string {

@@ -9,6 +9,7 @@ export const GENERATE_TRACK_BTN_ID = "generate-track-btn";
 export const VOCAL_MODE_NAME = "vocal-mode";
 export const AI_VOCAL_STYLING_ID = "ai-vocal-styling";
 export const VOCAL_SOUND_CONTROLS_ID = "vocal-sound-controls";
+export const VOCAL_GENDER_GROUP_ID = "vocal-gender-group";
 
 export type VocalMode = "default-ai" | "custom-upload";
 

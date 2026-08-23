@@ -66,6 +66,7 @@ import {
   usesDefaultAiVocal,
   AI_VOCAL_STYLING_ID,
   VOCAL_SOUND_CONTROLS_ID,
+  VOCAL_GENDER_GROUP_ID,
   VIDEO_PROMPT_INPUT_ID,
   type ValidatedStudioPayload,
 } from "@/lib/studio-payload";
@@ -82,7 +83,19 @@ import {
 import { notifyVaultOfNewGeneration } from "@/lib/vault-client";
 
 import { hybridMasterFileName, masterWavFromUrl } from "@/lib/audio-mixdown";
+import { abortableBarrier, abortableDelay, isGenerationAborted } from "@/lib/generation-abort";
+import {
+  PIPELINE_PROGRESS,
+  labelForProgressStage,
+  reportPipelineProgress,
+} from "@/lib/pipeline-progress";
 import { wait } from "@/lib/studio-retry";
+import {
+  cacheStudioStemBlobs,
+  revokeStemObjectUrls,
+  stemObjectUrl,
+  type StemKind,
+} from "@/lib/studio-stem-cache";
 import {
   clearEngineDraft,
   draftHasContent,
@@ -99,6 +112,8 @@ import {
   vocalProfileLabel,
 } from "@/lib/vocal-presets";
 import { buildDynamicStylePrompt } from "@/lib/generation-style-prompt";
+import { isLocalVocalProfileId } from "@/lib/vocal-profile-store";
+import { uploadVoiceSample } from "@/lib/voice-sample-upload";
 import {
   DEFAULT_TARGET_DURATION_SECONDS,
   MAX_TARGET_DURATION_SECONDS,
@@ -288,6 +303,20 @@ function sliderFill(value: number, min: number, max: number): CSSProperties {
 /** Gender presets are mutually exclusive in the vocals picker. */
 const GENDER_PRESETS = ["Male Vocal", "Female Vocal"] as const;
 
+type SelectedVocalGender = "" | "m" | "f";
+
+const VOCAL_GENDER_OPTIONS = [
+  { value: "" as const, label: "Auto / Any", tag: null },
+  { value: "m" as const, label: "Male", tag: "m" },
+  { value: "f" as const, label: "Female", tag: "f" },
+] as const;
+
+function vocalGenderTagLabel(value: string | undefined): string {
+  if (value === "m" || value === "Male") return "Male (m)";
+  if (value === "f" || value === "Female") return "Female (f)";
+  return "Auto / Any";
+}
+
 
 const PROMPT_MAX = 6000;
 const POLL_INTERVAL_MS = 4000;
@@ -414,7 +443,76 @@ type Result = {
   audioUrl: string;
   vocalUrl?: string | null;
   instrumentalUrl?: string | null;
+  taskId?: string | null;
 };
+
+/** Single source of truth for the generate run. */
+type PipelineStepId =
+  | "idle"
+  | "validate"
+  | "lyrics"
+  | "music"
+  | "stems"
+  | "vocals"
+  | "master"
+  | "complete";
+
+type PipelineStatus = "idle" | "loading" | "success" | "error";
+
+type PipelineLastError = {
+  step: string;
+  message: string;
+  raw: unknown;
+};
+
+type PipelineState = {
+  currentStep: PipelineStepId;
+  status: PipelineStatus;
+  progress: number;
+  lastError: PipelineLastError | null;
+};
+
+const IDLE_PIPELINE_STATE: PipelineState = {
+  currentStep: "idle",
+  status: "idle",
+  progress: 0,
+  lastError: null,
+};
+
+const PIPELINE_STEP_PROGRESS: Record<PipelineStepId, number> = {
+  idle: 0,
+  validate: 5,
+  lyrics: PIPELINE_PROGRESS.lyrics,
+  music: PIPELINE_PROGRESS.sonic,
+  stems: PIPELINE_PROGRESS.stems,
+  vocals: PIPELINE_PROGRESS.vocals,
+  master: PIPELINE_PROGRESS.master,
+  complete: PIPELINE_PROGRESS.complete,
+};
+
+function previewPipelinePayload(value: unknown, max = 180): string {
+  try {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    if (!text) return "(empty)";
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function pipelineStepFromError(error: unknown, fallback: PipelineStepId): string {
+  if (error && typeof error === "object" && "step" in error) {
+    const step = (error as { step?: unknown }).step;
+    if (typeof step === "string" && step.trim()) return step;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/GATE_1|lyrics/i.test(message)) return "lyrics";
+  if (/GATE_2|music engine|sonic|base audio/i.test(message)) return "music";
+  if (/GATE_3|stem/i.test(message)) return "stems";
+  if (/vocal/i.test(message)) return "vocals";
+  if (/GATE_4|master/i.test(message)) return "master";
+  return fallback;
+}
 
 /** Normalises legacy rows (no id/status) so old history keeps rendering. */
 function normalizeHistory(rows: unknown): HistoryItem[] {
@@ -1137,6 +1235,7 @@ export function AudioStudio() {
   const [vocalPresets, setVocalPresets] = useState<string[]>([]);
   const [voiceId, setVoiceId] = useState("");
   const [vocalSource, setVocalSource] = useState<VocalSourceMode>("default-ai");
+  const [selectedVocalGender, setSelectedVocalGender] = useState<SelectedVocalGender>("");
 
   /** Restores the composer from the session draft on the first client commit. */
   const draftRestoredRef = useRef(false);
@@ -1183,6 +1282,9 @@ export function AudioStudio() {
   }, []);
 
   const [customVocalFile, setCustomVocalFile] = useState<File | Blob | null>(null);
+  /** Object URL for the current custom take — mirrors QuickVocalRecorder clip for playback / Fish. */
+  const [vocalAudioUrl, setVocalAudioUrl] = useState<string | null>(null);
+  const recordedVoiceBlob = customVocalFile;
 
 
   const [balance, setBalance] = useState<number | null>(
@@ -1206,6 +1308,11 @@ export function AudioStudio() {
 
   // Cancel is hidden while a render runs; this flag is only for dropped jobs.
   const cancelRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const [pipelineState, setPipelineState] = useState<PipelineState>(IDLE_PIPELINE_STATE);
+  const pipelineStepRef = useRef<PipelineStepId>("idle");
+  const [playbackKind, setPlaybackKind] = useState<StemKind>("mastered");
+  const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [exportingUrl, setExportingUrl] = useState<string | null>(null);
   const exporting = exportingUrl !== null;
@@ -1275,6 +1382,72 @@ export function AudioStudio() {
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
 
+  const applyPipelineProgress = useCallback((stage: string, percent: number) => {
+    reportPipelineProgress(stage, percent);
+    const step = (["lyrics", "music", "stems", "vocals", "master", "complete"].includes(stage)
+      ? stage
+      : stage === "sonic"
+        ? "music"
+        : pipelineStepRef.current) as PipelineStepId;
+    pipelineStepRef.current = step;
+    setPipelineState((prev) => ({
+      ...prev,
+      currentStep: step,
+      status: step === "complete" ? "success" : "loading",
+      progress: percent,
+      lastError: step === "complete" ? null : prev.lastError,
+    }));
+    setStatusText(labelForProgressStage(stage === "music" ? "sonic" : stage));
+  }, []);
+
+  const beginPipelineStep = useCallback((step: PipelineStepId, payloadPreview?: unknown) => {
+    pipelineStepRef.current = step;
+    const progress = PIPELINE_STEP_PROGRESS[step];
+    setPipelineState({
+      currentStep: step,
+      status: "loading",
+      progress,
+      lastError: null,
+    });
+    setStatusText(labelForProgressStage(step === "music" ? "sonic" : step));
+    console.log(`[PIPELINE:STEP_START] ${step}`, {
+      at: new Date().toISOString(),
+      progress,
+      payload: previewPipelinePayload(payloadPreview),
+    });
+  }, []);
+
+  const completePipelineStep = useCallback((step: PipelineStepId, payloadPreview?: unknown) => {
+    console.log(`[PIPELINE:STEP_DONE] ${step}`, {
+      at: new Date().toISOString(),
+      payload: previewPipelinePayload(payloadPreview),
+    });
+  }, []);
+
+  const failPipelineStep = useCallback((step: string, error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "object" && error && "message" in error
+          ? String((error as { message?: unknown }).message ?? "Pipeline execution failed")
+          : String(error ?? "Pipeline execution failed");
+    const lastError: PipelineLastError = { step, message, raw: error };
+    console.error(`[PIPELINE_ERROR] Step: ${step} ->`, message, error);
+    setPipelineState((prev) => ({
+      ...prev,
+      currentStep: (prev.currentStep === "idle" ? "validate" : prev.currentStep) as PipelineStepId,
+      status: "error",
+      lastError,
+    }));
+    setRollbackNotice(`${step}: ${message}`);
+    return lastError;
+  }, []);
+
+  function cancelGeneration() {
+    cancelRef.current = true;
+    abortRef.current?.abort();
+  }
+
   const coproducerLock = useRef(false);
 
   async function handleCoProducerClick() {
@@ -1297,9 +1470,8 @@ export function AudioStudio() {
       });
       const data = (await res.json()) as { lyrics?: string; text?: string; error?: string };
       console.log("[LYRIC_GEN] Received response:", data);
-      const responseLyrics = data.lyrics ?? data.text;
-      if (typeof responseLyrics === "string" && responseLyrics.trim()) {
-        setLyrics(responseLyrics);
+      if (typeof data.lyrics === "string" && data.lyrics.trim()) {
+        setLyrics(data.lyrics);
         setLyricWarnings([]);
       } else if (data?.error) {
         toast.error(String(data.error));
@@ -1624,6 +1796,17 @@ export function AudioStudio() {
     });
   }
 
+  function resolvedVocalGender(): "m" | "f" | "Male" | "Female" | undefined {
+    if (!withVocals) return undefined;
+    if (selectedVocalGender === "m" || selectedVocalGender === "f") return selectedVocalGender;
+    const genderPreset = vocalPresets.find((preset) =>
+      GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]),
+    );
+    if (genderPreset === "Female Vocal") return "Female";
+    if (genderPreset === "Male Vocal") return "Male";
+    return undefined;
+  }
+
   const filteredVocalOptions = useMemo(() => {
     const q = vocalSearch.trim().toLowerCase();
     if (!q) return VOCAL_STYLE_GROUPS;
@@ -1755,6 +1938,8 @@ export function AudioStudio() {
     if (runningRef.current) return;
     setRollbackNotice(null);
     setRetryPlan(null);
+    setPipelineState(IDLE_PIPELINE_STATE);
+    pipelineStepRef.current = "idle";
     if (!signedIn) {
       toast.error("Sign in to generate a master track.");
       return;
@@ -1793,10 +1978,15 @@ export function AudioStudio() {
 
 
     cancelRef.current = false;
+    const abort = new AbortController();
+    abortRef.current = abort;
     runningRef.current = true;
     setBusy(true);
     setResult(null);
+    setPlaybackKind("mastered");
+    setPlaybackSrc(null);
     setStatusText("Checking your Hybrid Tokens…");
+    beginPipelineStep("validate", { style: styleLine, lyricsLength: lyrics.length });
 
     let runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const trackTitle = title.trim() || "Untitled master track";
@@ -1914,6 +2104,7 @@ export function AudioStudio() {
       if (current !== null && current < 1) {
         setTopUpOpen(true);
         const message = "You need at least 1 Hybrid Token to generate a track.";
+        failPipelineStep("validate", new Error(message));
         toast.error(message);
         updateHistory(runId, { status: "failed", error: message });
         await recordVault({ status: "failed", error: message });
@@ -1925,7 +2116,7 @@ export function AudioStudio() {
       // before spending the artist's time on a render that cannot start.
       if (creditsOut && (await refreshEngineCredits())) {
         const message = ENGINE_CREDIT_MESSAGE;
-        setRollbackNotice(message);
+        failPipelineStep("validate", new Error(message));
         setRetryPlan(null);
         toast.error(message);
         updateHistory(runId, { status: "failed", error: message });
@@ -1933,16 +2124,12 @@ export function AudioStudio() {
         return;
       }
 
-      setStatusText("Mastering track…");
+      applyPipelineProgress("sonic", PIPELINE_PROGRESS.sonic);
 
       const selectedStyles = styles.filter(Boolean);
       const genre = selectedStyles[0] || styleLine;
       const subGenre = selectedStyles.slice(1).join(", ");
-      const genderPreset = vocalPresets.find((preset) =>
-        GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]),
-      );
-      const vocalGender =
-        genderPreset === "Female Vocal" ? "Female" : genderPreset === "Male Vocal" ? "Male" : undefined;
+      const vocalGender = resolvedVocalGender();
       const vocalStyle = vocalPresets
         .filter((preset) => !GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]))
         .filter(Boolean)
@@ -1951,6 +2138,94 @@ export function AudioStudio() {
         ? vocalPresets.filter(Boolean).join(", ")
         : "";
       const mood = vocalPrompt.trim();
+      const arrangedLyrics = withVocals
+        ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
+        : "";
+      const styleTags = selectedStyles.join(", ") || styleLine || genre;
+
+      // Resolve custom vocal sample before the music step so an auth miss
+      // never looks like a Sonic failure. Null session → local object URL only;
+      // never abort the pipeline for guest / local-dev takes.
+      let referenceAudioUrl: string | undefined;
+      if (
+        withVocals &&
+        usesCustomVocal(studioPayload) &&
+        voiceId &&
+        isLocalVocalProfileId(voiceId) &&
+        recordedVoiceBlob
+      ) {
+        const { data: auth } = await supabase.auth.getUser();
+        const sessionUser = auth.user;
+        console.log(
+          "[VOICE_UPLOAD] Checking user session:",
+          sessionUser ? sessionUser.id : "GUEST/LOCAL",
+        );
+        console.log("[VOICE_UPLOAD] Proceeding with audio blob size:", recordedVoiceBlob.size);
+
+        const localPreviewUrl = URL.createObjectURL(recordedVoiceBlob);
+        setVocalAudioUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return localPreviewUrl;
+        });
+        console.log("[VOICE_UPLOAD] Local vocal preview ready:", localPreviewUrl.slice(0, 48));
+
+        if (!sessionUser) {
+          console.log(
+            "[VOICE_UPLOAD] No session — skipping remote upload; advancing to music with local preview",
+          );
+        } else {
+          console.log("[MIC_RECORD] Uploading recorded take for Fish / stem pipeline…", {
+            bytes: recordedVoiceBlob.size,
+            vocalAudioUrl: localPreviewUrl,
+          });
+          const file =
+            recordedVoiceBlob instanceof File
+              ? recordedVoiceBlob
+              : new File([recordedVoiceBlob], `vocal-take-${Date.now()}.webm`, {
+                  type: recordedVoiceBlob.type || "audio/webm",
+                });
+          try {
+            const uploaded = await uploadVoiceSample(file);
+            if (!uploaded.ok) {
+              // Auth / guest soft-fail: keep local preview and continue to Sonic.
+              if (/sign in/i.test(uploaded.message)) {
+                console.warn("[VOICE_UPLOAD]", uploaded.message, "— continuing with local preview");
+              } else {
+                console.warn(
+                  "[VOICE_UPLOAD] Upload failed — continuing with local preview:",
+                  uploaded.message,
+                );
+              }
+            } else if (/^https?:\/\//i.test(uploaded.url)) {
+              referenceAudioUrl = uploaded.url;
+            } else {
+              console.log(
+                "[VOICE_UPLOAD] Local object/data URL kept client-side; omitting from generate payload",
+              );
+              setVocalAudioUrl((prev) => {
+                if (prev && prev !== uploaded.url) URL.revokeObjectURL(prev);
+                return uploaded.url;
+              });
+            }
+          } catch (uploadError) {
+            console.warn(
+              "[VOICE_UPLOAD] Upload threw — continuing with local preview:",
+              uploadError instanceof Error ? uploadError.message : uploadError,
+            );
+          }
+        }
+      }
+
+      // Linear handoff: lyrics → Sonic prompt; style chips → tags.
+      beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
+      completePipelineStep("lyrics", { chars: arrangedLyrics.length, withVocals });
+      beginPipelineStep("music", {
+        prompt: arrangedLyrics || styleLine || genre,
+        tags: styleTags,
+        mv: "sonic-v5",
+        custom_mode: true,
+      });
+
       const stylePrompt = buildDynamicStylePrompt({
         genre,
         subGenre: subGenre || undefined,
@@ -1960,9 +2235,33 @@ export function AudioStudio() {
         vocalProfile: withVocals ? vocalProfile : undefined,
         vocalStyle: withVocals ? vocalStyle || undefined : undefined,
       });
-      const started = await startGeneration({
+      void stylePrompt;
+      if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
+      let tickerPercent: number = PIPELINE_PROGRESS.sonic;
+      const stopTicker = window.setInterval(() => {
+        tickerPercent = Math.min(PIPELINE_PROGRESS.master - 2, tickerPercent + 2);
+        const stage =
+          tickerPercent < PIPELINE_PROGRESS.stems
+            ? "sonic"
+            : tickerPercent < PIPELINE_PROGRESS.vocals
+              ? "stems"
+              : tickerPercent < PIPELINE_PROGRESS.master
+                ? "vocals"
+                : "master";
+        applyPipelineProgress(stage, tickerPercent);
+      }, 4000);
+      let started: Awaited<ReturnType<typeof startGeneration>>;
+      try {
+        // MusicAPI credentials live only on the server (`AIMUSICAPI_KEY` /
+        // `MUSICAPI_KEY` in `.env.local`). Never gate generate on
+        // `import.meta.env.VITE_*` — `startGeneration` → `postSonicCreate`
+        // reads `process.env` in the server function.
+        started = await Promise.race([
+          startGeneration({
         data: {
-          prompt: stylePrompt || genre,
+          prompt: arrangedLyrics || styleLine || genre,
+          tags: styleTags,
+          mv: "sonic-v5",
           style: genre,
           genre,
           ...(subGenre ? { subGenre } : {}),
@@ -1972,9 +2271,7 @@ export function AudioStudio() {
           ...(withVocals && vocalGender ? { vocalGender } : {}),
           ...(withVocals && vocalStyle ? { vocalStyle } : {}),
           title: trackTitle,
-          lyrics: withVocals
-            ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
-            : "",
+          lyrics: arrangedLyrics,
           instrumental: !withVocals,
           // Native pronunciation, diacritics and accent are resolved from this
           // on the server and injected into the engine prompt.
@@ -1982,6 +2279,7 @@ export function AudioStudio() {
           customLanguage: customLanguage.trim(),
           audioFormat: "mp3" as const,
           ...(withVocals && usesCustomVocal(studioPayload) && voiceId ? { voiceId } : {}),
+          ...(referenceAudioUrl ? { referenceAudioUrl } : {}),
           termsAccepted:
             studioPayload.vocal_config.type === "custom"
               ? studioPayload.vocal_config.terms_accepted
@@ -2002,7 +2300,17 @@ export function AudioStudio() {
             styleInfluence: clampStyleInfluence(styleInfluence),
           },
         },
-      });
+          }),
+          abortableBarrier(abort.signal),
+        ]);
+      } finally {
+        window.clearInterval(stopTicker);
+      }
+      if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+      completePipelineStep("music", { taskId: started.taskId, tracks: started.tracks?.length ?? 0 });
+      beginPipelineStep("stems", { taskId: started.taskId });
+      applyPipelineProgress("master", PIPELINE_PROGRESS.master);
+      beginPipelineStep("master", { taskId: started.taskId });
 
       const startedAt = Date.now();
       stageStartedAt = startedAt;
@@ -2030,10 +2338,10 @@ export function AudioStudio() {
       let pollErrors = 0;
       const deadline = startedAt + POLL_TIMEOUT_MS;
       while (ready.length === 0 && started.taskId && Date.now() < deadline) {
-        if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+        if (cancelRef.current || abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
         setStatusText(renderingLabel(startedAt));
-        await wait(POLL_INTERVAL_MS);
-        if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+        await abortableDelay(POLL_INTERVAL_MS, abort.signal);
+        if (cancelRef.current || abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
         try {
           const current = await pollGeneration({ data: { taskId: started.taskId } });
           pollErrors = 0;
@@ -2113,8 +2421,32 @@ export function AudioStudio() {
         audioUrl,
         vocalUrl: stems?.vocalUrl,
         instrumentalUrl: stems?.instrumentalUrl,
+        taskId: started.taskId,
       };
+      applyPipelineProgress("complete", PIPELINE_PROGRESS.complete);
+      completePipelineStep("master", { audioUrl, stems: Boolean(stems) });
+      setPipelineState({
+        currentStep: "complete",
+        status: "success",
+        progress: 100,
+        lastError: null,
+      });
       setResult(finished);
+      setPlaybackKind("mastered");
+      setPlaybackSrc(audioUrl);
+      if (started.taskId) {
+        void cacheStudioStemBlobs(started.taskId, {
+          raw: audioUrl,
+          mastered: audioUrl,
+          vocal: stems?.vocalUrl,
+          instrumental: stems?.instrumentalUrl,
+        }).then((cached) => {
+          if (!cached) return;
+          void stemObjectUrl(started.taskId!, "mastered", audioUrl).then((url) => {
+            if (url) setPlaybackSrc(url);
+          });
+        });
+      }
       setBusy(false);
       setStatusText(null);
       notifyVaultOfNewGeneration({
@@ -2134,7 +2466,17 @@ export function AudioStudio() {
       setStatusText(null);
       const raw = err instanceof Error ? err.message : GENERATION_FAIL_MESSAGE;
       const message = readableEngineError(raw);
-      const cancelled = message === CANCELLED_MESSAGE;
+      const cancelled = message === CANCELLED_MESSAGE || isGenerationAborted(err);
+      const failedStep = pipelineStepFromError(err, pipelineStepRef.current);
+      if (!cancelled) {
+        failPipelineStep(failedStep, err);
+      } else {
+        setPipelineState((prev) => ({
+          ...prev,
+          status: "idle",
+          lastError: null,
+        }));
+      }
       const recoveredAudio =
         !cancelled && stageAudio && isPlayableAudioSource(stageAudio) ? stageAudio : null;
       if (recoveredAudio) {
@@ -2233,6 +2575,7 @@ export function AudioStudio() {
 
     } finally {
       clearPendingJob();
+      if (abortRef.current === abort) abortRef.current = null;
       setBusy(false);
       runningRef.current = false;
     }
@@ -2563,10 +2906,18 @@ export function AudioStudio() {
   }
 
   function newTrack() {
+    if (result?.taskId) revokeStemObjectUrls(result.taskId);
     setLyrics("");
     setVocalPrompt("");
     setTitle("");
     setResult(null);
+    setPlaybackSrc(null);
+    setPlaybackKind("mastered");
+    setCustomVocalFile(null);
+    setVocalAudioUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setStatusText(null);
     setIsGeneratingLyrics(false);
     // Explicit reset wins over the restored session draft.
@@ -2622,16 +2973,30 @@ export function AudioStudio() {
           >
             <div className="flex items-center justify-between gap-3 text-xs">
               <p className="font-semibold text-foreground">
-                Step {studioStep + 1} of {STUDIO_STEPS.length}: {STUDIO_STEPS[studioStep]?.label}
+                {busy
+                  ? labelForProgressStage(
+                      pipelineState.currentStep === "music" ? "sonic" : pipelineState.currentStep,
+                    )
+                  : `Step ${studioStep + 1} of ${STUDIO_STEPS.length}: ${STUDIO_STEPS[studioStep]?.label}`}
               </p>
               <p className="tabular-nums text-muted-foreground">
-                {studioStep + 1}/{STUDIO_STEPS.length}
+                {busy ? `${pipelineState.progress}%` : `${studioStep + 1}/${STUDIO_STEPS.length}`}
               </p>
             </div>
             <Progress
-              value={((studioStep + 1) / STUDIO_STEPS.length) * 100}
+              value={
+                busy
+                  ? pipelineState.progress
+                  : ((studioStep + 1) / STUDIO_STEPS.length) * 100
+              }
               className="h-1.5"
-              aria-label={`Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`}
+              aria-label={
+                busy
+                  ? `Generation progress ${pipelineState.progress} percent, ${labelForProgressStage(
+                      pipelineState.currentStep === "music" ? "sonic" : pipelineState.currentStep,
+                    )}`
+                  : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
+              }
             />
             <div className="flex gap-1" role="tablist" aria-label="Generate steps">
               {STUDIO_STEPS.map((step, index) => (
@@ -2740,7 +3105,7 @@ export function AudioStudio() {
               maxLength={PROMPT_MAX}
               placeholder="Enter your custom lyrics here…"
               onChange={(e) => {
-                setLyrics(e.target.value.slice(0, PROMPT_MAX));
+                setLyrics(e.target.value);
                 if (lyricWarnings.length > 0) setLyricWarnings([]);
               }}
               className="resize-y border border-zinc-800 bg-zinc-950 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
@@ -3549,11 +3914,62 @@ export function AudioStudio() {
                 ) : null}
 
                 {vocalSource === "custom-upload" ? (
-                <div className="space-y-2">
+                <div className="space-y-4">
+                  <fieldset className="space-y-2">
+                    <legend className="text-sm font-semibold text-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        Vocal gender
+                        <InlineTip label="Vocal gender">
+                          Optional. Choose Male or Female for the lead vocal, or leave Auto so the
+                          engine decides.
+                        </InlineTip>
+                      </span>
+                    </legend>
+                    <div
+                      id={VOCAL_GENDER_GROUP_ID}
+                      role="radiogroup"
+                      aria-label="Vocal gender"
+                      className="grid gap-2 sm:grid-cols-3"
+                    >
+                      {VOCAL_GENDER_OPTIONS.map((option) => {
+                        const selected = selectedVocalGender === option.value;
+                        return (
+                          <label
+                            key={option.label}
+                            className={`flex cursor-pointer items-center gap-2 rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border-strong bg-background text-foreground hover:border-primary/60"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="vocal-gender"
+                              value={option.value}
+                              checked={selected}
+                              onChange={() => setSelectedVocalGender(option.value)}
+                              className="accent-primary"
+                            />
+                            {option.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground" aria-live="polite">
+                      Active tag: {vocalGenderTagLabel(selectedVocalGender)}
+                    </p>
+                  </fieldset>
+                  <div
+                    className="relative space-y-3"
+                    style={{ pointerEvents: "auto" }}
+                    data-pipeline-blocks-recording="false"
+                  >
                   <QuickVocalRecorder
                     voiceId={voiceId}
                     vocalMode={vocalSource}
                     signedIn={signedIn}
+                    selectedGender={selectedVocalGender}
+                    onGenderChange={setSelectedVocalGender}
                     onVoiceIdChange={(id) => {
                       setVoiceId(id);
                       if (id) setVocalSource("custom-upload");
@@ -3563,8 +3979,15 @@ export function AudioStudio() {
                       setVocalSource("custom-upload");
                       setVocalOpen(false);
                     }}
-                    onCustomFileChange={setCustomVocalFile}
+                    onCustomFileChange={(file) => {
+                      setCustomVocalFile(file);
+                      setVocalAudioUrl((prev) => {
+                        if (prev) URL.revokeObjectURL(prev);
+                        return file ? URL.createObjectURL(file) : null;
+                      });
+                    }}
                   />
+                  </div>
                 </div>
                 ) : null}
               </>
@@ -3622,6 +4045,12 @@ export function AudioStudio() {
                     <dt className="text-zinc-400">Vocals</dt>
                     <dd className="text-end text-zinc-100">{activeVocalProfile()}</dd>
                   </div>
+                  {withVocals ? (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-zinc-400">Vocal gender</dt>
+                      <dd className="text-end text-zinc-100">{vocalGenderTagLabel(resolvedVocalGender())}</dd>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between gap-3">
                     <dt className="text-zinc-400">Length</dt>
                     <dd className="text-end text-zinc-100">{formatDuration(targetDuration)}</dd>
@@ -3664,26 +4093,38 @@ export function AudioStudio() {
                   {studioStep === 0 ? "Continue to Step 2" : "Continue"}
                 </Button>
               ) : (
-              <Button
-                type="button"
-                id={GENERATE_TRACK_BTN_ID}
-                size="lg"
-                className="h-auto min-h-12 flex-1 whitespace-normal px-4 py-3 text-sm leading-tight sm:text-base"
-                disabled={busy && !result}
-                onClick={() => void handleGenerate()}
-              >
-                {busy && !result ? (
-                  <>
-                    <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
-                    <span className="min-w-0 truncate">{statusText ?? "Working…"}</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="size-4 shrink-0" aria-hidden />
-                    <span>Generate Track</span>
-                  </>
-                )}
-              </Button>
+                <>
+                  <Button
+                    type="button"
+                    id={GENERATE_TRACK_BTN_ID}
+                    size="lg"
+                    className="h-auto min-h-12 flex-1 whitespace-normal px-4 py-3 text-sm leading-tight sm:text-base"
+                    disabled={busy && !result}
+                    onClick={() => void handleGenerate()}
+                  >
+                    {busy && !result ? (
+                      <>
+                        <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
+                        <span className="min-w-0 truncate">{statusText ?? "Working…"}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="size-4 shrink-0" aria-hidden />
+                        <span>Generate Track</span>
+                      </>
+                    )}
+                  </Button>
+                  {busy && !result ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-auto min-h-12 border-border bg-zinc-900 text-white hover:border-destructive hover:text-destructive sm:w-44"
+                      onClick={cancelGeneration}
+                    >
+                      Cancel Generation
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
 
@@ -3691,6 +4132,32 @@ export function AudioStudio() {
             <p className="text-center text-xs text-muted-foreground" role="status">
               {statusText}
             </p>
+          ) : null}
+
+          {pipelineState.status === "error" && pipelineState.lastError ? (
+            <div
+              className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground"
+              role="alert"
+            >
+              <p className="font-semibold">
+                Pipeline failed at step: {pipelineState.lastError.step}
+              </p>
+              <p>{pipelineState.lastError.message}</p>
+              <p className="break-all font-mono text-[11px] opacity-80">
+                {previewPipelinePayload(pipelineState.lastError.raw, 240)}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() =>
+                  setPipelineState((prev) => ({ ...prev, status: "idle", lastError: null }))
+                }
+              >
+                Dismiss
+              </Button>
+            </div>
           ) : null}
 
           {creditsOut ? (
@@ -3760,8 +4227,46 @@ export function AudioStudio() {
               </span>
             </div>
 
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Playback stem">
+              {(
+                [
+                  ["mastered", "Mastered", result.audioUrl],
+                  ["raw", "Raw mix", result.audioUrl],
+                  ["vocal", "Vocals", result.vocalUrl],
+                  ["instrumental", "Instrumental", result.instrumentalUrl],
+                ] as Array<[StemKind, string, string | null | undefined]>
+              ).map(([kind, label, url]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  role="tab"
+                  aria-selected={playbackKind === kind}
+                  disabled={!url}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                    playbackKind === kind
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-zinc-700 text-zinc-300 hover:border-primary/50"
+                  } disabled:cursor-not-allowed disabled:opacity-40`}
+                  onClick={() => {
+                    setPlaybackKind(kind);
+                    const taskId = result.taskId;
+                    if (!taskId || !url) {
+                      setPlaybackSrc(url ?? result.audioUrl);
+                      return;
+                    }
+                    void stemObjectUrl(taskId, kind, url).then((next) => {
+                      if (next) setPlaybackSrc(next);
+                    });
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             <WaveformPlayer
-              src={result.audioUrl}
+              key={playbackSrc ?? result.audioUrl}
+              src={playbackSrc ?? result.audioUrl}
               title={result.title}
               onUrlRepaired={applyRepairedUrl}
               onRegenerate={() => void handleGenerate()}

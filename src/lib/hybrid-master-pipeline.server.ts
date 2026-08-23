@@ -11,7 +11,15 @@
  * listen. The caller charges the token only after this resolves, so throwing
  * leaves the artist unbilled.
  */
+import {
+  assertMasteringContractOutput,
+  isHttpAudioUrl,
+  logPostConditionPassed,
+  logPreConditionPassed,
+} from "@/lib/pipeline-contracts";
 import { backingStemUrl } from "@/lib/stem-urls";
+import { assertDemucsStemUrlGate } from "@/lib/studio-pipeline-gates";
+import { logFailedStudioGate, shouldRethrowPipelineControlError } from "@/lib/studio-pipeline-error";
 
 export type HybridMasterPipelineResult = {
   masterUrl: string | null;
@@ -96,6 +104,14 @@ export async function runHybridMasterPipeline(input: {
 
   const wantsVocals = !input.instrumental && input.lyrics.trim().length > 0;
 
+  if (!isHttpAudioUrl(input.baseAudioUrl)) {
+    logFailedStudioGate(new Error("FAIL_EARLY_GUARD: Stage 3: base audio URL was invalid"));
+    throw haltVocalRender("stem isolation", new Error("base audio URL was invalid"));
+  }
+  logPreConditionPassed("stems", "base audio URL valid");
+  const { PIPELINE_PROGRESS, reportPipelineProgress } = await import("@/lib/pipeline-progress");
+  reportPipelineProgress("stems", PIPELINE_PROGRESS.stems);
+
   try {
     const baseBytes = await downloadAudioBytes(input.baseAudioUrl);
     const { separateStems } = await import("@/lib/stems.server");
@@ -103,6 +119,9 @@ export async function runHybridMasterPipeline(input: {
       audio: baseBytes,
       filename: `${input.taskId}-base.mp3`,
     });
+    if (wantsVocals) {
+      assertDemucsStemUrlGate(stems, { required: true });
+    }
     instrumentalUrl = (await archiveUrl(
       backingStemUrl(stems),
       input.userId,
@@ -114,6 +133,10 @@ export async function runHybridMasterPipeline(input: {
     // costs nothing. A vocal render has no backing track to sing over without
     // it, and mastering the raw mix would hand back a track with the original
     // vocal still in it.
+    const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
+    logPipelineStepError("stems", error);
+    logFailedStudioGate(error);
+    if (shouldRethrowPipelineControlError(error)) throw error;
     if (wantsVocals) throw haltVocalRender("stem isolation", error);
     console.warn(
       "[pipeline] stem split skipped for instrumental render",
@@ -123,6 +146,7 @@ export async function runHybridMasterPipeline(input: {
 
   if (wantsVocals) {
     try {
+      reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
       const { convertVocalsWithStems, cloneVocalsFromSample } = await import("@/lib/fish-tts.server");
       // These downloads used to swallow failures, which quietly demoted a
       // voice-converted render to plain text-to-speech, or dropped the
@@ -160,6 +184,10 @@ export async function runHybridMasterPipeline(input: {
           });
       convertedVocalUrl = converted.tracks.find((track) => track.audioUrl)?.audioUrl ?? null;
     } catch (error) {
+      const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
+      logPipelineStepError("vocals", error);
+      logFailedStudioGate(error);
+      if (shouldRethrowPipelineControlError(error)) throw error;
       throw haltVocalRender("vocal conversion", error);
     }
 
@@ -175,6 +203,7 @@ export async function runHybridMasterPipeline(input: {
   const mixVocalUrl = vocalUrl ?? (instrumentalUrl ? null : input.baseAudioUrl);
   const mixInstrumentalUrl = instrumentalUrl ?? (vocalUrl ? null : input.baseAudioUrl);
 
+  reportPipelineProgress("master", PIPELINE_PROGRESS.master);
   const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
   const mastered = await mixAndMasterHybridTrack({
     introUrl: null,
@@ -183,9 +212,11 @@ export async function runHybridMasterPipeline(input: {
     userId: input.userId,
     taskId: input.taskId,
   });
+  const master = assertMasteringContractOutput(mastered.masterUrl);
+  logPostConditionPassed("Mastered audio ready");
 
   return {
-    masterUrl: mastered.masterUrl,
+    masterUrl: master.masteredAudioUrl,
     vocalUrl,
     instrumentalUrl,
     mixed: mastered.mixed,

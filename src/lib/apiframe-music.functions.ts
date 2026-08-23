@@ -116,6 +116,10 @@ const generateSchema = z.object({
   language: lyricLanguageFieldSchema,
   customLanguage: z.string().trim().max(60).default(""),
   customMode: z.boolean().default(false),
+  /** Sonic custom-mode tags — style / genre chips from the studio. */
+  tags: z.string().trim().max(600).optional(),
+  /** Sonic model version. Studio Step 2 locks to sonic-v5. */
+  mv: z.string().trim().max(40).optional(),
   model: z.enum(SUNO_MODELS).default("V4_5"),
   /** Ignored. Kept so older clients that still send an engine id do not 400. */
   engine: z.enum(["minimax", "hybrid", "elevenlabs"]).optional(),
@@ -218,8 +222,10 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       if (!payload.termsAccepted) {
         throw new Error(VOCAL_CONSENT_REQUIRED_MESSAGE);
       }
+      const { isLocalVocalProfileId } = await import("@/lib/vocal-profile-store");
       const isDevTestVoice = voiceId === DEV_TEST_VOICE_ID && isDevAuthBypass();
-      if (!referenceSampleUrl && !isDevTestVoice) {
+      const isLocalVoice = isLocalVocalProfileId(voiceId);
+      if (!referenceSampleUrl && !isDevTestVoice && !isLocalVoice) {
         const { data: profile } = await context.supabase
           .from("voice_profiles")
           .select("sample_url")
@@ -228,7 +234,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
           .maybeSingle();
         referenceSampleUrl = profile?.sample_url ?? undefined;
       }
-      if (!referenceSampleUrl && !isDevTestVoice) {
+      if (!referenceSampleUrl && !isDevTestVoice && !isLocalVoice) {
         throw new Error("That saved voice could not be loaded. Record or upload it again.");
       }
     }
@@ -272,7 +278,13 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       durationSeconds,
     });
 
-    const started = await generateStudioTrack({
+    const { PIPELINE_PROGRESS, reportPipelineProgress } = await import("@/lib/pipeline-progress");
+    reportPipelineProgress("lyrics", PIPELINE_PROGRESS.lyrics);
+
+    let started: Awaited<ReturnType<typeof generateStudioTrack>>;
+    let finished: Awaited<ReturnType<typeof waitForStudioTrack>>;
+    try {
+    started = await generateStudioTrack({
       genre,
       subGenre: payload.subGenre?.trim() || undefined,
       mood: mood || undefined,
@@ -283,10 +295,12 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
         ? undefined
         : payload.vocalGender?.trim() || vocalGenderFromProfile(vocalProfile),
       lyrics: lyricContent,
+      tags: payload.tags?.trim() || undefined,
       title: payload.title || "Studio Master",
       isInstrumental: payload.instrumental,
+      mv: "sonic-v5",
     });
-    const finished = await waitForStudioTrack(started.taskId);
+    finished = await waitForStudioTrack(started.taskId);
     const sonicUrl = finished.audioUrl;
     if (!sonicUrl) {
       throw new Error("Music engine: no audio URL was returned.");
@@ -425,6 +439,11 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       durationSeconds,
       routingNote: null,
     };
+    } catch (error) {
+      const { logFailedStudioGate } = await import("@/lib/studio-pipeline-error");
+      logFailedStudioGate(error);
+      throw error;
+    }
   });
 
 

@@ -25,6 +25,18 @@ import {
   type HybridStemInputs,
 } from "@/lib/matchering";
 import { readEnv } from "@/lib/env";
+import {
+  assertPipelineBreakerClosed,
+  recordPipelineFailure,
+  recordPipelineSuccess,
+} from "@/lib/pipeline-breaker";
+import {
+  assertMasteringContractOutput,
+  logPostConditionPassed,
+  logPreConditionPassed,
+} from "@/lib/pipeline-contracts";
+import { assertSampleRateGate } from "@/lib/studio-pipeline-gates";
+import { shouldRethrowPipelineControlError } from "@/lib/studio-pipeline-error";
 
 const execFileAsync = promisify(execFile);
 
@@ -211,6 +223,8 @@ async function mixAndMasterOnce(options: {
   const playablePath = join(tmp, "master.mp3");
 
   try {
+    const { logPipelineStep, logPipelineStepError } = await import("@/lib/pipeline-steps.server");
+    logPipelineStep("mastering");
     const downloads: Array<Promise<void>> = [];
     if (options.introUrl) downloads.push(downloadStem(options.introUrl, introPath));
     if (options.instrumentalUrl) downloads.push(downloadStem(options.instrumentalUrl, instrumentalPath));
@@ -218,6 +232,21 @@ async function mixAndMasterOnce(options: {
     if (downloads.length === 0) return { masterUrl: null, matched: false, mixed: false };
     console.log("[master] downloading stems");
     await Promise.all(downloads);
+
+    const rateBuffers: Array<{ label: string; bytes: Uint8Array }> = [];
+    if (options.instrumentalUrl && (await fileExists(instrumentalPath))) {
+      rateBuffers.push({
+        label: "instrumental",
+        bytes: new Uint8Array(await readFile(instrumentalPath)),
+      });
+    }
+    if (options.vocalUrl && (await fileExists(vocalPath))) {
+      rateBuffers.push({
+        label: "vocal",
+        bytes: new Uint8Array(await readFile(vocalPath)),
+      });
+    }
+    assertSampleRateGate(rateBuffers);
 
     const stems: HybridStemInputs = {
       introPath: options.introUrl ? introPath : undefined,
@@ -262,7 +291,11 @@ async function mixAndMasterOnce(options: {
     const wav = await readFile(masteredWav).catch(() => null);
     const playableObject = masteredPlayablePath(options.userId, options.taskId);
     console.log("[master] Uploading to vault & preparing player...");
-    const masterUrl = await uploadMasteredBytes(new Uint8Array(mp3), playableObject, "mp3");
+    const masterUrl = assertMasteringContractOutput(
+      await uploadMasteredBytes(new Uint8Array(mp3), playableObject, "mp3"),
+    ).masteredAudioUrl;
+    logPostConditionPassed("Mastered audio ready");
+    recordPipelineSuccess("mastering");
     console.log("[master] vault upload ready", playableObject);
     try {
       const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
@@ -308,6 +341,12 @@ export async function mixAndMasterHybridTrack(options: {
   userId: string;
   taskId: string;
 }): Promise<MixAndMasterResult> {
+  assertPipelineBreakerClosed("mastering");
+  if (!options.instrumentalUrl && !options.vocalUrl && !options.introUrl) {
+    logPreConditionPassed("mastering", "no stems — skipped");
+    return { masterUrl: null, matched: false, mixed: false };
+  }
+  logPreConditionPassed("mastering", "stem URLs present");
   try {
     return await withTimeout(
       mixAndMasterOnce(options),
@@ -315,6 +354,10 @@ export async function mixAndMasterHybridTrack(options: {
       "Matchering pipeline",
     );
   } catch (error) {
+    recordPipelineFailure("mastering", error);
+    const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
+    logPipelineStepError("mastering", error);
+    if (shouldRethrowPipelineControlError(error)) throw error;
     console.warn(
       "[matchering] pipeline skipped",
       error instanceof Error ? error.message : error,

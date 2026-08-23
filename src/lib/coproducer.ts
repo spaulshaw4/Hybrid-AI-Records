@@ -1,4 +1,20 @@
+import {
+  assertPipelineBreakerClosed,
+  recordPipelineFailure,
+  recordPipelineSuccess,
+} from "@/lib/pipeline-breaker";
+import {
+  assertLyricsContractInput,
+  assertLyricsContractOutput,
+  isFailEarlyGuardError,
+  isPipelineBreakerOpenError,
+  logGateCleared,
+  logPostConditionPassed,
+  logPreConditionPassed,
+} from "@/lib/pipeline-contracts";
+import { lyricPipelineKey, logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.server";
 import { REPLICATE_GEMINI_FLASH, replicateGeminiFlashLyrics } from "@/lib/replicate-llm.server";
+import { logFailedStudioGate } from "@/lib/studio-pipeline-error";
 
 /** Gemini 2.5 Flash on Replicate. Override with COPRODUCER_REPLICATE_MODEL. */
 export const COPRODUCER_REPLICATE_MODEL =
@@ -28,10 +44,7 @@ function lyricTimeoutError() {
 }
 
 function lyricEngineKey(): string | undefined {
-  if (typeof process === "undefined" || !process.env) return undefined;
-  const apiKey =
-    process.env.LYRIC_ENGINE_API_KEY || process.env.REPLICATE_API_KEY || process.env.ENGINE_API_KEY;
-  return apiKey?.trim() || undefined;
+  return lyricPipelineKey();
 }
 
 function publicLyricError(error: unknown): Error {
@@ -70,14 +83,19 @@ export async function writeLyricsWithStudio(trackTitle: string, language: string
     throw new Error("The Co-Producer is not configured. Add the lyric engine API key to .env.local.");
   }
 
+  assertPipelineBreakerClosed("lyrics");
   const title = trackTitle || "Untitled Track";
   const lang = language || "English";
-  const prompt =
-    `Write complete song lyrics in ${lang} with section markers ` +
-    `([Verse], [Chorus], [Bridge], [Outro]) for a track titled "${title}". ` +
-    `Return only the lyrics.`;
+  const prompt = assertLyricsContractInput({
+    prompt:
+      `Write complete song lyrics in ${lang} with section markers ` +
+      `([Verse], [Chorus], [Bridge], [Outro]) for a track titled "${title}". ` +
+      `Return only the lyrics.`,
+  });
+  logPreConditionPassed("lyrics", "prompt valid");
 
   try {
+    logPipelineStep("lyrics");
     const lyrics = await withLyricEngineTimeout(
       replicateGeminiFlashLyrics({
         prompt,
@@ -85,8 +103,18 @@ export async function writeLyricsWithStudio(trackTitle: string, language: string
         timeoutMs: LYRIC_ENGINE_TIMEOUT_MS,
       }),
     );
-    return { lyrics: lyrics || "" };
+    const output = assertLyricsContractOutput(lyrics);
+    recordPipelineSuccess("lyrics");
+    logGateCleared(1, `Lyrics verified (${output.lyrics.length} chars)`);
+    logPostConditionPassed("Cleaned lyrics ready for Base Audio");
+    return output;
   } catch (error: unknown) {
+    recordPipelineFailure("lyrics", error);
+    logFailedStudioGate(error);
+    if (isFailEarlyGuardError(error) || isPipelineBreakerOpenError(error)) {
+      throw error;
+    }
+    logPipelineStepError("lyrics", error);
     throw publicLyricError(error);
   }
 }

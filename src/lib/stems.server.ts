@@ -23,8 +23,23 @@ import {
   REPLICATE_PREDICTION_TIMEOUT_MS,
   replicateRunHeaders,
 } from "@/lib/replicate-predictions";
-import { parseDemucsOutput, type DemucsStemUrls } from "@/lib/stem-urls";
+import { parseDemucsOutput, backingStemUrl, type DemucsStemUrls } from "@/lib/stem-urls";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
+import { logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.server";
+import {
+  assertPipelineBreakerClosed,
+  recordPipelineFailure,
+  recordPipelineHttp,
+  recordPipelineSuccess,
+} from "@/lib/pipeline-breaker";
+import {
+  isHttpAudioUrl,
+  logPostConditionPassed,
+  logPreConditionPassed,
+  throwFailEarly,
+} from "@/lib/pipeline-contracts";
+import { assertDemucsStemUrlGate } from "@/lib/studio-pipeline-gates";
+import { logFailedStudioGate } from "@/lib/studio-pipeline-error";
 
 const DEMUCS_MODEL = process.env["DEMUCS_MODEL"] || "ryan5453/demucs";
 const DEMUCS_HARDWARE = process.env["DEMUCS_HARDWARE"]?.trim() || REPLICATE_COST_EFFECTIVE_GPU;
@@ -40,7 +55,9 @@ type PredictionState = {
 };
 
 function credentials() {
-  const token = requireStageKey("REPLICATE_API_TOKEN", "Stem Separation");
+  const token =
+    (typeof process !== "undefined" && process.env.REPLICATE_API_KEY?.trim()) ||
+    requireStageKey("REPLICATE_API_KEY", "Stem Separation");
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
@@ -53,6 +70,11 @@ async function bail(response: Response, what: string): Promise<never> {
     throw new Error("The stem worker has no render credit left. Top it up and retry.");
   }
   console.error(`Stem worker ${what} failed [${response.status}]: ${body.slice(0, 400)}`);
+  recordPipelineHttp("stems", response.status);
+  logPipelineStepError("stems", new Error(`Stem separation ${what} failed`), {
+    status: response.status,
+    body,
+  });
   throw new Error(`Stem separation ${what} failed [${response.status}].`);
 }
 
@@ -112,68 +134,90 @@ export async function separateStems(input: {
   audio: Uint8Array;
   filename: string;
 }): Promise<StemResult> {
-  const audioUrl = await uploadTrack(input.audio, input.filename);
-  const inputPayload = { audio: audioUrl, output_format: "mp3" };
-
-  const createUrl = DEMUCS_DEPLOYMENT
-    ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
-    : `${replicateBaseUrl()}/predictions`;
-  const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
-  const withHardware = DEMUCS_DEPLOYMENT
-    ? { input: inputPayload }
-    : communityPredictionBody(version!, inputPayload, { hardware: DEMUCS_HARDWARE });
-  const withoutHardware = DEMUCS_DEPLOYMENT
-    ? { input: inputPayload }
-    : communityPredictionBody(version!, inputPayload);
-
-  const dispatch = (payload: unknown) =>
-    resilientFetch(
-      createUrl,
-      {
-        method: "POST",
-        headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
-        body: JSON.stringify(payload),
-      },
-      { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
-    );
-
-  let created = await dispatch(withHardware);
-  // Public models ignore/reject a hardware SKU; retry without it.
-  if (!created.ok && (created.status === 400 || created.status === 422) && !DEMUCS_DEPLOYMENT) {
-    created = await dispatch(withoutHardware);
+  assertPipelineBreakerClosed("stems");
+  if (!input.audio?.byteLength || input.audio.byteLength < 1024) {
+    throwFailEarly("stems", "source audio buffer was empty");
   }
-  if (!created.ok) await bail(created, "dispatch");
+  logPreConditionPassed("stems", "source audio buffer valid");
+  logPipelineStep("stems");
 
-  let prediction = (await created.json()) as PredictionState;
-  const id = prediction.id;
-  if (!id) throw new Error("The stem worker returned no job id.");
-
-  const deadline = Date.now() + REPLICATE_PREDICTION_TIMEOUT_MS;
-
-  const settle = async (state: PredictionState): Promise<StemResult | null> => {
-    if (state.status === "succeeded") return pickStems(state.output);
-    if (isTerminalFailure(state.status)) {
-      throw new Error(String(state.error ?? "Stem separation failed for this track."));
+  const finish = (stems: StemResult): StemResult => {
+    recordPipelineSuccess("stems");
+    if (isHttpAudioUrl(stems.vocals) && isHttpAudioUrl(backingStemUrl(stems))) {
+      assertDemucsStemUrlGate(stems, { required: true });
+      logPostConditionPassed("Stems ready for Vocal Synthesis");
     }
-    return null;
+    return stems;
   };
 
-  const immediate = await settle(prediction);
-  if (immediate) return immediate;
+  try {
+    const audioUrl = await uploadTrack(input.audio, input.filename);
+    const inputPayload = { audio: audioUrl, output_format: "mp3" };
 
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-    const poll = await resilientFetch(
-      `${replicateBaseUrl()}/predictions/${id}`,
-      { headers: credentials() },
-      { label: "stem separation poll", timeoutMs: 20_000, retries: 0, baseDelayMs: 1000 },
-    );
-    if (!poll.ok) await bail(poll, "poll");
-    prediction = (await poll.json()) as PredictionState;
-    const done = await settle(prediction);
-    if (done) return done;
+    const createUrl = DEMUCS_DEPLOYMENT
+      ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
+      : `${replicateBaseUrl()}/predictions`;
+    const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
+    const withHardware = DEMUCS_DEPLOYMENT
+      ? { input: inputPayload }
+      : communityPredictionBody(version!, inputPayload, { hardware: DEMUCS_HARDWARE });
+    const withoutHardware = DEMUCS_DEPLOYMENT
+      ? { input: inputPayload }
+      : communityPredictionBody(version!, inputPayload);
+
+    const dispatch = (payload: unknown) =>
+      resilientFetch(
+        createUrl,
+        {
+          method: "POST",
+          headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
+          body: JSON.stringify(payload),
+        },
+        { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
+      );
+
+    let created = await dispatch(withHardware);
+    // Public models ignore/reject a hardware SKU; retry without it.
+    if (!created.ok && (created.status === 400 || created.status === 422) && !DEMUCS_DEPLOYMENT) {
+      created = await dispatch(withoutHardware);
+    }
+    if (!created.ok) await bail(created, "dispatch");
+
+    let prediction = (await created.json()) as PredictionState;
+    const id = prediction.id;
+    if (!id) throw new Error("The stem worker returned no job id.");
+
+    const deadline = Date.now() + REPLICATE_PREDICTION_TIMEOUT_MS;
+
+    const settle = async (state: PredictionState): Promise<StemResult | null> => {
+      if (state.status === "succeeded") return pickStems(state.output);
+      if (isTerminalFailure(state.status)) {
+        throw new Error(String(state.error ?? "Stem separation failed for this track."));
+      }
+      return null;
+    };
+
+    const immediate = await settle(prediction);
+    if (immediate) return finish(immediate);
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      const poll = await resilientFetch(
+        `${replicateBaseUrl()}/predictions/${id}`,
+        { headers: credentials() },
+        { label: "stem separation poll", timeoutMs: 20_000, retries: 0, baseDelayMs: 1000 },
+      );
+      if (!poll.ok) await bail(poll, "poll");
+      prediction = (await poll.json()) as PredictionState;
+      const done = await settle(prediction);
+      if (done) return finish(done);
+    }
+
+    await cancelPrediction(id);
+    throw new Error("Stem separation timed out for this track.");
+  } catch (error) {
+    recordPipelineFailure("stems", error);
+    logFailedStudioGate(error);
+    throw error;
   }
-
-  await cancelPrediction(id);
-  throw new Error("Stem separation timed out for this track.");
 }

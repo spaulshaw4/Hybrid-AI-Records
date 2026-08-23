@@ -53,7 +53,7 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
  * exactly TARGET_SECONDS long (mono, 44.1 kHz), starting at `startSeconds`.
  */
 export const MIN_CLIP_SECONDS = 5;
-export const MAX_CLIP_SECONDS = 15;
+export const MAX_CLIP_SECONDS = 60;
 
 export async function trimVoiceSample(
   file: File,
