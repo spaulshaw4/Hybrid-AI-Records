@@ -152,6 +152,8 @@ export type StudioTrackResult = {
   trackIds: string[];
   /** Raw provider status string (e.g. running, queued, succeeded). */
   rawStatus: string | null;
+  /** Number of clips the task returned, for poll diagnostics. */
+  clipCount: number;
 };
 
 const MUSIC_STAGE = "MusicAPI (Base Arrangement)" as const;
@@ -239,8 +241,13 @@ const TERMINAL_FAILURE_STATUSES = ["failed", "fail", "error", "canceled", "cance
 function dataRecords(body: unknown): Record<string, unknown>[] {
   const row = asRecord(body);
   if (!row) return [];
-  if (Array.isArray(row.data)) {
-    return row.data.map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => !!item);
+  const source = Array.isArray(row.data)
+    ? row.data
+    : Array.isArray(row.clips)
+      ? row.clips
+      : null;
+  if (source) {
+    return source.map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => !!item);
   }
   const single = asRecord(row.data);
   return single ? [single] : [];
@@ -780,11 +787,15 @@ export async function fetchStudioTrackTask(
     duration: clip.duration,
     trackIds: readTrackIds(raw, taskId),
     rawStatus: clip.rawStatus,
+    clipCount: dataRecords(raw).length,
   };
 }
 
-/** Poll every 4s for up to 5 minutes. */
-export const POLLING_INTERVAL_MS = 4000;
+/**
+ * Poll every 3s. The ceiling stays at 5 minutes because observed Sonic renders
+ * finish around 240s — a 180s cap would fail tracks that are still rendering.
+ */
+export const POLLING_INTERVAL_MS = 3000;
 export const MAX_POLLING_DURATION_MS = 300000; // 5 minutes max
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;
 
@@ -841,6 +852,12 @@ export async function waitForStudioTrack(
       consecutiveNetworkErrors = 0;
       const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
       const statusLabel = current.rawStatus || current.status;
+      console.log(
+        `[GATE_1_POLL_TICK] elapsed: ${elapsedSeconds}s, status:`,
+        statusLabel,
+        "clips:",
+        current.clipCount,
+      );
 
       if (current.status === "failed") {
         console.log(

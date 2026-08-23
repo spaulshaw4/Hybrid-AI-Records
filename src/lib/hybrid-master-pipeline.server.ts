@@ -66,6 +66,12 @@ function haltVocalRender(stage: string, error: unknown): Error {
   return new Error(isTimeout(error) ? VOCAL_TIMEOUT_MESSAGE : VOCAL_FAILURE_MESSAGE);
 }
 
+/**
+ * Archives a stem for the vault and returns a URL the rest of the pipeline can
+ * still fetch. The dev local-vault fallback returns a relative path, which
+ * `fetch` cannot resolve server-side, so keep the absolute upstream URL in that
+ * case and let the archived copy exist only for the vault.
+ */
 async function archiveUrl(
   url: string | null,
   userId: string,
@@ -74,7 +80,15 @@ async function archiveUrl(
   if (!url) return null;
   try {
     const { archiveGeneratedAudio } = await import("@/lib/apiframe.server");
-    return await archiveGeneratedAudio(url, userId, taskId);
+    const archived = await archiveGeneratedAudio(url, userId, taskId);
+    if (archived && !isHttpAudioUrl(archived)) {
+      console.warn("[pipeline] archived stem is not fetchable remotely — keeping upstream URL", {
+        archived,
+        upstream: url,
+      });
+      return url;
+    }
+    return archived;
   } catch (error) {
     console.warn(
       "[pipeline] stem archive skipped",
