@@ -6,6 +6,11 @@ dotenv.config({ path: ".env" });
 import "./lib/env";
 import "./lib/error-capture";
 
+// Install heavy-pipeline worker handlers (SIGTERM fail+tmp purge, orphan sweep).
+void import("./lib/pipeline-worker.server")
+  .then((m) => m.ensurePipelineWorkerInstalled())
+  .catch(() => undefined);
+
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { logServerError, newErrorReference } from "./lib/server-error-log";
@@ -31,7 +36,15 @@ export {
   writeAtomicAudioFile,
   waitForFileUnlock,
 } from "./lib/track-lock.server";
-export { executePipeline } from "./lib/execute-pipeline.server";
+export { executePipeline, PipelineAbortError, isPipelineAbortError } from "./lib/execute-pipeline.server";
+export {
+  runHeavyPipelineJob,
+  ensurePipelineWorkerInstalled,
+  HEAVY_PIPELINE_SLOTS,
+  PIPELINE_WATCHDOG_MS,
+  WorkerSlotBusyError,
+  WorkerWatchdogError,
+} from "./lib/pipeline-worker.server";
 export {
   GATE_6_OUTPUT_SPECS,
   GATE_6_OUTPUT_SAMPLE_RATE,

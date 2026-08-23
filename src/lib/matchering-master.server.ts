@@ -308,6 +308,12 @@ async function mixAndMasterOnce(options: {
   };
 }): Promise<MixAndMasterResult> {
   const tmp = await mkdtemp(join(tmpdir(), "hybrid-matchering-"));
+  try {
+    const { registerWorkerTempPathForTrack } = await import("@/lib/pipeline-worker.server");
+    if (options.taskId) registerWorkerTempPathForTrack(options.taskId, tmp);
+  } catch {
+    /* worker module optional during isolated tests */
+  }
   const introPath = join(tmp, "intro.bin");
   const instrumentalPath = join(tmp, "instrumental.bin");
   const vocalPath = join(tmp, "vocal.bin");
@@ -486,6 +492,12 @@ async function mixAndMasterOnce(options: {
     return { masterUrl, matched, mixed: true };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+    try {
+      const { unregisterWorkerTempPath } = await import("@/lib/pipeline-worker.server");
+      unregisterWorkerTempPath(tmp);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

@@ -320,20 +320,26 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     console.log("[Gate 1/6] Finished — audio_url ready");
 
     const { executePipeline } = await import("@/lib/execute-pipeline.server");
-    const pipeline = await executePipeline({
+    const { runHeavyPipelineJob } = await import("@/lib/pipeline-worker.server");
+    const pipeline = await runHeavyPipelineJob({
       trackId: started.taskId,
-      prompt: lyricContent || genre,
-      style: genre,
       userId: context.userId,
-      gate1AudioUrl: sonicUrl,
-      lyrics: lyricContent,
-      instrumental: payload.instrumental,
-      referenceSampleUrl,
-      audioFormat: payload.audioFormat,
-      title: payload.title || "Studio Master",
-      durationSeconds,
-      language: payload.language,
-      customLanguage: payload.customLanguage,
+      work: () =>
+        executePipeline({
+          trackId: started.taskId,
+          prompt: lyricContent || genre,
+          style: genre,
+          userId: context.userId,
+          gate1AudioUrl: sonicUrl,
+          lyrics: lyricContent,
+          instrumental: payload.instrumental,
+          referenceSampleUrl,
+          audioFormat: payload.audioFormat,
+          title: payload.title || "Studio Master",
+          durationSeconds,
+          language: payload.language,
+          customLanguage: payload.customLanguage,
+        }),
     });
 
     const rawTracks = [
@@ -456,7 +462,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     };
     } catch (error) {
       const { TrackLockConflictError } = await import("@/lib/track-lock.server");
-      if (error instanceof TrackLockConflictError) {
+      const { WorkerSlotBusyError } = await import("@/lib/pipeline-worker.server");
+      const { isPipelineAbortError } = await import("@/lib/execute-pipeline.server");
+      if (error instanceof TrackLockConflictError || error instanceof WorkerSlotBusyError) {
         throw error;
       }
       const { logFailedStudioGate } = await import("@/lib/studio-pipeline-error");
@@ -464,11 +472,22 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       // A halted render must not leave the task row claiming it is still
       // processing, or the vault badge spins forever.
       const { failGenerationTask } = await import("@/lib/engine-pipeline.server");
+      const abortLanding = isPipelineAbortError(error) ? error.landing : null;
       await failGenerationTask({
         taskId: startedTaskId,
         userId: context.userId,
-        reason: error instanceof Error ? error.message : String(error ?? ""),
+        reason: abortLanding?.error ?? (error instanceof Error ? error.message : String(error ?? "")),
       }).catch(() => undefined);
+      if (abortLanding) {
+        const abortError = new Error(abortLanding.error) as Error & {
+          landing: typeof abortLanding;
+          statusCode: number;
+        };
+        abortError.name = "PipelineAbortError";
+        abortError.landing = abortLanding;
+        abortError.statusCode = 500;
+        throw abortError;
+      }
       throw error;
     }
   });
