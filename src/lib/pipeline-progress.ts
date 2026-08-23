@@ -5,7 +5,8 @@
 
 export const PIPELINE_PROGRESS = {
   lyrics: 15,
-  sonic: 40,
+  sonic: 35,
+  cwalo: 48,
   stems: 60,
   vocals: 75,
   master: 90,
@@ -17,6 +18,7 @@ export type PipelineProgressStage = keyof typeof PIPELINE_PROGRESS;
 export const PIPELINE_PROGRESS_LABELS: Record<PipelineProgressStage, string> = {
   lyrics: "Writing lyrics…",
   sonic: "Building the base track…",
+  cwalo: "Analyzing structure (CWALO)…",
   stems: "Separating stems…",
   vocals: "Rendering vocals…",
   master: "Mastering the mix…",
@@ -29,6 +31,7 @@ export function normalizeProgressStage(stage: string): PipelineProgressStage | n
   const key = stage.trim().toLowerCase();
   if (key in PIPELINE_PROGRESS) return key as PipelineProgressStage;
   if (key === "music" || key === "base" || key === "base audio") return "sonic";
+  if (key === "structure" || key === "analysis" || key === "cwalo structure") return "cwalo";
   if (key === "mastering" || key === "matchering") return "master";
   return null;
 }

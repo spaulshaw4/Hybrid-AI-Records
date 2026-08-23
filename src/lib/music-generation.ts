@@ -702,7 +702,7 @@ export async function generateStudioTrack(
 
     const taskId = readTaskId(raw);
     if (!taskId) {
-      throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+      throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
     }
 
     logPostConditionPassed("Sonic task accepted");
@@ -818,9 +818,9 @@ export async function fetchStudioTrackTask(
   }
   const clip = readTaskResult(raw);
   if (TERMINAL_SUCCESS_STATUSES.includes(clip.rawStatus)) {
-    console.log("[GATE_2_RAW_POLL_RESULT]", JSON.stringify(raw, null, 2));
+    console.log("[GATE_1_RAW_POLL_RESULT]", JSON.stringify(raw, null, 2));
     if (!clip.audioUrl) {
-      console.error("[GATE_2_PARSE_FAIL] Could not locate audio URL in:", raw);
+      console.error("[GATE_1_PARSE_FAIL] Could not locate audio URL in:", raw);
     }
   }
   return {
@@ -872,9 +872,9 @@ export function assertHandoffToStems(result: {
 }): string {
   const audioUrl = typeof result.audioUrl === "string" ? result.audioUrl.trim() : "";
   if (!audioUrl || !isHttpAudioUrl(audioUrl)) {
-    throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+    throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
   }
-  console.log("[PIPELINE:HANDOFF_TO_STEMS]", {
+  console.log("[PIPELINE:HANDOFF_TO_CWALO]", {
     audioUrl,
     taskId: result.taskId,
     ...(result.trackIds?.length ? { trackIds: result.trackIds } : {}),
@@ -990,7 +990,7 @@ export async function waitForStudioTrack(
     }
     await abortableDelay(POLLING_INTERVAL_MS, hooks.abortSignal);
   }
-  throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+  throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
 }
 
 /** Full Stage 2 contract: Sonic create → poll → verified URL + duration. */

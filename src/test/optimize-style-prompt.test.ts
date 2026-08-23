@@ -10,6 +10,9 @@ describe("buildStyleOptimizePrompt", () => {
     expect(prompt).toContain("100K Prompt Book formula");
     expect(prompt).toContain('User Concept: "grunge rock night drive"');
     expect(prompt).toContain("carries the hook while");
+    expect(prompt).toContain("persistent rhythm section");
+    expect(prompt).toContain("solid continuous bassline");
+    expect(prompt).toContain("without sudden dropouts");
     expect(prompt).toContain("Return ONLY the raw prompt string");
   });
 });

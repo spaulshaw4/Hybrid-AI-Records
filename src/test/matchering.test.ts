@@ -35,7 +35,7 @@ describe("Matchering 2.0 mix + master contract", () => {
       { kind: "vocal", path: "c" },
     ]);
     expect(graph).toContain(`atrim=0:${HYBRID_INTRO_SECONDS}`);
-    expect(graph).toContain("[inst][voc]amix=inputs=2");
+    expect(graph).toContain("[inst][vox]amix=inputs=2");
     expect(graph).toContain("[intro][core]concat=n=2:v=0:a=1[out]");
   });
 
@@ -44,9 +44,15 @@ describe("Matchering 2.0 mix + master contract", () => {
       { kind: "instrumental", path: "b" },
       { kind: "vocal", path: "c" },
     ]);
-    expect(graph).toContain("[inst][voc]amix=inputs=2:duration=longest");
+    expect(graph).toContain("volume=1.0");
+    expect(graph).toContain(
+      "[inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=11:TP=-1.5[core]",
+    );
     expect(graph).toContain("[core]anull[out]");
     expect(graph).not.toContain("concat=");
+    expect(graph).not.toContain("dropout_transition=2");
+    expect(graph).not.toContain("duration=longest");
+    expect(graph).not.toContain("normalize=1");
   });
 
   it("encodes the mix as 24-bit 44.1 kHz stereo PCM", () => {
@@ -107,6 +113,17 @@ describe("Matchering 2.0 mix + master contract", () => {
       `afade=t=out:st=${180 - MASTER_FADE_OUT_SECONDS}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`,
     );
     expect(filter).toContain("loudnorm=I=-14");
+  });
+
+  it("applies a 4s exponential fade-out when only duration is known", () => {
+    const args = matcheringFinishArgs("in.wav", "out.mp3", undefined, {
+      durationSeconds: 120,
+    });
+    expect(args).not.toContain("-t");
+    const filter = args[args.indexOf("-af") + 1];
+    expect(filter).toContain(
+      `afade=t=out:st=${120 - MASTER_FADE_OUT_SECONDS}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`,
+    );
   });
 
   it("leaves the master untouched when no ceiling is requested", () => {

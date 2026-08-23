@@ -12,13 +12,13 @@ describe("pipeline step telemetry", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     logPipelineStep("lyrics");
     logPipelineStep("music");
-    logPipelineStep("handoff");
+    logPipelineStep("cwalo");
     logPipelineStep("stems");
     logPipelineStep("vocals");
     logPipelineStep("mastering");
     expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.lyrics);
     expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.music);
-    expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.handoff);
+    expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.cwalo);
     expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.stems);
     expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.vocals);
     expect(log).toHaveBeenCalledWith(PIPELINE_STEP_LOGS.mastering);
@@ -28,13 +28,13 @@ describe("pipeline step telemetry", () => {
   it("numbers the runtime gates 1 through 5 in execution order", () => {
     expect([
       PIPELINE_STEP_LOGS.music,
-      PIPELINE_STEP_LOGS.handoff,
+      PIPELINE_STEP_LOGS.cwalo,
       PIPELINE_STEP_LOGS.stems,
       PIPELINE_STEP_LOGS.vocals,
       PIPELINE_STEP_LOGS.mastering,
     ]).toEqual([
       expect.stringContaining("[1/5: BASE GENERATION]"),
-      expect.stringContaining("[2/5: BASE URL HANDOFF]"),
+      expect.stringContaining("[2/5: STRUCTURE]"),
       expect.stringContaining("[3/5: STEMS]"),
       expect.stringContaining("[4/5: VOCALS]"),
       expect.stringContaining("[5/5: MASTERING]"),

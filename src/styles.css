@@ -363,6 +363,34 @@
   overflow: visible;
 }
 
+/* Native text selection / right-click copy-paste on studio fields. */
+#engine-workspace :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea) {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  caret-color: auto;
+}
+
+#engine-workspace #studio-step-progress {
+  position: relative !important;
+  z-index: 0 !important;
+  top: auto !important;
+  bottom: auto !important;
+  inset: auto !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#engine-workspace #studio-generate-dock {
+  position: relative !important;
+  top: auto !important;
+  bottom: auto !important;
+  inset: auto !important;
+  z-index: auto;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 #coproducer-submit-btn {
   pointer-events: auto !important;
   position: relative !important;
@@ -385,17 +413,6 @@
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
   border-color: #e11d48 !important;
-}
-
-#engine-workspace #studio-step-progress,
-#engine-workspace #studio-generate-dock {
-  position: relative !important;
-  top: auto !important;
-  bottom: auto !important;
-  inset: auto !important;
-  z-index: auto;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
 /* Portalled outside #engine-workspace — must not depend on that ancestor.

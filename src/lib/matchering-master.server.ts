@@ -18,6 +18,7 @@ import {
   MATCHERING_SCRIPT_RELATIVE,
   buildHybridMixArgs,
   collectHybridStems,
+  hybridMixIncludesLoudnorm,
   matcheringFinishArgs,
   MASTER_FADE_OUT_SECONDS,
   matcheringPythonArgs,
@@ -75,6 +76,21 @@ async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
     if (err.code === "ENOENT") throw new Error("FFmpeg is not installed on this host.");
     const detail = (err.stderr || err.message || "unknown FFmpeg error").toString().slice(0, 800);
     throw new Error(`FFmpeg failed: ${detail}`);
+  }
+}
+
+/** Probe WAV/MP3 duration so the finish pass can fade the last 4 seconds. */
+async function probeAudioDurationSeconds(path: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "ffprobe",
+      ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+      { timeout: 15_000, windowsHide: true },
+    );
+    const seconds = Number.parseFloat(String(stdout).trim());
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
   }
 }
 
@@ -216,6 +232,8 @@ async function mixAndMasterOnce(options: {
   taskId: string;
   /** Requested track length; the master is cut and faded to it. */
   maxSeconds?: number;
+  /** CWALO Gate 2 remux gains. */
+  remuxGains?: { instrumentalVolume?: number; vocalVolume?: number };
 }): Promise<MixAndMasterResult> {
   const tmp = await mkdtemp(join(tmpdir(), "hybrid-matchering-"));
   const introPath = join(tmp, "intro.bin");
@@ -260,8 +278,15 @@ async function mixAndMasterOnce(options: {
       return { masterUrl: null, matched: false, mixed: false };
     }
 
-    console.log("[master] Mixing audio stems (FFmpeg)...");
-    await runFfmpeg(buildHybridMixArgs(stems, mixPath), MATCHERING_MIX_TIMEOUT_MS);
+    const remuxLoudnorm = hybridMixIncludesLoudnorm(stems);
+    console.log("[master] Mixing audio stems (FFmpeg)...", {
+      remux: options.remuxGains ?? { instrumentalVolume: 1.0, vocalVolume: 1.0 },
+      loudnormInMix: remuxLoudnorm,
+    });
+    await runFfmpeg(
+      buildHybridMixArgs(stems, mixPath, options.remuxGains),
+      MATCHERING_MIX_TIMEOUT_MS,
+    );
 
     const cwd = process.cwd();
     const reference = resolveMatcheringReferencePath(cwd);
@@ -279,23 +304,41 @@ async function mixAndMasterOnce(options: {
         masteredWav = matchedPath;
         console.log("[master] Matchering 2.0 finished");
       } else {
-        console.warn("[master] Matchering skipped — applying FFmpeg loudnorm + alimiter");
+        console.warn("[master] Matchering skipped — applying FFmpeg finish filter");
       }
     } else {
       console.warn(
-        `[matchering] no reference at ${MATCHERING_REFERENCE_RELATIVE} — skip Matchering, loudnorm only`,
+        `[matchering] no reference at ${MATCHERING_REFERENCE_RELATIVE} — skip Matchering`,
       );
     }
 
-    console.log("[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter");
-    if (options.maxSeconds) {
-      console.log("[master] duration ceiling", {
-        maxSeconds: options.maxSeconds,
+    const skipLoudnorm = remuxLoudnorm && !matched;
+    console.log(
+      skipLoudnorm
+        ? "[master] encode finish (loudnorm already in remux mix)"
+        : "[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter",
+    );
+    const probedDuration =
+      options.maxSeconds && options.maxSeconds > MASTER_FADE_OUT_SECONDS
+        ? null
+        : await probeAudioDurationSeconds(masteredWav);
+    const fadeDuration =
+      options.maxSeconds && options.maxSeconds > MASTER_FADE_OUT_SECONDS
+        ? options.maxSeconds
+        : probedDuration;
+    if (fadeDuration && fadeDuration > MASTER_FADE_OUT_SECONDS) {
+      console.log("[master] tail fade-out", {
+        maxSeconds: options.maxSeconds ?? null,
+        durationSeconds: fadeDuration,
         fadeOutSeconds: MASTER_FADE_OUT_SECONDS,
+        fadeStart: fadeDuration - MASTER_FADE_OUT_SECONDS,
       });
     }
     await runFfmpeg(
-      matcheringFinishArgs(masteredWav, playablePath, options.maxSeconds),
+      matcheringFinishArgs(masteredWav, playablePath, options.maxSeconds, {
+        skipLoudnorm,
+        durationSeconds: probedDuration ?? undefined,
+      }),
       MATCHERING_MIX_TIMEOUT_MS,
     );
 
@@ -353,6 +396,7 @@ export async function mixAndMasterHybridTrack(options: {
   userId: string;
   taskId: string;
   maxSeconds?: number;
+  remuxGains?: { instrumentalVolume?: number; vocalVolume?: number };
 }): Promise<MixAndMasterResult> {
   assertPipelineBreakerClosed("mastering");
   if (!options.instrumentalUrl && !options.vocalUrl && !options.introUrl) {

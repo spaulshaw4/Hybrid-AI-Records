@@ -7,10 +7,10 @@
 export const PIPELINE_STEP_LOGS = {
   lyrics: ">>> [LYRICS] Gemini 2.5 on Replicate (Co-Producer)",
   music: ">>> [1/5: BASE GENERATION] AIMusicAPI chirp-v5",
-  handoff: ">>> [2/5: BASE URL HANDOFF] Resolving audio link to Supabase",
+  cwalo: ">>> [2/5: STRUCTURE] CWALO all-in-one music structure analysis",
   stems: ">>> [3/5: STEMS] Replicate Demucs separation",
   vocals: ">>> [4/5: VOCALS] Fish Audio Plus vocal synthesis",
-  mastering: ">>> [5/5: MASTERING] Matchering + FFmpeg final master",
+  mastering: ">>> [5/5: MASTERING] Matchering + FFmpeg remux (CWALO-guided)",
 } as const;
 
 export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
@@ -18,7 +18,7 @@ export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
 const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   lyrics: "Replicate Gemini 2.5 Flash",
   music: "AIMusicAPI chirp-v5",
-  handoff: "Supabase Storage",
+  cwalo: "Replicate CWALO structure analysis",
   stems: "Replicate Demucs",
   vocals: "Fish Audio Plus",
   mastering: "Matchering + FFmpeg",
@@ -65,7 +65,7 @@ export function vocalPipelineKey(): string | undefined {
   return trimEnv("FISH_AUDIO_API_KEY") || trimEnv("FISH_API_KEY");
 }
 
-/** Steps 3–5 — Replicate stems, then local mastering. */
+/** Steps 2–3, 5 — Replicate CWALO + Demucs, then local mastering. */
 export function replicatePipelineKey(): string | undefined {
   return trimEnv("REPLICATE_API_KEY") || trimEnv("REPLICATE_API_TOKEN");
 }

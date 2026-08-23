@@ -453,6 +453,7 @@ type PipelineStepId =
   | "validate"
   | "lyrics"
   | "music"
+  | "cwalo"
   | "stems"
   | "vocals"
   | "master"
@@ -485,6 +486,7 @@ const PIPELINE_STEP_PROGRESS: Record<PipelineStepId, number> = {
   validate: 5,
   lyrics: PIPELINE_PROGRESS.lyrics,
   music: PIPELINE_PROGRESS.sonic,
+  cwalo: PIPELINE_PROGRESS.cwalo,
   stems: PIPELINE_PROGRESS.stems,
   vocals: PIPELINE_PROGRESS.vocals,
   master: PIPELINE_PROGRESS.master,
@@ -508,10 +510,11 @@ function pipelineStepFromError(error: unknown, fallback: PipelineStepId): string
   }
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/GATE_1|lyrics/i.test(message)) return "lyrics";
-  if (/GATE_2|music engine|sonic|base audio/i.test(message)) return "music";
+  if (/GATE_2|CWALO|structure analysis/i.test(message)) return "cwalo";
+  if (/music engine|sonic|base audio/i.test(message)) return "music";
   if (/GATE_3|stem/i.test(message)) return "stems";
   if (/vocal/i.test(message)) return "vocals";
-  if (/GATE_4|master/i.test(message)) return "master";
+  if (/GATE_4|GATE_5|master/i.test(message)) return "master";
   return fallback;
 }
 
@@ -1393,11 +1396,13 @@ export function AudioStudio() {
 
   const applyPipelineProgress = useCallback((stage: string, percent: number) => {
     reportPipelineProgress(stage, percent);
-    const step = (["lyrics", "music", "stems", "vocals", "master", "complete"].includes(stage)
+    const step = (["lyrics", "music", "cwalo", "stems", "vocals", "master", "complete"].includes(stage)
       ? stage
       : stage === "sonic"
         ? "music"
-        : pipelineStepRef.current) as PipelineStepId;
+        : stage === "structure" || stage === "analysis"
+          ? "cwalo"
+          : pipelineStepRef.current) as PipelineStepId;
     pipelineStepRef.current = step;
     setPipelineState((prev) => ({
       ...prev,
@@ -2298,13 +2303,15 @@ export function AudioStudio() {
       const stopTicker = window.setInterval(() => {
         tickerPercent = Math.min(PIPELINE_PROGRESS.master - 2, tickerPercent + 2);
         const stage =
-          tickerPercent < PIPELINE_PROGRESS.stems
+          tickerPercent < PIPELINE_PROGRESS.cwalo
             ? "sonic"
-            : tickerPercent < PIPELINE_PROGRESS.vocals
-              ? "stems"
-              : tickerPercent < PIPELINE_PROGRESS.master
-                ? "vocals"
-                : "master";
+            : tickerPercent < PIPELINE_PROGRESS.stems
+              ? "cwalo"
+              : tickerPercent < PIPELINE_PROGRESS.vocals
+                ? "stems"
+                : tickerPercent < PIPELINE_PROGRESS.master
+                  ? "vocals"
+                  : "master";
         applyPipelineProgress(stage, tickerPercent);
       }, 4000);
       let started: Awaited<ReturnType<typeof startGeneration>>;
@@ -2365,6 +2372,7 @@ export function AudioStudio() {
       }
       if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
       completePipelineStep("music", { taskId: started.taskId, tracks: started.tracks?.length ?? 0 });
+      beginPipelineStep("cwalo", { taskId: started.taskId });
       beginPipelineStep("stems", { taskId: started.taskId });
       applyPipelineProgress("master", PIPELINE_PROGRESS.master);
       beginPipelineStep("master", { taskId: started.taskId });
@@ -3028,7 +3036,7 @@ export function AudioStudio() {
 
           <div
             id="studio-step-progress"
-            className="relative space-y-2 border-b border-zinc-800 pb-3"
+            className="relative z-0 space-y-2 border-b border-zinc-800 pb-3"
           >
             <div className="flex items-center justify-between gap-3 text-xs">
               <p className="font-semibold text-foreground">
@@ -3048,7 +3056,7 @@ export function AudioStudio() {
                   ? pipelineState.progress
                   : ((studioStep + 1) / STUDIO_STEPS.length) * 100
               }
-              className="h-1.5"
+              className="pointer-events-none h-1.5"
               aria-label={
                 busy
                   ? `Generation progress ${pipelineState.progress} percent, ${labelForProgressStage(
@@ -3085,9 +3093,9 @@ export function AudioStudio() {
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="relative z-10 space-y-5 pointer-events-auto">
           {studioStep === 0 ? (
-          <div className="space-y-5 overflow-visible">
+          <div className="relative z-10 space-y-5 overflow-visible pointer-events-auto">
           {/* 1. Track title */}
           <div className="space-y-2">
             <Label htmlFor="studio-title" className="text-base font-semibold text-foreground">
@@ -3104,7 +3112,7 @@ export function AudioStudio() {
               aria-describedby="studio-title-help"
               autoComplete="off"
               enterKeyHint="done"
-              className="h-12 border border-border bg-input text-foreground placeholder:text-muted-foreground placeholder-dim transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="h-12 select-text pointer-events-auto border border-border bg-input text-foreground placeholder:text-muted-foreground placeholder-dim transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             />
             <p id="studio-title-help" className="text-xs text-muted-foreground">
               Name your track — up to 120 characters. Used as the file name and display title.
@@ -3126,7 +3134,7 @@ export function AudioStudio() {
           </div>
 
           {/* 2. Lyrics box — no fieldset / inert / aria-hidden ancestor. */}
-          <div className="relative space-y-2 overflow-visible" style={{ pointerEvents: "auto" }}>
+          <div className="relative z-10 space-y-2 overflow-visible pointer-events-auto">
             <div className="relative mb-2 flex items-center justify-between gap-3 overflow-visible">
               <Label htmlFor={SONG_LYRICS_INPUT_ID} className="text-base font-semibold text-foreground">
                 Lyrics
@@ -3167,7 +3175,7 @@ export function AudioStudio() {
                 setLyrics(e.target.value);
                 if (lyricWarnings.length > 0) setLyricWarnings([]);
               }}
-              className="resize-y border border-zinc-800 bg-zinc-950 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
+              className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
             />
             {lyricWarnings.length > 0 ? (
               <div
@@ -3227,7 +3235,7 @@ export function AudioStudio() {
               maxLength={400}
               placeholder="describe the vocal and delivery, eg rasp, male baritone, half sung, half rap, half reverb."
               onChange={(e) => setVocalPrompt(e.target.value.slice(0, 400))}
-              className="resize-y border border-zinc-800 bg-zinc-950 text-base text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
+              className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 text-base text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
             />
             <p className="text-xs text-muted-foreground">
               Shapes how the vocal is performed. Ignored on instrumental renders.
@@ -3421,7 +3429,7 @@ export function AudioStudio() {
                   onChange={(event) => setStylePrompt(event.target.value)}
                   rows={4}
                   placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
-                  className="resize-y border border-zinc-800 bg-zinc-950 text-sm text-zinc-100 placeholder:text-muted-foreground placeholder-dim shadow-none focus-visible:border-primary focus-visible:ring-primary"
+                  className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 text-sm text-zinc-100 placeholder:text-muted-foreground placeholder-dim shadow-none focus-visible:border-primary focus-visible:ring-primary"
                 />
                 <Button
                   type="button"

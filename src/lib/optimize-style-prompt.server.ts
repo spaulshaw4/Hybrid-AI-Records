@@ -19,6 +19,7 @@ export function buildStyleOptimizePrompt(userText: string): string {
   const concept = userText.trim().slice(0, MAX_USER_TEXT);
   return `You are an expert audio engineer and music producer. Transform this user concept into a single, highly structured style tag string following the 100K Prompt Book formula:
 [Genre/Sub-genre], [BPM], [Vocal Role], [Mood/Energy]; [Lead Hook Instrument] carries the hook while [Rhythm Bed Instrument] fills the space — theme: [Concept]
+Ensure the optimized prompt mandates a cohesive arrangement: persistent rhythm section, solid continuous bassline throughout, dynamic progression without sudden dropouts or empty hollow sections.
 Return ONLY the raw prompt string without markdown formatting, quotes, or conversational filler.
 User Concept: "${concept}"`;
 }

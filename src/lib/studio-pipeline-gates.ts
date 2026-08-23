@@ -51,16 +51,16 @@ export async function probeAudioUrlReachable(url: string): Promise<boolean> {
   }
 }
 
-/** Gate 2 — `data[0].audio_url` / `audio_url` must be a live HTTP URL. */
+/** Gate 2 precondition — `data[0].audio_url` must be a live HTTP URL before CWALO. */
 export async function assertBaseAudioUrlGate(url: string | null | undefined): Promise<string> {
   if (!isHttpAudioUrl(url)) {
-    throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+    throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
   }
   const reachable = await probeAudioUrlReachable(url);
   if (!reachable) {
-    throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+    throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
   }
-  logGateCleared(2, `Audio URL verified: ${url}`);
+  logGateCleared(1, `Audio URL verified for CWALO: ${url}`);
   return url;
 }
 

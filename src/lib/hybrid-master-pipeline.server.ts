@@ -103,8 +103,9 @@ async function archiveUrl(
 }
 
 /**
- * Stage 2–4 of generate: split the base mix, convert vocals on Fish Audio,
- * mix converted vocals with the Demucs backing, then Matchering-master.
+ * Stage 2–5: CWALO structure → one Demucs split → Fish vocals → remux over
+ * the Gate 3 instrumental (guided by CWALO remux gains). Never re-run Demucs
+ * after Fish.
  */
 export async function runHybridMasterPipeline(input: {
   baseAudioUrl: string;
@@ -124,15 +125,42 @@ export async function runHybridMasterPipeline(input: {
   let instrumentalUrl: string | null = input.instrumental ? input.baseAudioUrl : null;
   let isolatedVocalUrl: string | null = null;
   let convertedVocalUrl: string | null = null;
+  let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
 
   const wantsVocals = !input.instrumental && input.lyrics.trim().length > 0;
 
   if (!isHttpAudioUrl(input.baseAudioUrl)) {
-    logFailedStudioGate(new Error("FAIL_EARLY_GUARD: Stage 3: base audio URL was invalid"));
+    logFailedStudioGate(new Error("FAIL_EARLY_GUARD: Stage 2: base audio URL was invalid"));
     throw haltVocalRender("stem isolation", new Error("base audio URL was invalid"));
   }
   logPreConditionPassed("stems", "base audio URL valid");
   const { PIPELINE_PROGRESS, reportPipelineProgress } = await import("@/lib/pipeline-progress");
+
+  // Gate 2 — CWALO structure analysis on the Gate 1 mix (before Demucs).
+  try {
+    reportPipelineProgress("cwalo", PIPELINE_PROGRESS.cwalo);
+    const { logPipelineStep } = await import("@/lib/pipeline-steps.server");
+    logPipelineStep("cwalo");
+    const { analyzeMusicStructureWithCwalo } = await import("@/lib/cwalo-structure.server");
+    const structure = await analyzeMusicStructureWithCwalo(input.baseAudioUrl);
+    remuxGains = structure.remux;
+    console.warn("[GATE_2_CWALO] guiding Demucs remux", {
+      bpm: structure.bpm,
+      sectionCount: structure.sections.length,
+      remuxGains,
+    });
+  } catch (error) {
+    const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
+    logPipelineStepError("cwalo", error);
+    logFailedStudioGate(error);
+    // Soft-fail: Demucs + Fish remux still proceed with default gains so a
+    // CWALO outage cannot strand an otherwise healthy Gate 1 render.
+    console.warn(
+      "[GATE_2_CWALO] continuing with default remux gains",
+      error instanceof Error ? error.message : error,
+    );
+  }
+
   reportPipelineProgress("stems", PIPELINE_PROGRESS.stems);
 
   try {
@@ -229,9 +257,27 @@ export async function runHybridMasterPipeline(input: {
     }
   }
 
+  // Fish (or Demucs vocal fallback) over the original Gate 3 instrumental only.
+  // Do not fall back to the full Gate 1 mix when stems exist — that reintroduces
+  // the stock vocal and hollows the arrangement.
   const vocalUrl = convertedVocalUrl ?? isolatedVocalUrl;
   const mixVocalUrl = vocalUrl ?? (instrumentalUrl ? null : input.baseAudioUrl);
-  const mixInstrumentalUrl = instrumentalUrl ?? (vocalUrl ? null : input.baseAudioUrl);
+  const mixInstrumentalUrl =
+    instrumentalUrl ?? (wantsVocals ? null : input.baseAudioUrl);
+
+  if (wantsVocals && (!mixVocalUrl || !mixInstrumentalUrl)) {
+    throw haltVocalRender(
+      "vocal conversion",
+      new Error("missing Fish vocal or Gate 3 instrumental for remux"),
+    );
+  }
+
+  console.warn("[GATE_5_REMUX]", {
+    instrumental: mixInstrumentalUrl ? "gate3-demucs" : "none",
+    vocal: convertedVocalUrl ? "fish" : isolatedVocalUrl ? "demucs-vocal" : "none",
+    amix: "duration=first:dropout_transition=0:normalize=0",
+    remuxGains,
+  });
 
   reportPipelineProgress("master", PIPELINE_PROGRESS.master);
   const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
@@ -242,6 +288,7 @@ export async function runHybridMasterPipeline(input: {
     userId: input.userId,
     taskId: input.taskId,
     maxSeconds: input.durationSeconds,
+    remuxGains,
   });
   const master = assertMasteringContractOutput(mastered.masterUrl);
   logPostConditionPassed("Mastered audio ready");

@@ -15,6 +15,16 @@ export const MATCHERING_SCRIPT_RELATIVE = "scripts/matchering_master.py";
 export const BRICKWALL_LIMITER = "alimiter=limit=0.891250938:level=false";
 export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${LOUDNORM_FILTER}`;
 
+/**
+ * Gate 3 instrumental + Fish vocal remux — exact production filter:
+ * amix duration=first, dropout_transition=0, normalize=0 (no auto ducking),
+ * then loudnorm in the same chain.
+ */
+export const HYBRID_REMUX_AMIX =
+  "amix=inputs=2:duration=first:dropout_transition=0:normalize=0";
+export const HYBRID_REMUX_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.5";
+export const HYBRID_REMUX_MIX_FILTER = `${HYBRID_REMUX_AMIX},${HYBRID_REMUX_LOUDNORM}`;
+
 export type HybridStemKind = "intro" | "instrumental" | "vocal";
 
 export type HybridStemInputs = {
@@ -38,16 +48,31 @@ function stereo(label: string, extra = ""): string {
   return `[${label}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo${rest},asetpts=PTS-STARTPTS`;
 }
 
+function volumeGain(value: number): string {
+  // Keep a decimal so FFmpeg graphs stay readable as volume=1.0 (not volume=1).
+  return Number.isInteger(value) ? value.toFixed(1) : String(value);
+}
+
+
 /**
- * Mix graph: 30s intro (optional), then Demucs instrumental under Fish vocals.
- * Missing stems are skipped so a partial render still produces a file.
+ * Mix graph: optional intro, then Gate 3 Demucs instrumental under Fish vocals.
+ *
+ * Production remux (instrumental + vocal):
+ *   [0:a]volume=1.0[inst];[1:a]volume=1.0[vox];
+ *   [inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=11:TP=-1.5
+ *
+ * Volumes may be nudged by CWALO Gate 2 remux hints (bed never below 1.0).
  */
 export function buildHybridMixFilterComplex(
   slots: HybridStemSlot[],
   introSeconds: number = HYBRID_INTRO_SECONDS,
+  gains: { instrumentalVolume?: number; vocalVolume?: number } = {},
 ): string {
   if (slots.length === 0) throw new Error("No stems to mix.");
   if (slots.length === 1) return `${stereo("0:a")}[out]`;
+
+  const instVol = Math.max(1.0, gains.instrumentalVolume ?? 1.0);
+  const vocVol = gains.vocalVolume ?? 1.0;
 
   const indexOf = (kind: HybridStemKind) => slots.findIndex((slot) => slot.kind === kind);
   const intro = indexOf("intro");
@@ -58,17 +83,17 @@ export function buildHybridMixFilterComplex(
   if (intro >= 0) {
     lines.push(`${stereo(`${intro}:a`, `atrim=0:${introSeconds}`)}[intro]`);
   }
-  if (inst >= 0) lines.push(`${stereo(`${inst}:a`)}[inst]`);
-  if (vocal >= 0) lines.push(`${stereo(`${vocal}:a`)}[voc]`);
+  if (inst >= 0) lines.push(`${stereo(`${inst}:a`, `volume=${volumeGain(instVol)}`)}[inst]`);
+  if (vocal >= 0) lines.push(`${stereo(`${vocal}:a`, `volume=${volumeGain(vocVol)}`)}[vox]`);
 
   let core = "";
   if (inst >= 0 && vocal >= 0) {
-    lines.push("[inst][voc]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[core]");
+    lines.push(`[inst][vox]${HYBRID_REMUX_MIX_FILTER}[core]`);
     core = "[core]";
   } else if (inst >= 0) {
     core = "[inst]";
   } else if (vocal >= 0) {
-    core = "[voc]";
+    core = "[vox]";
   }
 
   if (intro >= 0 && core) {
@@ -81,7 +106,16 @@ export function buildHybridMixFilterComplex(
   return lines.join(";");
 }
 
-export function buildHybridMixArgs(stems: HybridStemInputs, outputWav: string): string[] {
+/** True when the mix graph already applied the remux loudnorm chain. */
+export function hybridMixIncludesLoudnorm(stems: HybridStemInputs): boolean {
+  return Boolean(stems.instrumentalPath && stems.vocalPath);
+}
+
+export function buildHybridMixArgs(
+  stems: HybridStemInputs,
+  outputWav: string,
+  gains?: { instrumentalVolume?: number; vocalVolume?: number },
+): string[] {
   const slots = collectHybridStems(stems);
   if (slots.length === 0) throw new Error("No stems to mix.");
   const inputs = slots.flatMap((slot) => ["-i", slot.path]);
@@ -106,7 +140,7 @@ export function buildHybridMixArgs(stems: HybridStemInputs, outputWav: string): 
     "-nostdin",
     ...inputs,
     "-filter_complex",
-    buildHybridMixFilterComplex(slots),
+    buildHybridMixFilterComplex(slots, HYBRID_INTRO_SECONDS, gains),
     "-map",
     "[out]",
     "-ac",
@@ -143,28 +177,44 @@ export function matcheringPythonArgs(input: {
   ];
 }
 
-/** Fade length applied at the duration ceiling so a cut never clicks. */
+/** Fade length at the track tail so cuts / trailing glitches never click. */
 export const MASTER_FADE_OUT_SECONDS = 4;
 
 /**
  * Final encode. When a ceiling is given the master is hard-limited to it with a
  * fade running into the cut, so a request for three minutes cannot come back
  * longer than three minutes.
+ *
+ * When only a known duration is available (no hard ceiling), still apply a clean
+ * 4s exponential fade-out at `duration - 4` to kill trailing noise bursts.
+ *
+ * When `skipLoudnorm` is set (remux already baked loudnorm into the mix WAV),
+ * only the brickwall limiter + fade run so we do not double-norm.
  */
 export function matcheringFinishArgs(
   inputWav: string,
   outputMp3: string,
   maxSeconds?: number,
+  options: { skipLoudnorm?: boolean; durationSeconds?: number } = {},
 ): string[] {
   const ceiling =
     typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds > MASTER_FADE_OUT_SECONDS
       ? Math.round(maxSeconds)
       : undefined;
-  const fadeStart = ceiling ? ceiling - MASTER_FADE_OUT_SECONDS : undefined;
+  const knownDuration =
+    ceiling ??
+    (typeof options.durationSeconds === "number" &&
+    Number.isFinite(options.durationSeconds) &&
+    options.durationSeconds > MASTER_FADE_OUT_SECONDS
+      ? options.durationSeconds
+      : undefined);
+  const fadeStart =
+    knownDuration !== undefined ? knownDuration - MASTER_FADE_OUT_SECONDS : undefined;
+  const baseFilter = options.skipLoudnorm ? BRICKWALL_LIMITER : MATCHERING_FINISH_FILTER;
   const filter =
     fadeStart === undefined
-      ? MATCHERING_FINISH_FILTER
-      : `${MATCHERING_FINISH_FILTER},afade=t=out:st=${fadeStart}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`;
+      ? baseFilter
+      : `${baseFilter},afade=t=out:st=${fadeStart}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`;
 
   return [
     "-y",
