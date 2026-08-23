@@ -41,12 +41,14 @@ async function downloadAudioBytes(url: string): Promise<Uint8Array> {
 }
 
 /**
- * Copy for a halted vocal render. Both stay vendor-neutral, and both promise
- * the token is safe: the caller charges only after this pipeline resolves, so
- * throwing here means the artist was never billed.
+ * Copy for a halted render. All stay vendor-neutral, and all promise the token
+ * is safe: the caller charges only after this pipeline resolves, so throwing
+ * here means the artist was never billed.
  */
 const VOCAL_FAILURE_MESSAGE = "Vocal conversion failed. Your hybrid tokens have not been charged.";
 const VOCAL_TIMEOUT_MESSAGE = "Vocal processing engine timed out. Please try your render again.";
+const STEM_FAILURE_MESSAGE =
+  "Stem separation failed. Your hybrid tokens have not been charged.";
 
 function isTimeout(error: unknown): boolean {
   if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
@@ -57,13 +59,15 @@ function isTimeout(error: unknown): boolean {
 }
 
 /**
- * Halts a vocal render. The provider-specific cause goes to the server log;
- * the artist gets neutral copy that names the stage, not the vendor.
+ * Halts a render. The provider-specific cause goes to the server log; the artist
+ * gets neutral copy naming the stage that actually failed — reporting a stem
+ * failure as a vocal failure sends debugging to the wrong gate.
  */
-function haltVocalRender(stage: string, error: unknown): Error {
+function haltVocalRender(stage: "stem isolation" | "vocal conversion", error: unknown): Error {
   const detail = error instanceof Error ? error.message : String(error);
   console.error(`[pipeline] ${stage} failed — halting render:`, detail);
-  return new Error(isTimeout(error) ? VOCAL_TIMEOUT_MESSAGE : VOCAL_FAILURE_MESSAGE);
+  if (isTimeout(error)) return new Error(VOCAL_TIMEOUT_MESSAGE);
+  return new Error(stage === "stem isolation" ? STEM_FAILURE_MESSAGE : VOCAL_FAILURE_MESSAGE);
 }
 
 /**

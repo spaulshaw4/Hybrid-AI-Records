@@ -33,7 +33,13 @@ describe("replicate prediction routes", () => {
     expect(REPLICATE_COST_EFFECTIVE_GPU).toBe("gpu-t4");
     expect(replicateRunHeaders(120_000)).toEqual({
       "Cancel-After": "120s",
-      Prefer: "wait=60",
+      Prefer: "wait=5",
+    });
+    // A long sync hold invites a client disconnect, which Replicate records as
+    // an aborted prediction, so the wait stays short regardless of the ceiling.
+    expect(replicateRunHeaders(300_000)).toEqual({
+      "Cancel-After": "300s",
+      Prefer: "wait=5",
     });
     expect(officialModelPredictionsPath("minimax/music-2.6")).not.toBe(
       `/models/${ACE_STEP_MODEL}/predictions`,

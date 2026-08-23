@@ -19,7 +19,6 @@ import { replicateBaseUrl } from "@/lib/ai-provider.server";
 import { requireStageKey } from "@/lib/env";
 import {
   communityPredictionBody,
-  REPLICATE_COST_EFFECTIVE_GPU,
   REPLICATE_PREDICTION_TIMEOUT_MS,
   replicateRunHeaders,
 } from "@/lib/replicate-predictions";
@@ -42,7 +41,8 @@ import { assertDemucsStemUrlGate } from "@/lib/studio-pipeline-gates";
 import { logFailedStudioGate } from "@/lib/studio-pipeline-error";
 
 const DEMUCS_MODEL = process.env["DEMUCS_MODEL"] || "ryan5453/demucs";
-const DEMUCS_HARDWARE = process.env["DEMUCS_HARDWARE"]?.trim() || REPLICATE_COST_EFFECTIVE_GPU;
+/** Only a private deployment can pin hardware; a public model 422s on it. */
+const DEMUCS_HARDWARE = process.env["DEMUCS_HARDWARE"]?.trim();
 const DEMUCS_DEPLOYMENT = process.env["DEMUCS_DEPLOYMENT"]?.trim();
 
 export type StemResult = DemucsStemUrls;
@@ -163,12 +163,13 @@ export async function separateStems(input: {
       ? `${replicateBaseUrl()}/deployments/${DEMUCS_DEPLOYMENT}/predictions`
       : `${replicateBaseUrl()}/predictions`;
     const version = DEMUCS_DEPLOYMENT ? null : await latestVersion();
-    const withHardware = DEMUCS_DEPLOYMENT
+    // A public model rejects a hardware SKU with 422, so only a private
+    // deployment's own hardware applies. Sending it cost a wasted round trip.
+    const body = DEMUCS_DEPLOYMENT
       ? { input: inputPayload }
-      : communityPredictionBody(version!, inputPayload, { hardware: DEMUCS_HARDWARE });
-    const withoutHardware = DEMUCS_DEPLOYMENT
-      ? { input: inputPayload }
-      : communityPredictionBody(version!, inputPayload);
+      : communityPredictionBody(version!, inputPayload, {
+          ...(DEMUCS_HARDWARE ? { hardware: DEMUCS_HARDWARE } : {}),
+        });
 
     const dispatch = (payload: unknown) =>
       resilientFetch(
@@ -181,11 +182,7 @@ export async function separateStems(input: {
         { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
       );
 
-    let created = await dispatch(withHardware);
-    // Public models ignore/reject a hardware SKU; retry without it.
-    if (!created.ok && (created.status === 400 || created.status === 422) && !DEMUCS_DEPLOYMENT) {
-      created = await dispatch(withoutHardware);
-    }
+    const created = await dispatch(body);
     if (!created.ok) await bail(created, "dispatch");
 
     let prediction = (await created.json()) as PredictionState;

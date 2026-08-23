@@ -79,6 +79,7 @@ describe("Fish Audio vocal payload", () => {
  */
 const VOCAL_FAILURE = "Vocal conversion failed. Your hybrid tokens have not been charged.";
 const VOCAL_TIMEOUT = "Vocal processing engine timed out. Please try your render again.";
+const STEM_FAILURE = "Stem separation failed. Your hybrid tokens have not been charged.";
 
 /** Enough bytes to clear the pipeline's "downloaded audio was empty" guard. */
 function audioResponse() {
@@ -107,7 +108,9 @@ describe("runHybridMasterPipeline vocal halting", () => {
     vi.stubGlobal("fetch", vi.fn(async () => audioResponse()));
     separateStems.mockRejectedValue(new Error("Stem separation failed for this track."));
 
-    await expect(runHybridMasterPipeline(baseInput())).rejects.toThrow(VOCAL_FAILURE);
+    // Names the stage that actually failed, so a stems outage is not chased
+    // through the vocal provider.
+    await expect(runHybridMasterPipeline(baseInput())).rejects.toThrow(STEM_FAILURE);
     expect(mixAndMasterHybridTrack).not.toHaveBeenCalled();
   });
 

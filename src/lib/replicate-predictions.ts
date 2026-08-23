@@ -13,12 +13,20 @@ export const REPLICATE_COMMUNITY_PREDICTIONS_PATH = "/predictions";
 /** Cheapest GPU SKU that still runs Demucs / similar audio models. */
 export const REPLICATE_COST_EFFECTIVE_GPU = "gpu-t4";
 
-/** Hard ceiling for a single stem/audio prediction so GPU time cannot hang. */
-export const REPLICATE_PREDICTION_TIMEOUT_MS = 120_000;
+/**
+ * Hard ceiling for a single stem/audio prediction so GPU time cannot hang.
+ * Demucs on a full track can run past two minutes, and `Cancel-After` is a
+ * server-side kill — too low and Replicate aborts a healthy separation.
+ */
+export const REPLICATE_PREDICTION_TIMEOUT_MS = 300_000;
 
 /**
- * Replicate headers that cap a prediction's lifetime and wait up to 60s
- * for a sync result. `Cancel-After` is the server-side kill switch.
+ * Replicate headers for a prediction create.
+ *
+ * `Prefer: wait` holds the HTTP request open for a sync result, but a long hold
+ * is fragile: if the connection drops, Replicate sees the client disconnect and
+ * marks the prediction Aborted. Ask for only a brief wait and let the caller's
+ * poll loop track the rest. `Cancel-After` is the server-side kill switch.
  */
 export function replicateRunHeaders(
   timeoutMs = REPLICATE_PREDICTION_TIMEOUT_MS,
@@ -26,7 +34,7 @@ export function replicateRunHeaders(
   const seconds = Math.max(5, Math.round(timeoutMs / 1000));
   return {
     "Cancel-After": `${seconds}s`,
-    Prefer: "wait=60",
+    Prefer: "wait=5",
   };
 }
 
