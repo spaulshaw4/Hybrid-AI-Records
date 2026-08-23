@@ -111,7 +111,12 @@ async function latestVersion(): Promise<string> {
 }
 
 function pickStems(output: unknown): StemResult {
-  return parseDemucsOutput(output);
+  console.log("[GATE_3_DEMUCS_OUTPUT]:", JSON.stringify(output, null, 2));
+  const stems = parseDemucsOutput(output);
+  if (!stems.vocals) {
+    console.warn("[GATE_3_DEMUCS_OUTPUT] no vocal stem in output shape:", typeof output);
+  }
+  return stems;
 }
 
 async function cancelPrediction(id: string): Promise<void> {

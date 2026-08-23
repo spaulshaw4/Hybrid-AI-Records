@@ -793,11 +793,12 @@ export async function fetchStudioTrackTask(
 }
 
 /**
- * Poll every 3s. The ceiling stays at 5 minutes because observed Sonic renders
- * finish around 240s — a 180s cap would fail tracks that are still rendering.
+ * Poll every 3s for up to 7 minutes. Observed Sonic renders land between 237s
+ * and beyond 300s, so a tighter ceiling fails tracks that are still rendering
+ * and discards audio the artist has already paid for.
  */
 export const POLLING_INTERVAL_MS = 3000;
-export const MAX_POLLING_DURATION_MS = 300000; // 5 minutes max
+export const MAX_POLLING_DURATION_MS = 420000; // 7 minutes max
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;
 
 const INTERMEDIATE_STATUSES = new Set([

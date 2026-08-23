@@ -167,6 +167,7 @@ export async function runHybridMasterPipeline(input: {
       // artist's own reference take without telling them.
       let isolatedVocal: Uint8Array | undefined;
       if (isolatedVocalUrl) {
+        console.log("[GATE_4_DISPATCH] Sending vocal stem to Fish Audio:", isolatedVocalUrl);
         isolatedVocal = await downloadAudioBytes(isolatedVocalUrl);
       }
       const converted = input.referenceSampleUrl
