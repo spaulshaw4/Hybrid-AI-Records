@@ -7,6 +7,24 @@ import { isDevRuntime } from "@/lib/supabase-env.server";
 
 const ROOT = join(process.cwd(), ".data", "local-vault");
 const CATALOG = join(ROOT, "catalog.json");
+/** Matches `server.port` in vite.config.ts. */
+const DEV_PORT = 8080;
+
+/**
+ * Absolute origin for vault URLs. Downstream stages fetch these server-side and
+ * `fetch` cannot resolve a bare path, so a relative URL fails every pipeline
+ * contract that requires an http(s) address.
+ */
+function vaultOrigin(): string {
+  const configured = process.env.LOCAL_VAULT_ORIGIN?.trim() || process.env.SITE_ORIGIN?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  const port = process.env.PORT?.trim() || String(DEV_PORT);
+  return `http://localhost:${port}`;
+}
+
+export function localVaultUrl(fileName: string): string {
+  return `${vaultOrigin()}/api/local-vault/${encodeURIComponent(fileName)}`;
+}
 
 export function localVaultEnabled(): boolean {
   return isDevRuntime();
@@ -38,7 +56,7 @@ export async function saveLocalAudioFile(
   const fileName = `${safe}.${ext}`;
   await writeFile(join(ROOT, fileName), bytes);
   console.warn(`[local-vault] saved ${fileName} (${bytes.byteLength} bytes)`);
-  return `/api/local-vault/${encodeURIComponent(fileName)}`;
+  return localVaultUrl(fileName);
 }
 
 export async function readLocalAudioFile(

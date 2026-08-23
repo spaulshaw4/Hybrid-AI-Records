@@ -59,7 +59,7 @@ function fishReferenceId(): string | undefined {
 }
 
 function logFishConfig(): void {
-  console.log("[GATE_4_FISH_CONFIG]", {
+  console.warn("[GATE_4_FISH_CONFIG]", {
     hasKey: !!process.env.FISH_AUDIO_API_KEY || !!process.env.FISH_API_KEY,
     modelTier: fishModelTier(),
     referenceId: fishReferenceId() ?? "NONE",
@@ -75,7 +75,7 @@ function logFishRequest(input: {
   referenceBytes?: number[];
   totalBodyBytes: number;
 }): void {
-  console.log("[GATE_4_FISH_REQUEST_PAYLOAD]:", {
+  console.warn("[GATE_4_FISH_REQUEST_PAYLOAD]:", {
     endpoint: FISH_TTS_URL,
     headers: {
       Authorization: "Bearer [REDACTED]",
@@ -204,10 +204,10 @@ export async function convertVocalsWithStems(input: {
   }
 
   const apiKey = fishApiKey();
-  console.log("[FISH_AUDIO_DISPATCH] Processing vocal refinement...");
+  console.warn("[FISH_AUDIO_DISPATCH] Processing vocal refinement...");
   logFishConfig();
   logPipelineStep("vocals");
-  console.log("[GATE_4_START_FETCH]", {
+  console.warn("[GATE_4_START_FETCH]", {
     contentLength: requestBody.byteLength,
     contentType,
   });
@@ -223,7 +223,7 @@ export async function convertVocalsWithStems(input: {
       body: Buffer.from(requestBody),
       signal: AbortSignal.timeout(FISH_REQUEST_TIMEOUT_MS),
     });
-    console.log("[GATE_4_FETCH_STATUS]", response.status, response.statusText);
+    console.warn("[GATE_4_FETCH_STATUS]", response.status, response.statusText);
   } catch (error) {
     recordPipelineFailure("vocals", error);
     logFailedStudioGate(error);
