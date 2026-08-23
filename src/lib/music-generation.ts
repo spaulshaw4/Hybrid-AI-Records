@@ -82,10 +82,19 @@ export const SUNO_TASK_URL = SONIC_PRIMARY_TASK_URL;
 export const AIMUSICAPI_HEADER_FORMAT = "Authorization: Bearer";
 /** Minimum abort window for Sonic create + poll HTTP calls. */
 export const AIMUSICAPI_FETCH_TIMEOUT_MS = 60_000;
-/** Locked Sonic v5 model id. Supports vocal_gender. */
+/** Locked Sonic v5 model id. MusicAPI names its v5 model this way. */
 export const SONIC_MODEL = "sonic-v5" as const;
+/**
+ * AIMusicAPI's equivalent of Sonic v5. Only the `chirp-*` names accept
+ * `vocal_gender` there, so the model id has to follow the host.
+ */
+export const AIMUSICAPI_MODEL = "chirp-v5" as const;
 /** @deprecated Use SONIC_MODEL. */
 export const SUNO_MODEL = SONIC_MODEL;
+
+export function sonicModelForHost(endpoint: string): string {
+  return endpoint.startsWith(AIMUSICAPI_BASE_URL) ? AIMUSICAPI_MODEL : SONIC_MODEL;
+}
 
 export type SonicModel = typeof SONIC_MODEL;
 
@@ -475,23 +484,24 @@ async function postSonicCreate(
   const trackTitle = payload.title;
   const vocalGender = normalizeVocalGender(payload.vocal_gender);
 
-  const dispatchPayload: Record<string, unknown> = {
+  const buildBody = (endpoint: string): Record<string, unknown> => ({
     custom_mode: true,
-    mv: "sonic-v5",
+    mv: sonicModelForHost(endpoint),
     prompt: lyricsPrompt,
     tags: styleTags,
     title: trackTitle,
     ...(vocalGender ? { vocal_gender: vocalGender } : {}),
-  };
+  });
 
-  console.log("[AIMUSICAPI_DISPATCH]", JSON.stringify(dispatchPayload, null, 2));
-  console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
   logAuthDiagnostic(apiKey);
 
   const endpoints = [SONIC_PRIMARY_CREATE_URL, SONIC_FALLBACK_CREATE_URL];
   let lastError: unknown = null;
 
   for (const endpoint of endpoints) {
+    const dispatchPayload = buildBody(endpoint);
+    console.log("[AIMUSICAPI_DISPATCH]", JSON.stringify(dispatchPayload, null, 2));
+    console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
     logAimusicRequest(endpoint, apiKey);
     try {
       const response = await globalThis.fetch(endpoint, {

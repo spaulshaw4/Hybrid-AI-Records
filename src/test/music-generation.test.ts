@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetPipelineBreakers } from "@/lib/pipeline-breaker";
 import {
   AIMUSICAPI_HEADER_FORMAT,
+  AIMUSICAPI_MODEL,
   generateStudioTrack,
+  MUSICAPI_CREATE_URL,
   musicApiKey,
   SONIC_CREATE_URL,
   SONIC_TASK_URL,
@@ -64,6 +66,37 @@ describe("MusicAPI sonic workflow", () => {
     return fetchMock;
   }
 
+  it("sends sonic-v5 when the request falls back to the MusicAPI host", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async (url: string) =>
+      url.startsWith(SONIC_CREATE_URL)
+        ? jsonResponse({ error: "not found" }, 404)
+        : jsonResponse({ message: "success", task_id: "task-fallback" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateStudioTrack({
+      genre: "Pop",
+      vocalGender: "Male",
+      lyrics: "[Chorus]\nGo",
+    });
+
+    const [primaryUrl] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [fallbackUrl, fallbackInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(primaryUrl).toBe(SONIC_CREATE_URL);
+    expect(fallbackUrl).toBe(MUSICAPI_CREATE_URL);
+    const primaryBody = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    expect(primaryBody.mv).toBe(AIMUSICAPI_MODEL);
+    const fallbackBody = JSON.parse(String(fallbackInit.body)) as Record<string, unknown>;
+    expect(fallbackBody.mv).toBe("sonic-v5");
+    expect(fallbackBody.vocal_gender).toBe("m");
+  });
+
   it("POSTs create_music with lyrics in prompt and style in tags", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
@@ -98,7 +131,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers.Authorization).toBe("Bearer test-music-key");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.mv).toBe("sonic-v5");
+    expect(body.mv).toBe(AIMUSICAPI_MODEL);
     expect(body.custom_mode).toBe(true);
     expect(body.vocal_gender).toBe("m");
     expect(body).not.toHaveProperty("customMode");
@@ -109,11 +142,11 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
     expect(log).toHaveBeenCalledWith(
       "[EXACT_OUTBOUND_BODY]",
-      expect.stringContaining('"mv": "sonic-v5"'),
+      expect.stringContaining(`"mv": "${AIMUSICAPI_MODEL}"`),
     );
     expect(log).toHaveBeenCalledWith(
       "[AIMUSICAPI_DISPATCH]",
-      expect.stringContaining('"mv": "sonic-v5"'),
+      expect.stringContaining(`"mv": "${AIMUSICAPI_MODEL}"`),
     );
     expect(log).toHaveBeenCalledWith("[MUSICAPI_DISPATCH]", {
       url: SONIC_CREATE_URL,
@@ -289,7 +322,7 @@ describe("MusicAPI sonic workflow", () => {
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
-    expect(body.mv).toBe("sonic-v5");
+    expect(body.mv).toBe(AIMUSICAPI_MODEL);
     expect(body.vocal_gender).toBe("f");
     expect(body.tags).toEqual(expect.stringContaining("female vocals"));
   });
@@ -311,7 +344,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(body).not.toHaveProperty("vocal_gender");
   });
 
-  it("locks mv to sonic-v5 even when a legacy model is requested", async () => {
+  it("ignores a legacy mv and sends the host's own model", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -329,12 +362,12 @@ describe("MusicAPI sonic workflow", () => {
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
-    expect(body.mv).toBe("sonic-v5");
+    expect(body.mv).toBe(AIMUSICAPI_MODEL);
     expect(body.vocal_gender).toBe("m");
     expect(body.tags).toEqual(expect.stringContaining("male vocals"));
     expect(log).toHaveBeenCalledWith(
       "[AIMUSICAPI_DISPATCH]",
-      expect.stringContaining('"mv": "sonic-v5"'),
+      expect.stringContaining(`"mv": "${AIMUSICAPI_MODEL}"`),
     );
   });
 
@@ -356,7 +389,7 @@ describe("MusicAPI sonic workflow", () => {
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
     expect(body.vocal_gender).toBe("m");
-    expect(body.mv).toBe("sonic-v5");
+    expect(body.mv).toBe(AIMUSICAPI_MODEL);
   });
 
   it("polls GET /sonic/task/:id every 4s until data.status is succeeded", async () => {
