@@ -9,7 +9,6 @@ import { GATE_TIMEOUTS_MS, withTimeout } from "@/lib/pipeline-gate.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
 import {
   generateDefaultStructure,
-  fetchRawVocalFallback,
 } from "@/lib/pipeline-fallbacks.server";
 import { ResidueCleanup } from "@/lib/six-gate-landing.server";
 import { backingStemUrl } from "@/lib/stem-urls";
@@ -106,30 +105,53 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "Unknown error");
 }
 
+/**
+ * Strip inherited Gate 1 circuit-breaker wording (e.g. "timed out after 150s")
+ * so Gate 4/5 failures never surface as AIMusicAPI timeouts.
+ */
+function sanitizeInheritedGate1Message(message: string): string {
+  return message
+    .replace(/\[Circuit Breaker\]\s*Gate\s*1[^\n]*/gi, "")
+    .replace(/Gate\s*1\s*\(AIMusicAPI[^)]*\)/gi, "")
+    .replace(/AIMusicAPI[^.\n]*/gi, "")
+    .replace(/timed out after 150s/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function gateStepError(gate: 4 | 5, stepLabel: string, error: unknown): Error {
+  const cleaned = sanitizeInheritedGate1Message(errorMessage(error));
+  return new Error(
+    `[Gate ${gate}] ${stepLabel}${cleaned ? `: ${cleaned}` : " failed"}`,
+  );
+}
+
 /** Map an error onto the fatal gate for terminal logging / abort landing. */
-export function classifyPipelineFailedGate(error: unknown): 1 | 2 | 3 | 4 | 5 | 6 {
+export function classifyPipelineFailedGate(
+  error: unknown,
+  currentStep?: string,
+): 1 | 2 | 3 | 4 | 5 | 6 {
+  // Prefer the active soft step so nested throws never inherit Gate 1 labels.
+  if (currentStep === "vocals") return 5;
+  if (currentStep === "master") return 6;
+  if (currentStep === "demux" || currentStep === "stems") return 4;
+  if (currentStep === "cwalo") return 3;
+  if (currentStep === "vault") return 2;
+
   const message = errorMessage(error);
   const gateMatch = message.match(/Gate\s*([1-6])(?:\/6)?/i);
   if (gateMatch) {
     const n = Number(gateMatch[1]) as 1 | 2 | 3 | 4 | 5 | 6;
     if (n >= 1 && n <= 6) return n;
   }
-  if (/AIMusicAPI|empty audio buffer|Gate 1/i.test(message)) return 1;
+  if (/AIMusicAPI|empty audio buffer|Gate 1/i.test(message) && !/Gate\s*[45]/i.test(message)) {
+    return 1;
+  }
   if (/Supabase|vault|public HTTPS CDN|Gate 2/i.test(message)) return 2;
   if (/CWALO|Gate 3/i.test(message)) return 3;
-  if (/Demucs|stem separation|Gate 4/i.test(message)) return 4;
+  if (/Demucs|demux|stem separation|Gate 4/i.test(message)) return 4;
   if (/Fish|vocal conversion|Gate 5/i.test(message)) return 5;
   return 6;
-}
-
-function isHttpOrTimeoutFailure(error: unknown): boolean {
-  const message = errorMessage(error);
-  return (
-    /timed\s?out|timeout|Circuit Breaker/i.test(message) ||
-    /HTTP\s*[45]\d\d/i.test(message) ||
-    /\b(401|403|404|408|429|500|502|503|504)\b/.test(message) ||
-    /4xx|5xx|status\s*[45]\d\d/i.test(message)
-  );
 }
 
 async function applyDefaultCwaloStructure(
@@ -185,6 +207,8 @@ export async function executePipeline(
   const fallbacksUsed: string[] = [];
   const wantsVocals = !input.instrumental && Boolean(input.lyrics?.trim());
   let activeGate: 1 | 2 | 3 | 4 | 5 | 6 = 1;
+  /** Soft progress step — Gate 4=`demux`, Gate 5=`vocals` (never inherit Gate 1 labels). */
+  let currentStep: string = "music";
 
   try {
     try {
@@ -201,6 +225,7 @@ export async function executePipeline(
 
       // ── Gate 1: Base Generation (AIMusicAPI) ─────────────────────────────
       activeGate = 1;
+      currentStep = "music";
       telemetry = safeBumpTelemetry(telemetry, 1, "gate_1_generating");
       await beforeGate({ trackId, gate: 1, stage: "gate_1_generating" });
 
@@ -242,6 +267,7 @@ export async function executePipeline(
 
       // ── Gate 2: Supabase Storage & Public CDN Link ───────────────────────
       activeGate = 2;
+      currentStep = "vault";
       telemetry = safeBumpTelemetry(telemetry, 2, "gate_2_vaulting");
       await beforeGate({ trackId, gate: 2, stage: "gate_2_vaulting" });
       const rawPath = `raw/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp3`;
@@ -274,6 +300,7 @@ export async function executePipeline(
 
       // ── Gate 3: CWALO with Fallback Detour ───────────────────────────────
       activeGate = 3;
+      currentStep = "cwalo";
       telemetry = safeBumpTelemetry(telemetry, 3, "gate_3_analyzing");
       await beforeGate({ trackId, gate: 3, stage: "gate_3_analyzing" });
       let cwaloOutput: Gate3Result | null = null;
@@ -315,7 +342,7 @@ export async function executePipeline(
         fallbacksUsed.push(FALLBACK_CWALO_DEFAULT_STRUCTURE);
         telemetry = safeRecordFallback(telemetry, FALLBACK_CWALO_DEFAULT_STRUCTURE);
       }
-      // Soft-fail guarantee: never proceed without a structure object.
+      // Soft-fail guarantee: CWALO must never block Demucs — always continue to Gate 4.
       if (!cwaloOutput || !masterPlan) {
         const defaults = await applyDefaultCwaloStructure(trackId, input.durationSeconds);
         cwaloOutput = defaults.gate3;
@@ -324,102 +351,181 @@ export async function executePipeline(
       }
       await afterGate(
         { trackId, gate: 3, stage: "gate_3_analyzing" },
-        cwaloOutput.isFallback ? "default structure" : "cwalo ok",
+        cwaloOutput.isFallback ? "default structure → Gate 4" : "cwalo ok → Gate 4",
       );
 
-      // ── Gate 4: Demucs ───────────────────────────────────────────────────
+      // ── Gate 4: Demucs (ryan5453/demucs) — ALWAYS after Gate 2 CDN URL ───
+      // Runs whether Gate 3 succeeded or soft-failed. Must complete before Gate 5.
       activeGate = 4;
+      currentStep = "demux";
       telemetry = safeBumpTelemetry(telemetry, 4, "gate_4_splitting");
       await beforeGate({ trackId, gate: 4, stage: "gate_4_splitting" });
-      const { separateStemsFromPublicUrl } = await import("@/lib/stems.server");
-      let demucsOutput: Awaited<ReturnType<typeof separateStemsFromPublicUrl>>;
+      console.log(
+        `[Gate 4/6] Demucs stem separation (ryan5453/demucs) on Gate 2 CDN URL…`,
+      );
+
+      let vocalStemUrl: string | null = null;
+      let instrumentalStemUrl: string | null = null;
+
       try {
-        demucsOutput = await withTimeout(
+        const { separateStemsFromPublicUrl } = await import("@/lib/stems.server");
+        if (!isPublicHttpAudioUrl(publicAudioUrl)) {
+          throw new Error("Gate 2 public CDN URL is required before Demucs.");
+        }
+        const demucsOutput = await withTimeout(
           separateStemsFromPublicUrl(publicAudioUrl),
           GATE_TIMEOUTS_MS[4],
-          "Gate 4 (Demucs)",
+          "Gate 4 (Demucs / ryan5453/demucs)",
         );
+        vocalStemUrl = demucsOutput.vocals;
+        instrumentalStemUrl = backingStemUrl(demucsOutput);
       } catch (err) {
-        throw new Error(`[Gate 4 Error] Demucs stem separation failed: ${errorMessage(err)}`);
-      }
-      const vocalStemUrl = demucsOutput.vocals;
-      const backingStemUrlValue = backingStemUrl(demucsOutput);
-      if (wantsVocals && (!vocalStemUrl || !backingStemUrlValue)) {
+        // Never surface Gate 1's 150s AIMusicAPI breaker wording here.
         throw new Error(
-          "[Gate 4 Error] Missing split stems in Demucs payload (vocals / no_vocals).",
+          `[Gate 4] Stem Separation Failed${
+            sanitizeInheritedGate1Message(errorMessage(err))
+              ? `: ${sanitizeInheritedGate1Message(errorMessage(err))}`
+              : ""
+          }`,
         );
       }
-      await afterGate({ trackId, gate: 4, stage: "gate_4_splitting" }, "stems ready");
+
+      if (wantsVocals && !vocalStemUrl) {
+        throw new Error(
+          "[Gate 4] Stem Separation Failed: Demucs did not return an isolated vocal stem URL.",
+        );
+      }
+      if (wantsVocals && !instrumentalStemUrl) {
+        console.warn(
+          "[Gate 4] Missing instrumental/no_vocals stem — falling back to Gate 2 master mix for remux backing.",
+        );
+        instrumentalStemUrl = publicAudioUrl;
+      }
+      if (!wantsVocals) {
+        // Instrumental renders: backing is Demucs no_vocals when present, else master mix.
+        instrumentalStemUrl = instrumentalStemUrl ?? publicAudioUrl;
+      }
+
+      await afterGate(
+        { trackId, gate: 4, stage: "gate_4_splitting" },
+        `vocals=${Boolean(vocalStemUrl)} instrumental=${Boolean(instrumentalStemUrl)}`,
+      );
 
       // ── Gate 5: Fish Audio with Fallback Detour ──────────────────────────
+      // Requires Gate 4 vocal stem. Never pass null/undefined into Fish Audio.
       activeGate = 5;
+      currentStep = "vocals";
       telemetry = safeBumpTelemetry(telemetry, 5, "gate_5_converting");
       await beforeGate({ trackId, gate: 5, stage: "gate_5_converting" });
-      let mixVocalUrl: string | null = null;
-      let convertedVocalBuffer: Buffer | null = null;
+      try {
+        const { reportPipelineProgress, PIPELINE_PROGRESS } = await import(
+          "@/lib/pipeline-progress"
+        );
+        reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
+      } catch {
+        /* progress is best-effort */
+      }
 
-      if (wantsVocals && vocalStemUrl) {
+      let mixVocalUrl: string | null = null;
+      let vocalAudioBuffer: Buffer | null = null;
+      const mixInstrumentalUrl = instrumentalStemUrl ?? publicAudioUrl;
+
+      if (wantsVocals) {
+        // Gate 5 pre-flight: valid Gate 4 vocal URL/buffer required before Fish.
+        if (!vocalStemUrl || !isPublicHttpAudioUrl(vocalStemUrl)) {
+          throw new Error(
+            "[Gate 4] Stem Separation Failed: no isolated vocal stem available for Fish Audio.",
+          );
+        }
+
+        let rawDemucsVocalBuffer: Buffer;
         try {
-          const { convertVocalsWithStems } = await import("@/lib/fish-tts.server");
-          const isolatedVocal = await downloadBuffer(vocalStemUrl);
-          residue.trackBuffer(isolatedVocal);
-          const converted = await withTimeout(
-            convertVocalsWithStems({
-              lyrics: input.lyrics ?? input.prompt,
-              isolatedVocal,
-              referenceAudio: input.referenceSampleUrl
-                ? await downloadBuffer(input.referenceSampleUrl)
-                : undefined,
-              audioFormat: input.audioFormat,
-              title: `${input.title ?? "Studio"} vocals`,
-              userId: input.userId,
-              taskId: `${trackId}-fish-vocals`,
-              language: input.language,
-              customLanguage: input.customLanguage,
-            }),
-            GATE_TIMEOUTS_MS[5],
-            "Gate 5 (Fish Audio)",
-          );
-          mixVocalUrl = converted.tracks.find((t) => t.audioUrl)?.audioUrl ?? null;
-          if (!mixVocalUrl) {
-            throw new Error("Empty vocal conversion buffer (no audioUrl).");
-          }
+          rawDemucsVocalBuffer = await downloadBuffer(vocalStemUrl);
+          residue.trackBuffer(rawDemucsVocalBuffer);
         } catch (err) {
-          const detail = errorMessage(err);
-          const kind = isHttpOrTimeoutFailure(err)
-            ? "timeout/4xx/5xx"
-            : "conversion failure";
+          throw gateStepError(4, "Stem Separation Failed (vocal download)", err);
+        }
+
+        if (!rawDemucsVocalBuffer.byteLength) {
+          // Soft remux path: original Gate 2 master mix instead of null into Fish.
           console.warn(
-            `[Gate 5 Fallback] Fish Audio ${kind}: ${detail}. ` +
-              `Falling back to fetchRawVocalFallback() (raw Demucs vocal stem).`,
+            "[Gate 5] Empty Demucs vocal buffer — using Gate 2 master mix as vocal fallback for remux.",
           );
+          vocalAudioBuffer = null;
+          mixVocalUrl = publicAudioUrl;
+        } else {
+          vocalAudioBuffer = rawDemucsVocalBuffer;
+          mixVocalUrl = vocalStemUrl;
+
           try {
-            const fallbackResult = await fetchRawVocalFallback(vocalStemUrl, trackId);
-            convertedVocalBuffer = fallbackResult.convertedVocalBuffer;
-            residue.trackBuffer(convertedVocalBuffer);
+            const { convertVocalsWithStems } = await import("@/lib/fish-tts.server");
+            const voiceModelId = `${trackId}-fish-vocals`;
+            const converted = await withTimeout(
+              (async () => {
+                const referenceAudio = input.referenceSampleUrl
+                  ? await downloadBuffer(input.referenceSampleUrl)
+                  : undefined;
+                return convertVocalsWithStems({
+                  lyrics: input.lyrics ?? input.prompt,
+                  isolatedVocal: rawDemucsVocalBuffer,
+                  referenceAudio,
+                  audioFormat: input.audioFormat,
+                  title: `${input.title ?? "Studio"} vocals`,
+                  userId: input.userId,
+                  taskId: voiceModelId,
+                  language: input.language,
+                  customLanguage: input.customLanguage,
+                });
+              })(),
+              GATE_TIMEOUTS_MS[5],
+              "Gate 5 (Fish Audio)",
+            );
+            const fishUrl = converted.tracks.find((t) => t.audioUrl)?.audioUrl ?? null;
+            if (!fishUrl) {
+              throw new Error("[Gate 5] Fish Audio returned an empty vocal conversion buffer.");
+            }
+            mixVocalUrl = fishUrl;
+            try {
+              vocalAudioBuffer = await downloadBuffer(fishUrl);
+              residue.trackBuffer(vocalAudioBuffer);
+            } catch {
+              vocalAudioBuffer = rawDemucsVocalBuffer;
+            }
+          } catch (err) {
+            const detail = sanitizeInheritedGate1Message(
+              err instanceof Error ? err.message : String(err ?? "unknown"),
+            );
+            console.warn(
+              "[Gate 5] Fish Audio conversion failed/timed out, falling back to raw vocal stem:",
+              detail || errorMessage(err),
+            );
+            vocalAudioBuffer = rawDemucsVocalBuffer;
             mixVocalUrl = vocalStemUrl;
             fallbacksUsed.push(FALLBACK_FISH_AUDIO_RAW_VOCALS);
             telemetry = safeRecordFallback(telemetry, FALLBACK_FISH_AUDIO_RAW_VOCALS);
-          } catch (fallbackErr) {
-            throw new Error(
-              `[Gate 5 Error] Fish Audio failed and Demucs vocal fallback also failed: ${errorMessage(fallbackErr)}`,
-            );
           }
         }
       }
 
-      const mixInstrumentalUrl =
-        backingStemUrlValue ?? (wantsVocals ? null : publicAudioUrl);
       if (wantsVocals && (!mixVocalUrl || !mixInstrumentalUrl)) {
-        throw new Error("[Gate 5 Error] Missing vocal or backing stem for remux.");
+        throw new Error(
+          "[Gate 4] Stem Separation Failed: missing vocal or instrumental stem for remux.",
+        );
       }
       await afterGate(
         { trackId, gate: 5, stage: "gate_5_converting" },
-        mixVocalUrl ? "vocals ready" : "instrumental path",
+        mixVocalUrl
+          ? fallbacksUsed.includes(FALLBACK_FISH_AUDIO_RAW_VOCALS)
+            ? "raw Demucs vocal → Gate 6"
+            : mixVocalUrl === publicAudioUrl
+              ? "master-mix vocal fallback → Gate 6"
+              : "Fish vocals ready"
+          : "instrumental path",
       );
 
       // ── Gate 6: FFmpeg Mastering & Final Vault Upload ────────────────────
       activeGate = 6;
+      currentStep = "master";
       telemetry = safeBumpTelemetry(telemetry, 6, "gate_6_mastering");
       await beforeGate({ trackId, gate: 6, stage: "gate_6_mastering" });
       const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
@@ -513,8 +619,12 @@ export async function executePipeline(
       if (error instanceof TrackLockConflictError || error instanceof PipelineAbortError) {
         throw error;
       }
-      const failedGate = classifyPipelineFailedGate(error) || activeGate;
-      const message = errorMessage(error);
+      const failedGate = classifyPipelineFailedGate(error, currentStep) || activeGate;
+      const rawMessage = errorMessage(error);
+      const message =
+        failedGate === 1
+          ? rawMessage
+          : sanitizeInheritedGate1Message(rawMessage) || rawMessage;
       await runSafeHook("pipeline fail log", () => {
         console.error(
           `[Pipeline Failed] Gate ${failedGate}/6 aborted for track ${trackId}: ${message}`,
