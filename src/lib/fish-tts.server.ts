@@ -29,11 +29,81 @@ import type { ApiframeResult } from "@/lib/apiframe.server";
 
 export const FISH_AUDIO_API_BASE = "https://api.fish.audio";
 export const FISH_TTS_URL = `${FISH_AUDIO_API_BASE}/v1/tts`;
+/** Model tier for the `model` header. Enum: s1 | s2-pro | s2.1-pro | s2.1-pro-free. */
 const FISH_MODEL = "s2-pro";
 const VOICE_SAMPLE_BUCKET = "voice-samples";
 
 function fishApiKey(): string {
   return requireFishApiKey();
+}
+
+/** Model tier sent in the `model` header. */
+function fishModelTier(): string {
+  return process.env.FISH_AUDIO_MODEL_TIER?.trim() || FISH_MODEL;
+}
+
+/**
+ * A saved voice model id from `POST /model`. When set, TTS takes the plain JSON
+ * path with `reference_id` and sends no audio at all. Without one, the only way
+ * to reach the artist's voice is instant cloning, which requires inline
+ * reference audio over MessagePack — JSON cannot carry the binary.
+ */
+function fishReferenceId(): string | undefined {
+  return (
+    process.env.FISH_AUDIO_REFERENCE_ID?.trim() ||
+    process.env.FISH_AUDIO_MODEL_ID?.trim() ||
+    undefined
+  );
+}
+
+function logFishConfig(): void {
+  console.log("[GATE_4_FISH_CONFIG]", {
+    hasKey: !!process.env.FISH_AUDIO_API_KEY || !!process.env.FISH_API_KEY,
+    modelTier: fishModelTier(),
+    referenceId: fishReferenceId() ?? "NONE",
+  });
+}
+
+/** Logs shape and byte sizes only — a msgpack body carries raw reference audio. */
+function logFishRequest(input: {
+  contentType: string;
+  textLength: number;
+  format: string;
+  referenceId?: string;
+  referenceBytes?: number[];
+  totalBodyBytes: number;
+}): void {
+  console.log("[GATE_4_FISH_REQUEST_PAYLOAD]:", {
+    endpoint: FISH_TTS_URL,
+    headers: {
+      Authorization: "Bearer [REDACTED]",
+      "Content-Type": input.contentType,
+      model: fishModelTier(),
+    },
+    body: {
+      textLength: input.textLength,
+      format: input.format,
+      referenceId: input.referenceId ?? "NONE",
+      referenceCount: input.referenceBytes?.length ?? 0,
+      referenceBytes: input.referenceBytes ?? [],
+      totalBodyBytes: input.totalBodyBytes,
+    },
+  });
+}
+
+function logFishError(input: {
+  status?: number;
+  statusText?: string;
+  data?: string;
+  error?: unknown;
+}): void {
+  console.error("[GATE_4_FISH_ERROR_DETAILS]:", {
+    status: input.status,
+    statusText: input.statusText,
+    data:
+      input.data ??
+      (input.error instanceof Error ? input.error.message : String(input.error ?? "")),
+  });
 }
 
 async function loadReferenceAudio(sampleUrl: string): Promise<Uint8Array> {
@@ -87,18 +157,53 @@ export async function convertVocalsWithStems(input: {
   logPreConditionPassed("vocals", "target lyrics valid");
 
   const format = input.audioFormat === "wav" ? "wav" : "mp3";
-  const extraReferences = input.referenceAudio ? [input.referenceAudio] : [];
-  const body = encode(
-    buildVocalClonePayload({
+  const referenceId = fishReferenceId();
+
+  // A saved voice model needs no audio on the wire, so take the plain JSON
+  // contract. Instant cloning has to ship the reference bytes, which only
+  // MessagePack can carry.
+  let contentType: string;
+  let requestBody: Uint8Array;
+  if (referenceId) {
+    contentType = "application/json";
+    requestBody = new TextEncoder().encode(
+      JSON.stringify({ text, reference_id: referenceId, format }),
+    );
+    logFishRequest({
+      contentType,
+      textLength: text.length,
+      format,
+      referenceId,
+      totalBodyBytes: requestBody.byteLength,
+    });
+  } else {
+    const { trimVocalReference } = await import("@/lib/vocal-reference-trim.server");
+    const isolatedVocal = input.isolatedVocal
+      ? await trimVocalReference(input.isolatedVocal)
+      : undefined;
+    const extraReferences = input.referenceAudio
+      ? [await trimVocalReference(input.referenceAudio)]
+      : [];
+    const payload = buildVocalClonePayload({
       text,
-      audio: input.isolatedVocal,
+      audio: isolatedVocal,
       extraReferences,
       format,
-    }),
-  );
+    });
+    contentType = "application/msgpack";
+    requestBody = encode(payload);
+    logFishRequest({
+      contentType,
+      textLength: payload.text.length,
+      format: payload.format,
+      referenceBytes: payload.references?.map((ref) => ref.audio.byteLength) ?? [],
+      totalBodyBytes: requestBody.byteLength,
+    });
+  }
 
   const apiKey = fishApiKey();
   console.log("[FISH_AUDIO_DISPATCH] Processing vocal refinement...");
+  logFishConfig();
   logPipelineStep("vocals");
   let response: Response | undefined;
   try {
@@ -106,15 +211,16 @@ export async function convertVocalsWithStems(input: {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/msgpack",
-        model: FISH_MODEL,
+        "Content-Type": contentType,
+        model: fishModelTier(),
       },
-      body: Buffer.from(body),
+      body: Buffer.from(requestBody),
       signal: AbortSignal.timeout(180_000),
     });
   } catch (error) {
     recordPipelineFailure("vocals", error);
     logFailedStudioGate(error);
+    logFishError({ error });
     logPipelineStepError("vocals", error);
     throw new Error(`Voice cloning is unreachable — ${describeFetchError(error)}.`);
   }
@@ -123,6 +229,7 @@ export async function convertVocalsWithStems(input: {
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
     recordPipelineHttp("vocals", response.status);
+    logFishError({ status: response.status, statusText: response.statusText, data: errorBody });
     logPipelineStepError("vocals", new Error(cloneErrorMessage(response.status)), {
       status: response.status,
       body: errorBody,
