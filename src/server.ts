@@ -70,6 +70,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/ai/optimize-prompt") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/ai/optimize-prompt/route");
+        return POST(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response, request);

@@ -1533,6 +1533,60 @@ export function AudioStudio() {
     }
   }
 
+  /**
+   * Gemini 2.5 Flash (Replicate) → 100K Prompt Book style string → stylePrompt state.
+   * That value is Gate 1 `tags` on generate when the box is filled.
+   */
+  async function handleOptimizeStyle() {
+    if (aiBusy) return;
+    const userText = stylePrompt.trim() || styleLine;
+    if (userText.length < 2) {
+      toast.error("Type a style concept in the Style Prompt box first.");
+      return;
+    }
+    setAiBusy("style");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 70_000);
+    try {
+      const res = await fetch("/api/ai/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userText, bpm: clampBpm(bpm) }),
+        signal: controller.signal,
+      });
+      const data = (await res.json()) as {
+        optimizedPrompt?: string;
+        prompt?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(data.error || "Style optimization failed.");
+        return;
+      }
+      const next = (data.optimizedPrompt || data.prompt || "").trim();
+      if (!next) {
+        toast.error("Optimizer returned an empty prompt. Try again.");
+        return;
+      }
+      setStylePrompt(next);
+      toast.success("Style prompt optimized.");
+    } catch (err) {
+      const timedOut =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && /aborted|timed out/i.test(err.message));
+      toast.error(
+        timedOut
+          ? "Style optimization timed out. Try again."
+          : err instanceof Error
+            ? err.message
+            : "Style optimization failed.",
+      );
+    } finally {
+      window.clearTimeout(timeoutId);
+      setAiBusy(null);
+    }
+  }
+
   /** Language picker — selection writes `language` immediately and never submits the form. */
   function applyLanguage(value: string) {
     if (isValidLyricLanguage(value)) {
@@ -3185,7 +3239,7 @@ export function AudioStudio() {
           {studioStep === 1 ? (
           <section className="relative overflow-visible rounded-xl border border-zinc-800 bg-zinc-950 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
-              Style &amp; length
+              1. General Style
             </h3>
             <div className="space-y-4 pb-4">
             <div className="space-y-2">
@@ -3369,6 +3423,22 @@ export function AudioStudio() {
                   placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
                   className="resize-y border border-zinc-800 bg-zinc-950 text-sm text-zinc-100 placeholder:text-muted-foreground placeholder-dim shadow-none focus-visible:border-primary focus-visible:ring-primary"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={aiBusy !== null}
+                  onClick={() => void handleOptimizeStyle()}
+                  className="w-full justify-center gap-2 border-zinc-800 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-zinc-100"
+                >
+                  {aiBusy === "style" ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                      Optimizing…
+                    </>
+                  ) : (
+                    <>⚡ Optimize Style</>
+                  )}
+                </Button>
                 {styleTagsPreview ? (
                   <p className="text-xs text-muted-foreground">
                     Engine tags: <span className="text-foreground">{styleTagsPreview}</span>
