@@ -49,26 +49,35 @@ import { logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.serv
 import { assertLyricsGate, probeAudioUrlReachable } from "@/lib/studio-pipeline-gates";
 import { logFailedStudioGate, StudioPipelineError } from "@/lib/studio-pipeline-error";
 
-/** Primary MusicAPI host (active credit balance). */
+/** MusicAPI host — separate vendor, separate key from AIMusicAPI. */
 export const MUSICAPI_BASE_URL = "https://api.musicapi.ai";
-/** Fallback AIMusicAPI host. */
+/** AIMusicAPI host — where the configured AIMUSICAPI_KEY is valid. */
 export const AIMUSICAPI_BASE_URL = "https://api.aimusicapi.ai";
-/** Primary Sonic create endpoint. */
+/** MusicAPI Sonic create endpoint. */
 export const MUSICAPI_CREATE_URL = `${MUSICAPI_BASE_URL}/api/v1/sonic/create`;
-/** Fallback Sonic create endpoint. */
+/** AIMusicAPI Sonic create endpoint. */
 export const AIMUSICAPI_CREATE_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/create`;
-/** Primary Sonic task poll base (append /${taskId}). */
+/** MusicAPI Sonic task poll base (append /${taskId}). */
 export const MUSICAPI_TASK_URL = `${MUSICAPI_BASE_URL}/api/v1/sonic/task`;
-/** Fallback Sonic task poll base. */
+/** AIMusicAPI Sonic task poll base. */
 export const AIMUSICAPI_TASK_URL = `${AIMUSICAPI_BASE_URL}/api/v1/sonic/task`;
+/**
+ * Create and poll must target the same host: a task id minted by one vendor is
+ * meaningless to the other. AIMusicAPI is primary because that is the account
+ * the configured key belongs to.
+ */
+export const SONIC_PRIMARY_CREATE_URL = AIMUSICAPI_CREATE_URL;
+export const SONIC_FALLBACK_CREATE_URL = MUSICAPI_CREATE_URL;
+export const SONIC_PRIMARY_TASK_URL = AIMUSICAPI_TASK_URL;
+export const SONIC_FALLBACK_TASK_URL = MUSICAPI_TASK_URL;
 /** Canonical create URL (primary). */
-export const SONIC_CREATE_URL = MUSICAPI_CREATE_URL;
+export const SONIC_CREATE_URL = SONIC_PRIMARY_CREATE_URL;
 /** Canonical task URL (primary). */
-export const SONIC_TASK_URL = MUSICAPI_TASK_URL;
+export const SONIC_TASK_URL = SONIC_PRIMARY_TASK_URL;
 /** @deprecated Alias for create URL. */
-export const SUNO_CREATE_URL = MUSICAPI_CREATE_URL;
+export const SUNO_CREATE_URL = SONIC_PRIMARY_CREATE_URL;
 /** @deprecated Alias for task URL. */
-export const SUNO_TASK_URL = MUSICAPI_TASK_URL;
+export const SUNO_TASK_URL = SONIC_PRIMARY_TASK_URL;
 /** Official MusicAPI / AIMusicAPI auth scheme. */
 export const AIMUSICAPI_HEADER_FORMAT = "Authorization: Bearer";
 /** Minimum abort window for Sonic create + poll HTTP calls. */
@@ -479,7 +488,7 @@ async function postSonicCreate(
   console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
   logAuthDiagnostic(apiKey);
 
-  const endpoints = [MUSICAPI_CREATE_URL, AIMUSICAPI_CREATE_URL];
+  const endpoints = [SONIC_PRIMARY_CREATE_URL, SONIC_FALLBACK_CREATE_URL];
   let lastError: unknown = null;
 
   for (const endpoint of endpoints) {
@@ -508,10 +517,10 @@ async function postSonicCreate(
       // Fall back only on hard host/routing failures, not auth / validation errors.
       if (
         !response.ok &&
-        endpoint === MUSICAPI_CREATE_URL &&
+        endpoint === SONIC_PRIMARY_CREATE_URL &&
         (response.status === 404 || response.status === 502 || response.status === 503)
       ) {
-        console.warn("[MUSICAPI_DISPATCH] primary host failed — trying AIMusicAPI fallback");
+        console.warn("[MUSICAPI_DISPATCH] primary host failed — trying MusicAPI fallback");
         lastError = new Error(`Primary MusicAPI create failed (${response.status})`);
         continue;
       }
@@ -523,9 +532,9 @@ async function postSonicCreate(
     } catch (error) {
       if (isGenerationAborted(error)) throw error;
       lastError = error;
-      if (endpoint === MUSICAPI_CREATE_URL) {
+      if (endpoint === SONIC_PRIMARY_CREATE_URL) {
         console.warn(
-          "[MUSICAPI_DISPATCH] primary host unreachable — trying AIMusicAPI fallback",
+          "[MUSICAPI_DISPATCH] primary host unreachable — trying MusicAPI fallback",
           error instanceof Error ? error.message : error,
         );
         continue;
@@ -613,8 +622,8 @@ export async function fetchStudioTrackTask(
   throwIfAborted(abortSignal);
   const apiKey = getMusicApiKey();
   const pollEndpoints = [
-    `${MUSICAPI_TASK_URL}/${encodeURIComponent(taskId)}`,
-    `${AIMUSICAPI_TASK_URL}/${encodeURIComponent(taskId)}`,
+    `${SONIC_PRIMARY_TASK_URL}/${encodeURIComponent(taskId)}`,
+    `${SONIC_FALLBACK_TASK_URL}/${encodeURIComponent(taskId)}`,
   ];
   let response: Response | null = null;
   let raw: unknown = null;
@@ -634,10 +643,10 @@ export async function fetchStudioTrackTask(
 
       if (
         !response.ok &&
-        targetUrl.startsWith(MUSICAPI_TASK_URL) &&
+        targetUrl.startsWith(SONIC_PRIMARY_TASK_URL) &&
         (response.status === 404 || response.status === 502 || response.status === 503)
       ) {
-        console.warn("[MUSICAPI_DISPATCH] primary poll host failed — trying AIMusicAPI fallback");
+        console.warn("[MUSICAPI_DISPATCH] primary poll host failed — trying MusicAPI fallback");
         lastError = new Error(`Primary MusicAPI poll failed (${response.status})`);
         continue;
       }
@@ -645,9 +654,9 @@ export async function fetchStudioTrackTask(
     } catch (error) {
       if (isGenerationAborted(error)) throw error;
       lastError = error;
-      if (targetUrl.startsWith(MUSICAPI_TASK_URL)) {
+      if (targetUrl.startsWith(SONIC_PRIMARY_TASK_URL)) {
         console.warn(
-          "[MUSICAPI_DISPATCH] primary poll host unreachable — trying AIMusicAPI fallback",
+          "[MUSICAPI_DISPATCH] primary poll host unreachable — trying MusicAPI fallback",
           error instanceof Error ? error.message : error,
         );
         continue;
