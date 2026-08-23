@@ -116,8 +116,12 @@ const generateSchema = z.object({
   language: lyricLanguageFieldSchema,
   customLanguage: z.string().trim().max(60).default(""),
   customMode: z.boolean().default(false),
-  /** Sonic custom-mode tags — style / genre chips from the studio. */
-  tags: z.string().trim().max(600).optional(),
+  /**
+   * Sonic custom-mode tags: genre chips plus the artist's freeform style
+   * prompt, passed through verbatim. The ceiling is a transport guard only —
+   * never trim or rewrite descriptors the artist typed.
+   */
+  tags: z.string().trim().max(6000).optional(),
   /** Sonic model version. Studio Step 2 locks to sonic-v5. */
   mv: z.string().trim().max(40).optional(),
   model: z.enum(SUNO_MODELS).default("V4_5"),
@@ -129,8 +133,8 @@ const generateSchema = z.object({
   allowReslice: z.boolean().optional(),
   controls: controlsSchema.optional(),
   /** Core style/genre tags from the studio — not rewritten to a stock genre. */
-  genre: z.string().trim().max(600).optional(),
-  subGenre: z.string().trim().max(400).optional(),
+  genre: z.string().trim().max(6000).optional(),
+  subGenre: z.string().trim().max(6000).optional(),
   mood: z.string().trim().max(400).optional(),
   instruments: z.array(z.string().trim().min(1).max(80)).max(24).optional(),
   /** Default-AI vocal character (Aggressive Rock Vocal, Female Vocal, …). */

@@ -21,6 +21,8 @@ export type EngineDraft = {
   lyrics: string;
   title: string;
   styles: string[];
+  /** Freeform style descriptors typed by the artist. */
+  stylePrompt: string;
   withVocals: boolean;
   targetDuration: number;
   bpm: number;
@@ -71,6 +73,7 @@ export function readEngineDraft(defaults: EngineDraft): EngineDraft | null {
       lyrics: str(parsed.lyrics),
       title: str(parsed.title),
       styles: strList(parsed.styles),
+      stylePrompt: str(parsed.stylePrompt),
       withVocals: typeof parsed.withVocals === "boolean" ? parsed.withVocals : defaults.withVocals,
       targetDuration: num(parsed.targetDuration, defaults.targetDuration),
       bpm: num(parsed.bpm, defaults.bpm),

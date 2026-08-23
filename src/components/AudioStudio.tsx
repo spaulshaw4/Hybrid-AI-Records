@@ -111,7 +111,6 @@ import {
   formatLyricBlocks,
   vocalProfileLabel,
 } from "@/lib/vocal-presets";
-import { buildDynamicStylePrompt } from "@/lib/generation-style-prompt";
 import { isLocalVocalProfileId } from "@/lib/vocal-profile-store";
 import { uploadVoiceSample } from "@/lib/voice-sample-upload";
 import {
@@ -1209,6 +1208,8 @@ export function AudioStudio() {
   const [lyricWarnings, setLyricWarnings] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [styles, setStyles] = useState<string[]>([]);
+  /** Freeform descriptors sent to the engine verbatim, alongside any chips. */
+  const [stylePrompt, setStylePrompt] = useState("");
   const [genreSearch, setGenreSearch] = useState("");
   const [vocalSearch, setVocalSearch] = useState("");
   const [vocalActiveIndex, setVocalActiveIndex] = useState(-1);
@@ -1261,6 +1262,7 @@ export function AudioStudio() {
     setLyrics(draft.lyrics);
     setTitle(draft.title);
     setStyles(draft.styles);
+    setStylePrompt(draft.stylePrompt);
     setWithVocals(draft.withVocals);
     setTargetDuration(draft.targetDuration);
     setBpm(draft.bpm);
@@ -1380,6 +1382,11 @@ export function AudioStudio() {
 
 
   const styleLine = styles.filter(Boolean).join(", ");
+  /**
+   * Freeform Style Prompt is the Gate 1 `tags` source of truth. Chips only
+   * fill in when the textarea is empty — never rewrite or truncate typed text.
+   */
+  const styleTagsPreview = stylePrompt.trim() || styleLine;
   const targetLanguage = lyricLanguageInstruction(language, customLanguage);
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
@@ -1620,6 +1627,7 @@ export function AudioStudio() {
       lyrics,
       title,
       styles,
+      stylePrompt,
       withVocals,
       targetDuration,
       bpm,
@@ -1633,6 +1641,7 @@ export function AudioStudio() {
       lyrics,
       title,
       styles,
+      stylePrompt,
       withVocals,
       targetDuration,
       bpm,
@@ -2129,7 +2138,8 @@ export function AudioStudio() {
       applyPipelineProgress("sonic", PIPELINE_PROGRESS.sonic);
 
       const selectedStyles = styles.filter(Boolean);
-      const genre = selectedStyles[0] || styleLine;
+      // A freeform-only entry still needs a genre for the engine prompt.
+      const genre = selectedStyles[0] || styleLine || stylePrompt.trim();
       const subGenre = selectedStyles.slice(1).join(", ");
       const vocalGender = resolvedVocalGender();
       const vocalStyle = vocalPresets
@@ -2143,7 +2153,8 @@ export function AudioStudio() {
       const arrangedLyrics = withVocals
         ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
         : "";
-      const styleTags = selectedStyles.join(", ") || styleLine || genre;
+      // Textarea → tags verbatim. No genre-lock rebuild, no truncation.
+      const styleTags = stylePrompt.trim() || selectedStyles.join(", ") || styleLine || genre;
 
       // Resolve custom vocal sample before the music step so an auth miss
       // never looks like a Sonic failure. Null session → local object URL only;
@@ -2218,7 +2229,7 @@ export function AudioStudio() {
         }
       }
 
-      // Linear handoff: lyrics → Sonic prompt; style chips → tags.
+      // Linear handoff: lyrics → Sonic prompt; Style Prompt textarea → tags.
       beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
       completePipelineStep("lyrics", { chars: arrangedLyrics.length, withVocals });
       beginPipelineStep("music", {
@@ -2228,16 +2239,6 @@ export function AudioStudio() {
         custom_mode: true,
       });
 
-      const stylePrompt = buildDynamicStylePrompt({
-        genre,
-        subGenre: subGenre || undefined,
-        bpm,
-        mood,
-        instruments: [],
-        vocalProfile: withVocals ? vocalProfile : undefined,
-        vocalStyle: withVocals ? vocalStyle || undefined : undefined,
-      });
-      void stylePrompt;
       if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
       let tickerPercent: number = PIPELINE_PROGRESS.sonic;
       const stopTicker = window.setInterval(() => {
@@ -3349,6 +3350,31 @@ export function AudioStudio() {
                   </p>
                 </div>
               ) : null}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="style-prompt" className="text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    Style Prompt / Genre Descriptors
+                    <InlineTip label="Style Prompt / Genre Descriptors">
+                      Sent unchanged as Gate 1 <code>tags</code>. Genre chips are only used when
+                      this box is empty — nothing rewrites or truncates your text.
+                    </InlineTip>
+                  </span>
+                </Label>
+                <Textarea
+                  id="style-prompt"
+                  value={stylePrompt}
+                  onChange={(event) => setStylePrompt(event.target.value)}
+                  rows={4}
+                  placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
+                  className="resize-y border border-zinc-800 bg-zinc-950 text-sm text-zinc-100 placeholder:text-muted-foreground placeholder-dim shadow-none focus-visible:border-primary focus-visible:ring-primary"
+                />
+                {styleTagsPreview ? (
+                  <p className="text-xs text-muted-foreground">
+                    Engine tags: <span className="text-foreground">{styleTagsPreview}</span>
+                  </p>
+                ) : null}
+              </div>
 
             </div>
 
