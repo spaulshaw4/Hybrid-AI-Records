@@ -232,8 +232,20 @@ async function mixAndMasterOnce(options: {
   taskId: string;
   /** Requested track length; the master is cut and faded to it. */
   maxSeconds?: number;
-  /** CWALO Gate 2 remux gains. */
-  remuxGains?: { instrumentalVolume?: number; vocalVolume?: number };
+  /** CWALO Gate 2 remux gains + optional section volume envelopes. */
+  remuxGains?: {
+    instrumentalVolume?: number;
+    vocalVolume?: number;
+    instrumentalVolumeExpr?: string | null;
+    vocalVolumeExpr?: string | null;
+  };
+  /** CWALO section timestamps for Gate 5 fade / retention. */
+  cwaloGuide?: {
+    trackEnd?: number;
+    outroStart?: number;
+    fadeOutSeconds?: number;
+    sectionCount?: number;
+  };
 }): Promise<MixAndMasterResult> {
   const tmp = await mkdtemp(join(tmpdir(), "hybrid-matchering-"));
   const introPath = join(tmp, "intro.bin");
@@ -281,6 +293,8 @@ async function mixAndMasterOnce(options: {
     const remuxLoudnorm = hybridMixIncludesLoudnorm(stems);
     console.log("[master] Mixing audio stems (FFmpeg)...", {
       remux: options.remuxGains ?? { instrumentalVolume: 1.0, vocalVolume: 1.0 },
+      dynamicRemux: Boolean(options.remuxGains?.instrumentalVolumeExpr),
+      cwaloGuide: options.cwaloGuide ?? null,
       loudnormInMix: remuxLoudnorm,
     });
     await runFfmpeg(
@@ -318,26 +332,27 @@ async function mixAndMasterOnce(options: {
         ? "[master] encode finish (loudnorm already in remux mix)"
         : "[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter",
     );
+    const fadeSecs = options.cwaloGuide?.fadeOutSeconds ?? MASTER_FADE_OUT_SECONDS;
+    const trackEnd = options.cwaloGuide?.trackEnd;
     const probedDuration =
-      options.maxSeconds && options.maxSeconds > MASTER_FADE_OUT_SECONDS
+      (options.maxSeconds && options.maxSeconds > fadeSecs) ||
+      (trackEnd != null && trackEnd > fadeSecs)
         ? null
         : await probeAudioDurationSeconds(masteredWav);
-    const fadeDuration =
-      options.maxSeconds && options.maxSeconds > MASTER_FADE_OUT_SECONDS
-        ? options.maxSeconds
-        : probedDuration;
-    if (fadeDuration && fadeDuration > MASTER_FADE_OUT_SECONDS) {
-      console.log("[master] tail fade-out", {
-        maxSeconds: options.maxSeconds ?? null,
-        durationSeconds: fadeDuration,
-        fadeOutSeconds: MASTER_FADE_OUT_SECONDS,
-        fadeStart: fadeDuration - MASTER_FADE_OUT_SECONDS,
-      });
-    }
+    console.log("[master] tail fade-out", {
+      maxSeconds: options.maxSeconds ?? null,
+      trackEnd: trackEnd ?? null,
+      outroStart: options.cwaloGuide?.outroStart ?? null,
+      durationSeconds: probedDuration,
+      fadeOutSeconds: fadeSecs,
+      note: "fade anchored at CWALO track_end when present — never at outro_start",
+    });
     await runFfmpeg(
       matcheringFinishArgs(masteredWav, playablePath, options.maxSeconds, {
         skipLoudnorm,
         durationSeconds: probedDuration ?? undefined,
+        trackEnd: trackEnd ?? undefined,
+        fadeOutSeconds: fadeSecs,
       }),
       MATCHERING_MIX_TIMEOUT_MS,
     );
@@ -396,7 +411,18 @@ export async function mixAndMasterHybridTrack(options: {
   userId: string;
   taskId: string;
   maxSeconds?: number;
-  remuxGains?: { instrumentalVolume?: number; vocalVolume?: number };
+  remuxGains?: {
+    instrumentalVolume?: number;
+    vocalVolume?: number;
+    instrumentalVolumeExpr?: string | null;
+    vocalVolumeExpr?: string | null;
+  };
+  cwaloGuide?: {
+    trackEnd?: number;
+    outroStart?: number;
+    fadeOutSeconds?: number;
+    sectionCount?: number;
+  };
 }): Promise<MixAndMasterResult> {
   assertPipelineBreakerClosed("mastering");
   if (!options.instrumentalUrl && !options.vocalUrl && !options.introUrl) {

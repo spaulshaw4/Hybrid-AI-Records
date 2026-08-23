@@ -103,6 +103,42 @@ export function isHttpAudioUrl(value: unknown): value is string {
   }
 }
 
+/**
+ * True when a cloud worker (Replicate, etc.) can fetch the URL over the public
+ * internet. Rejects localhost, loopback, link-local, and RFC1918 private hosts.
+ */
+export function isPublicHttpAudioUrl(value: unknown): value is string {
+  if (!isHttpAudioUrl(value)) return false;
+  try {
+    const { hostname } = new URL(value.trim());
+    const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+      host === "localhost" ||
+      host === "0.0.0.0" ||
+      host === "::1" ||
+      host === "0:0:0:0:0:0:0:1" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local")
+    ) {
+      return false;
+    }
+    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return false;
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return false;
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return false;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)) return false;
+    if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Prefer the first publicly fetchable http(s) URL. Never returns localhost/private URLs. */
+export function preferPublicAudioUrl(...candidates: Array<string | null | undefined>): string | null {
+  const urls = candidates.filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+  return urls.find((url) => isPublicHttpAudioUrl(url)) ?? null;
+}
+
 export function cleanLyricSheet(value: string | null | undefined): string {
   return (value ?? "")
     .replace(/^```(?:\w+)?\s*/m, "")

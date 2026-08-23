@@ -126,6 +126,35 @@ describe("Matchering 2.0 mix + master contract", () => {
     );
   });
 
+  it("anchors a 2.5s fade at CWALO track_end and never fades at outro_start", () => {
+    const args = matcheringFinishArgs("in.wav", "out.mp3", 180, {
+      trackEnd: 165,
+      fadeOutSeconds: 2.5,
+    });
+    expect(args).toContain("-t");
+    expect(args[args.indexOf("-t") + 1]).toBe("165");
+    const filter = args[args.indexOf("-af") + 1];
+    expect(filter).toContain("afade=t=out:st=162.5:d=2.5:curve=exp");
+    expect(filter).not.toContain("st=161"); // would be outro_start-ish early fade
+  });
+
+  it("applies CWALO section volume envelopes during remux", () => {
+    const graph = buildHybridMixFilterComplex(
+      [
+        { kind: "instrumental", path: "b" },
+        { kind: "vocal", path: "c" },
+      ],
+      HYBRID_INTRO_SECONDS,
+      {
+        instrumentalVolumeExpr: "if(between(t\\,8\\,24)\\,0.88\\,1.0)",
+        vocalVolumeExpr: "if(between(t\\,8\\,24)\\,1.12\\,1.0)",
+      },
+    );
+    expect(graph).toContain("volume='if(between(t\\,8\\,24)\\,0.88\\,1.0)':eval=frame");
+    expect(graph).toContain("volume='if(between(t\\,8\\,24)\\,1.12\\,1.0)':eval=frame");
+    expect(graph).toContain("normalize=0");
+  });
+
   it("leaves the master untouched when no ceiling is requested", () => {
     const args = matcheringFinishArgs("in.wav", "out.mp3");
     expect(args).not.toContain("-t");

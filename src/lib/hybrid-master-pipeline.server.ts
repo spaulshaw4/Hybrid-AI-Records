@@ -109,6 +109,11 @@ async function archiveUrl(
  */
 export async function runHybridMasterPipeline(input: {
   baseAudioUrl: string;
+  /**
+   * Pre-archive Gate 1 CDN URL for Replicate (CWALO). Must be publicly
+   * fetchable — never a localhost / local-vault URL.
+   */
+  publicBaseAudioUrl?: string;
   lyrics: string;
   instrumental: boolean;
   referenceSampleUrl?: string;
@@ -126,6 +131,7 @@ export async function runHybridMasterPipeline(input: {
   let isolatedVocalUrl: string | null = null;
   let convertedVocalUrl: string | null = null;
   let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
+  let masterPlan: import("@/lib/cwalo-structure.server").CwaloMasterPlan | null = null;
 
   const wantsVocals = !input.instrumental && input.lyrics.trim().length > 0;
 
@@ -142,12 +148,20 @@ export async function runHybridMasterPipeline(input: {
     const { logPipelineStep } = await import("@/lib/pipeline-steps.server");
     logPipelineStep("cwalo");
     const { analyzeMusicStructureWithCwalo } = await import("@/lib/cwalo-structure.server");
-    const structure = await analyzeMusicStructureWithCwalo(input.baseAudioUrl);
+    const { preferPublicAudioUrl } = await import("@/lib/pipeline-contracts");
+    const cwaloSource =
+      preferPublicAudioUrl(input.publicBaseAudioUrl, input.baseAudioUrl) ?? input.baseAudioUrl;
+    const structure = await analyzeMusicStructureWithCwalo(cwaloSource);
     remuxGains = structure.remux;
-    console.warn("[GATE_2_CWALO] guiding Demucs remux", {
+    masterPlan = structure.masterPlan;
+    console.warn("[GATE_2_CWALO] guiding Demucs remux + Gate 5 master", {
       bpm: structure.bpm,
       sectionCount: structure.sections.length,
+      energyPoints: structure.energyProfile.length,
+      outroStart: structure.outroStart,
+      trackEnd: structure.trackEnd,
       remuxGains,
+      dynamicRemux: Boolean(masterPlan.instrumentalVolumeExpr),
     });
   } catch (error) {
     const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
@@ -277,6 +291,15 @@ export async function runHybridMasterPipeline(input: {
     vocal: convertedVocalUrl ? "fish" : isolatedVocalUrl ? "demucs-vocal" : "none",
     amix: "duration=first:dropout_transition=0:normalize=0",
     remuxGains,
+    cwalo: masterPlan
+      ? {
+          sections: masterPlan.sections.length,
+          outroStart: masterPlan.outroStart,
+          trackEnd: masterPlan.trackEnd,
+          fadeOutSeconds: masterPlan.fadeOutSeconds,
+          dynamicRemux: Boolean(masterPlan.instrumentalVolumeExpr),
+        }
+      : null,
   });
 
   reportPipelineProgress("master", PIPELINE_PROGRESS.master);
@@ -288,7 +311,19 @@ export async function runHybridMasterPipeline(input: {
     userId: input.userId,
     taskId: input.taskId,
     maxSeconds: input.durationSeconds,
-    remuxGains,
+    remuxGains: {
+      ...remuxGains,
+      instrumentalVolumeExpr: masterPlan?.instrumentalVolumeExpr,
+      vocalVolumeExpr: masterPlan?.vocalVolumeExpr,
+    },
+    cwaloGuide: masterPlan
+      ? {
+          trackEnd: masterPlan.trackEnd ?? undefined,
+          outroStart: masterPlan.outroStart ?? undefined,
+          fadeOutSeconds: masterPlan.fadeOutSeconds,
+          sectionCount: masterPlan.sections.length,
+        }
+      : undefined,
   });
   const master = assertMasteringContractOutput(mastered.masterUrl);
   logPostConditionPassed("Mastered audio ready");

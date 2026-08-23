@@ -7,10 +7,16 @@
  */
 
 import Replicate from "replicate";
+import { createReadStream } from "node:fs";
+import { join } from "node:path";
 
 import { replicateApiKey } from "@/lib/ai-provider.server";
 import { StudioPipelineError } from "@/lib/studio-pipeline-error";
-import { logGateCleared, isHttpAudioUrl } from "@/lib/pipeline-contracts";
+import {
+  logGateCleared,
+  isHttpAudioUrl,
+  isPublicHttpAudioUrl,
+} from "@/lib/pipeline-contracts";
 
 /** Pinned model + version hash (do not float to latest). */
 export const CWALO_MODEL =
@@ -29,15 +35,38 @@ export type CwaloRemuxGains = {
   vocalVolume: number;
 };
 
+export type CwaloSectionKind = "intro" | "verse" | "chorus" | "bridge" | "outro" | "other";
+
+/** Downstream mastering guide derived from CWALO sections + energy. */
+export type CwaloMasterPlan = {
+  sections: CwaloSection[];
+  energyProfile: number[];
+  outroStart: number | null;
+  trackEnd: number | null;
+  remux: CwaloRemuxGains;
+  /** FFmpeg volume= expression (eval=frame); commas pre-escaped for filter_complex. */
+  instrumentalVolumeExpr: string | null;
+  vocalVolumeExpr: string | null;
+  /** Smooth stereo fade exclusively at track_end (2.5s when CWALO end is known). */
+  fadeOutSeconds: number;
+};
+
 export type CwaloStructure = {
   bpm: number | null;
   beats: number[];
   downbeats: number[];
   sections: CwaloSection[];
+  energyProfile: number[];
+  outroStart: number | null;
+  trackEnd: number | null;
   durationSeconds: number | null;
   remux: CwaloRemuxGains;
+  masterPlan: CwaloMasterPlan;
   raw: unknown;
 };
+
+/** Gate 5 tail fade when CWALO provides a genuine track_end. */
+export const CWALO_TAIL_FADE_SECONDS = 2.5;
 
 const DEFAULT_REMUX: CwaloRemuxGains = {
   instrumentalVolume: 1.0,
@@ -92,7 +121,9 @@ function parseSection(row: unknown): CwaloSection | null {
 /**
  * Pull structure fields from an all-in-one JSON document (or nested wrapper).
  */
-export function parseCwaloAnalysisJson(doc: unknown): Omit<CwaloStructure, "raw" | "remux"> {
+export function parseCwaloAnalysisJson(
+  doc: unknown,
+): Omit<CwaloStructure, "raw" | "remux" | "masterPlan"> {
   const root =
     doc && typeof doc === "object" && !Array.isArray(doc)
       ? (doc as Record<string, unknown>)
@@ -112,19 +143,128 @@ export function parseCwaloAnalysisJson(doc: unknown): Omit<CwaloStructure, "raw"
     .map(parseSection)
     .filter((s): s is CwaloSection => Boolean(s));
 
+  const energyProfile = asNumberArray(
+    nested.energy_profile ??
+      nested.energyProfile ??
+      nested.energies ??
+      nested.energy ??
+      root.energy_profile ??
+      root.energyProfile,
+  );
+
   let durationSeconds =
     asNumber(nested.duration ?? nested.duration_seconds ?? root.duration) ?? null;
   if (durationSeconds == null && sections.length > 0) {
     durationSeconds = Math.max(...sections.map((s) => s.end));
   }
 
-  return { bpm, beats, downbeats, sections, durationSeconds };
+  const outroSection = sections.find((s) => classifyCwaloSection(s.label) === "outro");
+  const outroStart =
+    asNumber(nested.outro_start ?? nested.outroStart ?? root.outro_start) ??
+    outroSection?.start ??
+    null;
+  const trackEnd =
+    asNumber(nested.track_end ?? nested.trackEnd ?? root.track_end) ??
+    durationSeconds ??
+    (sections.length > 0 ? Math.max(...sections.map((s) => s.end)) : null);
+
+  return {
+    bpm,
+    beats,
+    downbeats,
+    sections,
+    energyProfile,
+    outroStart,
+    trackEnd,
+    durationSeconds,
+  };
+}
+
+export function classifyCwaloSection(label: string): CwaloSectionKind {
+  const normalized = normalizeLabel(label);
+  if (normalized.includes("intro")) return "intro";
+  if (normalized.includes("outro") || normalized.includes("ending")) return "outro";
+  if (normalized.includes("chorus") || normalized.includes("hook") || normalized.includes("drop")) {
+    return "chorus";
+  }
+  if (normalized.includes("bridge") || normalized.includes("break")) return "bridge";
+  if (
+    normalized.includes("verse") ||
+    normalized.includes("pre chorus") ||
+    normalized.includes("prechorus") ||
+    normalized.includes("refrain")
+  ) {
+    return "verse";
+  }
+  return "other";
+}
+
+/** Per-section remux targets: full band on chorus/outro; vocal pocket on verse. */
+export function sectionRemuxGains(kind: CwaloSectionKind): CwaloRemuxGains {
+  switch (kind) {
+    case "verse":
+      // Clear vocal pocket — slight bed dip, vocal lift (bed never hollows out).
+      return { instrumentalVolume: 0.88, vocalVolume: 1.12 };
+    case "chorus":
+    case "outro":
+      return { instrumentalVolume: 1.0, vocalVolume: 1.0 };
+    case "bridge":
+      return { instrumentalVolume: 1.0, vocalVolume: 0.95 };
+    case "intro":
+      return { instrumentalVolume: 1.0, vocalVolume: 0.75 };
+    default:
+      return { ...DEFAULT_REMUX };
+  }
+}
+
+function formatGain(value: number): string {
+  const clamped = Math.max(0.5, Math.min(1.25, value));
+  return Number.isInteger(clamped) ? clamped.toFixed(1) : clamped.toFixed(2);
+}
+
+/**
+ * Build an FFmpeg volume expression from CWALO section markers.
+ * Commas are escaped for use inside `-filter_complex`.
+ */
+export function buildSectionVolumeExpression(
+  sections: CwaloSection[],
+  role: "instrumental" | "vocal",
+  energyProfile: number[] = [],
+): string | null {
+  if (sections.length === 0) return null;
+  const sorted = [...sections].sort((a, b) => a.start - b.start);
+  const energyMedian =
+    energyProfile.length > 0
+      ? [...energyProfile].sort((a, b) => a - b)[Math.floor(energyProfile.length / 2)]!
+      : null;
+
+  let expr = "1.0";
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const section = sorted[i]!;
+    const kind = classifyCwaloSection(section.label);
+    let gains = sectionRemuxGains(kind);
+    // High-energy frames keep full instrumentation even inside verse pockets.
+    if (energyMedian != null && energyProfile[i] != null && energyProfile[i]! >= energyMedian) {
+      gains = {
+        instrumentalVolume: Math.max(gains.instrumentalVolume, 1.0),
+        vocalVolume: gains.vocalVolume,
+      };
+    }
+    if (kind === "chorus" || kind === "outro") {
+      gains = { instrumentalVolume: 1.0, vocalVolume: gains.vocalVolume };
+    }
+    const gain = formatGain(
+      role === "instrumental" ? gains.instrumentalVolume : gains.vocalVolume,
+    );
+    const start = Number(section.start.toFixed(3));
+    const end = Number(section.end.toFixed(3));
+    expr = `if(between(t\\,${start}\\,${end})\\,${gain}\\,${expr})`;
+  }
+  return expr;
 }
 
 /** Remux gains: keep bed solid through outro/transition; slight vocal lift in pockets. */
-export function remuxGainsFromStructure(
-  sections: CwaloSection[],
-): CwaloRemuxGains {
+export function remuxGainsFromStructure(sections: CwaloSection[]): CwaloRemuxGains {
   if (sections.length === 0) return { ...DEFAULT_REMUX };
 
   const labels = sections.map((s) => normalizeLabel(s.label));
@@ -136,10 +276,43 @@ export function remuxGainsFromStructure(
   );
 
   return {
-    // Keep both stems at unity — amix normalize=0 holds the bed constant;
-    // never drop the bed when CWALO sees outro/transition material.
     instrumentalVolume: protectsBed ? 1.0 : DEFAULT_REMUX.instrumentalVolume,
     vocalVolume: hasVocalPockets ? 1.0 : DEFAULT_REMUX.vocalVolume,
+  };
+}
+
+/** Build the Gate 5 mastering plan from parsed CWALO fields. */
+export function buildCwaloMasterPlan(
+  parsed: Omit<CwaloStructure, "raw" | "remux" | "masterPlan">,
+): CwaloMasterPlan {
+  const remux = remuxGainsFromStructure(parsed.sections);
+  const trackEnd = parsed.trackEnd ?? parsed.durationSeconds;
+  const hasDynamic = parsed.sections.length > 0;
+  return {
+    sections: parsed.sections,
+    energyProfile: parsed.energyProfile,
+    outroStart: parsed.outroStart,
+    trackEnd,
+    remux,
+    instrumentalVolumeExpr: hasDynamic
+      ? buildSectionVolumeExpression(parsed.sections, "instrumental", parsed.energyProfile)
+      : null,
+    vocalVolumeExpr: hasDynamic
+      ? buildSectionVolumeExpression(parsed.sections, "vocal", parsed.energyProfile)
+      : null,
+    fadeOutSeconds: trackEnd != null && trackEnd > CWALO_TAIL_FADE_SECONDS
+      ? CWALO_TAIL_FADE_SECONDS
+      : CWALO_TAIL_FADE_SECONDS,
+  };
+}
+
+function finalizeStructure(parsed: Omit<CwaloStructure, "raw" | "remux" | "masterPlan">, raw: unknown): CwaloStructure {
+  const masterPlan = buildCwaloMasterPlan(parsed);
+  return {
+    ...parsed,
+    remux: masterPlan.remux,
+    masterPlan,
+    raw,
   };
 }
 
@@ -182,11 +355,7 @@ export async function resolveCwaloStructureFromOutput(output: unknown): Promise<
   if (output && typeof output === "object" && !Array.isArray(output)) {
     const direct = parseCwaloAnalysisJson(output);
     if (direct.sections.length > 0 || direct.bpm != null) {
-      return {
-        ...direct,
-        remux: remuxGainsFromStructure(direct.sections),
-        raw: output,
-      };
+      return finalizeStructure(direct, output);
     }
   }
 
@@ -198,11 +367,7 @@ export async function resolveCwaloStructureFromOutput(output: unknown): Promise<
       const doc = await loadJsonFromUrl(url);
       const parsed = parseCwaloAnalysisJson(doc);
       if (parsed.sections.length > 0 || parsed.bpm != null || parsed.beats.length > 0) {
-        return {
-          ...parsed,
-          remux: remuxGainsFromStructure(parsed.sections),
-          raw: doc,
-        };
+        return finalizeStructure(parsed, doc);
       }
     } catch (error) {
       console.warn(
@@ -214,15 +379,102 @@ export async function resolveCwaloStructureFromOutput(output: unknown): Promise<
   }
 
   // Soft structure: empty roadmap still lets Demucs proceed with default gains.
-  return {
-    bpm: null,
-    beats: [],
-    downbeats: [],
-    sections: [],
-    durationSeconds: null,
-    remux: { ...DEFAULT_REMUX },
-    raw: output,
-  };
+  return finalizeStructure(
+    {
+      bpm: null,
+      beats: [],
+      downbeats: [],
+      sections: [],
+      energyProfile: [],
+      outroStart: null,
+      trackEnd: null,
+      durationSeconds: null,
+    },
+    output,
+  );
+}
+
+/**
+ * Resolve a Replicate-reachable `music_input`:
+ * 1) public CDN URL as-is
+ * 2) otherwise stream local vault audio via createReadStream → replicate.files.create
+ *    and return the uploaded file's public URL (never localhost)
+ */
+export async function resolveCwaloMusicInput(
+  replicate: Replicate,
+  audioUrl: string,
+): Promise<string> {
+  if (isPublicHttpAudioUrl(audioUrl)) {
+    return audioUrl;
+  }
+
+  console.warn("[GATE_2_CWALO] non-public audio URL — uploading to Replicate Files", {
+    audio: audioUrl.slice(0, 120),
+  });
+
+  let bytes: Buffer | null = null;
+  let fileName = "gate1-base.mp3";
+  let diskPath: string | null = null;
+
+  try {
+    const parsed = new URL(audioUrl);
+    const leaf = decodeURIComponent(parsed.pathname.split("/").pop() || "");
+    if (leaf && /local-vault/i.test(parsed.pathname)) {
+      fileName = leaf;
+      diskPath = join(process.cwd(), ".data", "local-vault", leaf);
+    }
+  } catch {
+    // fall through
+  }
+
+  // Preferred path: stream from disk into replicate.files.create.
+  // The JS SDK types only accept Buffer|Blob, so we buffer the ReadStream.
+  if (diskPath) {
+    try {
+      const stream = createReadStream(diskPath);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      if (chunks.length > 0) bytes = Buffer.concat(chunks);
+    } catch (error) {
+      console.warn(
+        "[GATE_2_CWALO] local vault stream miss — falling back to HTTP fetch",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  if (!bytes) {
+    const response = await fetch(audioUrl, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Could not read Gate 1 audio for CWALO upload (${response.status})`);
+    }
+    bytes = Buffer.from(await response.arrayBuffer());
+  }
+
+  if (bytes.byteLength < 1024) {
+    throw new Error("Gate 1 audio was empty — cannot run CWALO");
+  }
+
+  const file = await replicate.files.create(bytes, {
+    filename: fileName,
+    source: "cwalo-gate2",
+  });
+  // Prediction JSON needs a public URL; FileObject.urls.get is what cloud workers fetch.
+  const uploaded = typeof file?.urls?.get === "string" ? file.urls.get : null;
+  if (!uploaded || !isPublicHttpAudioUrl(uploaded)) {
+    throw new Error("Replicate files.create returned no public URL for CWALO music_input");
+  }
+  console.warn("[GATE_2_CWALO] uploaded local audio to Replicate Files", {
+    fileId: file.id,
+    bytes: bytes.byteLength,
+    url: uploaded.slice(0, 96),
+  });
+  return uploaded;
 }
 
 /**
@@ -239,18 +491,26 @@ export async function analyzeMusicStructureWithCwalo(
   const token = replicateApiKey("CWALO structure analysis");
   const replicate = new Replicate({ auth: token });
 
+  const musicInput = await resolveCwaloMusicInput(replicate, audioUrl);
+  if (!isPublicHttpAudioUrl(musicInput)) {
+    throw new StudioPipelineError(
+      "GATE_2",
+      "CWALO music_input must be a public URL (CDN or Replicate Files) — refused localhost",
+    );
+  }
+
   console.warn("[GATE_2_CWALO] dispatch", {
     model: CWALO_MODEL,
-    audio: audioUrl.slice(0, 96),
+    audio: musicInput.slice(0, 96),
+    uploaded: musicInput !== audioUrl,
   });
 
   let output: unknown;
   try {
-    // Strict Cog schema: only `music_input` (raw audio URL). Extra keys (demux,
-    // audio alias, visualize, …) cause Replicate validation rejection.
+    // Strict Cog schema: only `music_input` (public URL or Replicate file URL).
     output = await replicate.run(CWALO_MODEL as `${string}/${string}:${string}`, {
       input: {
-        music_input: audioUrl,
+        music_input: musicInput,
       },
     });
   } catch (error) {
@@ -264,7 +524,11 @@ export async function analyzeMusicStructureWithCwalo(
   console.warn("[GATE_2_CWALO_STRUCTURE]", {
     bpm: structure.bpm,
     sections: structure.sections.map((s) => `${s.label}@${s.start.toFixed(1)}-${s.end.toFixed(1)}`),
+    energyPoints: structure.energyProfile.length,
+    outroStart: structure.outroStart,
+    trackEnd: structure.trackEnd,
     remux: structure.remux,
+    dynamicRemux: Boolean(structure.masterPlan.instrumentalVolumeExpr),
   });
   logGateCleared(
     2,

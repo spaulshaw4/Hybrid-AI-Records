@@ -61,18 +61,39 @@ function volumeGain(value: number): string {
  *   [0:a]volume=1.0[inst];[1:a]volume=1.0[vox];
  *   [inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=11:TP=-1.5
  *
- * Volumes may be nudged by CWALO Gate 2 remux hints (bed never below 1.0).
+ * When CWALO section expressions are present, volume uses eval=frame envelopes
+ * (full band on chorus/outro; vocal pocketing on verse) instead of static gains.
  */
+export type HybridMixGains = {
+  instrumentalVolume?: number;
+  vocalVolume?: number;
+  /** Pre-escaped FFmpeg volume expression for eval=frame. */
+  instrumentalVolumeExpr?: string | null;
+  vocalVolumeExpr?: string | null;
+};
+
+function volumeFilter(staticGain: number, expr?: string | null): string {
+  if (expr && expr.trim()) {
+    return `volume='${expr}':eval=frame`;
+  }
+  return `volume=${volumeGain(staticGain)}`;
+}
+
 export function buildHybridMixFilterComplex(
   slots: HybridStemSlot[],
   introSeconds: number = HYBRID_INTRO_SECONDS,
-  gains: { instrumentalVolume?: number; vocalVolume?: number } = {},
+  gains: HybridMixGains = {},
 ): string {
   if (slots.length === 0) throw new Error("No stems to mix.");
   if (slots.length === 1) return `${stereo("0:a")}[out]`;
 
   const instVol = Math.max(1.0, gains.instrumentalVolume ?? 1.0);
   const vocVol = gains.vocalVolume ?? 1.0;
+  // Dynamic CWALO envelopes may dip the bed slightly in verses — allow that.
+  const instFilter = gains.instrumentalVolumeExpr
+    ? volumeFilter(1.0, gains.instrumentalVolumeExpr)
+    : volumeFilter(instVol);
+  const vocFilter = volumeFilter(vocVol, gains.vocalVolumeExpr);
 
   const indexOf = (kind: HybridStemKind) => slots.findIndex((slot) => slot.kind === kind);
   const intro = indexOf("intro");
@@ -83,8 +104,8 @@ export function buildHybridMixFilterComplex(
   if (intro >= 0) {
     lines.push(`${stereo(`${intro}:a`, `atrim=0:${introSeconds}`)}[intro]`);
   }
-  if (inst >= 0) lines.push(`${stereo(`${inst}:a`, `volume=${volumeGain(instVol)}`)}[inst]`);
-  if (vocal >= 0) lines.push(`${stereo(`${vocal}:a`, `volume=${volumeGain(vocVol)}`)}[vox]`);
+  if (inst >= 0) lines.push(`${stereo(`${inst}:a`, instFilter)}[inst]`);
+  if (vocal >= 0) lines.push(`${stereo(`${vocal}:a`, vocFilter)}[vox]`);
 
   let core = "";
   if (inst >= 0 && vocal >= 0) {
@@ -114,7 +135,7 @@ export function hybridMixIncludesLoudnorm(stems: HybridStemInputs): boolean {
 export function buildHybridMixArgs(
   stems: HybridStemInputs,
   outputWav: string,
-  gains?: { instrumentalVolume?: number; vocalVolume?: number },
+  gains?: HybridMixGains,
 ): string[] {
   const slots = collectHybridStems(stems);
   if (slots.length === 0) throw new Error("No stems to mix.");
@@ -185,8 +206,9 @@ export const MASTER_FADE_OUT_SECONDS = 4;
  * fade running into the cut, so a request for three minutes cannot come back
  * longer than three minutes.
  *
- * When only a known duration is available (no hard ceiling), still apply a clean
- * 4s exponential fade-out at `duration - 4` to kill trailing noise bursts.
+ * CWALO `trackEnd` is the genuine end boundary — full level is retained until
+ * then, with a smooth exponential fade only at that edge (typically 2.5s).
+ * `outroStart` is intentionally ignored so we never fade early through the outro.
  *
  * When `skipLoudnorm` is set (remux already baked loudnorm into the mix WAV),
  * only the brickwall limiter + fade run so we do not double-norm.
@@ -195,26 +217,58 @@ export function matcheringFinishArgs(
   inputWav: string,
   outputMp3: string,
   maxSeconds?: number,
-  options: { skipLoudnorm?: boolean; durationSeconds?: number } = {},
+  options: {
+    skipLoudnorm?: boolean;
+    durationSeconds?: number;
+    /** CWALO genuine track end — preferred fade boundary. */
+    trackEnd?: number;
+    /** Override fade length (CWALO uses 2.5s). */
+    fadeOutSeconds?: number;
+  } = {},
 ): string[] {
-  const ceiling =
-    typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds > MASTER_FADE_OUT_SECONDS
+  const fadeSecs =
+    typeof options.fadeOutSeconds === "number" &&
+    Number.isFinite(options.fadeOutSeconds) &&
+    options.fadeOutSeconds > 0
+      ? options.fadeOutSeconds
+      : MASTER_FADE_OUT_SECONDS;
+
+  const studioCeiling =
+    typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds > fadeSecs
       ? Math.round(maxSeconds)
       : undefined;
-  const knownDuration =
+
+  const trackEnd =
+    typeof options.trackEnd === "number" &&
+    Number.isFinite(options.trackEnd) &&
+    options.trackEnd > fadeSecs
+      ? options.trackEnd
+      : undefined;
+
+  // Prefer CWALO track_end as the trim point when it is within the studio ceiling.
+  const ceiling =
+    trackEnd != null
+      ? studioCeiling != null
+        ? Math.min(studioCeiling, Math.round(trackEnd))
+        : Math.round(trackEnd)
+      : studioCeiling;
+
+  const fadeAnchor =
     ceiling ??
+    trackEnd ??
     (typeof options.durationSeconds === "number" &&
     Number.isFinite(options.durationSeconds) &&
-    options.durationSeconds > MASTER_FADE_OUT_SECONDS
+    options.durationSeconds > fadeSecs
       ? options.durationSeconds
       : undefined);
+
   const fadeStart =
-    knownDuration !== undefined ? knownDuration - MASTER_FADE_OUT_SECONDS : undefined;
+    fadeAnchor !== undefined ? Math.max(0, fadeAnchor - fadeSecs) : undefined;
   const baseFilter = options.skipLoudnorm ? BRICKWALL_LIMITER : MATCHERING_FINISH_FILTER;
   const filter =
     fadeStart === undefined
       ? baseFilter
-      : `${baseFilter},afade=t=out:st=${fadeStart}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`;
+      : `${baseFilter},afade=t=out:st=${fadeStart}:d=${fadeSecs}:curve=exp`;
 
   return [
     "-y",

@@ -338,27 +338,39 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     );
 
     const archivedBase = tracks[0]?.audioUrl ?? null;
-    if (!archivedBase) {
+    // Prefer the Gate 1 CDN URL before the local-vault rewrite. Replicate
+    // (CWALO) cannot fetch http://localhost:8080/...
+    const { isHttpAudioUrl, isPublicHttpAudioUrl, preferPublicAudioUrl } = await import(
+      "@/lib/pipeline-contracts"
+    );
+    console.log(">>> [1/5: BASE URL READY] Gate 1 audio handed to CWALO / Demucs");
+    const publicGate1Url = preferPublicAudioUrl(sonicUrl, archivedBase);
+    // Local Demucs download can use localhost; CWALO must use the CDN (or upload).
+    const pipelineBase =
+      publicGate1Url ??
+      (isHttpAudioUrl(sonicUrl) ? sonicUrl : null) ??
+      (isHttpAudioUrl(archivedBase) ? archivedBase : null);
+    if (!pipelineBase) {
       throw new Error("Music engine: no audio URL was returned.");
     }
-
-    // The archive is a Supabase signed URL in production but a relative
-    // `/api/local-vault/...` path in dev. Stem separation runs on Replicate and
-    // has to fetch the audio over the internet, so hand it the upstream CDN URL
-    // whenever the archived copy is not absolute.
-    const { isHttpAudioUrl } = await import("@/lib/pipeline-contracts");
-    console.log(">>> [1/5: BASE URL READY] Gate 1 audio handed to CWALO / Demucs");
-    const pipelineBase = isHttpAudioUrl(archivedBase) ? archivedBase : sonicUrl;
-    if (pipelineBase !== archivedBase) {
+    if (publicGate1Url && publicGate1Url !== archivedBase) {
+      console.warn("[PIPELINE] using public Gate 1 CDN URL for remote stages (not local vault)", {
+        archivedBase: String(archivedBase).slice(0, 96),
+        pipelineBase: publicGate1Url.slice(0, 96),
+        sonicPublic: isPublicHttpAudioUrl(sonicUrl),
+      });
+    } else if (!publicGate1Url) {
       console.warn(
-        "[PIPELINE] archived base is not fetchable remotely — using upstream URL for stems",
-        { archivedBase, pipelineBase },
+        "[PIPELINE] no public Gate 1 CDN URL — CWALO will upload bytes to Replicate Files",
+        { pipelineBase: pipelineBase.slice(0, 96) },
       );
     }
 
     const { runHybridMasterPipeline } = await import("@/lib/hybrid-master-pipeline.server");
     const pipeline = await runHybridMasterPipeline({
       baseAudioUrl: pipelineBase,
+      /** Always the pre-archive CDN when available — never a localhost vault URL. */
+      publicBaseAudioUrl: publicGate1Url ?? (isPublicHttpAudioUrl(sonicUrl) ? sonicUrl : undefined),
       lyrics: lyricContent,
       instrumental: payload.instrumental,
       referenceSampleUrl,
