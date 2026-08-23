@@ -137,6 +137,7 @@ export function classifyPipelineFailedGate(
   if (currentStep === "demux" || currentStep === "stems") return 4;
   if (currentStep === "cwalo") return 3;
   if (currentStep === "vault") return 2;
+  if (currentStep === "composition" || currentStep === "music") return 1;
 
   const message = errorMessage(error);
   const gateMatch = message.match(/Gate\s*([1-6])(?:\/6)?/i);
@@ -207,8 +208,8 @@ export async function executePipeline(
   const fallbacksUsed: string[] = [];
   const wantsVocals = !input.instrumental && Boolean(input.lyrics?.trim());
   let activeGate: 1 | 2 | 3 | 4 | 5 | 6 = 1;
-  /** Soft progress step — Gate 4=`demux`, Gate 5=`vocals` (never inherit Gate 1 labels). */
-  let currentStep: string = "music";
+  /** Soft progress step — Gate 1=`composition`, Gate 4=`demux`, Gate 5=`vocals`. */
+  let currentStep: string = "composition";
 
   try {
     try {
@@ -225,42 +226,74 @@ export async function executePipeline(
 
       // ── Gate 1: Base Generation (AIMusicAPI) ─────────────────────────────
       activeGate = 1;
-      currentStep = "music";
+      currentStep = "composition";
       telemetry = safeBumpTelemetry(telemetry, 1, "gate_1_generating");
       await beforeGate({ trackId, gate: 1, stage: "gate_1_generating" });
+      try {
+        const { reportPipelineProgress, PIPELINE_PROGRESS } = await import(
+          "@/lib/pipeline-progress"
+        );
+        reportPipelineProgress("composition", PIPELINE_PROGRESS.sonic);
+      } catch {
+        /* progress is best-effort */
+      }
+      console.log("[Gate 1/6] currentStep=composition — AIMusicAPI create/poll");
 
       let rawAudioBuffer: Buffer;
       if (input.gate1AudioUrl) {
-        rawAudioBuffer = await withTimeout(
-          downloadBuffer(input.gate1AudioUrl),
-          GATE_TIMEOUTS_MS[1],
-          "Gate 1 (AIMusicAPI)",
-        );
+        try {
+          rawAudioBuffer = await withTimeout(
+            downloadBuffer(input.gate1AudioUrl),
+            GATE_TIMEOUTS_MS[1],
+            "Gate 1 (AIMusicAPI)",
+            { step: "composition" },
+          );
+        } catch (err) {
+          const e = new Error(
+            errorMessage(err) ||
+              `[Circuit Breaker] Gate 1 (AIMusicAPI) timed out after ${GATE_TIMEOUTS_MS[1] / 1000}s`,
+          ) as Error & { step: string };
+          e.step = "composition";
+          throw e;
+        }
       } else {
         const { generateStudioTrack, waitForStudioTrack } = await import(
           "@/lib/music-generation"
         );
-        const started = await withTimeout(
-          generateStudioTrack({
-            genre: input.style || input.prompt,
-            lyrics: input.instrumental ? "" : input.lyrics ?? input.prompt,
-            title: input.title || "Studio Master",
-            isInstrumental: Boolean(input.instrumental),
-            mv: "sonic-v5",
-            tags: input.style || undefined,
-          }),
-          GATE_TIMEOUTS_MS[1],
-          "Gate 1 (AIMusicAPI create)",
-        );
-        const finished = await withTimeout(
-          waitForStudioTrack(input.gate1TaskId ?? started.taskId),
-          GATE_TIMEOUTS_MS[1],
-          "Gate 1 (AIMusicAPI)",
-        );
-        if (!finished.audioUrl) {
-          throw new Error("[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.");
+        try {
+          const started = await withTimeout(
+            generateStudioTrack({
+              genre: input.style || input.prompt,
+              lyrics: input.instrumental ? "" : input.lyrics ?? input.prompt,
+              title: input.title || "Studio Master",
+              isInstrumental: Boolean(input.instrumental),
+              mv: "sonic-v5",
+              tags: input.style || undefined,
+            }),
+            GATE_TIMEOUTS_MS[1],
+            "Gate 1 (AIMusicAPI create)",
+            { step: "composition" },
+          );
+          const finished = await withTimeout(
+            waitForStudioTrack(input.gate1TaskId ?? started.taskId),
+            GATE_TIMEOUTS_MS[1],
+            "Gate 1 (AIMusicAPI)",
+            { step: "composition" },
+          );
+          if (!finished.audioUrl) {
+            const empty = new Error(
+              "[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.",
+            ) as Error & { step: string };
+            empty.step = "composition";
+            throw empty;
+          }
+          rawAudioBuffer = await downloadBuffer(finished.audioUrl);
+        } catch (err) {
+          if (err && typeof err === "object" && "step" in err) throw err;
+          const e = new Error(errorMessage(err)) as Error & { step: string };
+          e.step = "composition";
+          throw e;
         }
-        rawAudioBuffer = await downloadBuffer(finished.audioUrl);
       }
       residue.trackBuffer(rawAudioBuffer);
       await afterGate({ trackId, gate: 1, stage: "gate_1_generating" }, "audio buffer ready");

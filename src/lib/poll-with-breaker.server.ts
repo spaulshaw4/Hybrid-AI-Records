@@ -15,6 +15,8 @@ export type PollWithBreakerOptions = {
   intervalMs?: number;
   /** Shown in logs as `[Polling <stepName>] Attempt X/30...` */
   stepName?: string;
+  /** Attached to the thrown breaker error for UI step sync (e.g. `composition`). */
+  step?: string;
 };
 
 /**
@@ -42,16 +44,22 @@ export async function pollWithBreaker<T>(
       return result;
     }
     if (isTerminalError(result)) {
-      throw new Error(`[${logLabel}] Failed with terminal error response.`);
+      const err = new Error(
+        `[${logLabel}] Failed with terminal error response.`,
+      ) as Error & { step?: string };
+      if (options.step) err.step = options.step;
+      throw err;
     }
     if (attempts < maxAttempts) {
       await sleep(intervalMs);
     }
   }
 
-  throw new Error(
+  const err = new Error(
     `[${logLabel}] Breaker tripped: Exceeded max attempts (${maxAttempts}).`,
-  );
+  ) as Error & { step?: string };
+  if (options.step) err.step = options.step;
+  throw err;
 }
 
 /** True for Replicate / vendor statuses that must abort the poll immediately. */

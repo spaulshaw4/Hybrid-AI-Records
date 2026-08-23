@@ -4,8 +4,8 @@
  */
 
 export const GATE_TIMEOUTS_MS = {
-  /** AIMusicAPI create+poll — must cover 60 × 2.5s Gate 1 poll budget (~150s). */
-  1: 150_000,
+  /** AIMusicAPI create+poll — must cover 80 × 2.5s Gate 1 poll budget (~200s). */
+  1: 200_000,
   2: 30_000, // Supabase vault upload + public URL verify
   3: 60_000, // CWALO Replicate (soft-fail)
   4: 90_000, // Demucs separation + stem checks
@@ -48,13 +48,23 @@ export function logGateFinished(gate: StudioGateId, detail?: string): void {
 
 /**
  * Circuit breaker: race `promise` against `ms`. Clears the timer on settle.
+ * Optional `step` is attached on timeout so the UI can show the failing stage.
  */
-export function withTimeout<T>(promise: Promise<T>, ms: number, stepName: string): Promise<T> {
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  stepName: string,
+  meta?: { step?: string },
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       console.error(`[Circuit Breaker] ${stepName} timed out after ${ms / 1000}s`);
-      reject(new Error(`[Circuit Breaker] ${stepName} timed out after ${ms / 1000}s`));
+      const err = new Error(
+        `[Circuit Breaker] ${stepName} timed out after ${ms / 1000}s`,
+      ) as Error & { step?: string };
+      if (meta?.step) err.step = meta.step;
+      reject(err);
     }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => {

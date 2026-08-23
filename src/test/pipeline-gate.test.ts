@@ -10,7 +10,7 @@ import {
 describe("pipeline gate timeouts", () => {
   it("budgets each gate per the circuit breaker table", () => {
     expect(gateTimeoutMs(1)).toBe(GATE_1_MUSIC_TIMEOUT_MS);
-    expect(gateTimeoutMs(1)).toBe(150_000);
+    expect(gateTimeoutMs(1)).toBe(200_000);
     expect(gateTimeoutMs(2)).toBe(30_000);
     expect(gateTimeoutMs(3)).toBe(60_000);
     expect(gateTimeoutMs(4)).toBe(90_000);

@@ -837,11 +837,11 @@ export async function fetchStudioTrackTask(
 }
 
 /**
- * Poll every 2.5s for up to 60 attempts (~150s). Bounded so Gate 1 cannot hang Node
+ * Poll every 2.5s for up to 80 attempts (~200s). Bounded so Gate 1 cannot hang Node
  * under load while still allowing AIMusicAPI full generations to finish.
  */
 export const POLLING_INTERVAL_MS = 2500;
-export const MAX_POLLING_ATTEMPTS = 60;
+export const MAX_POLLING_ATTEMPTS = 80;
 /** @deprecated Prefer MAX_POLLING_ATTEMPTS × POLLING_INTERVAL_MS */
 export const MAX_POLLING_DURATION_MS = MAX_POLLING_ATTEMPTS * POLLING_INTERVAL_MS;
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;
@@ -888,7 +888,9 @@ export async function waitForStudioTrack(
   hooks: StudioTrackHooks = {},
 ): Promise<StudioTrackResult> {
   const startedAt = Date.now();
-  reportPipelineProgress("sonic", PIPELINE_PROGRESS.sonic, hooks.onProgress);
+  // Dispatch composition before the poll loop so UI / abort landings stay on Gate 1.
+  reportPipelineProgress("composition", PIPELINE_PROGRESS.sonic, hooks.onProgress);
+  console.log("[Gate 1/6] currentStep=composition — starting AIMusicAPI poll loop");
 
   const { pollWithBreaker, isTerminalPollStatus } = await import(
     "@/lib/poll-with-breaker.server"
@@ -898,101 +900,127 @@ export async function waitForStudioTrack(
     | { kind: "ready"; result: StudioTrackResult }
     | { kind: "pending"; status: string };
 
-  const finished = await pollWithBreaker<PollTick>(
-    async () => {
-      throwIfAborted(hooks.abortSignal);
-      try {
-        const current = await fetchStudioTrackTask(taskId, hooks.abortSignal);
-        const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
-        const statusLabel = current.rawStatus || current.status;
-        console.log(
-          `[GATE_1_POLL_TICK] elapsed: ${elapsedSeconds}s, status:`,
-          statusLabel,
-          "clips:",
-          current.clipCount,
-        );
+  let finished: PollTick;
+  try {
+    finished = await pollWithBreaker<PollTick>(
+      async () => {
+        throwIfAborted(hooks.abortSignal);
+        try {
+          const current = await fetchStudioTrackTask(taskId, hooks.abortSignal);
+          const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+          const statusLabel = current.rawStatus || current.status;
+          console.log(
+            `[GATE_1_POLL_TICK] elapsed: ${elapsedSeconds}s, status:`,
+            statusLabel,
+            "clips:",
+            current.clipCount,
+          );
 
-        if (current.status === "failed" || isTerminalPollStatus(statusLabel)) {
-          throw new Error("Music engine: generation failed.");
-        }
-
-        if (current.status === "completed" && isHttpAudioUrl(current.audioUrl)) {
-          const reachable = await probeAudioUrlReachable(current.audioUrl);
-          if (reachable) {
-            logGateCleared(2, `Audio URL verified: ${current.audioUrl}`);
-            const output = assertBaseAudioContractOutput({
-              audioUrl: current.audioUrl,
-              duration: current.duration,
-            });
-            recordPipelineSuccess("music");
-            logPostConditionPassed("Base audio ready for Stem Separation");
-            reportPipelineProgress("sonic", 90, hooks.onProgress);
-            console.log(
-              `[SONIC_V5_POLL] Task: ${taskId} | Status: ${statusLabel} | Elapsed: ${elapsedSeconds}s`,
-            );
-            const audioUrl = assertHandoffToStems({
-              audioUrl: output.audioUrl,
-              taskId,
-              trackIds: current.trackIds,
-            });
-            return {
-              kind: "ready",
-              result: {
-                ...current,
-                audioUrl,
-                duration: output.duration,
-                title: current.title,
-                trackIds: current.trackIds.length ? current.trackIds : [taskId],
-              },
-            };
+          if (current.status === "failed" || isTerminalPollStatus(statusLabel)) {
+            throw new Error("Music engine: generation failed.");
           }
-          console.warn(
-            `[SONIC_V5_POLL] Task: ${taskId} | audio_url not reachable yet — continuing`,
-          );
-        }
 
-        reportPipelineProgress(
-          "sonic",
-          renderProgressPercent(startedAt, Date.now()),
-          hooks.onProgress,
-        );
-        console.log(
-          `[SONIC_V5_POLL] Task: ${taskId} | Status: ${statusLabel} | Elapsed: ${elapsedSeconds}s`,
-        );
-        return { kind: "pending", status: statusLabel };
-      } catch (error) {
-        if (isGenerationAborted(error)) throw error;
-        if (error instanceof StudioPipelineError) throw error;
-        // 4xx/5xx and permanent Music engine errors abort immediately.
-        if (isTransientSonicPollError(error) && error.status && error.status >= 400) {
-          throw new Error(
-            `[Polling Gate 1 AIMusicAPI] HTTP ${error.status} — aborting poll.`,
+          if (current.status === "completed" && isHttpAudioUrl(current.audioUrl)) {
+            const reachable = await probeAudioUrlReachable(current.audioUrl);
+            if (reachable) {
+              logGateCleared(2, `Audio URL verified: ${current.audioUrl}`);
+              const output = assertBaseAudioContractOutput({
+                audioUrl: current.audioUrl,
+                duration: current.duration,
+              });
+              recordPipelineSuccess("music");
+              logPostConditionPassed("Base audio ready for Stem Separation");
+              reportPipelineProgress("composition", 90, hooks.onProgress);
+              console.log(
+                `[SONIC_V5_POLL] Task: ${taskId} | Status: ${statusLabel} | Elapsed: ${elapsedSeconds}s`,
+              );
+              const audioUrl = assertHandoffToStems({
+                audioUrl: output.audioUrl,
+                taskId,
+                trackIds: current.trackIds,
+              });
+              return {
+                kind: "ready",
+                result: {
+                  ...current,
+                  audioUrl,
+                  duration: output.duration,
+                  title: current.title,
+                  trackIds: current.trackIds.length ? current.trackIds : [taskId],
+                },
+              };
+            }
+            console.warn(
+              `[SONIC_V5_POLL] Task: ${taskId} | audio_url not reachable yet — continuing`,
+            );
+          }
+
+          reportPipelineProgress(
+            "composition",
+            renderProgressPercent(startedAt, Date.now()),
+            hooks.onProgress,
           );
-        }
-        if (
-          error instanceof Error &&
-          (/Music engine:/i.test(error.message) || /task poll failed/i.test(error.message))
-        ) {
+          console.log(
+            `[SONIC_V5_POLL] Task: ${taskId} | Status: ${statusLabel} | Elapsed: ${elapsedSeconds}s`,
+          );
+          return { kind: "pending", status: statusLabel };
+        } catch (error) {
+          if (isGenerationAborted(error)) throw error;
+          if (error instanceof StudioPipelineError) throw error;
+          // 4xx/5xx and permanent Music engine errors abort immediately.
+          if (isTransientSonicPollError(error) && error.status && error.status >= 400) {
+            throw new Error(
+              `[Polling Gate 1 AIMusicAPI] HTTP ${error.status} — aborting poll.`,
+            );
+          }
+          if (
+            error instanceof Error &&
+            (/Music engine:/i.test(error.message) || /task poll failed/i.test(error.message))
+          ) {
+            throw error;
+          }
+          if (isTransientSonicPollError(error)) {
+            console.warn(`[SONIC_V5_POLL] Transient error Task: ${taskId}`, error.message);
+            return { kind: "pending", status: "transient" };
+          }
           throw error;
         }
-        if (isTransientSonicPollError(error)) {
-          console.warn(`[SONIC_V5_POLL] Transient error Task: ${taskId}`, error.message);
-          return { kind: "pending", status: "transient" };
-        }
-        throw error;
-      }
-    },
-    (tick) => tick.kind === "ready",
-    () => false,
-    {
-      maxAttempts: MAX_POLLING_ATTEMPTS,
-      intervalMs: POLLING_INTERVAL_MS,
-      stepName: "Gate 1 AIMusicAPI",
-    },
-  );
+      },
+      (tick) => tick.kind === "ready",
+      () => false,
+      {
+        maxAttempts: MAX_POLLING_ATTEMPTS,
+        intervalMs: POLLING_INTERVAL_MS,
+        stepName: "Gate 1 AIMusicAPI",
+        step: "composition",
+      },
+    );
+  } catch (error) {
+    if (isGenerationAborted(error)) throw error;
+    if (error && typeof error === "object" && "step" in error) {
+      const existing = error as Error & { step?: string };
+      if (!existing.step) existing.step = "composition";
+      throw existing;
+    }
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error ?? "[Circuit Breaker] Gate 1 AIMusicAPI timed out");
+    const err = new Error(
+      /Breaker tripped|timed out|Circuit Breaker/i.test(message)
+        ? `[Circuit Breaker] Gate 1 (AIMusicAPI) timed out after ${MAX_POLLING_DURATION_MS / 1000}s`
+        : message,
+    ) as Error & { step: string };
+    err.step = "composition";
+    throw err;
+  }
 
   if (finished.kind !== "ready") {
-    throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
+    const err = new StudioPipelineError("GATE_1", "Base audio URL was not returned") as StudioPipelineError & {
+      step: string;
+    };
+    err.step = "composition";
+    throw err;
   }
   return finished.result;
 }

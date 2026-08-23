@@ -452,7 +452,8 @@ type PipelineStepId =
   | "idle"
   | "validate"
   | "lyrics"
-  | "music"
+  | "composition"
+  | "music" // legacy alias for composition (Gate 1)
   | "cwalo"
   | "stems"
   | "vocals"
@@ -485,6 +486,7 @@ const PIPELINE_STEP_PROGRESS: Record<PipelineStepId, number> = {
   idle: 0,
   validate: 5,
   lyrics: PIPELINE_PROGRESS.lyrics,
+  composition: PIPELINE_PROGRESS.sonic,
   music: PIPELINE_PROGRESS.sonic,
   cwalo: PIPELINE_PROGRESS.cwalo,
   stems: PIPELINE_PROGRESS.stems,
@@ -503,19 +505,36 @@ function previewPipelinePayload(value: unknown, max = 180): string {
   }
 }
 
-function pipelineStepFromError(error: unknown, fallback: PipelineStepId): string {
-  if (error && typeof error === "object" && "step" in error) {
-    const step = (error as { step?: unknown }).step;
-    if (typeof step === "string" && step.trim()) return step;
+function readErrorStep(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const step = (error as { step?: unknown }).step;
+  if (typeof step === "string" && step.trim()) return step.trim();
+  const landing = (error as { landing?: { failedGate?: unknown } }).landing;
+  if (landing && typeof landing.failedGate === "string") {
+    if (/gate\s*1/i.test(landing.failedGate)) return "composition";
   }
+  return null;
+}
+
+function pipelineStepFromError(error: unknown, fallback: PipelineStepId): string {
+  const fromPayload = readErrorStep(error);
+  if (fromPayload) return fromPayload === "music" ? "composition" : fromPayload;
   const message = error instanceof Error ? error.message : String(error ?? "");
-  if (/GATE_1|lyrics/i.test(message)) return "lyrics";
+  if (/GATE_1|composition|AIMusicAPI|Circuit Breaker.*Gate 1/i.test(message)) {
+    return "composition";
+  }
   if (/GATE_2|CWALO|structure analysis/i.test(message)) return "cwalo";
-  if (/music engine|sonic|base audio/i.test(message)) return "music";
-  if (/GATE_3|stem/i.test(message)) return "stems";
-  if (/vocal/i.test(message)) return "vocals";
-  if (/GATE_4|GATE_5|master/i.test(message)) return "master";
-  return fallback;
+  if (/music engine|sonic|base audio/i.test(message)) return "composition";
+  if (/GATE_3|stem|Demucs|demux/i.test(message)) return "stems";
+  if (/vocal|Fish|Gate 5/i.test(message)) return "vocals";
+  if (/GATE_4|GATE_5|master|Gate 6/i.test(message)) return "master";
+  return fallback === "music" ? "composition" : fallback;
+}
+
+function displayPipelineStep(step: string | null | undefined, currentStep?: string): string {
+  const value = (step || currentStep || "composition").trim();
+  if (value === "music" || value === "sonic") return "composition";
+  return value;
 }
 
 /** Normalises legacy rows (no id/status) so old history keeps rendering. */
@@ -1396,10 +1415,21 @@ export function AudioStudio() {
 
   const applyPipelineProgress = useCallback((stage: string, percent: number) => {
     reportPipelineProgress(stage, percent);
-    const step = (["lyrics", "music", "cwalo", "stems", "vocals", "master", "complete"].includes(stage)
-      ? stage
-      : stage === "sonic"
-        ? "music"
+    const step = ([
+      "lyrics",
+      "composition",
+      "music",
+      "cwalo",
+      "stems",
+      "vocals",
+      "master",
+      "complete",
+    ].includes(stage)
+      ? stage === "music"
+        ? "composition"
+        : stage
+      : stage === "sonic" || stage === "composition"
+        ? "composition"
         : stage === "structure" || stage === "analysis"
           ? "cwalo"
           : pipelineStepRef.current) as PipelineStepId;
@@ -1411,20 +1441,27 @@ export function AudioStudio() {
       progress: percent,
       lastError: step === "complete" ? null : prev.lastError,
     }));
-    setStatusText(labelForProgressStage(stage === "music" ? "sonic" : stage));
+    setStatusText(
+      labelForProgressStage(
+        step === "composition" || step === "music" ? "sonic" : stage,
+      ),
+    );
   }, []);
 
   const beginPipelineStep = useCallback((step: PipelineStepId, payloadPreview?: unknown) => {
-    pipelineStepRef.current = step;
-    const progress = PIPELINE_STEP_PROGRESS[step];
+    const normalized = step === "music" ? "composition" : step;
+    pipelineStepRef.current = normalized;
+    const progress = PIPELINE_STEP_PROGRESS[normalized];
     setPipelineState({
-      currentStep: step,
+      currentStep: normalized,
       status: "loading",
       progress,
       lastError: null,
     });
-    setStatusText(labelForProgressStage(step === "music" ? "sonic" : step));
-    console.log(`[PIPELINE:STEP_START] ${step}`, {
+    setStatusText(
+      labelForProgressStage(normalized === "composition" ? "sonic" : normalized),
+    );
+    console.log(`[PIPELINE:STEP_START] ${normalized}`, {
       at: new Date().toISOString(),
       progress,
       payload: previewPipelinePayload(payloadPreview),
@@ -1432,7 +1469,7 @@ export function AudioStudio() {
   }, []);
 
   const completePipelineStep = useCallback((step: PipelineStepId, payloadPreview?: unknown) => {
-    console.log(`[PIPELINE:STEP_DONE] ${step}`, {
+    console.log(`[PIPELINE:STEP_DONE] ${step === "music" ? "composition" : step}`, {
       at: new Date().toISOString(),
       payload: previewPipelinePayload(payloadPreview),
     });
@@ -1445,15 +1482,19 @@ export function AudioStudio() {
         : typeof error === "object" && error && "message" in error
           ? String((error as { message?: unknown }).message ?? "Pipeline execution failed")
           : String(error ?? "Pipeline execution failed");
-    const lastError: PipelineLastError = { step, message, raw: error };
-    console.error(`[PIPELINE_ERROR] Step: ${step} ->`, message, error);
+    const resolvedStep = displayPipelineStep(
+      step || readErrorStep(error),
+      pipelineStepRef.current,
+    );
+    const lastError: PipelineLastError = { step: resolvedStep, message, raw: error };
+    console.error(`[PIPELINE_ERROR] Step: ${resolvedStep} ->`, message, error);
     setPipelineState((prev) => ({
       ...prev,
-      currentStep: (prev.currentStep === "idle" ? "validate" : prev.currentStep) as PipelineStepId,
+      currentStep: (resolvedStep === "idle" ? "validate" : resolvedStep) as PipelineStepId,
       status: "error",
       lastError,
     }));
-    setRollbackNotice(`${step}: ${message}`);
+    setRollbackNotice(`${resolvedStep}: ${message}`);
     return lastError;
   }, []);
 
@@ -2305,7 +2346,7 @@ export function AudioStudio() {
       // Linear handoff: lyrics → Sonic prompt; Style Prompt textarea → tags.
       beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
       completePipelineStep("lyrics", { chars: arrangedLyrics.length, withVocals });
-      beginPipelineStep("music", {
+      beginPipelineStep("composition", {
         prompt: arrangedLyrics || styleLine || genre,
         tags: styleTags,
         mv: "sonic-v5",
@@ -2385,7 +2426,7 @@ export function AudioStudio() {
         window.clearInterval(stopTicker);
       }
       if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
-      completePipelineStep("music", { taskId: started.taskId, tracks: started.tracks?.length ?? 0 });
+      completePipelineStep("composition", { taskId: started.taskId, tracks: started.tracks?.length ?? 0 });
       beginPipelineStep("cwalo", { taskId: started.taskId });
       beginPipelineStep("stems", { taskId: started.taskId });
       applyPipelineProgress("master", PIPELINE_PROGRESS.master);
@@ -2548,7 +2589,10 @@ export function AudioStudio() {
       const raw = err instanceof Error ? err.message : GENERATION_FAIL_MESSAGE;
       const message = readableEngineError(raw);
       const cancelled = message === CANCELLED_MESSAGE || isGenerationAborted(err);
-      const failedStep = pipelineStepFromError(err, pipelineStepRef.current);
+      const failedStep = displayPipelineStep(
+        pipelineStepFromError(err, pipelineStepRef.current),
+        pipelineStepRef.current,
+      );
       if (!cancelled) {
         failPipelineStep(failedStep, err);
       } else {
@@ -2852,6 +2896,15 @@ export function AudioStudio() {
     if (!plan || busy || runningRef.current) return;
     setRollbackNotice(null);
     setRetryPlan(null);
+    // Reset UI to Gate 1 composition before any retry path.
+    pipelineStepRef.current = "composition";
+    setPipelineState({
+      currentStep: "composition",
+      status: "idle",
+      progress: PIPELINE_STEP_PROGRESS.composition,
+      lastError: null,
+    });
+    setStatusText(labelForProgressStage("sonic"));
 
     if (plan.stage === "render") {
       await handleGenerate();
@@ -3056,7 +3109,10 @@ export function AudioStudio() {
               <p className="font-semibold text-foreground">
                 {busy
                   ? labelForProgressStage(
-                      pipelineState.currentStep === "music" ? "sonic" : pipelineState.currentStep,
+                      pipelineState.currentStep === "music" ||
+                      pipelineState.currentStep === "composition"
+                        ? "sonic"
+                        : pipelineState.currentStep,
                     )
                   : `Step ${studioStep + 1} of ${STUDIO_STEPS.length}: ${STUDIO_STEPS[studioStep]?.label}`}
               </p>
@@ -3074,7 +3130,10 @@ export function AudioStudio() {
               aria-label={
                 busy
                   ? `Generation progress ${pipelineState.progress} percent, ${labelForProgressStage(
-                      pipelineState.currentStep === "music" ? "sonic" : pipelineState.currentStep,
+                      pipelineState.currentStep === "music" ||
+                      pipelineState.currentStep === "composition"
+                        ? "sonic"
+                        : pipelineState.currentStep,
                     )}`
                   : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
               }
@@ -4262,7 +4321,13 @@ export function AudioStudio() {
               role="alert"
             >
               <p className="font-semibold">
-                Pipeline failed at step: {pipelineState.lastError.step}
+                Pipeline failed at step:{" "}
+                {displayPipelineStep(
+                  pipelineState.lastError.step ||
+                    readErrorStep(pipelineState.lastError.raw) ||
+                    pipelineState.currentStep,
+                  pipelineState.currentStep,
+                )}
               </p>
               <p>{pipelineState.lastError.message}</p>
               <p className="break-all font-mono text-[11px] opacity-80">

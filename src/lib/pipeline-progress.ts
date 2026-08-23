@@ -32,10 +32,13 @@ export type StudioProgressCallback = (stage: string, percent: number) => void;
 export function normalizeProgressStage(stage: string): PipelineProgressStage | null {
   const key = stage.trim().toLowerCase();
   if (key in PIPELINE_PROGRESS) return key as PipelineProgressStage;
-  if (key === "music" || key === "base" || key === "base audio") return "sonic";
+  if (key === "music" || key === "base" || key === "base audio" || key === "composition") {
+    return "sonic";
+  }
   if (key === "vaulting" || key === "supabase" || key === "gate_2_vaulted") return "vault";
   if (key === "structure" || key === "analysis" || key === "cwalo structure") return "cwalo";
   if (key === "mastering" || key === "matchering") return "master";
+  if (key === "demux") return "stems";
   return null;
 }
 

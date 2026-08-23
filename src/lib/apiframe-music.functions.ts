@@ -307,15 +307,32 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     });
     startedTaskId = started.taskId;
     const { withTimeout, GATE_TIMEOUTS_MS } = await import("@/lib/pipeline-gate.server");
-    console.log("[Gate 1/6] Base Generation...");
-    finished = await withTimeout(
-      waitForStudioTrack(started.taskId),
-      GATE_TIMEOUTS_MS[1],
-      "Gate 1 (AIMusicAPI)",
-    );
+    const { reportPipelineProgress: reportGate1Progress, PIPELINE_PROGRESS: gate1Progress } =
+      await import("@/lib/pipeline-progress");
+    reportGate1Progress("composition", gate1Progress.sonic);
+    console.log("[Gate 1/6] currentStep=composition — Base Generation poll…");
+    try {
+      finished = await withTimeout(
+        waitForStudioTrack(started.taskId),
+        GATE_TIMEOUTS_MS[1],
+        "Gate 1 (AIMusicAPI)",
+        { step: "composition" },
+      );
+    } catch (err) {
+      if (err && typeof err === "object" && "step" in err) throw err;
+      const e = new Error(
+        err instanceof Error ? err.message : String(err ?? "Gate 1 timed out"),
+      ) as Error & { step: string };
+      e.step = "composition";
+      throw e;
+    }
     const sonicUrl = finished.audioUrl;
     if (!sonicUrl) {
-      throw new Error("[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.");
+      const empty = new Error(
+        "[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.",
+      ) as Error & { step: string };
+      empty.step = "composition";
+      throw empty;
     }
     console.log("[Gate 1/6] Finished — audio_url ready");
 
