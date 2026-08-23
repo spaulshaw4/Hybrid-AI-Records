@@ -1,9 +1,12 @@
-import { optimizeStylePromptViaGemini } from "@/lib/optimize-style-prompt.server";
+import {
+  injectLyricStructureAnchors,
+  optimizeStylePromptViaGemini,
+} from "@/lib/optimize-style-prompt.server";
 
 /**
  * POST /api/ai/optimize-prompt
- * Body: { userText: string } | { prompt: string }
- * Returns: { optimizedPrompt: string }
+ * Body: { userText: string, lyrics?: string, bpm?: number }
+ * Returns: { optimizedPrompt, lyricAnchors, lyrics? }
  *
  * Runs google/gemini-2.5-flash on Replicate (REPLICATE_API_TOKEN).
  */
@@ -13,6 +16,7 @@ export async function POST(req: Request): Promise<Response> {
       userText?: string;
       prompt?: string;
       text?: string;
+      lyrics?: string;
       bpm?: number;
     };
     const userText = String(body.userText ?? body.prompt ?? body.text ?? "").trim();
@@ -28,12 +32,24 @@ export async function POST(req: Request): Promise<Response> {
         ? `${userText}, ${Math.round(body.bpm)} BPM`
         : userText;
 
-    const optimizedPrompt = await optimizeStylePromptViaGemini(withTempo);
+    const existingLyrics = typeof body.lyrics === "string" ? body.lyrics : "";
+    const result = await optimizeStylePromptViaGemini(withTempo, {
+      lyrics: existingLyrics,
+    });
+    const lyrics = injectLyricStructureAnchors(existingLyrics, result.lyricAnchors);
+
     console.warn("[STYLE_OPTIMIZE]", {
       inputChars: withTempo.length,
-      outputChars: optimizedPrompt.length,
+      outputChars: result.stylePrompt.length,
+      anchors: result.lyricAnchors.length,
     });
-    return Response.json({ optimizedPrompt, prompt: optimizedPrompt });
+
+    return Response.json({
+      optimizedPrompt: result.stylePrompt,
+      prompt: result.stylePrompt,
+      lyricAnchors: result.lyricAnchors,
+      lyrics,
+    });
   } catch (error) {
     console.error("[STYLE_OPTIMIZE_ERROR]", error);
     const message =

@@ -1539,8 +1539,8 @@ export function AudioStudio() {
   }
 
   /**
-   * Gemini 2.5 Flash (Replicate) → 100K Prompt Book style string → stylePrompt state.
-   * That value is Gate 1 `tags` on generate when the box is filled.
+   * Gemini 2.5 Flash (Replicate) → genre-adaptive style tokens + lyric anchors.
+   * Style tokens become Gate 1 `tags`; anchors inject into the lyrics box.
    */
   async function handleOptimizeStyle() {
     if (aiBusy) return;
@@ -1556,12 +1556,18 @@ export function AudioStudio() {
       const res = await fetch("/api/ai/optimize-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText, bpm: clampBpm(bpm) }),
+        body: JSON.stringify({
+          userText,
+          bpm: clampBpm(bpm),
+          lyrics,
+        }),
         signal: controller.signal,
       });
       const data = (await res.json()) as {
         optimizedPrompt?: string;
         prompt?: string;
+        lyricAnchors?: string[];
+        lyrics?: string;
         error?: string;
       };
       if (!res.ok) {
@@ -1574,7 +1580,15 @@ export function AudioStudio() {
         return;
       }
       setStylePrompt(next);
-      toast.success("Style prompt optimized.");
+      if (typeof data.lyrics === "string" && data.lyrics.trim()) {
+        setLyrics(data.lyrics);
+      }
+      const anchorCount = Array.isArray(data.lyricAnchors) ? data.lyricAnchors.length : 0;
+      toast.success(
+        anchorCount > 0
+          ? `Style optimized with ${anchorCount} genre structure tags.`
+          : "Style prompt optimized.",
+      );
     } catch (err) {
       const timedOut =
         (err instanceof DOMException && err.name === "AbortError") ||
