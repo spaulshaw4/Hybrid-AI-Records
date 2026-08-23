@@ -338,6 +338,8 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     // has to fetch the audio over the internet, so hand it the upstream CDN URL
     // whenever the archived copy is not absolute.
     const { isHttpAudioUrl } = await import("@/lib/pipeline-contracts");
+    const { logPipelineStep } = await import("@/lib/pipeline-steps.server");
+    logPipelineStep("handoff");
     const pipelineBase = isHttpAudioUrl(archivedBase) ? archivedBase : sonicUrl;
     if (pipelineBase !== archivedBase) {
       console.warn(

@@ -1,24 +1,27 @@
 /**
- * Five-stage studio pipeline: isolated providers, keys, and server telemetry.
+ * Five runtime gates of a studio generate. Lyrics are written earlier by the
+ * Co-Producer and arrive in the payload, so they sit outside the numbering.
  * Logs are for the terminal only — artist-facing errors stay vendor-neutral.
  */
 
 export const PIPELINE_STEP_LOGS = {
-  lyrics: ">>> [1/5: LYRICS] Gemini 2.5 on Replicate",
-  music: ">>> [2/5: BASE AUDIO] AIMusicAPI Sonic v5",
+  lyrics: ">>> [LYRICS] Gemini 2.5 on Replicate (Co-Producer)",
+  music: ">>> [1/5: BASE GENERATION] AIMusicAPI chirp-v5",
+  handoff: ">>> [2/5: BASE URL HANDOFF] Resolving audio link to Supabase",
   stems: ">>> [3/5: STEMS] Replicate Demucs separation",
-  vocals: ">>> [4/5: VOCALS] Direct Fish.audio API dispatch",
-  mastering: ">>> [5/5: MASTERING] Local Matchering + FFmpeg final pass",
+  vocals: ">>> [4/5: VOCALS] Fish Audio Plus vocal synthesis",
+  mastering: ">>> [5/5: MASTERING] Matchering + FFmpeg final master",
 } as const;
 
 export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
 
 const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   lyrics: "Replicate Gemini 2.5 Flash",
-  music: "AIMusicAPI Sonic v5",
+  music: "AIMusicAPI chirp-v5",
+  handoff: "Supabase Storage",
   stems: "Replicate Demucs",
-  vocals: "Fish Audio",
-  mastering: "Local Matchering",
+  vocals: "Fish Audio Plus",
+  mastering: "Matchering + FFmpeg",
 };
 
 export function logPipelineStep(step: PipelineStepId): void {
