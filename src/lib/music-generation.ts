@@ -758,6 +758,7 @@ export async function fetchStudioTrackTask(
       duration: null,
       trackIds: [taskId],
       rawStatus: "processing",
+      clipCount: dataRecords(raw).length,
     };
   }
   if (!response.ok) {
