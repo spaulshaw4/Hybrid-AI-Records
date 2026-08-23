@@ -1,7 +1,7 @@
 /**
- * Gate 2 — CWALO all-in-one music structure analysis (Replicate).
+ * Gate 3 — CWALO all-in-one music structure analysis (Replicate).
  *
- * Runs after Gate 1 base audio is ready and before Gate 3 Demucs.
+ * Runs after Gate 2 vaults a public HTTPS CDN URL and before Gate 4 Demucs.
  * Extracts section boundaries, tempo, and remux gain hints so the
  * instrumental bed is never attenuated through transitions / outro.
  */
@@ -21,6 +21,36 @@ import {
 /** Pinned model + version hash (do not float to latest). */
 export const CWALO_MODEL =
   "cwalo/all-in-one-music-structure-analysis:6deeba047db17da69e9826c0285cd137cd2a81af05eb44ff496b7acd69b3a383";
+
+/**
+ * Exact Cog / container input for CWALO Gate 3.
+ * `music_input` must be a public HTTPS CDN URL (Supabase vault) — never localhost.
+ */
+export type CwaloRunInput = {
+  music_input: string;
+  model: "harmonix-all";
+  demux: false;
+  sonify: false;
+  visualize: false;
+  activ: false;
+  embed: false;
+  include_embeddings: false;
+  include_activations: false;
+};
+
+export function buildCwaloRunInput(musicInput: string): CwaloRunInput {
+  return {
+    music_input: musicInput,
+    model: "harmonix-all",
+    demux: false,
+    sonify: false,
+    visualize: false,
+    activ: false,
+    embed: false,
+    include_embeddings: false,
+    include_activations: false,
+  };
+}
 
 export type CwaloSection = {
   start: number;
@@ -478,14 +508,14 @@ export async function resolveCwaloMusicInput(
 }
 
 /**
- * Gate 2 entry: structure analysis on the Gate 1 audio URL.
+ * Gate 3 entry: structure analysis on the Gate 2 public vault CDN URL.
  * Uses the pinned CWALO version hash via the Replicate SDK.
  */
 export async function analyzeMusicStructureWithCwalo(
   audioUrl: string,
 ): Promise<CwaloStructure> {
   if (!isHttpAudioUrl(audioUrl)) {
-    throw new StudioPipelineError("GATE_2", "Base audio URL was not returned");
+    throw new StudioPipelineError("GATE_3", "Base audio URL was not returned");
   }
 
   const token = replicateApiKey("CWALO structure analysis");
@@ -494,34 +524,38 @@ export async function analyzeMusicStructureWithCwalo(
   const musicInput = await resolveCwaloMusicInput(replicate, audioUrl);
   if (!isPublicHttpAudioUrl(musicInput)) {
     throw new StudioPipelineError(
-      "GATE_2",
+      "GATE_3",
       "CWALO music_input must be a public URL (CDN or Replicate Files) — refused localhost",
     );
   }
 
-  console.warn("[GATE_2_CWALO] dispatch", {
+  const cwaloInput = buildCwaloRunInput(musicInput);
+  console.warn("[GATE_3_CWALO] dispatch", {
     model: CWALO_MODEL,
     audio: musicInput.slice(0, 96),
     uploaded: musicInput !== audioUrl,
+    flags: {
+      model: cwaloInput.model,
+      demux: cwaloInput.demux,
+      sonify: cwaloInput.sonify,
+      visualize: cwaloInput.visualize,
+    },
   });
 
   let output: unknown;
   try {
-    // Strict Cog schema: only `music_input` (public URL or Replicate file URL).
     output = await replicate.run(CWALO_MODEL as `${string}/${string}:${string}`, {
-      input: {
-        music_input: musicInput,
-      },
+      input: cwaloInput,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    console.error("[GATE_2_CWALO_FAIL]", detail);
-    throw new StudioPipelineError("GATE_2", `CWALO structure analysis failed: ${detail.slice(0, 240)}`);
+    console.error("[GATE_3_CWALO_FAIL]", detail);
+    throw new StudioPipelineError("GATE_3", `CWALO structure analysis failed: ${detail.slice(0, 240)}`);
   }
 
-  console.warn("[GATE_2_CWALO_OUTPUT]", typeof output, Array.isArray(output) ? output.length : "");
+  console.warn("[GATE_3_CWALO_OUTPUT]", typeof output, Array.isArray(output) ? output.length : "");
   const structure = await resolveCwaloStructureFromOutput(output);
-  console.warn("[GATE_2_CWALO_STRUCTURE]", {
+  console.warn("[GATE_3_CWALO_STRUCTURE]", {
     bpm: structure.bpm,
     sections: structure.sections.map((s) => `${s.label}@${s.start.toFixed(1)}-${s.end.toFixed(1)}`),
     energyPoints: structure.energyProfile.length,
@@ -531,7 +565,7 @@ export async function analyzeMusicStructureWithCwalo(
     dynamicRemux: Boolean(structure.masterPlan.instrumentalVolumeExpr),
   });
   logGateCleared(
-    2,
+    3,
     `CWALO roadmap ready (bpm=${structure.bpm ?? "n/a"}, sections=${structure.sections.length})`,
   );
   return structure;

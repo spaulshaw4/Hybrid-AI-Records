@@ -114,6 +114,8 @@ export async function executePipeline(
     }
 
     // ── Gate 1: Base Generation (AIMusicAPI) ───────────────────────────────
+    // Poll budget lives in waitForStudioTrack (60 × 2.5s). Outer withTimeout
+    // matches GATE_TIMEOUTS_MS[1] (~150s). Exceeding it throws before charge.
     console.log(`[Gate 1/6] Base generation starting for track ${trackId}...`);
     telemetry = bumpTelemetry(telemetry, 1, "gate_1_generating");
 
@@ -176,15 +178,15 @@ export async function executePipeline(
     }
 
     // ── Gate 3: CWALO with Fallback Detour ─────────────────────────────────
+    // Exact container schema is applied inside analyzeMusicStructureWithCwalo
+    // (music_input + harmonix-all flags). Soft-fail → generateDefaultStructure().
     console.log(`[Gate 3/6] Running CWALO structural analysis...`);
     telemetry = bumpTelemetry(telemetry, 3, "gate_3_analyzing");
     let gate3: Gate3Result;
     let masterPlan: import("@/lib/cwalo-structure.server").CwaloMasterPlan | null = null;
     let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
     try {
-      const { analyzeMusicStructureWithCwalo, buildCwaloMasterPlan } = await import(
-        "@/lib/cwalo-structure.server"
-      );
+      const { analyzeMusicStructureWithCwalo } = await import("@/lib/cwalo-structure.server");
       const structure = await withTimeout(
         analyzeMusicStructureWithCwalo(publicAudioUrl),
         GATE_TIMEOUTS_MS[3],

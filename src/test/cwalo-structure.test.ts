@@ -3,6 +3,7 @@ import {
   CWALO_MODEL,
   CWALO_TAIL_FADE_SECONDS,
   buildCwaloMasterPlan,
+  buildCwaloRunInput,
   buildSectionVolumeExpression,
   classifyCwaloSection,
   parseCwaloAnalysisJson,
@@ -14,11 +15,26 @@ import {
 } from "@/lib/pipeline-contracts";
 import { PIPELINE_PROGRESS, PIPELINE_PROGRESS_LABELS } from "@/lib/pipeline-progress";
 
-describe("CWALO Gate 2", () => {
+describe("CWALO Gate 3", () => {
   it("pins the exact Replicate model hash", () => {
     expect(CWALO_MODEL).toBe(
       "cwalo/all-in-one-music-structure-analysis:6deeba047db17da69e9826c0285cd137cd2a81af05eb44ff496b7acd69b3a383",
     );
+  });
+
+  it("builds the exact CWALO container input schema", () => {
+    const url = "https://cdn.example.com/raw/track.mp3";
+    expect(buildCwaloRunInput(url)).toEqual({
+      music_input: url,
+      model: "harmonix-all",
+      demux: false,
+      sonify: false,
+      visualize: false,
+      activ: false,
+      embed: false,
+      include_embeddings: false,
+      include_activations: false,
+    });
   });
 
   it("parses section boundaries, energy profile, outro_start, and track_end", () => {
