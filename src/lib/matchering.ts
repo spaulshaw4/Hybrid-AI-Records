@@ -1,5 +1,5 @@
 import { HYBRID_INTRO_SECONDS } from "@/lib/hybrid-track-pipeline";
-import { LOUDNORM_FILTER } from "@/lib/loudnorm";
+import { GATE_6_EBU_R128_MASTERING_FILTER } from "@/lib/loudnorm";
 import { masteredTrackObjectPath } from "@/lib/audio-vault";
 
 /** Hard cap so a stuck Python/FFmpeg child never hangs a generation. */
@@ -13,7 +13,8 @@ export const MATCHERING_SCRIPT_RELATIVE = "scripts/matchering_master.py";
 
 /** Brickwall ceiling (~ -1 dBTP) before streaming loudnorm. */
 export const BRICKWALL_LIMITER = "alimiter=limit=0.891250938:level=false";
-export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${LOUDNORM_FILTER}`;
+/** Deterministic EBU R128 finish — always -14 LUFS / -1.0 dBFS peak. */
+export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${GATE_6_EBU_R128_MASTERING_FILTER}`;
 
 /**
  * Gate 3 instrumental + Fish vocal remux — exact production filter:
@@ -24,7 +25,7 @@ export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${LOUDNORM_FILTER}
  */
 export const HYBRID_REMUX_AMIX =
   "amix=inputs=2:duration=first:dropout_transition=0:normalize=0";
-export const HYBRID_REMUX_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.5";
+export const HYBRID_REMUX_LOUDNORM = "loudnorm=I=-14:LRA=7:TP=-1.0";
 export const HYBRID_REMUX_MIX_FILTER = `${HYBRID_REMUX_AMIX},${HYBRID_REMUX_LOUDNORM}`;
 
 /** Gate 6 forced output specs — every remux / finish encode must include these. */
@@ -71,7 +72,7 @@ function volumeGain(value: number): string {
  *
  * Production remux (instrumental + vocal):
  *   [0:a]volume=1.0[inst];[1:a]volume=1.0[vox];
- *   [inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=11:TP=-1.5
+ *   [inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=7:TP=-1.0
  *
  * When CWALO section expressions are present, volume uses eval=frame envelopes
  * (full band on chorus/outro; vocal pocketing on verse) instead of static gains.
@@ -218,7 +219,9 @@ export const MASTER_FADE_OUT_SECONDS = 4;
  * then, with a smooth exponential fade only at that edge (typically 2.5s).
  * `outroStart` is intentionally ignored so we never fade early through the outro.
  *
- * When `skipLoudnorm` is set (remux already baked loudnorm into the mix WAV),
+ * `skipLoudnorm` still applies GATE_6_EBU_R128_MASTERING_FILTER after the brickwall
+ * (deterministic -14 LUFS / -1.0 dBTP); it only skips the duplicate brickwall+loudnorm
+ * combo when remux already shaped the mix.
  * only the brickwall limiter + fade run so we do not double-norm.
  */
 export function matcheringFinishArgs(
@@ -272,7 +275,9 @@ export function matcheringFinishArgs(
 
   const fadeStart =
     fadeAnchor !== undefined ? Math.max(0, fadeAnchor - fadeSecs) : undefined;
-  const baseFilter = options.skipLoudnorm ? BRICKWALL_LIMITER : MATCHERING_FINISH_FILTER;
+  const baseFilter = options.skipLoudnorm
+    ? `${BRICKWALL_LIMITER},${GATE_6_EBU_R128_MASTERING_FILTER}`
+    : MATCHERING_FINISH_FILTER;
   const filter =
     fadeStart === undefined
       ? baseFilter

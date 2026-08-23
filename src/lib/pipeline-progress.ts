@@ -27,7 +27,11 @@ export const PIPELINE_PROGRESS_LABELS: Record<PipelineProgressStage, string> = {
   complete: "Master track ready",
 };
 
-export type StudioProgressCallback = (stage: string, percent: number) => void;
+export type StudioProgressCallback = (
+  stage: string,
+  percent: number,
+  pipelineState?: number,
+) => void;
 
 export function normalizeProgressStage(stage: string): PipelineProgressStage | null {
   const key = stage.trim().toLowerCase();
@@ -35,7 +39,9 @@ export function normalizeProgressStage(stage: string): PipelineProgressStage | n
   if (key === "music" || key === "base" || key === "base audio" || key === "composition") {
     return "sonic";
   }
-  if (key === "vaulting" || key === "supabase" || key === "gate_2_vaulted") return "vault";
+  if (key === "vaulting" || key === "supabase" || key === "gate_2_vaulted" || key === "storage") {
+    return "vault";
+  }
   if (key === "structure" || key === "analysis" || key === "cwalo structure") return "cwalo";
   if (key === "mastering" || key === "matchering") return "master";
   if (key === "demux") return "stems";
@@ -56,8 +62,13 @@ export function reportPipelineProgress(
   stage: string,
   percent: number,
   onProgress?: StudioProgressCallback,
+  pipelineState?: number,
 ): void {
   const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-  console.log("[PROGRESS]", stage, clamped);
-  onProgress?.(stage, clamped);
+  if (typeof pipelineState === "number") {
+    console.log("[PROGRESS]", stage, clamped, `flags=0b${pipelineState.toString(2)}`);
+  } else {
+    console.log("[PROGRESS]", stage, clamped);
+  }
+  onProgress?.(stage, clamped, pipelineState);
 }

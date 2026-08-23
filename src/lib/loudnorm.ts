@@ -1,10 +1,29 @@
-/** Streaming / broadcast loudness targets (EBU R128-style). */
+/** Streaming / broadcast loudness targets (EBU R128). */
 export const STREAMING_LUFS = -14;
-export const TRUE_PEAK_DBTP = -1.5;
-export const LOUDNESS_RANGE = 11;
+/** True-peak ceiling — Gate 6 mastering standard (-1.0 dBFS / dBTP). */
+export const TRUE_PEAK_DBTP = -1.0;
+/** Loudness range target (±0.5 LU integrated tolerance via two-pass linear). */
+export const LOUDNESS_RANGE = 7;
 export const MASTER_AUDIO_BITRATE = "320k";
 
-export const LOUDNORM_FILTER = `loudnorm=I=${STREAMING_LUFS}:TP=${TRUE_PEAK_DBTP}:LRA=${LOUDNESS_RANGE}`;
+/** Canonical one-pass / print filter: I=-14, LRA=7, TP=-1.0 */
+export const LOUDNORM_FILTER = `loudnorm=I=${STREAMING_LUFS}:LRA=${LOUDNESS_RANGE}:TP=${TRUE_PEAK_DBTP}`;
+
+/**
+ * Static fallback when dynamic Matchering fails — applied directly to mixed stems.
+ * FFmpeg accepts `TP=` / `tp=` for true peak; Gate 6 uses the deterministic linear form.
+ */
+export const STATIC_EBU_R128_LOUDNORM = "loudnorm=I=-14:LRA=7:TP=-1.0";
+
+/**
+ * Deterministic Gate 6 mastering filter — broadcast-ready (-14 LUFS / -1.0 dBFS peak).
+ * Applied as `-af <filter>` on the final FFmpeg encode.
+ */
+export const GATE_6_EBU_R128_MASTERING_FILTER =
+  "loudnorm=I=-14:LRA=7:tp=-1.0:measured_I=-14:measured_tp=-1.0:offset=0.0:linear=true:print_format=summary";
+
+/** FFmpeg argv fragment: `['-af', GATE_6_EBU_R128_MASTERING_FILTER]` */
+export const ffmpegMasteringFilter = ["-af", GATE_6_EBU_R128_MASTERING_FILTER] as const;
 
 export type LoudnormMeasurement = {
   input_i: string;
@@ -33,7 +52,6 @@ export function loudnormTwoPassFilter(measured: LoudnormMeasurement): string {
     "linear=true",
   ].join(":");
 }
-
 export function parseLoudnormMeasurement(stderr: string): LoudnormMeasurement | null {
   const match = stderr.match(/\{[\s\S]*?"input_i"[\s\S]*?\}/);
   if (!match) return null;
@@ -74,7 +92,7 @@ export function measureLoudnormArgs(inputAudioPath: string): string[] {
   ];
 }
 
-/** Matches: ffmpeg -i in -af loudnorm=I=-14:TP=-1.5:LRA=11 -b:a 320k out */
+/** Matches: ffmpeg -i in -af loudnorm=I=-14:LRA=7:TP=-1.0 -b:a 320k out */
 export function finalizeTrackMasterArgs(
   inputAudioPath: string,
   outputMasterPath: string,

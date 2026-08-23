@@ -38,7 +38,7 @@ async function runFfmpeg(args: string[]): Promise<string> {
 
 /**
  * Applies professional broadcast limiting and targets -14 LUFS integrated,
- * -1.5 dBTP, LRA 11, then encodes a 320 kbps master.
+ * -1.0 dBTP, LRA 7 (EBU R128 two-pass when measurement succeeds).
  */
 export async function finalizeTrackMaster(
   inputAudioPath: string,
@@ -49,6 +49,55 @@ export async function finalizeTrackMaster(
   const filter = measured ? loudnormTwoPassFilter(measured) : loudnormFilter();
   await runFfmpeg(finalizeTrackMasterArgs(inputAudioPath, outputMasterPath, filter));
   return outputMasterPath;
+}
+
+/**
+ * Two-pass EBU R128 normalize a WAV in place (or to `outputWavPath`).
+ * Falls back to one-pass `STATIC_EBU_R128_LOUDNORM` when measurement JSON is missing.
+ */
+export async function applyEbuR128TwoPass(
+  inputWavPath: string,
+  outputWavPath: string,
+): Promise<{ mode: "two-pass" | "one-pass" }> {
+  const { STATIC_EBU_R128_LOUDNORM } = await import("@/lib/loudnorm");
+  const measuredLog = await runFfmpeg(measureLoudnormArgs(inputWavPath));
+  const measured = parseLoudnormMeasurement(measuredLog);
+  if (measured) {
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-nostdin",
+      "-i",
+      inputWavPath,
+      "-af",
+      loudnormTwoPassFilter(measured),
+      "-ac",
+      "2",
+      "-ar",
+      "44100",
+      "-c:a",
+      "pcm_s24le",
+      outputWavPath,
+    ]);
+    return { mode: "two-pass" };
+  }
+  await runFfmpeg([
+    "-y",
+    "-hide_banner",
+    "-nostdin",
+    "-i",
+    inputWavPath,
+    "-af",
+    STATIC_EBU_R128_LOUDNORM,
+    "-ac",
+    "2",
+    "-ar",
+    "44100",
+    "-c:a",
+    "pcm_s24le",
+    outputWavPath,
+  ]);
+  return { mode: "one-pass" };
 }
 
 /**

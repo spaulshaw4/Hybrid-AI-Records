@@ -402,15 +402,9 @@ export function ensurePipelineWorkerInstalled(): void {
   if (shutdownHandlersInstalled) return;
   shutdownHandlersInstalled = true;
 
-  const handler = (signal: string) => {
-    void onProcessShutdown(signal).finally(() => {
-      // Allow natural exit; do not process.exit so Vinxi can finish.
-    });
-  };
-
   try {
-    process.on("SIGTERM", () => handler("SIGTERM"));
-    process.on("SIGINT", () => handler("SIGINT"));
+    // SIGTERM/SIGINT are owned by execute-pipeline `installPipelineOsGuards`
+    // (process.once → cleanupActiveSlot → exit). Keep beforeExit + boot sweep here.
     process.on("beforeExit", () => {
       void cleanupOrphanTempFiles({ maxAgeMs: 0 });
     });
@@ -459,6 +453,33 @@ export async function sweepStaleProcessingJobs(): Promise<number> {
     }
   });
   return swept;
+}
+
+export function forceReleaseHeavySlots(): void {
+  activeSlots = 0;
+  while (slotWaiters.length) {
+    const w = slotWaiters.shift();
+    if (!w) break;
+    clearTimeout(w.timer);
+    w.reject(new WorkerSlotBusyError("Worker slot released on process exit."));
+  }
+}
+
+/** Alias used by execute-pipeline OS exit traps. */
+export function releaseWorkerSlot(): void {
+  forceReleaseHeavySlots();
+  for (const job of inFlight.values()) {
+    try {
+      job.abort.abort();
+    } catch {
+      /* ignore */
+    }
+  }
+  inFlight.clear();
+}
+
+export async function purgeTempBuffers(): Promise<number> {
+  return cleanupOrphanTempFiles({ maxAgeMs: 0 });
 }
 
 /** Test helpers */

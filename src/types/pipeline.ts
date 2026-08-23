@@ -99,6 +99,8 @@ export interface LandingSuccessResponse {
   structuralMarkers: MusicSectionMarker[];
   fallbacksUsed: string[];
   executionTimeMs: number;
+  /** Bitmask of completed `PipelineGate` flags for studio badge sync. */
+  pipelineState: number;
 }
 
 export interface LandingAbortResponse {
@@ -107,6 +109,8 @@ export interface LandingAbortResponse {
   failedGate: string;
   error: string;
   executionTimeMs: number;
+  /** Bitmask of gates completed before abort. */
+  pipelineState: number;
 }
 
 export type PipelineResponse = LandingSuccessResponse | LandingAbortResponse;

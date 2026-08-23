@@ -77,13 +77,13 @@ export async function fetchRawVocalFallback(
 
 /**
  * Static FFmpeg remux when section-aware (CWALO) mastering fails.
- * Forces 44.1 kHz stereo + duration=first; pair with CLI `-shortest`.
+ * Forces 44.1 kHz stereo + duration=first, then EBU R128 loudnorm (-14 LUFS / -1.0 dBTP).
  */
 export const STATIC_MASTER_FFMPEG_FILTER =
   "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0];" +
   "[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a1];" +
   "[a0][a1]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed];" +
-  "[mixed]alimiter=limit=0.95:level=true[out]";
+  "[mixed]loudnorm=I=-14:LRA=7:TP=-1.0,alimiter=limit=0.891250938:level=false[out]";
 
 /** Build argv for a static (non-CWALO) two-stem FFmpeg master. */
 export function buildStaticMasterFfmpegArgs(

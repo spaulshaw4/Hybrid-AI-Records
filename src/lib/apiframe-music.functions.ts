@@ -282,6 +282,30 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const { PIPELINE_PROGRESS, reportPipelineProgress } = await import("@/lib/pipeline-progress");
     reportPipelineProgress("lyrics", PIPELINE_PROGRESS.lyrics);
 
+    const {
+      buildGenerationIdempotencyKey,
+      coalesceGenerationRun,
+      reserveGenerationTokenIntent,
+      clearGenerationTokenIntent,
+    } = await import("@/lib/pipeline-idempotency.server");
+
+    const idempotencyKey =
+      payload.idempotencyKey?.trim() ||
+      buildGenerationIdempotencyKey({
+        userId: context.userId,
+        prompt: lyricContent || genre,
+        style: genre,
+        lyrics: lyricContent,
+        instrumental: payload.instrumental,
+      });
+
+    reserveGenerationTokenIntent(idempotencyKey);
+
+    try {
+    const { value: generateResult, coalesced } = await coalesceGenerationRun(
+      idempotencyKey,
+      context.userId,
+      async () => {
     let started: Awaited<ReturnType<typeof generateStudioTrack>>;
     let finished: Awaited<ReturnType<typeof waitForStudioTrack>>;
     let startedTaskId: string | null = null;
@@ -469,13 +493,19 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       routingNote: null,
       landing: {
         status: pipeline.status,
-        trackId,
+        trackId: taskId,
         masterUrl,
         duration: pipeline.duration,
         structuralMarkers: pipeline.structuralMarkers,
         fallbacksUsed: pipeline.fallbacksUsed,
         executionTimeMs: pipeline.executionTimeMs,
+        pipelineState: pipeline.pipelineState,
       },
+      gateMask: pipeline.pipelineState,
+      tokenSettled: Boolean(pipeline.tokenSettled),
+      settlement: pipeline.settlement ?? null,
+      chargeLedger: pipeline.chargeLedger ?? pipeline.settlement?.chargeLedger ?? [],
+      totalCharged: pipeline.totalCharged ?? pipeline.settlement?.totalCharged ?? 0,
     };
     } catch (error) {
       const { TrackLockConflictError } = await import("@/lib/track-lock.server");
@@ -507,6 +537,20 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       }
       throw error;
     }
+      },
+    );
+
+    clearGenerationTokenIntent(idempotencyKey);
+    if (coalesced) {
+      console.log(
+        `[Idempotency] Returned coalesced generate result key=${idempotencyKey.slice(0, 12)}…`,
+      );
+    }
+    return generateResult;
+  } catch (outerError) {
+    clearGenerationTokenIntent(idempotencyKey);
+    throw outerError;
+  }
   });
 
 

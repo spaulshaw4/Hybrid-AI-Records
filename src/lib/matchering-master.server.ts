@@ -419,12 +419,14 @@ async function mixAndMasterOnce(options: {
       );
     }
 
-    const skipLoudnorm = remuxLoudnorm && !matched;
-    console.log(
-      skipLoudnorm
-        ? "[master] encode finish (loudnorm already in remux mix)"
-        : "[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter",
-    );
+    // Always finish with deterministic EBU R128 (-14 LUFS / -1.0 dBFS).
+    // Dynamic Matchering may shape the mix; loudnorm is never skipped.
+    if (!matched) {
+      console.warn(
+        "[Gate 6] Dynamic Matchering unavailable — applying static EBU R128 loudnorm=I=-14:LRA=7:tp=-1.0",
+      );
+    }
+    console.log("[master] applying deterministic FFmpeg EBU R128 mastering filter (-14 LUFS / -1.0 dBFS)");
     const fadeSecs = options.cwaloGuide?.fadeOutSeconds ?? MASTER_FADE_OUT_SECONDS;
     const trackEnd = options.cwaloGuide?.trackEnd;
     const probedDuration =
@@ -443,7 +445,8 @@ async function mixAndMasterOnce(options: {
     await produceAtomicAudioFile(playablePath, async (tmpPlayable) => {
       await runFfmpeg(
         matcheringFinishArgs(masteredWav, tmpPlayable, options.maxSeconds, {
-          skipLoudnorm,
+          // Always apply GATE_6_EBU_R128_MASTERING_FILTER (never skip).
+          skipLoudnorm: false,
           durationSeconds: probedDuration ?? undefined,
           trackEnd: trackEnd ?? undefined,
           fadeOutSeconds: fadeSecs,

@@ -89,6 +89,15 @@ import {
   labelForProgressStage,
   reportPipelineProgress,
 } from "@/lib/pipeline-progress";
+import {
+  PipelineGate,
+  PIPELINE_COMPLETE,
+  PIPELINE_GATE_ORDER,
+  getGateNameFromFlag,
+  hasPassedGate,
+  percentFromGateMask,
+  progressStageFromGateFlag,
+} from "@/lib/pipeline-flags";
 import { wait } from "@/lib/studio-retry";
 import {
   cacheStudioStemBlobs,
@@ -1336,6 +1345,8 @@ export function AudioStudio() {
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const [pipelineState, setPipelineState] = useState<PipelineState>(IDLE_PIPELINE_STATE);
+  /** Server-authoritative gate bitmask — badges light only via hasPassedGate. */
+  const [serverGateMask, setServerGateMask] = useState(PipelineGate.NONE);
   const pipelineStepRef = useRef<PipelineStepId>("idle");
   const [playbackKind, setPlaybackKind] = useState<StemKind>("mastered");
   const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);
@@ -1413,40 +1424,54 @@ export function AudioStudio() {
   const trackTitle = title;
   const canProceed = Boolean(trackTitle?.trim() && lyrics?.trim());
 
-  const applyPipelineProgress = useCallback((stage: string, percent: number) => {
-    reportPipelineProgress(stage, percent);
-    const step = ([
-      "lyrics",
-      "composition",
-      "music",
-      "cwalo",
-      "stems",
-      "vocals",
-      "master",
-      "complete",
-    ].includes(stage)
-      ? stage === "music"
-        ? "composition"
-        : stage
-      : stage === "sonic" || stage === "composition"
-        ? "composition"
-        : stage === "structure" || stage === "analysis"
-          ? "cwalo"
-          : pipelineStepRef.current) as PipelineStepId;
-    pipelineStepRef.current = step;
-    setPipelineState((prev) => ({
-      ...prev,
-      currentStep: step,
-      status: step === "complete" ? "success" : "loading",
-      progress: percent,
-      lastError: step === "complete" ? null : prev.lastError,
-    }));
-    setStatusText(
-      labelForProgressStage(
-        step === "composition" || step === "music" ? "sonic" : stage,
-      ),
-    );
-  }, []);
+  const applyPipelineProgress = useCallback(
+    (stage: string, percent: number, gateMask?: number) => {
+      reportPipelineProgress(stage, percent, undefined, gateMask);
+      if (typeof gateMask === "number") {
+        setServerGateMask(gateMask);
+        // Never predict ahead of server bits — progress % from mask only.
+        const maskPercent = percentFromGateMask(gateMask);
+        const highest = PIPELINE_GATE_ORDER.reduce((acc, flag) => {
+          return hasPassedGate(gateMask, flag) ? flag : acc;
+        }, PipelineGate.NONE);
+        const stepName = progressStageFromGateFlag(highest) || stage;
+        const step = (
+          stepName === "sonic" || stepName === "composition" || stepName === "vault" || stepName === "storage"
+            ? "composition"
+            : stepName === "cwalo" || stepName === "structure"
+              ? "cwalo"
+              : stepName === "stems" || stepName === "demux"
+                ? "stems"
+                : stepName === "vocals"
+                  ? "vocals"
+                  : stepName === "master" || stepName === "mastering"
+                    ? "master"
+                    : pipelineStepRef.current
+        ) as PipelineStepId;
+        pipelineStepRef.current = step;
+        setPipelineState((prev) => ({
+          ...prev,
+          currentStep: step,
+          status: gateMask === PIPELINE_COMPLETE ? "success" : "loading",
+          progress: Math.max(maskPercent, percent > 0 && maskPercent === 0 ? 5 : maskPercent),
+          lastError: gateMask === PIPELINE_COMPLETE ? null : prev.lastError,
+        }));
+        setStatusText(
+          labelForProgressStage(
+            step === "composition" || step === "music" ? "sonic" : step,
+          ),
+        );
+        return;
+      }
+      // Without a server mask, only update label — do not advance gate badges.
+      setStatusText(
+        labelForProgressStage(
+          stage === "music" || stage === "composition" ? "sonic" : stage,
+        ),
+      );
+    },
+    [],
+  );
 
   const beginPipelineStep = useCallback((step: PipelineStepId, payloadPreview?: unknown) => {
     const normalized = step === "music" ? "composition" : step;
@@ -2354,20 +2379,13 @@ export function AudioStudio() {
       });
 
       if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
-      let tickerPercent: number = PIPELINE_PROGRESS.sonic;
+      // Soft pulse only — never advance stage badges ahead of serverGateMask bits.
+      setServerGateMask(PipelineGate.NONE);
       const stopTicker = window.setInterval(() => {
-        tickerPercent = Math.min(PIPELINE_PROGRESS.master - 2, tickerPercent + 2);
-        const stage =
-          tickerPercent < PIPELINE_PROGRESS.cwalo
-            ? "sonic"
-            : tickerPercent < PIPELINE_PROGRESS.stems
-              ? "cwalo"
-              : tickerPercent < PIPELINE_PROGRESS.vocals
-                ? "stems"
-                : tickerPercent < PIPELINE_PROGRESS.master
-                  ? "vocals"
-                  : "master";
-        applyPipelineProgress(stage, tickerPercent);
+        setPipelineState((prev) => {
+          if (prev.status !== "loading") return prev;
+          return { ...prev, progress: Math.min(90, prev.progress + 1) };
+        });
       }, 4000);
       let started: Awaited<ReturnType<typeof startGeneration>>;
       try {
@@ -2426,11 +2444,26 @@ export function AudioStudio() {
         window.clearInterval(stopTicker);
       }
       if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+      const responseGateMask =
+        started && typeof started === "object" && "gateMask" in started
+          ? Number((started as { gateMask?: number }).gateMask ?? PipelineGate.NONE)
+          : started && typeof started === "object" && "landing" in started
+            ? Number(
+                (started as { landing?: { pipelineState?: number } }).landing?.pipelineState ??
+                  PipelineGate.NONE,
+              )
+            : PipelineGate.NONE;
+      if (responseGateMask > 0) {
+        applyPipelineProgress(
+          "master",
+          percentFromGateMask(responseGateMask),
+          responseGateMask,
+        );
+      }
       completePipelineStep("composition", { taskId: started.taskId, tracks: started.tracks?.length ?? 0 });
-      beginPipelineStep("cwalo", { taskId: started.taskId });
-      beginPipelineStep("stems", { taskId: started.taskId });
-      applyPipelineProgress("master", PIPELINE_PROGRESS.master);
-      beginPipelineStep("master", { taskId: started.taskId });
+      if (hasPassedGate(responseGateMask, PipelineGate.MASTERING)) {
+        beginPipelineStep("master", { taskId: started.taskId });
+      }
 
       const startedAt = Date.now();
       stageStartedAt = startedAt;
@@ -2518,12 +2551,17 @@ export function AudioStudio() {
         vocalUrl: stems?.vocalUrl,
       });
 
-      // Everything landed: audio rendered, archived and committed. Charge now.
-      // Keyed on the run id: a retried or resumed run is charged exactly once,
-      // no matter how many times this step is reached.
+      // Everything landed: audio rendered, archived and committed. Charge now
+      // only if the server did not already settle tokens in post-binary settlement.
+      const serverTokenSettled =
+        started && typeof started === "object" && "tokenSettled" in started
+          ? Boolean((started as { tokenSettled?: boolean }).tokenSettled)
+          : false;
       if (isDevAuthBypass()) {
-        setBalance((prev) => Math.max(0, (prev ?? DEV_TEST_TOKEN_BALANCE) - 1));
-      } else {
+        if (!serverTokenSettled) {
+          setBalance((prev) => Math.max(0, (prev ?? DEV_TEST_TOKEN_BALANCE) - 1));
+        }
+      } else if (!serverTokenSettled) {
       const spend = await spendToken({
         data: { amount: 1, idempotencyKey: `gen:${runId}`, note: title },
       });
@@ -2533,6 +2571,19 @@ export function AudioStudio() {
           new CustomEvent("hybrid:tokens-changed", { detail: { balance: spend.balance } }),
         );
       }
+      } else if (serverTokenSettled) {
+        // Refresh balance after server-side settlement.
+        try {
+          const bal = await fetchBalance({});
+          if (bal && typeof bal.balance === "number") {
+            setBalance(bal.balance);
+            window.dispatchEvent(
+              new CustomEvent("hybrid:tokens-changed", { detail: { balance: bal.balance } }),
+            );
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
       const finished: Result = {
@@ -2545,8 +2596,13 @@ export function AudioStudio() {
         rawAudioUrl: stems?.rawAudioUrl,
         taskId: started.taskId,
       };
-      applyPipelineProgress("complete", PIPELINE_PROGRESS.complete);
+      applyPipelineProgress(
+        "complete",
+        PIPELINE_PROGRESS.complete,
+        responseGateMask || PIPELINE_COMPLETE,
+      );
       completePipelineStep("master", { audioUrl, stems: Boolean(stems) });
+      setServerGateMask(responseGateMask || PIPELINE_COMPLETE);
       setPipelineState({
         currentStep: "complete",
         status: "success",
@@ -2593,6 +2649,16 @@ export function AudioStudio() {
         pipelineStepFromError(err, pipelineStepRef.current),
         pipelineStepRef.current,
       );
+      const abortMask =
+        err && typeof err === "object" && "landing" in err
+          ? Number(
+              (err as { landing?: { pipelineState?: number } }).landing?.pipelineState ??
+                serverGateMask,
+            )
+          : serverGateMask;
+      if (typeof abortMask === "number" && abortMask > 0) {
+        setServerGateMask(abortMask);
+      }
       if (!cancelled) {
         failPipelineStep(failedStep, err);
       } else {
@@ -2898,6 +2964,7 @@ export function AudioStudio() {
     setRetryPlan(null);
     // Reset UI to Gate 1 composition before any retry path.
     pipelineStepRef.current = "composition";
+    setServerGateMask(PipelineGate.NONE);
     setPipelineState({
       currentStep: "composition",
       status: "idle",
@@ -3138,6 +3205,33 @@ export function AudioStudio() {
                   : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
               }
             />
+            {busy ? (
+              <div
+                className="flex flex-wrap gap-1.5"
+                role="list"
+                aria-label="Pipeline gate status"
+              >
+                {PIPELINE_GATE_ORDER.map((flag) => {
+                  const lit = hasPassedGate(serverGateMask, flag);
+                  const name = getGateNameFromFlag(flag);
+                  return (
+                    <span
+                      key={flag}
+                      role="listitem"
+                      title={name}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors ${
+                        lit
+                          ? "bg-primary/20 text-primary"
+                          : "bg-muted text-muted-foreground/70"
+                      }`}
+                      aria-current={lit ? "step" : undefined}
+                    >
+                      {name}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
             <div className="flex gap-1" role="tablist" aria-label="Generate steps">
               {STUDIO_STEPS.map((step, index) => (
                 <button

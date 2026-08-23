@@ -58,6 +58,12 @@ export function requireTrackLock(trackId: string): void {
   }
 }
 
+export function releaseAllTrackLocks(): void {
+  if (activeTrackLocks.size === 0) return;
+  console.warn(`[Filing Lock] Releasing ${activeTrackLocks.size} lock(s) on process exit`);
+  activeTrackLocks.clear();
+}
+
 /** Test helper. */
 export function __resetTrackLocksForTests(): void {
   activeTrackLocks.clear();

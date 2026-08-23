@@ -15,6 +15,7 @@ import { backingStemUrl } from "@/lib/stem-urls";
 import {
   acquireTrackLock,
   releaseTrackLock,
+  releaseAllTrackLocks,
   TrackLockConflictError,
   cleanupAudioWriteResidue,
 } from "@/lib/track-lock.server";
@@ -36,6 +37,67 @@ import {
   safeRecordFallback,
   safeUpdateTrackStatus,
 } from "@/lib/pipeline-hooks.server";
+import {
+  PipelineGate,
+  PIPELINE_COMPLETE,
+  canExecuteVocals,
+  chargeLineItem,
+  getGateNameFromFlag,
+  hasPassedGate,
+  passGate,
+  percentFromGateMask,
+  progressStageFromGateFlag,
+  type ChargeLedgerEntry,
+} from "@/lib/pipeline-flags";
+import { reportPipelineProgress, PIPELINE_PROGRESS } from "@/lib/pipeline-progress";
+import { executePostBinarySettlement } from "@/lib/pipeline-settlement.server";
+import { ffmpegMasteringFilter } from "@/lib/loudnorm";
+import {
+  purgeTempBuffers,
+  releaseWorkerSlot,
+} from "@/lib/pipeline-worker.server";
+import {
+  abortActiveGenerationRuns,
+  voidPendingTokenReservations,
+} from "@/lib/pipeline-idempotency.server";
+
+// Re-export for Gate 6 callers / tests that import from the orchestrator module.
+export { ffmpegMasteringFilter };
+
+// ── Graceful process exit traps ──────────────────────────────────────────────
+let osGuardsInstalled = false;
+
+const cleanupActiveSlot = () => {
+  try {
+    releaseWorkerSlot();
+    void purgeTempBuffers();
+    releaseAllTrackLocks();
+    voidPendingTokenReservations();
+    abortActiveGenerationRuns();
+  } catch (err) {
+    console.error("Error during emergency process cleanup:", err);
+  }
+};
+
+/** Idempotent — register SIGTERM/SIGINT once for emergency slot/tmp cleanup. */
+export function installPipelineOsGuards(): void {
+  if (osGuardsInstalled || typeof process === "undefined" || typeof process.once !== "function") {
+    return;
+  }
+  osGuardsInstalled = true;
+  process.once("SIGTERM", () => {
+    console.warn("[Pipeline OS Guard] SIGTERM — emergency cleanup");
+    cleanupActiveSlot();
+    process.exit(0);
+  });
+  process.once("SIGINT", () => {
+    console.warn("[Pipeline OS Guard] SIGINT — emergency cleanup");
+    cleanupActiveSlot();
+    process.exit(0);
+  });
+}
+
+installPipelineOsGuards();
 
 export type ExecutePipelineInput = {
   trackId: string;
@@ -62,6 +124,18 @@ export type ExecutePipelineSuccess = LandingSuccessResponse & {
   publicAudioUrl: string;
   mixed: boolean;
   matched: boolean;
+  /** True when post-binary settlement debited Hybrid Tokens server-side. */
+  tokenSettled?: boolean;
+  settlement?: {
+    status: "settled" | "rolled_back";
+    gateMask: number;
+    finalGateMask: number;
+    tokenSettled: boolean;
+    chargeLedger?: ChargeLedgerEntry[];
+    totalCharged?: number;
+  };
+  chargeLedger?: ChargeLedgerEntry[];
+  totalCharged?: number;
 };
 
 /** Thrown after outer catch builds a typed abort landing for the client. */
@@ -210,6 +284,21 @@ export async function executePipeline(
   let activeGate: 1 | 2 | 3 | 4 | 5 | 6 = 1;
   /** Soft progress step — Gate 1=`composition`, Gate 4=`demux`, Gate 5=`vocals`. */
   let currentStep: string = "composition";
+  let gateMask: number = PipelineGate.NONE;
+  const chargeLedger: ChargeLedgerEntry[] = [];
+
+  const emitGateProgress = (justPassed: number) => {
+    const stage = progressStageFromGateFlag(justPassed);
+    const percent = percentFromGateMask(gateMask);
+    void runSafeHook(`progress ${getGateNameFromFlag(justPassed)}`, () => {
+      reportPipelineProgress(stage, percent || PIPELINE_PROGRESS.sonic, undefined, gateMask);
+    });
+  };
+
+  /** Sequential line charger — records billable compute as each gate completes. */
+  const billGate = (gateFlag: number) => {
+    chargeLineItem(chargeLedger, gateFlag);
+  };
 
   try {
     try {
@@ -229,14 +318,7 @@ export async function executePipeline(
       currentStep = "composition";
       telemetry = safeBumpTelemetry(telemetry, 1, "gate_1_generating");
       await beforeGate({ trackId, gate: 1, stage: "gate_1_generating" });
-      try {
-        const { reportPipelineProgress, PIPELINE_PROGRESS } = await import(
-          "@/lib/pipeline-progress"
-        );
-        reportPipelineProgress("composition", PIPELINE_PROGRESS.sonic);
-      } catch {
-        /* progress is best-effort */
-      }
+      reportPipelineProgress("composition", PIPELINE_PROGRESS.sonic, undefined, gateMask);
       console.log("[Gate 1/6] currentStep=composition — AIMusicAPI create/poll");
 
       let rawAudioBuffer: Buffer;
@@ -296,13 +378,20 @@ export async function executePipeline(
         }
       }
       residue.trackBuffer(rawAudioBuffer);
+      gateMask = passGate(gateMask, PipelineGate.COMPOSITION);
+      emitGateProgress(PipelineGate.COMPOSITION);
+      billGate(PipelineGate.COMPOSITION);
       await afterGate({ trackId, gate: 1, stage: "gate_1_generating" }, "audio buffer ready");
 
       // ── Gate 2: Supabase Storage & Public CDN Link ───────────────────────
+      if (!hasPassedGate(gateMask, PipelineGate.COMPOSITION)) {
+        throw new Error("[Gate 2] Prerequisite failed: COMPOSITION bit not set.");
+      }
       activeGate = 2;
       currentStep = "vault";
       telemetry = safeBumpTelemetry(telemetry, 2, "gate_2_vaulting");
       await beforeGate({ trackId, gate: 2, stage: "gate_2_vaulting" });
+      reportPipelineProgress("vault", PIPELINE_PROGRESS.vault, undefined, gateMask);
       const rawPath = `raw/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp3`;
       await withTimeout(
         (async () => {
@@ -330,12 +419,18 @@ export async function executePipeline(
         { trackId, gate: 2, stage: "gate_2_vaulting" },
         `cdn=${publicAudioUrl.slice(0, 64)}`,
       );
+      gateMask = passGate(gateMask, PipelineGate.STORAGE);
+      emitGateProgress(PipelineGate.STORAGE);
 
       // ── Gate 3: CWALO with Fallback Detour ───────────────────────────────
+      if (!hasPassedGate(gateMask, PipelineGate.STORAGE)) {
+        throw new Error("[Gate 3] Prerequisite failed: STORAGE bit not set.");
+      }
       activeGate = 3;
       currentStep = "cwalo";
       telemetry = safeBumpTelemetry(telemetry, 3, "gate_3_analyzing");
       await beforeGate({ trackId, gate: 3, stage: "gate_3_analyzing" });
+      reportPipelineProgress("cwalo", PIPELINE_PROGRESS.cwalo, undefined, gateMask);
       let cwaloOutput: Gate3Result | null = null;
       let masterPlan: import("@/lib/cwalo-structure.server").CwaloMasterPlan | null = null;
       let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
@@ -386,13 +481,20 @@ export async function executePipeline(
         { trackId, gate: 3, stage: "gate_3_analyzing" },
         cwaloOutput.isFallback ? "default structure → Gate 4" : "cwalo ok → Gate 4",
       );
+      // Soft-fail still marks STRUCTURE so Demucs can proceed with a known plan.
+      gateMask = passGate(gateMask, PipelineGate.STRUCTURE);
+      emitGateProgress(PipelineGate.STRUCTURE);
 
       // ── Gate 4: Demucs (ryan5453/demucs) — ALWAYS after Gate 2 CDN URL ───
       // Runs whether Gate 3 succeeded or soft-failed. Must complete before Gate 5.
+      if (!hasPassedGate(gateMask, PipelineGate.STORAGE)) {
+        throw new Error("[Gate 4] Prerequisite failed: STORAGE bit not set.");
+      }
       activeGate = 4;
       currentStep = "demux";
       telemetry = safeBumpTelemetry(telemetry, 4, "gate_4_splitting");
       await beforeGate({ trackId, gate: 4, stage: "gate_4_splitting" });
+      reportPipelineProgress("stems", PIPELINE_PROGRESS.stems, undefined, gateMask);
       console.log(
         `[Gate 4/6] Demucs stem separation (ryan5453/demucs) on Gate 2 CDN URL…`,
       );
@@ -443,24 +545,26 @@ export async function executePipeline(
         { trackId, gate: 4, stage: "gate_4_splitting" },
         `vocals=${Boolean(vocalStemUrl)} instrumental=${Boolean(instrumentalStemUrl)}`,
       );
+      gateMask = passGate(gateMask, PipelineGate.DEMUX);
+      emitGateProgress(PipelineGate.DEMUX);
+      billGate(PipelineGate.DEMUX);
 
       // ── Gate 5: Fish Audio with Fallback Detour ──────────────────────────
-      // Requires Gate 4 vocal stem. Never pass null/undefined into Fish Audio.
+      // Enforce Demucs bit before Fish Audio.
+      if (!hasPassedGate(gateMask, PipelineGate.DEMUX) || !canExecuteVocals(gateMask)) {
+        throw new Error(
+          "[Gate 5] Prerequisite failed: DEMUX bit must be set before vocals.",
+        );
+      }
       activeGate = 5;
       currentStep = "vocals";
       telemetry = safeBumpTelemetry(telemetry, 5, "gate_5_converting");
       await beforeGate({ trackId, gate: 5, stage: "gate_5_converting" });
-      try {
-        const { reportPipelineProgress, PIPELINE_PROGRESS } = await import(
-          "@/lib/pipeline-progress"
-        );
-        reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
-      } catch {
-        /* progress is best-effort */
-      }
+      reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals, undefined, gateMask);
 
       let mixVocalUrl: string | null = null;
       let vocalAudioBuffer: Buffer | null = null;
+      let fishConversionSucceeded = false;
       const mixInstrumentalUrl = instrumentalStemUrl ?? publicAudioUrl;
 
       if (wantsVocals) {
@@ -518,6 +622,7 @@ export async function executePipeline(
               throw new Error("[Gate 5] Fish Audio returned an empty vocal conversion buffer.");
             }
             mixVocalUrl = fishUrl;
+            fishConversionSucceeded = true;
             try {
               vocalAudioBuffer = await downloadBuffer(fishUrl);
               residue.trackBuffer(vocalAudioBuffer);
@@ -555,12 +660,27 @@ export async function executePipeline(
               : "Fish vocals ready"
           : "instrumental path",
       );
+      // Instrumental path still sets VOCALS so the complete mask can reach 63.
+      gateMask = passGate(gateMask, PipelineGate.VOCALS);
+      emitGateProgress(PipelineGate.VOCALS);
+      // Bypass line charge when Fish soft-failed to raw Demucs stems (or instrumental skip).
+      if (fishConversionSucceeded) {
+        billGate(PipelineGate.VOCALS);
+      } else if (fallbacksUsed.includes(FALLBACK_FISH_AUDIO_RAW_VOCALS)) {
+        console.log(
+          "[Line Charger] Bypassed Vocal Model Conversion — soft-failed to raw Demucs stems ($0.00)",
+        );
+      }
 
       // ── Gate 6: FFmpeg Mastering & Final Vault Upload ────────────────────
+      if (!hasPassedGate(gateMask, PipelineGate.VOCALS)) {
+        throw new Error("[Gate 6] Prerequisite failed: VOCALS bit not set.");
+      }
       activeGate = 6;
       currentStep = "master";
       telemetry = safeBumpTelemetry(telemetry, 6, "gate_6_mastering");
       await beforeGate({ trackId, gate: 6, stage: "gate_6_mastering" });
+      reportPipelineProgress("master", PIPELINE_PROGRESS.master, undefined, gateMask);
       const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
       let mastered: Awaited<ReturnType<typeof mixAndMasterHybridTrack>>;
       try {
@@ -624,8 +744,41 @@ export async function executePipeline(
       }
 
       await afterGate({ trackId, gate: 6, stage: "gate_6_mastering" }, "master ready");
+      gateMask = passGate(gateMask, PipelineGate.MASTERING);
+      emitGateProgress(PipelineGate.MASTERING);
+      billGate(PipelineGate.MASTERING);
+
+      const duration = input.durationSeconds ?? cwaloOutput.markers.at(-1)?.end ?? 0;
+      const structuralMarkers = markersFromGate3(cwaloOutput);
+
+      // Post-binary settlement — only when every gate bit is set (63).
+      const settlement = await executePostBinarySettlement({
+        gateMask,
+        trackId,
+        userId: input.userId,
+        masterUrl: finalMasterUrl,
+        vocalUrl: mixVocalUrl,
+        instrumentalUrl: mixInstrumentalUrl,
+        publicAudioUrl,
+        structuralMarkers,
+        duration,
+        title: input.title,
+        idempotencyKey: `pipeline:${trackId}`,
+        chargeLedger,
+        residue,
+        tmpPaths: tmpFiles,
+      });
+
+      if (!settlement.ok || gateMask !== PIPELINE_COMPLETE) {
+        throw new Error(
+          `[Settlement] Incomplete binary mask 0b${gateMask.toString(2)} (${gateMask}); rolled back with zero charge.`,
+        );
+      }
+
       await runSafeHook("pipeline success log", () => {
-        console.log(`[Pipeline Success] Master ready at: ${finalMasterUrl}`);
+        console.log(
+          `[Pipeline Success] Master ready at: ${finalMasterUrl} gateMask=${gateMask} totalCharged=$${settlement.ui.totalCharged.toFixed(2)} tokenSettled=${settlement.ui.tokenSettled}`,
+        );
       });
       telemetry = safeBumpTelemetry(
         telemetry,
@@ -636,16 +789,21 @@ export async function executePipeline(
       return {
         status: fallbacksUsed.length ? "completed_fallback" : "success",
         trackId,
-        masterUrl: finalMasterUrl,
-        duration: input.durationSeconds ?? cwaloOutput.markers.at(-1)?.end ?? 0,
-        structuralMarkers: markersFromGate3(cwaloOutput),
+        masterUrl: settlement.ui.masterUrl ?? finalMasterUrl,
+        duration: settlement.ui.duration || duration,
+        structuralMarkers: settlement.ui.structuralMarkers,
         fallbacksUsed,
         executionTimeMs: Date.now() - startedAt,
-        vocalUrl: mixVocalUrl,
-        instrumentalUrl: mixInstrumentalUrl,
+        pipelineState: gateMask,
+        vocalUrl: settlement.ui.vocalUrl ?? mixVocalUrl,
+        instrumentalUrl: settlement.ui.instrumentalUrl ?? mixInstrumentalUrl,
         publicAudioUrl,
         mixed: mastered.mixed,
         matched: mastered.matched,
+        tokenSettled: settlement.ui.tokenSettled,
+        settlement: settlement.ui,
+        chargeLedger: settlement.ui.chargeLedger,
+        totalCharged: settlement.ui.totalCharged,
       };
     } catch (error) {
       // Outer abort landing — soft-fail gates (3/5) never reach here for their detours.
@@ -660,27 +818,33 @@ export async function executePipeline(
           : sanitizeInheritedGate1Message(rawMessage) || rawMessage;
       await runSafeHook("pipeline fail log", () => {
         console.error(
-          `[Pipeline Failed] Gate ${failedGate}/6 aborted for track ${trackId}: ${message}`,
+          `[Pipeline Failed] Gate ${failedGate}/6 aborted for track ${trackId}: ${message} gateMask=0b${gateMask.toString(2)}`,
         );
       });
       telemetry = safeBumpTelemetry(telemetry, failedGate, "landing_aborted");
-      await safeUpdateTrackStatus({
+      // Zero-charge rollback path — incomplete mask never debits tokens.
+      const { executeZeroChargeRollback } = await import("@/lib/pipeline-settlement.server");
+      await executeZeroChargeRollback({
+        gateMask,
         trackId,
         userId: input.userId,
-        status: "failed",
         reason: message,
-      });
+        residue,
+        tmpPaths: tmpFiles,
+      }).catch(() => undefined);
       const landing: LandingAbortResponse = {
         status: "failed",
         trackId,
         failedGate: `Gate ${failedGate}`,
         error: message,
         executionTimeMs: Date.now() - startedAt,
+        pipelineState: gateMask,
       };
       throw new PipelineAbortError(landing);
     }
   } finally {
     // Unconditional cleanup — each step isolated so one failure cannot skip the rest.
+    // Settlement may have already disposed residue; these calls are idempotent / soft.
     try {
       releaseTrackLock(trackId);
     } catch (lockErr) {
