@@ -98,6 +98,60 @@ describe("MusicAPI sonic workflow", () => {
     expect(fallbackBody.vocal_gender).toBe("m");
   });
 
+  it("normalizes studio slider weights to the 0-1 range Sonic accepts", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-weights");
+
+    await generateStudioTrack({
+      genre: "Pop",
+      lyrics: "[Chorus]\nGo",
+      styleInfluence: 76,
+      audioInfluence: 82,
+      weirdness: 20,
+    });
+
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    // Sonic answers "should be a number between 0 and 1" for a raw 76.
+    expect(body.style_weight).toBe(0.76);
+    expect(body.audio_weight).toBe(0.82);
+    expect(body.weirdness_constraint).toBe(0.2);
+  });
+
+  it("reads a slider of 1 as one percent, not as maximum", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-low-weight");
+
+    await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo", weirdness: 1 });
+
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    expect(body.weirdness_constraint).toBe(0.01);
+  });
+
+  it("omits weights the artist never set", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-no-weights");
+
+    await generateStudioTrack({ genre: "Pop", lyrics: "[Chorus]\nGo" });
+
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("style_weight");
+    expect(body).not.toHaveProperty("audio_weight");
+    expect(body).not.toHaveProperty("weirdness_constraint");
+  });
+
   it("POSTs create_music with lyrics in prompt and style in tags", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
@@ -120,7 +174,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(started.payload.mv).toBe("sonic-v5");
     expect(started.payload.prompt).toBe("[Verse 1]\nNight drive");
     expect(started.payload.tags).toBe(
-      "Nu-Metal, Rap Rock, 102 BPM, distorted guitars, 808s, Authentic lead, male vocals",
+      "Nu-Metal, Rap Rock, 102 BPM, steady tempo, distorted guitars, 808s, Authentic lead, male vocals",
     );
     expect(started.payload.title).toBe("Night Drive");
     expect(started.payload.vocal_gender).toBe("m");

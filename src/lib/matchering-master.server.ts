@@ -19,6 +19,7 @@ import {
   buildHybridMixArgs,
   collectHybridStems,
   matcheringFinishArgs,
+  MASTER_FADE_OUT_SECONDS,
   matcheringPythonArgs,
   masteredPlayablePath,
   masteredPcmPath,
@@ -213,6 +214,8 @@ async function mixAndMasterOnce(options: {
   vocalUrl?: string | null;
   userId: string;
   taskId: string;
+  /** Requested track length; the master is cut and faded to it. */
+  maxSeconds?: number;
 }): Promise<MixAndMasterResult> {
   const tmp = await mkdtemp(join(tmpdir(), "hybrid-matchering-"));
   const introPath = join(tmp, "intro.bin");
@@ -285,7 +288,16 @@ async function mixAndMasterOnce(options: {
     }
 
     console.log("[master] applying FFmpeg loudnorm (-14 LUFS) + alimiter");
-    await runFfmpeg(matcheringFinishArgs(masteredWav, playablePath), MATCHERING_MIX_TIMEOUT_MS);
+    if (options.maxSeconds) {
+      console.log("[master] duration ceiling", {
+        maxSeconds: options.maxSeconds,
+        fadeOutSeconds: MASTER_FADE_OUT_SECONDS,
+      });
+    }
+    await runFfmpeg(
+      matcheringFinishArgs(masteredWav, playablePath, options.maxSeconds),
+      MATCHERING_MIX_TIMEOUT_MS,
+    );
 
     const mp3 = await readFile(playablePath);
     const wav = await readFile(masteredWav).catch(() => null);
@@ -340,6 +352,7 @@ export async function mixAndMasterHybridTrack(options: {
   vocalUrl?: string | null;
   userId: string;
   taskId: string;
+  maxSeconds?: number;
 }): Promise<MixAndMasterResult> {
   assertPipelineBreakerClosed("mastering");
   if (!options.instrumentalUrl && !options.vocalUrl && !options.introUrl) {

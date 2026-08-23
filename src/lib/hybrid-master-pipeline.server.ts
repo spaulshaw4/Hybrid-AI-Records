@@ -115,6 +115,11 @@ export async function runHybridMasterPipeline(input: {
   title: string;
   userId: string;
   taskId: string;
+  /** Requested track length; the master is cut and faded to it. */
+  durationSeconds?: number;
+  /** Studio language selection, forwarded to the vocal stage. */
+  language?: string;
+  customLanguage?: string;
 }): Promise<HybridMasterPipelineResult> {
   let instrumentalUrl: string | null = input.instrumental ? input.baseAudioUrl : null;
   let isolatedVocalUrl: string | null = null;
@@ -184,6 +189,8 @@ export async function runHybridMasterPipeline(input: {
               title: `${input.title} vocals`,
               userId: input.userId,
               taskId: `${input.taskId}-fish-vocals`,
+              language: input.language,
+              customLanguage: input.customLanguage,
             })
           : await cloneVocalsFromSample({
               sampleUrl: input.referenceSampleUrl,
@@ -192,6 +199,8 @@ export async function runHybridMasterPipeline(input: {
               title: `${input.title} vocals`,
               userId: input.userId,
               taskId: `${input.taskId}-fish-vocals`,
+              language: input.language,
+              customLanguage: input.customLanguage,
             })
         : await convertVocalsWithStems({
             lyrics: input.lyrics,
@@ -200,6 +209,8 @@ export async function runHybridMasterPipeline(input: {
             title: `${input.title} vocals`,
             userId: input.userId,
             taskId: `${input.taskId}-fish-vocals`,
+            language: input.language,
+            customLanguage: input.customLanguage,
           });
       convertedVocalUrl = converted.tracks.find((track) => track.audioUrl)?.audioUrl ?? null;
     } catch (error) {
@@ -230,6 +241,7 @@ export async function runHybridMasterPipeline(input: {
     vocalUrl: mixVocalUrl,
     userId: input.userId,
     taskId: input.taskId,
+    maxSeconds: input.durationSeconds,
   });
   const master = assertMasteringContractOutput(mastered.masterUrl);
   logPostConditionPassed("Mastered audio ready");

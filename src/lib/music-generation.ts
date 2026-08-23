@@ -112,6 +112,10 @@ export type StudioTrackOptions = {
   tags?: string;
   title?: string;
   isInstrumental?: boolean;
+  /** Studio slider values on a 0–100 scale; normalized to Sonic's 0–1. */
+  styleInfluence?: number;
+  audioInfluence?: number;
+  weirdness?: number;
   /** Ignored — every dispatch is locked to `sonic-v5`. */
   mv?: string;
   onProgress?: StudioProgressCallback;
@@ -133,6 +137,10 @@ export type SonicCreatePayload = {
   tags: string;
   title: string;
   vocal_gender?: SonicVocalGender;
+  /** Sonic rejects anything outside 0–1 with a validation error. */
+  style_weight?: number;
+  audio_weight?: number;
+  weirdness_constraint?: number;
 };
 
 export type StudioTrackStart = {
@@ -428,7 +436,7 @@ function styleTags(options: StudioTrackOptions): string {
   return [
     options.genre,
     options.subGenre,
-    options.bpm ? `${options.bpm} BPM` : null,
+    options.bpm ? `${options.bpm} BPM, steady tempo` : null,
     options.instruments?.length ? options.instruments.join(", ") : null,
     options.vocalTimbre || "raw acoustic studio recording",
   ]
@@ -468,11 +476,26 @@ function appendGenderTag(tags: string, gender: SonicVocalGender): string {
   return tags ? `${tags}, ${phrase}` : phrase;
 }
 
+/**
+ * Studio sliders run 0–100 and Sonic rejects anything outside 0–1, so a slider
+ * percentage is always divided down. Never infer the scale from the magnitude:
+ * a weirdness of 1 means 1%, not maximum.
+ */
+export function sonicWeight(percent: number | undefined): number | undefined {
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return undefined;
+  const clamped = Math.min(100, Math.max(0, percent));
+  return Math.round((clamped / 100) * 100) / 100;
+}
+
 /** Strict Sonic v5 create body — caller `mv` is ignored. */
 export function buildSonicCreatePayload(options: StudioTrackOptions): SonicCreatePayload {
   const gender = normalizeVocalGender(options.vocal_gender || options.vocalGender);
   let tags = options.tags?.trim() || styleTags(options) || options.genre || "";
   if (gender) tags = appendGenderTag(tags, gender);
+
+  const styleWeight = sonicWeight(options.styleInfluence);
+  const audioWeight = sonicWeight(options.audioInfluence);
+  const weirdness = sonicWeight(options.weirdness);
 
   const payload: SonicCreatePayload = {
     custom_mode: true,
@@ -480,6 +503,9 @@ export function buildSonicCreatePayload(options: StudioTrackOptions): SonicCreat
     prompt: options.lyrics ?? "",
     tags,
     title: options.title || "Studio Master",
+    ...(styleWeight === undefined ? {} : { style_weight: styleWeight }),
+    ...(audioWeight === undefined ? {} : { audio_weight: audioWeight }),
+    ...(weirdness === undefined ? {} : { weirdness_constraint: weirdness }),
   };
 
   if (gender) {
@@ -557,6 +583,11 @@ async function postSonicCreate(
     tags: styleTags,
     title: trackTitle,
     ...(vocalGender ? { vocal_gender: vocalGender } : {}),
+    ...(payload.style_weight === undefined ? {} : { style_weight: payload.style_weight }),
+    ...(payload.audio_weight === undefined ? {} : { audio_weight: payload.audio_weight }),
+    ...(payload.weirdness_constraint === undefined
+      ? {}
+      : { weirdness_constraint: payload.weirdness_constraint }),
   });
 
   logAuthDiagnostic(apiKey);

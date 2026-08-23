@@ -292,6 +292,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       bpm,
       instruments,
       vocalTimbre: payload.vocalTimbre?.trim() || undefined,
+      styleInfluence: controls?.styleInfluence,
+      audioInfluence: controls?.influence,
+      weirdness: controls?.weirdness,
       vocalGender: payload.instrumental
         ? undefined
         : payload.vocalGender?.trim() || vocalGenderFromProfile(vocalProfile),
@@ -360,6 +363,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       title: payload.title || "Studio Master",
       userId: context.userId,
       taskId: started.taskId,
+      durationSeconds,
+      language: payload.language,
+      customLanguage: payload.customLanguage,
     });
 
     const vocalUrl = pipeline.vocalUrl;

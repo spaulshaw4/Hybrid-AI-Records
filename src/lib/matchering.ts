@@ -143,15 +143,38 @@ export function matcheringPythonArgs(input: {
   ];
 }
 
-export function matcheringFinishArgs(inputWav: string, outputMp3: string): string[] {
+/** Fade length applied at the duration ceiling so a cut never clicks. */
+export const MASTER_FADE_OUT_SECONDS = 4;
+
+/**
+ * Final encode. When a ceiling is given the master is hard-limited to it with a
+ * fade running into the cut, so a request for three minutes cannot come back
+ * longer than three minutes.
+ */
+export function matcheringFinishArgs(
+  inputWav: string,
+  outputMp3: string,
+  maxSeconds?: number,
+): string[] {
+  const ceiling =
+    typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds > MASTER_FADE_OUT_SECONDS
+      ? Math.round(maxSeconds)
+      : undefined;
+  const fadeStart = ceiling ? ceiling - MASTER_FADE_OUT_SECONDS : undefined;
+  const filter =
+    fadeStart === undefined
+      ? MATCHERING_FINISH_FILTER
+      : `${MATCHERING_FINISH_FILTER},afade=t=out:st=${fadeStart}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`;
+
   return [
     "-y",
     "-hide_banner",
     "-nostdin",
     "-i",
     inputWav,
+    ...(ceiling ? ["-t", String(ceiling)] : []),
     "-af",
-    MATCHERING_FINISH_FILTER,
+    filter,
     "-b:a",
     "320k",
     outputMp3,

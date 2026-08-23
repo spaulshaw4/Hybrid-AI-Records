@@ -22,7 +22,7 @@ import {
 import { logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.server";
 import { logFailedStudioGate } from "@/lib/studio-pipeline-error";
 import { describeFetchError } from "@/lib/safe-fetch";
-import { lyricsForCloneSpeech } from "@/lib/clone-lyrics";
+import { lyricsForCloneSpeech, languageHintForClone } from "@/lib/clone-lyrics";
 import { samplePathFromUrl } from "@/lib/instant-voice";
 import { buildVocalClonePayload } from "@/lib/vocal-clone-payload";
 import type { ApiframeResult } from "@/lib/apiframe.server";
@@ -149,6 +149,9 @@ export async function convertVocalsWithStems(input: {
   title?: string;
   userId: string;
   taskId: string;
+  /** Studio language selection; keeps native spelling out of English normalize. */
+  language?: string;
+  customLanguage?: string;
 }): Promise<ApiframeResult> {
   assertPipelineBreakerClosed("vocals");
   const contract = assertVocalContractInput({ lyrics: input.lyrics, voiceId: input.taskId });
@@ -191,6 +194,7 @@ export async function convertVocalsWithStems(input: {
       audio: isolatedVocal,
       extraReferences,
       format,
+      language: languageHintForClone(input.language ?? "", input.customLanguage ?? ""),
     });
     contentType = "application/msgpack";
     requestBody = encode(payload);
@@ -282,6 +286,8 @@ export async function cloneVocalsFromBytes(
     title?: string;
     userId: string;
     taskId: string;
+    language?: string;
+    customLanguage?: string;
   },
 ): Promise<ApiframeResult> {
   if (input.audioBytes.byteLength < 256) {
@@ -294,6 +300,8 @@ export async function cloneVocalsFromBytes(
     title: input.title,
     userId: input.userId,
     taskId: input.taskId,
+    language: input.language,
+    customLanguage: input.customLanguage,
   });
 }
 
@@ -326,5 +334,7 @@ export async function cloneVocalsFromSample(
     title: input.title,
     userId: input.userId,
     taskId: input.taskId,
+    language: input.language,
+    customLanguage: input.customLanguage,
   });
 }

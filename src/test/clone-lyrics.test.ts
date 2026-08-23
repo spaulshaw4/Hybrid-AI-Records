@@ -57,4 +57,27 @@ describe("buildVocalClonePayload", () => {
     expect(payload.references?.[0]?.text).toBe("We own the night");
     expect(payload.references?.[0]?.audio).toBe(audio);
   });
+
+  it("keeps English text normalization off for other languages", () => {
+    // Fish normalizes for English conventions, which mangles native spelling.
+    const lithuanian = buildVocalClonePayload({
+      text: "Aš girdžiu tavo balsą",
+      format: "mp3",
+      language: "lt",
+    });
+    expect(lithuanian.normalize).toBe(false);
+    expect(lithuanian.text).toBe("Aš girdžiu tavo balsą");
+
+    expect(buildVocalClonePayload({ text: "x", format: "mp3", language: "en" }).normalize).toBe(true);
+    expect(buildVocalClonePayload({ text: "x", format: "mp3", language: "auto" }).normalize).toBe(
+      true,
+    );
+    expect(buildVocalClonePayload({ text: "x", format: "mp3" }).normalize).toBe(true);
+  });
+
+  it("preserves non-Latin lyrics through the clone text pass", () => {
+    expect(lyricsForCloneSpeech("[Verse]\n夜が明ける\n[Chorus]\nमैं गाता हूँ")).toBe(
+      "夜が明ける मैं गाता हूँ",
+    );
+  });
 });

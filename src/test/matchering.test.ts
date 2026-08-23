@@ -6,6 +6,7 @@ import {
   MATCHERING_PIPELINE_TIMEOUT_MS,
   MATCHERING_REFERENCE_RELATIVE,
   MATCHERING_SCRIPT_RELATIVE,
+  MASTER_FADE_OUT_SECONDS,
   buildHybridMixArgs,
   buildHybridMixFilterComplex,
   collectHybridStems,
@@ -94,6 +95,29 @@ describe("Matchering 2.0 mix + master contract", () => {
       "320k",
       "out.mp3",
     ]);
+  });
+
+  it("cuts the master at the requested length with a fade into the cut", () => {
+    const args = matcheringFinishArgs("in.wav", "out.mp3", 180);
+    // A 3 minute request must not come back longer than 3 minutes.
+    expect(args).toContain("-t");
+    expect(args[args.indexOf("-t") + 1]).toBe("180");
+    const filter = args[args.indexOf("-af") + 1];
+    expect(filter).toContain(
+      `afade=t=out:st=${180 - MASTER_FADE_OUT_SECONDS}:d=${MASTER_FADE_OUT_SECONDS}:curve=exp`,
+    );
+    expect(filter).toContain("loudnorm=I=-14");
+  });
+
+  it("leaves the master untouched when no ceiling is requested", () => {
+    const args = matcheringFinishArgs("in.wav", "out.mp3");
+    expect(args).not.toContain("-t");
+    expect(args[args.indexOf("-af") + 1]).toBe(MATCHERING_FINISH_FILTER);
+  });
+
+  it("ignores a ceiling shorter than the fade itself", () => {
+    const args = matcheringFinishArgs("in.wav", "out.mp3", 2);
+    expect(args).not.toContain("-t");
   });
 
   it("stores playable masters under mastered_tracks/", () => {
