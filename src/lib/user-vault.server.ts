@@ -12,6 +12,8 @@ export type UserVaultStems = {
   masterUrl?: string | null;
   instrumentalUrl?: string | null;
   vocalUrl?: string | null;
+  /** Raw Gate 1 engine audio, before stems and mastering. */
+  rawAudioUrl?: string | null;
 };
 
 /** Wire JSON shape for GET /api/studio/vault/tracks */
@@ -23,6 +25,7 @@ export type UserVaultApiTrack = {
   master_url: string | null;
   instrumental_url: string | null;
   vocal_url: string | null;
+  raw_audio_url: string | null;
   created_at: string;
 };
 
@@ -49,6 +52,7 @@ export async function persistUserVault(
     master_url?: string | null;
     instrumental_url?: string | null;
     vocal_url?: string | null;
+    raw_audio_url?: string | null;
   } = {
     user_id: userId,
     title: stems.title.trim() || "Untitled Track",
@@ -58,6 +62,7 @@ export async function persistUserVault(
   if (masterUrl) patch.master_url = masterUrl;
   if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl;
   if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl;
+  if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl;
 
   if (stems.id) {
     if (!masterUrl && stems.status === "failed") {
@@ -108,6 +113,7 @@ export async function persistUserVault(
     master_url: masterUrl,
     instrumental_url: stems.instrumentalUrl || null,
     vocal_url: stems.vocalUrl || null,
+    raw_audio_url: stems.rawAudioUrl || null,
   };
   const { data, error } = await supabase
     .from("user_vault")
@@ -142,6 +148,7 @@ async function toApiTracks(
     master_url: string | null;
     instrumental_url: string | null;
     vocal_url: string | null;
+    raw_audio_url?: string | null;
     created_at: string;
   }>,
 ): Promise<UserVaultApiTrack[]> {
@@ -149,7 +156,12 @@ async function toApiTracks(
   try {
     const { signedUrlsForStored } = await import("@/lib/track-refresh.server");
     signed = await signedUrlsForStored(
-      rows.flatMap((row) => [row.master_url, row.instrumental_url, row.vocal_url]),
+      rows.flatMap((row) => [
+        row.master_url,
+        row.instrumental_url,
+        row.vocal_url,
+        row.raw_audio_url ?? null,
+      ]),
     );
   } catch (error) {
     console.warn(
@@ -167,6 +179,7 @@ async function toApiTracks(
       master_url: resolve(row.master_url),
       instrumental_url: resolve(row.instrumental_url),
       vocal_url: resolve(row.vocal_url),
+      raw_audio_url: resolve(row.raw_audio_url ?? null),
       created_at: row.created_at,
     })),
   );
@@ -180,7 +193,7 @@ export async function listUserVaultApiTracks(userId: string): Promise<UserVaultA
     if (admin) {
       const { data, error } = await admin
         .from("user_vault")
-        .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
+        .select("id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at")
         .eq("user_id", userId)
         .or("status.eq.completed,status.eq.processing,master_url.not.is.null")
         .order("created_at", { ascending: false });
@@ -214,7 +227,7 @@ export async function getUserVaultApiTrack(
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data, error } = await supabaseAdmin
       .from("user_vault")
-      .select("id, title, style, status, master_url, instrumental_url, vocal_url, created_at")
+      .select("id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at")
       .eq("user_id", userId)
       .eq("id", trackId)
       .maybeSingle();

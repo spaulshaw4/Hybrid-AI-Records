@@ -11,6 +11,8 @@ export type UserVaultRow = {
   masterUrl: string;
   instrumentalUrl: string;
   vocalUrl: string;
+  /** Raw Gate 1 engine audio, before stems and mastering. */
+  rawAudioUrl: string;
   createdAt: string;
 };
 
@@ -77,6 +79,7 @@ export const listUserVaultTracks = createServerFn({ method: "POST" })
         masterUrl: row.master_url ?? "",
         instrumentalUrl: row.instrumental_url ?? "",
         vocalUrl: row.vocal_url ?? "",
+        rawAudioUrl: row.raw_audio_url ?? "",
         createdAt: row.created_at,
       }));
     } catch (error) {

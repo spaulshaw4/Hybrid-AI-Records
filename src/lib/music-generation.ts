@@ -477,6 +477,18 @@ function appendGenderTag(tags: string, gender: SonicVocalGender): string {
 }
 
 /**
+ * Sonic has no BPM field, so tempo only reaches the engine through the tags.
+ * The studio always sends pre-built tags, which skips the `styleTags()` path —
+ * append it here or the artist's tempo is silently dropped.
+ */
+function appendTempoTag(tags: string, bpm: number | string | undefined): string {
+  if (bpm === undefined || bpm === null || bpm === "") return tags;
+  if (/\bbpm\b/i.test(tags)) return tags;
+  const tempo = `${bpm} BPM, steady tempo`;
+  return tags ? `${tags}, ${tempo}` : tempo;
+}
+
+/**
  * Studio sliders run 0–100 and Sonic rejects anything outside 0–1, so a slider
  * percentage is always divided down. Never infer the scale from the magnitude:
  * a weirdness of 1 means 1%, not maximum.
@@ -491,6 +503,7 @@ export function sonicWeight(percent: number | undefined): number | undefined {
 export function buildSonicCreatePayload(options: StudioTrackOptions): SonicCreatePayload {
   const gender = normalizeVocalGender(options.vocal_gender || options.vocalGender);
   let tags = options.tags?.trim() || styleTags(options) || options.genre || "";
+  tags = appendTempoTag(tags, options.bpm);
   if (gender) tags = appendGenderTag(tags, gender);
 
   const styleWeight = sonicWeight(options.styleInfluence);

@@ -152,6 +152,43 @@ describe("MusicAPI sonic workflow", () => {
     expect(body).not.toHaveProperty("weirdness_constraint");
   });
 
+  it("keeps the artist's tempo in the tags even when tags are pre-built", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = await stubCreateOk("task-tempo");
+
+    // The studio always sends pre-built tags, which used to skip the BPM append.
+    const started = await generateStudioTrack({
+      genre: "Pop",
+      lyrics: "[Chorus]\nGo",
+      tags: "Acoustic, Country",
+      bpm: 96,
+    });
+
+    expect(started.payload.tags).toBe("Acoustic, Country, 96 BPM, steady tempo");
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as Record<string, unknown>;
+    expect(body.tags).toContain("96 BPM");
+  });
+
+  it("does not repeat a tempo the tags already carry", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await stubCreateOk("task-tempo-dupe");
+
+    const started = await generateStudioTrack({
+      genre: "Pop",
+      lyrics: "[Chorus]\nGo",
+      tags: "Acoustic, 120 BPM",
+      bpm: 96,
+    });
+
+    expect(started.payload.tags).toBe("Acoustic, 120 BPM");
+  });
+
   it("POSTs create_music with lyrics in prompt and style in tags", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";

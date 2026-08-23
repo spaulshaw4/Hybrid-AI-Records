@@ -371,6 +371,9 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     const vocalUrl = pipeline.vocalUrl;
     const instrumentalUrl = pipeline.instrumentalUrl;
     const introUrl = null;
+    // Gate 1 output before stems and mastering. `archivedBase` is the stored
+    // copy; fall back to the upstream CDN URL when the archive is not addressable.
+    const rawAudioUrl = isHttpAudioUrl(archivedBase) ? archivedBase : pipelineBase;
     let masterUrl = pipeline.masterUrl;
     const taskId = started.taskId;
 
@@ -413,6 +416,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       masterUrl,
       instrumentalUrl,
       vocalUrl,
+      rawAudioUrl,
     });
     if (masterUrl) {
       const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
@@ -432,6 +436,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
         masterUrl,
         instrumentalUrl,
         vocalUrl,
+        rawAudioUrl,
       });
     }
 
@@ -454,6 +459,7 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
         instrumentalUrl,
         vocalUrl,
         introUrl,
+        rawAudioUrl,
       },
       correlationId,
       cached: false,

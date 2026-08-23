@@ -69,6 +69,7 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
   masterUrl?: string | null;
   instrumentalUrl?: string | null;
   vocalUrl?: string | null;
+  rawAudioUrl?: string | null;
 }) {
   if (typeof window === "undefined") return;
   const status = tempTrackData.status ?? "processing";
@@ -80,6 +81,7 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
     master_url: tempTrackData.masterUrl ?? null,
     instrumental_url: tempTrackData.instrumentalUrl ?? null,
     vocal_url: tempTrackData.vocalUrl ?? null,
+    raw_audio_url: tempTrackData.rawAudioUrl ?? null,
     created_at: new Date().toISOString(),
   };
   window.dispatchEvent(new CustomEvent(VAULT_NEW_GENERATION_EVENT, { detail: track }));

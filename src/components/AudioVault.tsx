@@ -45,7 +45,15 @@ type Props = {
   onDownload: (url: string, title: string) => void;
 };
 
-type StemKind = "master" | "acapella" | "instrumental";
+type StemKind = "master" | "raw" | "acapella" | "instrumental";
+
+/** Export rows, in the order they appear under the player. */
+const EXPORT_ROWS: Array<{ kind: StemKind; label: string }> = [
+  { kind: "master", label: "Master Track" },
+  { kind: "raw", label: "Raw Pre-Master" },
+  { kind: "acapella", label: "Clean Vocal Stem" },
+  { kind: "instrumental", label: "Instrumental Stem" },
+];
 
 function relativeStamp(iso: string): string {
   const at = new Date(iso).getTime();
@@ -64,8 +72,21 @@ function fileSlug(title: string): string {
 
 function stemFileName(title: string, stem: StemKind, ext: "mp3" | "wav"): string {
   const suffix =
-    stem === "master" ? "Full_Master" : stem === "acapella" ? "Acapella" : "Instrumental";
+    stem === "master"
+      ? "Full_Master"
+      : stem === "raw"
+        ? "Raw_Pre_Master"
+        : stem === "acapella"
+          ? "Acapella"
+          : "Instrumental";
   return `${fileSlug(title)}_${suffix}.${ext}`;
+}
+
+function stemUrl(row: UserVaultRow, stem: StemKind): string {
+  if (stem === "master") return row.masterUrl;
+  if (stem === "raw") return row.rawAudioUrl;
+  if (stem === "acapella") return row.vocalUrl;
+  return row.instrumentalUrl;
 }
 
 function fromApi(track: VaultTrackPayload): UserVaultRow {
@@ -78,6 +99,7 @@ function fromApi(track: VaultTrackPayload): UserVaultRow {
     masterUrl: clean?.master_url ?? "",
     instrumentalUrl: clean?.instrumental_url ?? "",
     vocalUrl: clean?.vocal_url ?? "",
+    rawAudioUrl: clean?.raw_audio_url ?? "",
     createdAt: clean?.created_at ?? track.created_at,
   };
 }
@@ -278,50 +300,39 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                           <ChevronDown className="size-3.5" aria-hidden />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-56">
-                        <DropdownMenuLabel>Full Master</DropdownMenuLabel>
-                        <DropdownMenuItem
-                          disabled={!row.masterUrl}
-                          onSelect={() => onDownload(row.masterUrl, stemFileName(row.title, "master", "mp3"))}
-                        >
-                          MP3
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!row.masterUrl || wavBusy !== null}
-                          onSelect={() => void downloadWav(row.masterUrl, row.title, "master")}
-                        >
-                          WAV
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuLabel>Acapella (Vocal Stem)</DropdownMenuLabel>
-                        <DropdownMenuItem
-                          disabled={!row.vocalUrl}
-                          onSelect={() => onDownload(row.vocalUrl, stemFileName(row.title, "acapella", "mp3"))}
-                        >
-                          MP3
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!row.vocalUrl || wavBusy !== null}
-                          onSelect={() => void downloadWav(row.vocalUrl, row.title, "acapella")}
-                        >
-                          WAV
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuLabel>Instrumental</DropdownMenuLabel>
-                        <DropdownMenuItem
-                          disabled={!row.instrumentalUrl}
-                          onSelect={() =>
-                            onDownload(row.instrumentalUrl, stemFileName(row.title, "instrumental", "mp3"))
-                          }
-                        >
-                          MP3
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={!row.instrumentalUrl || wavBusy !== null}
-                          onSelect={() => void downloadWav(row.instrumentalUrl, row.title, "instrumental")}
-                        >
-                          WAV
-                        </DropdownMenuItem>
+                      <DropdownMenuContent align="end" className="min-w-64">
+                        {EXPORT_ROWS.map(({ kind, label }, index) => {
+                          const url = stemUrl(row, kind);
+                          return (
+                            <div key={kind}>
+                              {index > 0 ? <DropdownMenuSeparator /> : null}
+                              <DropdownMenuLabel className="flex items-center justify-between gap-2">
+                                <span>{label}</span>
+                                {url ? null : (
+                                  <span className="text-[10px] font-normal text-muted-foreground">
+                                    unavailable
+                                  </span>
+                                )}
+                              </DropdownMenuLabel>
+                              <div className="flex gap-1 px-1 pb-1">
+                                <DropdownMenuItem
+                                  className="flex-1 justify-center rounded border border-border/60 text-xs"
+                                  disabled={!url || wavBusy !== null}
+                                  onSelect={() => void downloadWav(url, row.title, kind)}
+                                >
+                                  WAV
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="flex-1 justify-center rounded border border-border/60 text-xs"
+                                  disabled={!url}
+                                  onSelect={() => onDownload(url, stemFileName(row.title, kind, "mp3"))}
+                                >
+                                  MP3
+                                </DropdownMenuItem>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </>

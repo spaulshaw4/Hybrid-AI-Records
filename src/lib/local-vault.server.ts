@@ -103,6 +103,7 @@ export async function persistLocalVaultTrack(
     master_url: masterUrl,
     instrumental_url: stems.instrumentalUrl || existing?.instrumental_url || null,
     vocal_url: stems.vocalUrl || existing?.vocal_url || null,
+    raw_audio_url: stems.rawAudioUrl || existing?.raw_audio_url || null,
     created_at: existing?.created_at || new Date().toISOString(),
   };
   const without = rows.filter((row) => row.id !== id);

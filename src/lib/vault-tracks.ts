@@ -14,6 +14,8 @@ export type SanitizedVaultTrack = {
   master_url: string | null;
   instrumental_url: string | null;
   vocal_url: string | null;
+  /** Raw Gate 1 engine audio, before stems and mastering. */
+  raw_audio_url: string | null;
   created_at: string;
 };
 
@@ -55,6 +57,7 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
     const masterUrl = playableOrNull(row.master_url ?? row.masterUrl ?? row.audio_url ?? row.audioUrl);
     const instrumentalUrl = playableOrNull(row.instrumental_url ?? row.instrumentalUrl);
     const vocalUrl = playableOrNull(row.vocal_url ?? row.vocalUrl);
+    const rawAudioUrl = playableOrNull(row.raw_audio_url ?? row.rawAudioUrl);
     const createdAt =
       typeof row.created_at === "string" && row.created_at
         ? row.created_at
@@ -78,6 +81,7 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
       master_url: nextStatus === "completed" ? masterUrl : null,
       instrumental_url: nextStatus === "completed" ? instrumentalUrl : null,
       vocal_url: nextStatus === "completed" ? vocalUrl : null,
+      raw_audio_url: nextStatus === "completed" ? rawAudioUrl : null,
       created_at: createdAt,
     });
   }

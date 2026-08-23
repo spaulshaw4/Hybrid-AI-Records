@@ -443,6 +443,8 @@ type Result = {
   audioUrl: string;
   vocalUrl?: string | null;
   instrumentalUrl?: string | null;
+  /** Raw Gate 1 engine audio, before stems and mastering. */
+  rawAudioUrl?: string | null;
   taskId?: string | null;
 };
 
@@ -2387,6 +2389,7 @@ export function AudioStudio() {
               masterUrl?: string | null;
               instrumentalUrl?: string | null;
               vocalUrl?: string | null;
+              rawAudioUrl?: string | null;
             })
           : null;
       await recordAudioVault({
@@ -2421,6 +2424,7 @@ export function AudioStudio() {
         audioUrl,
         vocalUrl: stems?.vocalUrl,
         instrumentalUrl: stems?.instrumentalUrl,
+        rawAudioUrl: stems?.rawAudioUrl,
         taskId: started.taskId,
       };
       applyPipelineProgress("complete", PIPELINE_PROGRESS.complete);
@@ -2900,9 +2904,9 @@ export function AudioStudio() {
     }
   }
 
-  async function downloadWav() {
+  async function downloadWav(url?: string, label?: string) {
     if (!result) return;
-    await exportWav(result.audioUrl, result.title);
+    await exportWav(url ?? result.audioUrl, label ?? result.title);
   }
 
   function newTrack() {
@@ -4274,47 +4278,59 @@ export function AudioStudio() {
             />
 
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => void downloadWav()} disabled={exporting}>
-                {exporting ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
-                ) : (
-                  <Download className="size-4" aria-hidden />
-                )}
-                Download Mastered WAV
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  void downloadTrack(result.audioUrl, `${result.title} (Mastered)`);
-                }}
-              >
-                <Download className="size-4" aria-hidden /> Full Mastered Track
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!result.vocalUrl}
-                onClick={() => {
-                  if (!result.vocalUrl) return;
-                  void downloadTrack(result.vocalUrl, `${result.title} (Converted Vocal)`);
-                }}
-              >
-                <Download className="size-4" aria-hidden /> Converted Vocal Stem
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!result.instrumentalUrl}
-                onClick={() => {
-                  if (!result.instrumentalUrl) return;
-                  void downloadTrack(result.instrumentalUrl, `${result.title} (Instrumental)`);
-                }}
-              >
-                <Download className="size-4" aria-hidden /> Instrumental Stem
-              </Button>
-              <Button type="button" variant="ghost" onClick={newTrack}>
+            <div className="flex flex-col gap-2">
+              {(
+                [
+                  { label: "Master Track", url: result.audioUrl, slug: "Master" },
+                  { label: "Raw Pre-Master", url: result.rawAudioUrl, slug: "Raw Pre-Master" },
+                  { label: "Clean Vocal Stem", url: result.vocalUrl, slug: "Clean Vocal" },
+                  {
+                    label: "Instrumental Stem",
+                    url: result.instrumentalUrl,
+                    slug: "Instrumental",
+                  },
+                ] as const
+              ).map(({ label, url, slug }) => (
+                <div
+                  key={label}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
+                >
+                  <span className="text-sm text-zinc-200">{label}</span>
+                  <span className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={!url || exporting}
+                      onClick={() => {
+                        if (!url) return;
+                        void downloadWav(url, `${result.title} (${slug})`);
+                      }}
+                    >
+                      {exporting ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                      ) : (
+                        <Download className="size-3.5" aria-hidden />
+                      )}
+                      WAV
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={!url}
+                      onClick={() => {
+                        if (!url) return;
+                        void downloadTrack(url, `${result.title} (${slug})`);
+                      }}
+                    >
+                      <Download className="size-3.5" aria-hidden />
+                      MP3
+                    </Button>
+                  </span>
+                </div>
+              ))}
+              <Button type="button" variant="ghost" onClick={newTrack} className="self-start">
                 <Plus className="size-4" aria-hidden /> Create New Track
               </Button>
             </div>

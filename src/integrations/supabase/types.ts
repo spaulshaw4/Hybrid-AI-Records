@@ -1114,6 +1114,7 @@ export type Database = {
           id: string
           instrumental_url: string | null
           master_url: string | null
+          raw_audio_url: string | null
           status: string
           style: string | null
           title: string
@@ -1125,6 +1126,7 @@ export type Database = {
           id?: string
           instrumental_url?: string | null
           master_url?: string | null
+          raw_audio_url?: string | null
           status?: string
           style?: string | null
           title?: string
@@ -1136,6 +1138,7 @@ export type Database = {
           id?: string
           instrumental_url?: string | null
           master_url?: string | null
+          raw_audio_url?: string | null
           status?: string
           style?: string | null
           title?: string

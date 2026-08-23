@@ -1,0 +1,17 @@
+# Mastering shells out to FFmpeg (mix, loudnorm, duration ceiling) and to
+# Python Matchering 2.0. Neither is in the default Node image, and without them
+# Gate 5 degrades to loudnorm-only or fails outright.
+[phases.setup]
+nixPkgs = ["nodejs_22", "ffmpeg-full", "python311", "python311Packages.pip"]
+
+[phases.install]
+cmds = [
+  "npm ci",
+  "pip install --break-system-packages matchering==2.0.6"
+]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node .output/server/index.mjs"
