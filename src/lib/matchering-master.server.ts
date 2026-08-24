@@ -42,7 +42,36 @@ export type MixAndMasterResult = {
   masterUrl: string | null;
   matched: boolean;
   mixed: boolean;
+  /** Set when mastering soft-skips so Gate 6 can surface the real cause. */
+  failureReason?: string;
 };
+
+function formatMasteringError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause =
+      error.cause instanceof Error
+        ? error.cause.message
+        : error.cause != null
+          ? String(error.cause)
+          : "";
+    return cause ? `${error.message} | cause=${cause}` : error.message;
+  }
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error ?? "unknown mastering failure");
+}
+
+/** Prefer FFMPEG_PATH, then PATH lookup — avoids Windows `spawn UNKNOWN`. */
+function resolveFfmpegBin(): string {
+  const fromEnv = process.env.FFMPEG_PATH?.trim() || process.env.FFMPEG_BINARY?.trim();
+  if (fromEnv) return fromEnv;
+  return "ffmpeg";
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -61,10 +90,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
+  const bin = resolveFfmpegBin();
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", args, {
+    const child = spawn(bin, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
     });
 
     let settled = false;
@@ -78,18 +109,33 @@ async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
     };
 
     const timer = setTimeout(() => {
-      console.error(`[Gate 5] FFmpeg timed out after ${timeoutMs}ms — killing child`);
+      console.error(`[Gate 6] FFmpeg timed out after ${timeoutMs}ms — killing child (${bin})`);
       killMatcheringChild(child);
       finish(new Error(`FFmpeg timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     child.on("error", (error) => {
       const err = error as NodeJS.ErrnoException;
+      console.error("[Gate 6] FFmpeg spawn error", {
+        bin,
+        code: err.code,
+        errno: err.errno,
+        syscall: err.syscall,
+        message: err.message,
+      });
       if (err.code === "ENOENT") {
-        finish(new Error("FFmpeg is not installed on this host."));
+        finish(
+          new Error(
+            `FFmpeg is not installed or not on PATH (tried "${bin}"). Set FFMPEG_PATH to the full ffmpeg.exe path.`,
+          ),
+        );
         return;
       }
-      finish(error);
+      finish(
+        new Error(
+          `FFmpeg spawn failed (${err.code ?? "unknown"}): ${err.message}. On Windows this is often spawn UNKNOWN — set FFMPEG_PATH.`,
+        ),
+      );
     });
 
     // Drain pipes so a full buffer never blocks the child.
@@ -105,7 +151,8 @@ async function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
         finish();
         return;
       }
-      const detail = (stderr || signal || `exit ${code}`).toString().slice(0, 800);
+      const detail = (stderr || signal || `exit ${code}`).toString().slice(0, 1200);
+      console.error("[Gate 6] FFmpeg non-zero exit", { code, signal, bin, detail: detail.slice(0, 400) });
       finish(new Error(`FFmpeg failed: ${detail}`));
     });
   });
@@ -602,17 +649,16 @@ export async function mixAndMasterHybridTrack(options: {
     recordPipelineFailure("mastering", error);
     const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
     logPipelineStepError("mastering", error);
-    if (shouldRethrowPipelineControlError(error)) throw error;
-    // Remux / encode failures must surface — returning a null master hides the
-    // real FFmpeg error behind "did not produce a playable master".
-    const message = error instanceof Error ? error.message : String(error ?? "");
-    if (
-      /FFmpeg|timed out|not installed|Sample rate|GATE_4|remux|empty/i.test(message)
-    ) {
-      throw error instanceof Error ? error : new Error(message);
+    const detail = formatMasteringError(error);
+    console.error("[Gate 6] mixAndMasterHybridTrack failed — surfacing exact cause:", detail);
+    if (error instanceof Error && error.stack) {
+      console.error("[Gate 6] stack:", error.stack.slice(0, 2000));
     }
-    console.warn("[matchering] pipeline skipped", message);
-    return { masterUrl: null, matched: false, mixed: false };
+    if (shouldRethrowPipelineControlError(error)) throw error;
+    // Never return a silent null master — that becomes "playable master. {}".
+    throw new Error(`[Gate 6] Mastering utility failed: ${detail}`, {
+      cause: error instanceof Error ? error : undefined,
+    });
   }
 }
 

@@ -421,8 +421,12 @@ export async function runSixGatePipeline(input: {
 
     if (!mastered.masterUrl || !mastered.mixed) {
       // Inner static filter may still have run; treat hard miss as fatal.
+      const reason =
+        mastered.failureReason ||
+        `mixed=${mastered.mixed}, masterUrl=${mastered.masterUrl ? "set" : "null"}`;
+      console.error("[Circuit Breaker] Gate 6 returned empty master:", reason);
       throw new Error(
-        "[Circuit Breaker] Gate 6 failed: Mastering did not produce a playable master.",
+        `[Circuit Breaker] Gate 6 failed: Mastering did not produce a playable master. ${reason}`,
       );
     }
     if (telemetry.fallbacksApplied.includes(FALLBACK_STATIC_MASTER_FFMPEG) === false) {

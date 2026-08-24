@@ -60,8 +60,21 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
       } catch (error) {
         const message =
           error instanceof Error ? error.message : String(error ?? "Generation failed");
-        console.error("[GENERATE_SSE_ERROR]", message);
-        send("error", { message });
+        const cause =
+          error instanceof Error && error.cause != null
+            ? error.cause instanceof Error
+              ? error.cause.message
+              : String(error.cause)
+            : undefined;
+        console.error("[GENERATE_SSE_ERROR]", message, cause ? `| cause=${cause}` : "");
+        if (error instanceof Error && error.stack) {
+          console.error("[GENERATE_SSE_ERROR] stack:", error.stack.slice(0, 2500));
+        }
+        send("error", {
+          message,
+          ...(cause ? { cause } : {}),
+          gate: /Gate\s*6|mastering|Matchering|FFmpeg|Resemble/i.test(message) ? 6 : undefined,
+        });
       } finally {
         clearInterval(keepalive);
         closed = true;

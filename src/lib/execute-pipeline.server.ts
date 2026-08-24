@@ -774,6 +774,12 @@ export async function executePipeline(
       const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
       let mastered: Awaited<ReturnType<typeof mixAndMasterHybridTrack>>;
       try {
+        console.log("[Gate 6] Entering mastering utility", {
+          instrumentalUrl: Boolean(mixInstrumentalUrl),
+          vocalUrl: Boolean(mixVocalUrl),
+          ffmpegPath: process.env.FFMPEG_PATH || process.env.FFMPEG_BINARY || "(PATH)",
+          gateTimeoutMs: GATE_TIMEOUTS_MS[6],
+        });
         mastered = await withTimeout(
           mixAndMasterHybridTrack({
             introUrl: null,
@@ -798,12 +804,33 @@ export async function executePipeline(
           "Gate 6 (FFmpeg Remux)",
         );
       } catch (err) {
-        throw new Error(`[Gate 6 Error] FFmpeg remux failed: ${errorMessage(err)}`);
+        const detail = errorMessage(err);
+        console.error("[Gate 6 Error] Mastering try/catch caught:", detail);
+        if (err instanceof Error && err.stack) {
+          console.error("[Gate 6 Error] stack:", err.stack.slice(0, 2500));
+        }
+        if (err instanceof Error && err.cause) {
+          console.error(
+            "[Gate 6 Error] cause:",
+            err.cause instanceof Error ? err.cause.message : err.cause,
+          );
+        }
+        throw new Error(`[Gate 6 Error] FFmpeg remux / mastering failed: ${detail}`, {
+          cause: err instanceof Error ? err : undefined,
+        });
       }
 
       if (!mastered.masterUrl || !mastered.mixed) {
+        const reason =
+          mastered.failureReason ||
+          `mixed=${mastered.mixed}, masterUrl=${mastered.masterUrl ? "set" : "null"}`;
+        console.error("[Gate 6 Error] Mastering returned no playable master:", reason, {
+          mixed: mastered.mixed,
+          matched: mastered.matched,
+          masterUrlPresent: Boolean(mastered.masterUrl),
+        });
         throw new Error(
-          `[Gate 6 Error] Mastering did not produce a playable master (mixed=${mastered.mixed}, masterUrl=${mastered.masterUrl ? "set" : "null"}).`,
+          `[Gate 6 Error] Mastering did not produce a playable master. ${reason}`,
         );
       }
 

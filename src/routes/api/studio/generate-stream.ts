@@ -67,6 +67,26 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
   const supabase = tryGetSupabaseAdmin() ?? createSupabaseUserClient(token);
 
   return createGenerateSseResponse({
-    run: () => runGenerateEngineTrack(data, { userId: userId!, supabase }),
+    run: async () => {
+      try {
+        return await runGenerateEngineTrack(data, { userId: userId!, supabase });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "Generation failed");
+        if (/Gate\s*6|mastering|Matchering|FFmpeg|Resemble|playable master/i.test(message)) {
+          console.error("[generate-stream] Gate 6 failure detail:", message);
+          if (error instanceof Error && error.cause) {
+            console.error(
+              "[generate-stream] Gate 6 cause:",
+              error.cause instanceof Error ? error.cause.message : error.cause,
+            );
+          }
+          if (error instanceof Error && error.stack) {
+            console.error("[generate-stream] Gate 6 stack:", error.stack.slice(0, 2500));
+          }
+        }
+        throw error;
+      }
+    },
   });
 }

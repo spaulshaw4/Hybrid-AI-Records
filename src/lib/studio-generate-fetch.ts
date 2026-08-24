@@ -100,9 +100,10 @@ export async function streamStudioGenerate(
       return;
     }
     if (event === "error" && payload && typeof payload === "object") {
-      const message =
-        "message" in payload ? String((payload as { message: unknown }).message) : "Generation failed.";
-      streamError = message;
+      const p = payload as { message?: unknown; cause?: unknown };
+      const message = "message" in p ? String(p.message) : "Generation failed.";
+      const cause = "cause" in p && p.cause != null ? String(p.cause) : "";
+      streamError = cause && !message.includes(cause) ? `${message} (${cause})` : message;
     }
   };
 
