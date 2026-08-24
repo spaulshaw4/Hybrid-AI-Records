@@ -8,6 +8,10 @@ import { useDivisionNames } from "@/lib/division-settings";
 import type { Division } from "@/lib/divisions";
 import { resolvePositions, shouldSeek, shouldWritePosition, type DeviceWin, type ResolvedPosition } from "@/lib/radio-positions";
 import { toast } from "sonner";
+import {
+  claimCatalogPlayback,
+  getCatalogAudioElement,
+} from "@/lib/catalog-player";
 
 import { deviceLabel } from "@/lib/radio-device";
 import {
@@ -790,6 +794,67 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
   const [restored, setRestored] = useState(false);
   // Listeners review the mixed rotation first, then confirm to start the broadcast.
   const [confirmed, setConfirmed] = useState(false);
+
+  // Bind the shared catalog HTMLAudioElement so Artist page / album / Radio
+  // all play the same public CDN URLs through one element.
+  useEffect(() => {
+    const el = getCatalogAudioElement();
+    if (!el) return;
+    audioRef.current = el;
+    claimCatalogPlayback("radio");
+
+    const onPlay = () => {
+      claimCatalogPlayback("radio");
+      setPlaying(true);
+    };
+    const onPause = () => setPlaying(false);
+    const onEnded = () => advanceRef.current();
+    const onLoadStart = () => setBuffering(true);
+    const onWaiting = () => setBuffering(true);
+    const onStalled = () => setBuffering(true);
+    const onSeeking = () => setBuffering(true);
+    const onSeeked = () => setBuffering(false);
+    const onCanPlay = () => setBuffering(false);
+    const onPlaying = () => setBuffering(false);
+    const onError = () => setBuffering(false);
+    const onProgress = () => {
+      setBuffered(el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0);
+    };
+    const onLoadedMetadata = () => {
+      setDuration(el.duration || 0);
+      setBuffering(false);
+    };
+
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    el.addEventListener("loadstart", onLoadStart);
+    el.addEventListener("waiting", onWaiting);
+    el.addEventListener("stalled", onStalled);
+    el.addEventListener("seeking", onSeeking);
+    el.addEventListener("seeked", onSeeked);
+    el.addEventListener("canplay", onCanPlay);
+    el.addEventListener("playing", onPlaying);
+    el.addEventListener("error", onError);
+    el.addEventListener("progress", onProgress);
+    el.addEventListener("loadedmetadata", onLoadedMetadata);
+
+    return () => {
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("loadstart", onLoadStart);
+      el.removeEventListener("waiting", onWaiting);
+      el.removeEventListener("stalled", onStalled);
+      el.removeEventListener("seeking", onSeeking);
+      el.removeEventListener("seeked", onSeeked);
+      el.removeEventListener("canplay", onCanPlay);
+      el.removeEventListener("playing", onPlaying);
+      el.removeEventListener("error", onError);
+      el.removeEventListener("progress", onProgress);
+      el.removeEventListener("loadedmetadata", onLoadedMetadata);
+    };
+  }, []);
 
   adoptRemote.current = (remote) => {
     if (!remote) return;
@@ -1847,31 +1912,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
           : "No track loaded"}
       </p>
 
-
-      <audio
-        ref={audioRef}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={next}
-        onLoadStart={() => setBuffering(true)}
-        onWaiting={() => setBuffering(true)}
-        onStalled={() => setBuffering(true)}
-        onSeeking={() => setBuffering(true)}
-        onSeeked={() => setBuffering(false)}
-        onCanPlay={() => setBuffering(false)}
-        onPlaying={() => setBuffering(false)}
-        onError={() => setBuffering(false)}
-        onProgress={(e) => {
-          const a = e.currentTarget;
-          setBuffered(a.buffered.length ? a.buffered.end(a.buffered.length - 1) : 0);
-        }}
-        onLoadedMetadata={(e) => {
-          setDuration(e.currentTarget.duration || 0);
-          setBuffering(false);
-        }}
-        className="hidden"
-      />
+      {/* Shared catalog <audio> is owned by catalog-player (bound via audioRef). */}
       {/* hidden YT mount */}
       <div className="pointer-events-none absolute top-0 start-0 h-0 w-0 overflow-hidden opacity-0">
         <div ref={mountRef} />

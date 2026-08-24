@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -17,7 +17,18 @@ import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
 import { TrackWaveform } from "@/components/TrackWaveform";
-import { ALBUMS, STREAM_TRACKS } from "@/lib/radio-tracks";
+import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
+import {
+  groupPlayablesAsAlbums,
+  mergeCatalogIntoStreamTracks,
+  type CatalogPlayable,
+} from "@/lib/artist-catalog";
+import { listArtistCatalog } from "@/lib/artist-catalog.functions";
+import {
+  playCatalogTrack,
+  seekCatalogPlayback,
+  useCatalogPlayback,
+} from "@/lib/catalog-player";
 import { CoverImage } from "@/components/CoverImage";
 import {
   Sheet,
@@ -88,21 +99,14 @@ function ArtistTracksPage() {
   const tokens = useArtistTokens();
   const navigate = useNavigate({ from: "/artists" });
   const { album: albumParam } = Route.useSearch();
-  const selectedAlbum =
-    ALBUMS.find((a) => a.id === albumParam) ??
-    ALBUMS.find((a) => a.title === albumParam) ??
-    null;
+  const playback = useCatalogPlayback();
 
+  const [catalog, setCatalog] = useState<CatalogPlayable[]>([]);
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortMode>("track");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  // Track currently loaded into the shared <audio> element (may be paused).
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
 
   const [bulkMode, setBulkMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -112,7 +116,38 @@ function ArtistTracksPage() {
   const [popularity, setPopularity] = useState<Map<string, number>>(new Map());
   const [popularityError, setPopularityError] = useState(false);
   const [popularityRetry, setPopularityRetry] = useState(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const catalogAlbums = useMemo(() => groupPlayablesAsAlbums(catalog), [catalog]);
+  const albumsSource: Album[] = catalogAlbums.length ? catalogAlbums : ALBUMS;
+  const tracksSource: StreamTrack[] = useMemo(() => {
+    if (!catalog.length) return STREAM_TRACKS;
+    return mergeCatalogIntoStreamTracks(STREAM_TRACKS, catalog);
+  }, [catalog]);
+
+  const selectedAlbum =
+    albumsSource.find((a) => a.id === albumParam) ??
+    albumsSource.find((a) => a.title === albumParam) ??
+    null;
+
+  const playingId = playback.playing ? playback.track?.id ?? null : null;
+  const activeId = playback.track?.id ?? null;
+  const currentTime = playback.currentTime;
+  const duration = playback.duration;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await listArtistCatalog({ data: undefined });
+        if (!cancelled) setCatalog(rows);
+      } catch {
+        if (!cancelled) setCatalog([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load anonymous popularity counts once.
   useEffect(() => {
@@ -136,12 +171,12 @@ function ArtistTracksPage() {
 
 
   const genres = useMemo(
-    () => Array.from(new Set(ALBUMS.map((a) => a.genre).filter(Boolean))).sort() as string[],
-    [],
+    () => Array.from(new Set(albumsSource.map((a) => a.genre).filter(Boolean))).sort() as string[],
+    [albumsSource],
   );
 
   const albums = useMemo(() => {
-    let list = ALBUMS;
+    let list = albumsSource;
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter((a) => {
@@ -149,14 +184,12 @@ function ArtistTracksPage() {
         return hay.toLowerCase().includes(q);
       });
     }
-    if (activeGenre) {
-      list = list.filter((a) => a.genre === activeGenre);
-    }
+    if (activeGenre) list = list.filter((a) => a.genre === activeGenre);
     return list;
-  }, [query, activeGenre]);
+  }, [albumsSource, query, activeGenre]);
 
   const tracks = useMemo(() => {
-    let list = STREAM_TRACKS;
+    let list = tracksSource;
     if (selectedAlbum) {
       list = list.filter((t) => t.album === selectedAlbum.title);
     }
@@ -199,7 +232,7 @@ function ArtistTracksPage() {
         break;
     }
     return list;
-  }, [query, activeGenre, sortBy, popularity, selectedAlbum]);
+  }, [tracksSource, query, activeGenre, sortBy, popularity, selectedAlbum]);
 
   const totalPages = Math.max(1, Math.ceil(tracks.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -215,8 +248,8 @@ function ArtistTracksPage() {
   }, [query, activeGenre, sortBy, pageSize]);
 
   const detailTrack = useMemo(
-    () => STREAM_TRACKS.find((t) => t.id === detailTrackId) ?? null,
-    [detailTrackId],
+    () => tracksSource.find((t) => t.id === detailTrackId) ?? null,
+    [detailTrackId, tracksSource],
   );
 
   const ownedTracks = useMemo(
@@ -273,39 +306,36 @@ function ArtistTracksPage() {
   };
 
   const preview = (id: string, src: string) => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (activeId === id) {
-      // Same track: toggle without resetting the shared clock, so progress stays put.
-      if (el.paused) {
-        void el.play().catch(() => setPlayingId(null));
-        setPlayingId(id);
-      } else {
-        el.pause();
-        setPlayingId(null);
-      }
-      return;
-    }
-    el.src = src;
-    setCurrentTime(0);
-    setDuration(0);
-    setActiveId(id);
-    void el.play().catch(() => setPlayingId(null));
-    setPlayingId(id);
+    const track =
+      tracksSource.find((t) => t.id === id) ??
+      ({
+        id,
+        title: id,
+        artist: "Hybrid AI Records",
+        src,
+      } satisfies StreamTrack);
+    void playCatalogTrack(
+      {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        src,
+        cover: track.cover,
+        album: track.album,
+        genre: track.genre,
+        credits: track.credits,
+        trackNumber: track.trackNumber,
+        trackTotal: track.trackTotal,
+        division: track.division,
+        priceTokens: track.priceTokens,
+      },
+      selectedAlbum ? "album" : "artists",
+    );
   };
-
 
   const seek = (time: number) => {
-    const el = audioRef.current;
-    if (!el) return;
-    const next = Math.max(0, Math.min(time, duration || time));
-    el.currentTime = next;
-    // Update immediately so the list row bar and the drawer waveform move on the same frame.
-    setCurrentTime(next);
+    seekCatalogPlayback(time);
   };
-
-  // Progress comes from the audio element's timeupdate (a few times a second),
-  // not a rAF clock — that used to re-render the whole catalog at 60fps.
 
 
 
@@ -905,24 +935,6 @@ function ArtistTracksPage() {
           ) : null}
         </SheetContent>
       </Sheet>
-
-      <audio
-        ref={audioRef}
-        onEnded={() => {
-          setPlayingId(null);
-          setCurrentTime(duration || 0);
-        }}
-        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
-        onSeeking={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
-        onSeeked={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
-        onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)}
-        onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)}
-        onPlay={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
-        onPause={() => {
-          if (audioRef.current?.paused && playingId !== null) setPlayingId(null);
-        }}
-        className="hidden"
-      />
 
       <ArtistTokenStore tokens={tokens} />
     </main>

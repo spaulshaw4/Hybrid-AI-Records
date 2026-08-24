@@ -6,6 +6,8 @@ import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import keliasCover from "@/assets/kelias-i-save-cover.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
+import { mergeCatalogIntoStreamTracks, playableToRadioTrack } from "@/lib/artist-catalog";
+import { listRadioReadyCatalog } from "@/lib/artist-catalog.functions";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trackHowItWorksCtaClick } from "@/lib/cta-analytics";
 
@@ -374,6 +376,57 @@ const YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@HybridAIRecords";
 function Home() {
   const { v: videoParam } = Route.useSearch();
   const navigate = useNavigate({ from: "/" });
+  const [radioCatalog, setRadioCatalog] = useState<
+    ReturnType<typeof playableToRadioTrack>[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await listRadioReadyCatalog({ data: undefined });
+        if (!cancelled) setRadioCatalog(rows.map(playableToRadioTrack));
+      } catch {
+        if (!cancelled) setRadioCatalog([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const radioTracks = useMemo(() => {
+    const mergedStream = mergeCatalogIntoStreamTracks(
+      STREAM_TRACKS,
+      radioCatalog.map((t) => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        src: t.src ?? "",
+        cover: t.cover,
+        album: t.album,
+        genre: t.genre,
+        credits: t.credits,
+        trackNumber: t.trackNumber,
+        trackTotal: t.trackTotal,
+        division: t.division,
+        radioReady: true,
+      })),
+    );
+    return [
+      ...mergedStream,
+      ...RELEASES.filter(
+        (r) =>
+          !mergedStream.some((s) => s.title.toLowerCase() === r.title.toLowerCase()),
+      ).map((r) => ({
+        id: r.id,
+        title: r.title,
+        artist: r.artist,
+        cover: albumCoverSrc(r),
+        genre: ALBUMS.find((a) => a.artist === r.artist)?.genre,
+      })),
+    ];
+  }, [radioCatalog]);
 
   // The open video lives in the URL so any artist click is shareable.
   const activeVideo = useMemo<VideoItem | null>(() => {
@@ -949,25 +1002,7 @@ function Home() {
                 </p>
 
                 <div className="mx-auto mt-8 max-w-2xl">
-                  <RadioPlayer
-                    tracks={[
-                      ...STREAM_TRACKS,
-                      ...RELEASES.filter(
-                        (r) =>
-                          !STREAM_TRACKS.some(
-                            (s) => s.title.toLowerCase() === r.title.toLowerCase(),
-                          ),
-                      ).map((r) => ({
-                        id: r.id,
-                        title: r.title,
-                        artist: r.artist,
-                        cover: albumCoverSrc(r),
-                        genre: ALBUMS.find((a) => a.artist === r.artist)?.genre,
-                      })),
-                    ]}
-
-                  />
-
+                  <RadioPlayer tracks={radioTracks} />
                 </div>
 
                 <div className="mt-8 flex justify-center">

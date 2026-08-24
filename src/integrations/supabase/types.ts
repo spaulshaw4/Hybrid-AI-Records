@@ -173,6 +173,66 @@ export type Database = {
         }
         Relationships: []
       }
+      artist_tracks: {
+        Row: {
+          album_id: string
+          album_title: string
+          artist_name: string
+          audio_url: string
+          cover_url: string | null
+          created_at: string
+          credits: string | null
+          division: string | null
+          genre: string | null
+          id: string
+          price_tokens: number
+          radio_ready: boolean
+          storage_path: string
+          title: string
+          track_number: number
+          track_total: number | null
+          updated_at: string
+        }
+        Insert: {
+          album_id: string
+          album_title: string
+          artist_name?: string
+          audio_url: string
+          cover_url?: string | null
+          created_at?: string
+          credits?: string | null
+          division?: string | null
+          genre?: string | null
+          id: string
+          price_tokens?: number
+          radio_ready?: boolean
+          storage_path: string
+          title: string
+          track_number: number
+          track_total?: number | null
+          updated_at?: string
+        }
+        Update: {
+          album_id?: string
+          album_title?: string
+          artist_name?: string
+          audio_url?: string
+          cover_url?: string | null
+          created_at?: string
+          credits?: string | null
+          division?: string | null
+          genre?: string | null
+          id?: string
+          price_tokens?: number
+          radio_ready?: boolean
+          storage_path?: string
+          title?: string
+          track_number?: number
+          track_total?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       engine_proxy_cache: {
         Row: {
           created_at: string
