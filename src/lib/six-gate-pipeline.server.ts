@@ -1,6 +1,9 @@
 /**
  * Explicit 6-gate studio orchestrator with circuit breakers, flight-pattern
  * fallbacks, filing locks, and PipelineResponse landing contracts.
+ *
+ * Production short path (default): after Gate 2, skip to Gate 6 unless
+ * HYBRID_ENABLE_STEM_PIPELINE=1 (preserves Gates 3–5 for local/full runs).
  */
 
 import {
@@ -177,7 +180,21 @@ export async function runSixGatePipeline(input: {
       );
     }
     const publicAudioUrl = gate2.publicCdnUrl;
-    console.log(`[Gate 2/6] Pre-flight CDN OK — routing to Gates 3/4`);
+    console.log(`[Gate 2/6] Pre-flight CDN OK`);
+
+    const { isStemPipelineEnabled, pipelineModeLabel } = await import(
+      "@/lib/pipeline-mode.server"
+    );
+    console.log(`[Pipeline] mode=${pipelineModeLabel()}`);
+
+    let instrumentalUrl: string | null = publicAudioUrl;
+    let isolatedVocalUrl: string | null = null;
+    let gate4: Gate4Result | null = null;
+    let mixVocalUrl: string | null = null;
+    let fishFallback = false;
+
+    if (isStemPipelineEnabled()) {
+    console.log(`[Gate 2/6] routing to Gates 3/4 (stem pipeline enabled)`);
 
     // ── Gate 3 (CWALO, soft-fail → default structure) ─────────────────────
     telemetry = bumpTelemetry(telemetry, 3, "gate_3_analyzing");
@@ -233,9 +250,9 @@ export async function runSixGatePipeline(input: {
       throw new Error("Gate 4 pre-flight: public CDN URL required.");
     }
 
-    let instrumentalUrl: string | null = input.instrumental ? publicAudioUrl : null;
-    let isolatedVocalUrl: string | null = null;
-    let gate4: Gate4Result | null = null;
+    instrumentalUrl = input.instrumental ? publicAudioUrl : null;
+    isolatedVocalUrl = null;
+    gate4 = null;
 
     try {
       const { separateStemsFromPublicUrl } = await import("@/lib/stems.server");
@@ -269,15 +286,11 @@ export async function runSixGatePipeline(input: {
       logFailedStudioGate(error);
       if (shouldRethrowPipelineControlError(error)) throw error;
       if (wantsVocals) throw haltStem(error);
-      console.warn(
-        "[Circuit Breaker] Gate 4 skipped for instrumental render",
-        error instanceof Error ? error.message : error,
-      );
+      instrumentalUrl = publicAudioUrl;
+      console.warn("[Gate 4/6] Soft-fail instrumental — using Gate 2 CDN as backing");
     }
 
     // ── Gate 5 (RVC → Fish → Demucs vocal fallback) ───────────────────────
-    let mixVocalUrl: string | null = null;
-    let fishFallback = false;
     if (wantsVocals) {
       telemetry = bumpTelemetry(telemetry, 5, "gate_5_converting");
       reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
@@ -377,12 +390,28 @@ export async function runSixGatePipeline(input: {
         }
       }
     }
+    } else {
+      console.log(
+        "[Pipeline] Bypassing Gates 3–5 — Gate 6 masters Gate 2 vault audio. " +
+          "Set HYBRID_ENABLE_STEM_PIPELINE=1 to restore CWALO/Demucs/RVC.",
+      );
+      const { generateDefaultStructure } = await import("@/lib/pipeline-fallbacks.server");
+      const { buildCwaloMasterPlan } = await import("@/lib/cwalo-structure.server");
+      const gate3 = generateDefaultStructure(input.durationSeconds ?? 180, input.taskId);
+      structuralMarkers = gate3.markers;
+      masterPlan = markersToMasterPlan(gate3, buildCwaloMasterPlan);
+      remuxGains = masterPlan.remux;
+      instrumentalUrl = publicAudioUrl;
+      isolatedVocalUrl = null;
+      mixVocalUrl = null;
+      useFallbackStructure = true;
+    }
 
     const vocalUrl = mixVocalUrl ?? isolatedVocalUrl;
     const mixInstrumentalUrl =
-      instrumentalUrl ?? (wantsVocals ? null : publicAudioUrl);
+      instrumentalUrl ?? (wantsVocals && isStemPipelineEnabled() ? null : publicAudioUrl);
 
-    if (wantsVocals && (!mixVocalUrl || !mixInstrumentalUrl)) {
+    if (isStemPipelineEnabled() && wantsVocals && (!mixVocalUrl || !mixInstrumentalUrl)) {
       throw haltStem(new Error("missing vocal or Gate 4 instrumental for remux"));
     }
 
@@ -468,7 +497,6 @@ export async function runSixGatePipeline(input: {
     };
 
     console.log(`[Pipeline Complete] Master ready: ${finalMasterUrl.slice(0, 96)}`);
-    void gate3;
     void gate4;
     void fishFallback;
 

@@ -1,6 +1,8 @@
 /**
- * Canonical 6-gate execution pipeline — mirrors the flight-plan sketch:
- * lock → Gate 1–6 with circuit breakers → unlock + temp cleanup in finally.
+ * Canonical pipeline execution — circuit breakers + unlock/cleanup in finally.
+ *
+ * Production default: Gate 1 → Gate 2 → Gate 6 (master Gate 2 vault audio).
+ * Gates 3–5 (CWALO / Demucs / RVC) remain behind HYBRID_ENABLE_STEM_PIPELINE=1.
  */
 
 import { AUDIO_VAULT_BUCKET, resolveAudioVaultBucket } from "@/lib/audio-vault";
@@ -464,6 +466,20 @@ export async function executePipeline(
       gateMask = passGate(gateMask, PipelineGate.STORAGE);
       emitGateProgress(PipelineGate.STORAGE);
 
+      let cwaloOutput: Gate3Result | null = null;
+      let masterPlan: import("@/lib/cwalo-structure.server").CwaloMasterPlan | null = null;
+      let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
+      let mixVocalUrl: string | null = null;
+      let mixInstrumentalUrl: string = publicAudioUrl;
+      let fishConversionSucceeded = false;
+      let rvcConversionSucceeded = false;
+
+      const { isStemPipelineEnabled, pipelineModeLabel } = await import(
+        "@/lib/pipeline-mode.server"
+      );
+      console.log(`[Pipeline] mode=${pipelineModeLabel()}`);
+
+      if (isStemPipelineEnabled()) {
       // ── Gate 3: CWALO with Fallback Detour ───────────────────────────────
       if (!hasPassedGate(gateMask, PipelineGate.STORAGE)) {
         throw new Error("[Gate 3] Prerequisite failed: STORAGE bit not set.");
@@ -473,9 +489,6 @@ export async function executePipeline(
       telemetry = safeBumpTelemetry(telemetry, 3, "gate_3_analyzing");
       await beforeGate({ trackId, gate: 3, stage: "gate_3_analyzing" });
       reportPipelineProgress("cwalo", PIPELINE_PROGRESS.cwalo, undefined, gateMask);
-      let cwaloOutput: Gate3Result | null = null;
-      let masterPlan: import("@/lib/cwalo-structure.server").CwaloMasterPlan | null = null;
-      let remuxGains = { instrumentalVolume: 1.0, vocalVolume: 1.0 };
       try {
         const { analyzeMusicStructureWithCwalo } = await import("@/lib/cwalo-structure.server");
         const structure = await withTimeout(
@@ -595,7 +608,7 @@ export async function executePipeline(
       // Enforce Demucs bit before vocals.
       if (!hasPassedGate(gateMask, PipelineGate.DEMUX) || !canExecuteVocals(gateMask)) {
         throw new Error(
-          "[Gate 5] Prerequisite failed: DEMUX bit must be set before vocals.",
+          "[Gate 5] Prerequisite failed: DEMUX bit not set before vocals.",
         );
       }
       activeGate = 5;
@@ -604,11 +617,7 @@ export async function executePipeline(
       await beforeGate({ trackId, gate: 5, stage: "gate_5_converting" });
       reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals, undefined, gateMask);
 
-      let mixVocalUrl: string | null = null;
-      let vocalAudioBuffer: Buffer | null = null;
-      let fishConversionSucceeded = false;
-      let rvcConversionSucceeded = false;
-      const mixInstrumentalUrl = instrumentalStemUrl ?? publicAudioUrl;
+      mixInstrumentalUrl = instrumentalStemUrl ?? publicAudioUrl;
 
       if (wantsVocals) {
         // Gate 5 pre-flight: valid Gate 4 vocal URL/buffer required before conversion.
@@ -631,10 +640,8 @@ export async function executePipeline(
           console.warn(
             "[Gate 5] Empty Demucs vocal buffer — using Gate 2 master mix as vocal fallback for remux.",
           );
-          vocalAudioBuffer = null;
           mixVocalUrl = publicAudioUrl;
         } else {
-          vocalAudioBuffer = rawDemucsVocalBuffer;
           mixVocalUrl = vocalStemUrl;
 
           const { resolveRvcModelDownloadUrl, convertVocalsWithRvc } = await import(
@@ -660,10 +667,9 @@ export async function executePipeline(
               rvcConversionSucceeded = true;
               fishConversionSucceeded = true; // bill vocals gate
               try {
-                vocalAudioBuffer = await downloadBuffer(finishedVocalStemUrl);
-                residue.trackBuffer(vocalAudioBuffer);
+                residue.trackBuffer(await downloadBuffer(finishedVocalStemUrl));
               } catch {
-                vocalAudioBuffer = rawDemucsVocalBuffer;
+                /* keep mixVocalUrl; buffer optional for remux */
               }
             } catch (err) {
               const detail = sanitizeInheritedGate1Message(
@@ -711,10 +717,9 @@ export async function executePipeline(
               mixVocalUrl = fishUrl;
               fishConversionSucceeded = true;
               try {
-                vocalAudioBuffer = await downloadBuffer(fishUrl);
-                residue.trackBuffer(vocalAudioBuffer);
+                residue.trackBuffer(await downloadBuffer(fishUrl));
               } catch {
-                vocalAudioBuffer = rawDemucsVocalBuffer;
+                /* keep mixVocalUrl */
               }
             } catch (err) {
               const detail = sanitizeInheritedGate1Message(
@@ -724,7 +729,6 @@ export async function executePipeline(
                 "[Gate 5] Fish Audio conversion failed/timed out, falling back to raw vocal stem:",
                 detail || errorMessage(err),
               );
-              vocalAudioBuffer = rawDemucsVocalBuffer;
               mixVocalUrl = vocalStemUrl;
               fallbacksUsed.push(FALLBACK_FISH_AUDIO_RAW_VOCALS);
               telemetry = safeRecordFallback(telemetry, FALLBACK_FISH_AUDIO_RAW_VOCALS);
@@ -761,10 +765,80 @@ export async function executePipeline(
           "[Line Charger] Bypassed Vocal Model Conversion — soft-failed to raw Demucs stems ($0.00)",
         );
       }
+      } else {
+        // ── Production short path: Gate 2 CDN → Gate 6 (skip 3–5) ─────────
+        console.log(
+          "[Pipeline] Bypassing Gates 3–5 — Gate 6 masters Gate 2 Supabase vault audio directly. " +
+            "Set HYBRID_ENABLE_STEM_PIPELINE=1 to restore CWALO/Demucs/RVC.",
+        );
+        const defaults = await applyDefaultCwaloStructure(trackId, input.durationSeconds);
+        cwaloOutput = defaults.gate3;
+        masterPlan = defaults.masterPlan;
+        remuxGains = defaults.remuxGains;
+        mixInstrumentalUrl = publicAudioUrl;
+        mixVocalUrl = null;
+
+        const bypassGates: Array<{
+          gate: 3 | 4 | 5;
+          flag: number;
+          stage: "gate_3_analyzing" | "gate_4_splitting" | "gate_5_converting";
+          progress: "cwalo" | "stems" | "vocals";
+          step: string;
+        }> = [
+          {
+            gate: 3,
+            flag: PipelineGate.STRUCTURE,
+            stage: "gate_3_analyzing",
+            progress: "cwalo",
+            step: "cwalo",
+          },
+          {
+            gate: 4,
+            flag: PipelineGate.DEMUX,
+            stage: "gate_4_splitting",
+            progress: "stems",
+            step: "demux",
+          },
+          {
+            gate: 5,
+            flag: PipelineGate.VOCALS,
+            stage: "gate_5_converting",
+            progress: "vocals",
+            step: "vocals",
+          },
+        ];
+        for (const bypass of bypassGates) {
+          activeGate = bypass.gate;
+          currentStep = bypass.step;
+          telemetry = safeBumpTelemetry(telemetry, bypass.gate, bypass.stage);
+          await beforeGate({ trackId, gate: bypass.gate, stage: bypass.stage });
+          reportPipelineProgress(
+            bypass.progress,
+            PIPELINE_PROGRESS[bypass.progress],
+            undefined,
+            gateMask,
+          );
+          gateMask = passGate(gateMask, bypass.flag);
+          emitGateProgress(bypass.flag);
+          await afterGate(
+            { trackId, gate: bypass.gate, stage: bypass.stage },
+            "bypassed → Gate 6 (Gate 2 vault audio)",
+          );
+        }
+        console.log(
+          `[Pipeline] Short path ready — Gate 6 input=${publicAudioUrl.slice(0, 96)}`,
+        );
+      }
 
       // ── Gate 6: FFmpeg Mastering & Final Vault Upload ────────────────────
       if (!hasPassedGate(gateMask, PipelineGate.VOCALS)) {
         throw new Error("[Gate 6] Prerequisite failed: VOCALS bit not set.");
+      }
+      if (!masterPlan || !cwaloOutput) {
+        const defaults = await applyDefaultCwaloStructure(trackId, input.durationSeconds);
+        cwaloOutput = defaults.gate3;
+        masterPlan = defaults.masterPlan;
+        remuxGains = defaults.remuxGains;
       }
       activeGate = 6;
       currentStep = "master";
@@ -775,8 +849,10 @@ export async function executePipeline(
       let mastered: Awaited<ReturnType<typeof mixAndMasterHybridTrack>>;
       try {
         console.log("[Gate 6] Entering mastering utility", {
+          source: isStemPipelineEnabled() ? "stems" : "gate2-vault",
           instrumentalUrl: Boolean(mixInstrumentalUrl),
           vocalUrl: Boolean(mixVocalUrl),
+          gate2Cdn: publicAudioUrl.slice(0, 64),
           ffmpegPath: process.env.FFMPEG_PATH || process.env.FFMPEG_BINARY || "(PATH)",
           gateTimeoutMs: GATE_TIMEOUTS_MS[6],
         });
