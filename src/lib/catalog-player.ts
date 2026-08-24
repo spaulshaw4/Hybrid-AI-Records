@@ -28,6 +28,7 @@ let state: CatalogPlaybackState = {
   owner: null,
 };
 const listeners = new Set<Listener>();
+let listenersBound = false;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -46,36 +47,70 @@ function setState(patch: Partial<CatalogPlaybackState>) {
 }
 
 function playbackUrl(track: CatalogPlayable): string {
-  const raw = (track.audio_url ?? track.src ?? "").trim();
-  return raw;
+  return (track.audio_url ?? track.src ?? "").trim();
+}
+
+function bindElementListeners(el: HTMLAudioElement) {
+  if (listenersBound && audio === el) return;
+  listenersBound = true;
+  el.addEventListener("timeupdate", () => {
+    setState({ currentTime: el.currentTime ?? 0 });
+  });
+  el.addEventListener("loadedmetadata", () => {
+    setState({ duration: el.duration ?? 0 });
+    console.log("[catalog-player] loadedmetadata", {
+      duration: el.duration,
+      src: el.currentSrc,
+    });
+  });
+  el.addEventListener("durationchange", () => {
+    setState({ duration: el.duration ?? 0 });
+  });
+  el.addEventListener("play", () => {
+    console.log("[catalog-player] state: play", { src: el.currentSrc });
+    setState({ playing: true });
+  });
+  el.addEventListener("pause", () => {
+    console.log("[catalog-player] state: pause", { src: el.currentSrc });
+    setState({ playing: false });
+  });
+  el.addEventListener("ended", () => {
+    console.log("[catalog-player] state: ended");
+    setState({ playing: false, currentTime: 0 });
+  });
+  el.addEventListener("error", () => {
+    const err = el.error;
+    console.error("[catalog-player] media error", {
+      code: err?.code,
+      message: err?.message,
+      src: el.currentSrc || el.src,
+    });
+    setState({ playing: false });
+  });
+}
+
+/** Bind the root-mounted <audio> from CatalogAudioHost. */
+export function bindCatalogAudioElement(el: HTMLAudioElement) {
+  audio = el;
+  el.preload = "auto";
+  bindElementListeners(el);
 }
 
 function ensureAudio(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
-  if (audio) return audio;
+  if (audio) {
+    bindElementListeners(audio);
+    return audio;
+  }
+  // Fallback if host not mounted yet (still works for same-gesture clicks).
+  const existing = document.getElementById("hybrid-catalog-audio");
+  if (existing instanceof HTMLAudioElement) {
+    bindCatalogAudioElement(existing);
+    return existing;
+  }
   audio = new Audio();
   audio.preload = "auto";
-  audio.addEventListener("timeupdate", () => {
-    setState({ currentTime: audio?.currentTime ?? 0 });
-  });
-  audio.addEventListener("loadedmetadata", () => {
-    setState({ duration: audio?.duration ?? 0 });
-  });
-  audio.addEventListener("durationchange", () => {
-    setState({ duration: audio?.duration ?? 0 });
-  });
-  audio.addEventListener("play", () => setState({ playing: true }));
-  audio.addEventListener("pause", () => setState({ playing: false }));
-  audio.addEventListener("ended", () => setState({ playing: false, currentTime: 0 }));
-  audio.addEventListener("error", () => {
-    const err = audio?.error;
-    console.error("[catalog-player] media error", {
-      code: err?.code,
-      message: err?.message,
-      src: audio?.currentSrc || audio?.src,
-    });
-    setState({ playing: false });
-  });
+  bindElementListeners(audio);
   return audio;
 }
 
@@ -103,7 +138,11 @@ export async function playCatalogTrack(
 ): Promise<void> {
   const el = ensureAudio();
   const url = playbackUrl(track);
-  console.log("Playing audio URL:", track.audio_url ?? track.src, { id: track.id, owner });
+  console.log("Playing audio URL:", track.audio_url ?? track.src, {
+    id: track.id,
+    owner,
+    title: track.title,
+  });
 
   if (!el) {
     console.error("[catalog-player] no Audio element available");
@@ -117,11 +156,12 @@ export async function playCatalogTrack(
   claimCatalogPlayback(owner);
 
   const sameTrack = state.currentTrack?.id === track.id || state.track?.id === track.id;
-  if (sameTrack && el.currentSrc) {
+  if (sameTrack && (el.currentSrc || el.src)) {
     if (el.paused) {
       try {
-        await el.play();
+        const p = el.play();
         setState({ playing: true, currentTrack: track, track });
+        await p;
       } catch (error) {
         console.error("[catalog-player] play() failed (resume):", error);
         setState({ playing: false });
@@ -146,8 +186,14 @@ export async function playCatalogTrack(
     el.pause();
     el.src = url;
     el.load();
-    await el.play();
+    console.log("[catalog-player] assigned src → play()", {
+      src: el.src,
+      readyState: el.readyState,
+    });
+    // Call play() in the same user-gesture turn; await after state update.
+    const playPromise = el.play();
     setState({ playing: true, currentTrack: track, track });
+    await playPromise;
   } catch (error) {
     console.error("[catalog-player] play() failed:", error, { url });
     setState({ playing: false });

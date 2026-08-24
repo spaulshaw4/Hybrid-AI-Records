@@ -12,6 +12,8 @@ import {
   claimCatalogPlayback,
   getCatalogAudioElement,
 } from "@/lib/catalog-player";
+import { fetchRadioReadyTracks } from "@/lib/fetch-artist-catalog.client";
+import { playableToRadioTrack } from "@/lib/artist-catalog";
 
 import { deviceLabel } from "@/lib/radio-device";
 import {
@@ -520,6 +522,28 @@ function mergePositions(remote: {
 
 
 export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }) {
+  // Prefer live radio_ready rows from artist_tracks (CDN audio_url).
+  const [stationTracks, setStationTracks] = useState<RadioTrack[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await fetchRadioReadyTracks();
+        if (cancelled) return;
+        const mapped = rows.map(playableToRadioTrack).filter((t) => Boolean(t.src));
+        console.log("[radio] feeding queue from artist_tracks.radio_ready", mapped.length);
+        setStationTracks(mapped);
+      } catch (error) {
+        console.error("[radio] artist_tracks queue fetch failed:", error);
+        if (!cancelled) setStationTracks([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Account sync: when a listener is signed in, their mix travels with them.
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "loading" | "synced">("idle");
@@ -769,10 +793,14 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
   const guardRelaxed = relaxed && (mixStyle === "genre" ? relaxRules.genre : relaxRules.artist);
   const effectiveSpacing = guardRelaxed ? 0 : spacing;
 
-  const tracks = useMemo(
-    () => applyMixStyle(dedupeTracks(incomingTracks), mixStyle, mixSeed, effectiveSpacing),
-    [incomingTracks, mixStyle, mixSeed, effectiveSpacing],
-  );
+  const tracks = useMemo(() => {
+    const source =
+      stationTracks && stationTracks.length > 0
+        ? stationTracks
+        : incomingTracks.filter((t) => Boolean(t.src));
+    const fallback = source.length ? source : incomingTracks;
+    return applyMixStyle(dedupeTracks(fallback), mixStyle, mixSeed, effectiveSpacing);
+  }, [stationTracks, incomingTracks, mixStyle, mixSeed, effectiveSpacing]);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1985,6 +2013,9 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
             width={64}
             height={64}
             className="h-16 w-16 shrink-0 rounded-md border border-border-strong object-cover shadow-[0_0_24px_-8px_rgba(225,29,46,0.9)] animate-in fade-in zoom-in-95 duration-500 ease-out motion-reduce:animate-none"
+            onError={() => {
+              console.warn("[radio] cover failed:", { id: track.id, cover_url: track.cover });
+            }}
           />
         )}
         <div

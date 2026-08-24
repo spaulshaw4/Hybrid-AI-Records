@@ -199,15 +199,23 @@ export function groupPlayablesAsAlbums(tracks: CatalogPlayable[]): Album[] {
       (a, b) => (a.trackNumber ?? 0) - (b.trackNumber ?? 0) || a.title.localeCompare(b.title),
     );
     const head = sorted[0];
+    const cover =
+      sorted.find((t) => Boolean(t.cover?.trim()))?.cover?.trim() ||
+      head?.cover?.trim() ||
+      "";
     return {
       id: head?.album ? slugish(head.album) : slugish(title),
       title,
       artist: head?.artist ?? "Hybrid AI Records",
-      cover: head?.cover ?? "",
+      cover,
       credits: head?.credits ?? "",
       genre: head?.genre ?? "",
       division: head?.division,
-      tracks: sorted.map((t) => ({ id: t.id, title: t.title, src: t.src })),
+      tracks: sorted.map((t) => ({
+        id: t.id,
+        title: t.title,
+        src: t.audio_url ?? t.src,
+      })),
     };
   });
 }

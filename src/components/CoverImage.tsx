@@ -43,6 +43,11 @@ export function CoverImage({
   };
 
   const handleError = (event: SyntheticEvent<HTMLImageElement>) => {
+    const broken = chain[Math.min(index, chain.length - 1)];
+    console.warn("[CoverImage] broken/404 artwork path:", broken, {
+      alt,
+      nextFallback: chain[index + 1] ?? null,
+    });
     advance();
     onError?.(event);
   };

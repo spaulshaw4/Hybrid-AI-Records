@@ -23,7 +23,7 @@ import {
   mergeCatalogIntoStreamTracks,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
-import { listArtistCatalog } from "@/lib/artist-catalog.functions";
+import { fetchArtistCatalogTracks } from "@/lib/fetch-artist-catalog.client";
 import {
   playCatalogTrack,
   seekCatalogPlayback,
@@ -138,9 +138,10 @@ function ArtistTracksPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await listArtistCatalog({ data: undefined });
+        const rows = await fetchArtistCatalogTracks();
         if (!cancelled) setCatalog(rows);
-      } catch {
+      } catch (error) {
+        console.error("[artists] catalog fetch failed:", error);
         if (!cancelled) setCatalog([]);
       }
     })();
@@ -533,15 +534,27 @@ function ArtistTracksPage() {
                   aria-label={`Open album ${album.title} by ${album.artist}`}
                 >
                   <span className="relative aspect-square w-full overflow-hidden bg-ink">
-                    <CoverImage
-                      src={album.cover}
-                      alt={`${album.title} album cover`}
-                      priority={ai < 4}
-                      sizes="(min-width: 1024px) 20vw, (min-width: 640px) 30vw, 50vw"
-                      width={640}
-                      height={640}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                    />
+                    {album.cover ? (
+                      <CoverImage
+                        src={album.cover}
+                        alt={`${album.title} album cover`}
+                        priority={ai < 4}
+                        sizes="(min-width: 1024px) 20vw, (min-width: 640px) 30vw, 50vw"
+                        width={640}
+                        height={640}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                        onError={() => {
+                          console.warn("[artists] album card cover failed:", {
+                            album: album.title,
+                            cover_url: album.cover,
+                          });
+                        }}
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        No cover
+                      </span>
+                    )}
                   </span>
                   <span className="border-t border-border-strong p-3">
                     <span className="block truncate font-display text-sm font-semibold text-foreground">
@@ -567,14 +580,26 @@ function ArtistTracksPage() {
       ) : (
         <>
           <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-end">
-            <CoverImage
-              src={selectedAlbum.cover}
-              alt={`${selectedAlbum.title} album cover`}
-              sizes="(min-width: 640px) 11rem, 40vw"
-              width={640}
-              height={640}
-              className="aspect-square w-40 shrink-0 rounded-xl border border-border-strong object-cover shadow-lg sm:w-44"
-            />
+            {selectedAlbum.cover ? (
+              <CoverImage
+                src={selectedAlbum.cover}
+                alt={`${selectedAlbum.title} album cover`}
+                sizes="(min-width: 640px) 11rem, 40vw"
+                width={640}
+                height={640}
+                className="aspect-square w-40 shrink-0 rounded-xl border border-border-strong object-cover shadow-lg sm:w-44"
+                onError={() => {
+                  console.warn("[artists] album header cover failed:", {
+                    album: selectedAlbum.title,
+                    cover_url: selectedAlbum.cover,
+                  });
+                }}
+              />
+            ) : (
+              <span className="flex aspect-square w-40 shrink-0 items-center justify-center rounded-xl border border-border-strong bg-ink font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground sm:w-44">
+                No cover
+              </span>
+            )}
             <div className="min-w-0 space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 {selectedAlbum.artist}
@@ -714,6 +739,12 @@ function ArtistTracksPage() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      console.log("[artists] play click", {
+                        id: t.id,
+                        title: t.title,
+                        audio_url: t.src,
+                        cover_url: t.cover,
+                      });
                       preview(t.id, t.src);
                     }}
                     aria-label={`${isPlaying ? "Pause" : "Preview"} ${t.title} by ${t.artist}`}
@@ -834,6 +865,12 @@ function ArtistTracksPage() {
                     width={640}
                     height={640}
                     className="aspect-square w-full rounded-xl border border-border-strong object-cover shadow-2xl"
+                    onError={() => {
+                      console.warn("[artists] track detail cover failed:", {
+                        id: detailTrack.id,
+                        cover_url: detailTrack.cover,
+                      });
+                    }}
                   />
                 ) : null}
                 <SheetTitle className="font-display text-xl uppercase tracking-[0.12em] text-foreground">

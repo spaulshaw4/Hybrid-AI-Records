@@ -17,6 +17,7 @@ import { LivingBackground } from "@/components/LivingBackground";
 import { RouteTransition } from "@/components/RouteTransition";
 import { BackgroundDebug } from "@/components/BackgroundDebug";
 import { SiteChrome } from "@/components/SiteNav";
+import { CatalogAudioHost } from "@/components/CatalogAudioHost";
 
 import { PageTranslator, languageInfo, useLanguageState } from "@/lib/i18n";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
@@ -324,7 +325,7 @@ function RootComponent() {
         {/* Top-center so confirmations stay visible above open dialogs
             (settings, divisions) instead of hiding behind bottom-corner UI. */}
         <Toaster position="top-center" richColors closeButton expand duration={3500} />
-        
+        <CatalogAudioHost />
       </DirectionProvider>
 
     </QueryClientProvider>
