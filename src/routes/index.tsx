@@ -936,7 +936,7 @@ function Home() {
 
 
       {/* HYBRID AI RADIO — SPOTIFY */}
-      <section id="radio" className="relative border-t border-border py-20 md:py-28">
+      <section id="radio" className="relative scroll-mt-20 border-t border-border py-20 md:py-28">
         <div className="relative mx-auto max-w-5xl px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -1054,7 +1054,7 @@ function Home() {
                   { label: "Distribution & Video", href: "/portal", isLink: true },
                   { label: "Hybrid Engine 1.0", href: "/engine", isLink: true },
                   { label: "Artists", href: "#catalog", isLink: false },
-                  { label: "Podcast", href: "#podcast", isLink: false },
+                  { label: "Hybrid AI Radio", href: "#radio", isLink: false },
                   { label: "Tokens", href: "/tokens", isLink: true },
                 ].map(({ label, href, isLink }) => {
                   const className = "text-sm text-slate-400 transition-colors hover:text-white";

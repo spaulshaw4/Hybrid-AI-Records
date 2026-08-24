@@ -1847,21 +1847,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
 
 
 
-  // Mobile: show a sticky mini-player only once the full console is off screen.
   const consoleRef = useRef<HTMLDivElement | null>(null);
-  const [consoleVisible, setConsoleVisible] = useState(true);
-  useEffect(() => {
-    const el = consoleRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      ([entry]) => setConsoleVisible(entry?.isIntersecting ?? true),
-      { rootMargin: "-72px 0px 0px 0px", threshold: 0 },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  const showMini = confirmed && !consoleVisible && Boolean(track);
 
   // Global shortcuts: number keys 1-9 fire the matching saved Relax preset
   // instantly during playback, 0 restores the saved guard.
@@ -3035,89 +3021,6 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
       <ArtistTokenStore tokens={artistTokens} />
 
     </section>
-
-
-    {/* Sticky mobile mini-player */}
-    {showMini && (
-      <div
-        data-testid="radio-mini-player"
-        data-radio-console
-        role="region"
-        aria-label="Radio mini player"
-        className="fixed inset-x-0 bottom-[var(--site-dock-height)] z-40 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] sm:hidden lg:bottom-0"
-      >
-        <div className="relative h-0.5 w-full bg-slate-200">
-          <div className="absolute inset-y-0 start-0 bg-slate-300" style={{ width: `${bufferedPct}%` }} />
-          <div
-            className={`relative h-full bg-primary ${buffering ? "animate-pulse" : ""}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => consoleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
-            aria-label="Open the full radio console"
-            className="flex min-w-0 items-center gap-2 text-start"
-          >
-            {track?.cover && (
-              <CoverImage
-                key={`${track.id}-mini-cover`}
-                src={track.cover}
-                alt=""
-                sizes="36px"
-                width={36}
-                height={36}
-                className="h-9 w-9 shrink-0 rounded border border-border-strong object-cover animate-in fade-in zoom-in-95 duration-400 ease-out motion-reduce:animate-none"
-              />
-            )}
-            <span
-              key={`${track?.id ?? "empty"}-mini-meta`}
-              className="min-w-0 animate-in fade-in slide-in-from-bottom-1 duration-300 ease-out motion-reduce:animate-none"
-            >
-              <span className="rwb-flame rwb-flame-deep block truncate text-[12px] font-semibold">
-                {track?.title ?? "—"}
-              </span>
-              <span className="block truncate font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
-                {track?.artist ?? ""}
-              </span>
-            </span>
-          </button>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={prev}
-              aria-label="Previous"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-white text-foreground"
-            >
-              <SkipBack size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={toggle}
-              aria-label={playing ? "Pause" : "Play"}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-primary bg-primary text-white shadow-[0_0_20px_-6px_rgba(225,29,46,0.9)]"
-            >
-              {buffering ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : playing ? (
-                <Pause size={16} fill="currentColor" />
-              ) : (
-                <Play size={16} fill="currentColor" className="translate-x-[1px]" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={next}
-              aria-label="Next"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-white text-foreground"
-            >
-              <SkipForward size={14} />
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 

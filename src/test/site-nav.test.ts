@@ -7,9 +7,16 @@ describe("site nav", () => {
       "make-track",
       "catalog",
       "merch",
-      "podcast",
+      "radio",
       "packages",
     ]);
+  });
+
+  it("marks Hybrid AI Radio active on the homepage radio hash", () => {
+    const item = SITE_NAV.find((entry) => entry.id === "radio")!;
+    expect(isSiteNavActive(item, "/", {}, "radio")).toBe(true);
+    expect(isSiteNavActive(item, "/", {}, "podcast")).toBe(false);
+    expect(isSiteNavActive(item, "/artists", {}, "")).toBe(false);
   });
 
   it("hides chrome on admin and auth", () => {

@@ -4,7 +4,7 @@ import {
   AudioLines,
   Clapperboard,
   Library,
-  Mic2,
+  Radio,
   ShoppingBag,
 } from "lucide-react";
 
@@ -23,7 +23,7 @@ const ICONS = {
   audio: AudioLines,
   catalog: Library,
   merch: ShoppingBag,
-  podcast: Mic2,
+  radio: Radio,
   packages: Clapperboard,
 } as const;
 
@@ -107,9 +107,9 @@ function NavItem({
     );
   }
 
-  if (item.to === "/" && item.hash === "podcast") {
+  if (item.to === "/" && item.hash === "radio") {
     return (
-      <Link to="/" hash="podcast" className={className} aria-current={active ? "page" : undefined}>
+      <Link to="/" hash="radio" className={className} aria-current={active ? "page" : undefined}>
         {label}
       </Link>
     );

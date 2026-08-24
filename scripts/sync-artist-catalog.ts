@@ -85,14 +85,12 @@ const ALBUM_META: Record<
     artist: "Stephen P. Shaw",
     genre: "Cinematic Rock",
     credits: "Written by Stephen P. Shaw · Produced by Hybrid AI Records",
-    division: "jester",
   },
   "the last bow a tribute to the jester": {
     title: "The Last Bow: A Tribute to The Jester",
     artist: "Stephen P. Shaw",
     genre: "Cinematic Rock",
     credits: "Written by Stephen P. Shaw · Produced by Hybrid AI Records",
-    division: "jester",
   },
   "collection of me": {
     title: "A Collection Of Me",
