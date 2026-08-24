@@ -92,7 +92,15 @@ function voiceProfilesErrorMessage(
   const message = error?.message ?? "";
   const code = error?.code ?? "";
   if (/schema cache|Could not find the table|does not exist/i.test(message) || code === "PGRST205") {
-    return "Voice library table is missing. Apply supabase/migrations/20260824140000_ensure_voice_profiles.sql in the Supabase SQL Editor, then try again.";
+    return "Voice library table is missing. Apply supabase/migrations/20260824141000_align_voice_profiles_columns.sql in the Supabase SQL Editor, then try again.";
+  }
+  // Live table was created with `name`/`duration` instead of `label`/`voice_id`.
+  if (
+    code === "PGRST204" ||
+    code === "42703" ||
+    /Could not find the '.*' column|column voice_profiles\./i.test(message)
+  ) {
+    return "Voice library columns are out of date (need label + voice_id). Apply supabase/migrations/20260824141000_align_voice_profiles_columns.sql in the Supabase SQL Editor, then try again.";
   }
   if (code === "23503" || /foreign key|auth\.users/i.test(message)) {
     if (isDevAuthBypass()) {
@@ -172,30 +180,45 @@ export const saveVoiceProfile = createServerFn({ method: "POST" })
       );
     }
 
-    const supabase = await voiceProfilesClient().catch(() => context.supabase);
+    let supabase;
+    try {
+      supabase = await voiceProfilesClient();
+    } catch (adminError) {
+      console.warn(
+        "[voice_profiles] service-role unavailable, falling back to user JWT client",
+        adminError instanceof Error ? adminError.message : adminError,
+      );
+      supabase = context.supabase;
+    }
+
+    // Client payload: { label, voiceId, sampleUrl, quality? }
+    // DB row: snake_case columns below (label/voice_id — not legacy name/duration).
+    const insertRow = {
+      user_id: userId,
+      label: data.label,
+      voice_id: data.voiceId,
+      sample_url: data.sampleUrl,
+      peak: data.quality?.peak ?? null,
+      rms: data.quality?.rms ?? null,
+      clip_ratio: data.quality?.clipRatio ?? null,
+      silence_ratio: data.quality?.silenceRatio ?? null,
+      clip_bars: data.quality?.clipBars ?? null,
+      silence_bars: data.quality?.silenceBars ?? null,
+      total_bars: data.quality?.totalBars ?? null,
+      quality_blocked: data.quality?.blocked ?? null,
+      trim_start_seconds: data.quality?.trimStartSeconds ?? null,
+    };
+
     const { data: row, error } = await supabase
       .from("voice_profiles")
-      .insert({
-        user_id: userId,
-        label: data.label,
-        voice_id: data.voiceId,
-        sample_url: data.sampleUrl,
-        peak: data.quality?.peak ?? null,
-        rms: data.quality?.rms ?? null,
-        clip_ratio: data.quality?.clipRatio ?? null,
-        silence_ratio: data.quality?.silenceRatio ?? null,
-        clip_bars: data.quality?.clipBars ?? null,
-        silence_bars: data.quality?.silenceBars ?? null,
-        total_bars: data.quality?.totalBars ?? null,
-        quality_blocked: data.quality?.blocked ?? null,
-        trim_start_seconds: data.quality?.trimStartSeconds ?? null,
-      })
+      .insert(insertRow)
       .select(PROFILE_COLUMNS)
       .maybeSingle();
 
     if (error || !row) {
       console.error("[voice_profiles] insert failed", {
         userId,
+        columns: Object.keys(insertRow),
         code: error?.code,
         message: error?.message,
         details: error?.details,
