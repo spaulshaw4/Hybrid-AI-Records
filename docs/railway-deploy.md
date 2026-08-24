@@ -5,8 +5,9 @@
 | File | Purpose |
 | --- | --- |
 | `railway.json` | Nixpacks builder, start command, healthcheck, restart policy |
-| `nixpacks.toml` | Bun install/build; installs FFmpeg and Python Matchering for mastering |
+| `nixpacks.toml` | Bun install/build + start `bun .output/server/index.mjs`; FFmpeg/Matchering |
 | `package.json` | `start` → `bun .output/server/index.mjs`; `engines.node` → `>=20` |
+| `.dockerignore` | Excludes noise/secrets but **not** `.output` (Nitro server must ship) |
 
 The build emits a Nitro `node-server` bundle at `.output/`. That server reads
 `PORT` and binds `0.0.0.0` on its own, so no custom Express wrapper is needed.

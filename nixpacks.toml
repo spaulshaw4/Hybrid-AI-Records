@@ -10,8 +10,14 @@ cmds = [
   "pip install --break-system-packages matchering==2.0.6"
 ]
 
+# Nitro must emit .output/server/index.mjs for the start command below.
+# Railway/Nixpacks app root is /app; cmds run from that directory.
 [phases.build]
-cmds = ["bun run build"]
+dependsOn = ["install"]
+cmds = [
+  "bun run build",
+  "test -f .output/server/index.mjs || (echo 'ERROR: .output/server/index.mjs missing after build' && pwd && ls -la .output .output/server 2>/dev/null; exit 1)"
+]
 
 [start]
 cmd = "bun .output/server/index.mjs"

@@ -1,0 +1,29 @@
+# Railway / Nixpacks context ignores.
+# IMPORTANT: Do NOT ignore `.output` — Vite+Nitro writes the production server
+# there during `bun run build`, and the start command runs:
+#   bun .output/server/index.mjs
+
+.git
+.agents
+.claude
+.windsurf
+.tmp
+tmp
+tmp-audio-upload
+.data
+coverage
+test-results
+playwright-report
+blob-report
+*.log
+.env
+.env.*
+!.env.example
+
+# Dependency trees are installed in-image; skip local copies.
+node_modules
+
+# Local editor / OS noise
+.DS_Store
+.idea
+.vscode
