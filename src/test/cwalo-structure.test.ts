@@ -102,7 +102,7 @@ describe("CWALO Gate 3", () => {
   });
 
   it("exposes Analyzing structure (CWALO)… on the progress stepper", () => {
-    expect(PIPELINE_PROGRESS.cwalo).toBe(48);
+    expect(PIPELINE_PROGRESS.cwalo).toBe(52);
     expect(PIPELINE_PROGRESS_LABELS.cwalo).toBe("Analyzing structure (CWALO)…");
     expect(PIPELINE_PROGRESS.sonic).toBeLessThan(PIPELINE_PROGRESS.cwalo);
     expect(PIPELINE_PROGRESS.cwalo).toBeLessThan(PIPELINE_PROGRESS.stems);

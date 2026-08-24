@@ -3,9 +3,10 @@
  * Genre-adaptive dense style tokens + structural lyric anchors for Gate 1.
  */
 
-import { replicateBaseUrl, replicateApiKey } from "@/lib/ai-provider.server";
+import { replicateBaseUrl } from "@/lib/ai-provider.server";
 import {
   joinReplicateOutput,
+  lyricReplicateToken,
   REPLICATE_GEMINI_FLASH,
 } from "@/lib/replicate-llm.server";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
@@ -157,13 +158,13 @@ export function injectLyricStructureAnchors(lyrics: string, anchors: string[]): 
 function authHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${replicateApiKey(OPTIMIZER_LABEL)}`,
+    Authorization: `Bearer ${lyricReplicateToken()}`,
   };
 }
 
 /**
- * Runs google/gemini-2.5-flash via Replicate with REPLICATE_API_TOKEN
- * (alias: REPLICATE_API_KEY).
+ * Runs google/gemini-2.5-flash via Replicate with LYRIC_ENGINE_API_KEY
+ * (never the hybrid1 REPLICATE_API_TOKEN used by Demucs / CWALO).
  */
 export async function optimizeStylePromptViaGemini(
   userText: string,

@@ -48,9 +48,9 @@ function trimEnv(name: string): string | undefined {
   return value || undefined;
 }
 
-/** Lyrics — isolated from ENGINE_API_KEY. */
+/** Lyrics / Gemini — isolated from hybrid REPLICATE_API_TOKEN. */
 export function lyricPipelineKey(): string | undefined {
-  return trimEnv("LYRIC_ENGINE_API_KEY") || trimEnv("REPLICATE_API_KEY");
+  return trimEnv("LYRIC_ENGINE_API_KEY") || trimEnv("ENGINE_API_KEY");
 }
 
 /** Gate 1 — Sonic base audio. */
@@ -67,7 +67,7 @@ export function vocalPipelineKey(): string | undefined {
   return trimEnv("FISH_AUDIO_API_KEY") || trimEnv("FISH_API_KEY");
 }
 
-/** Gates 3–4 — Replicate CWALO + Demucs. */
+/** Gates 3–4 — Replicate CWALO + Demucs (hybrid1 token). */
 export function replicatePipelineKey(): string | undefined {
-  return trimEnv("REPLICATE_API_KEY") || trimEnv("REPLICATE_API_TOKEN");
+  return trimEnv("REPLICATE_API_TOKEN") || trimEnv("REPLICATE_API_KEY");
 }

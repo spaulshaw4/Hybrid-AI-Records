@@ -113,6 +113,23 @@ describe("requireStageKey", () => {
     expect(error).toHaveBeenCalledWith(message);
   });
 
+  it("does not alias hybrid REPLICATE_API_TOKEN to LYRIC_ENGINE_API_KEY", () => {
+    clear(["REPLICATE_API_TOKEN", "REPLICATE_API_KEY", "ENGINE_API_KEY", "LYRIC_ENGINE_API_KEY"]);
+    process.env.REPLICATE_API_TOKEN = "hybrid1-token";
+    expect(readEnv("LYRIC_ENGINE_API_KEY")).toBeUndefined();
+    expect(readEnv("ENGINE_API_KEY")).toBeUndefined();
+    expect(readEnv("REPLICATE_API_TOKEN")).toBe("hybrid1-token");
+  });
+
+  it("does not alias LYRIC_ENGINE_API_KEY to REPLICATE_API_TOKEN", () => {
+    clear(["REPLICATE_API_TOKEN", "REPLICATE_API_KEY", "ENGINE_API_KEY", "LYRIC_ENGINE_API_KEY"]);
+    process.env.LYRIC_ENGINE_API_KEY = "lyric-token";
+    expect(readEnv("REPLICATE_API_TOKEN")).toBeUndefined();
+    expect(readEnv("REPLICATE_API_KEY")).toBeUndefined();
+    expect(readEnv("LYRIC_ENGINE_API_KEY")).toBe("lyric-token");
+    expect(readEnv("ENGINE_API_KEY")).toBe("lyric-token");
+  });
+
   it("accepts FISH_API_KEY as an alias for Fish Audio vocals", () => {
     clear(["FISH_AUDIO_API_KEY", "FISH_API_KEY"]);
     process.env.FISH_API_KEY = "fish-key";

@@ -8,7 +8,7 @@ import {
  * Body: { userText: string, lyrics?: string, bpm?: number }
  * Returns: { optimizedPrompt, lyricAnchors, lyrics? }
  *
- * Runs google/gemini-2.5-flash on Replicate (REPLICATE_API_TOKEN).
+ * Runs google/gemini-2.5-flash on Replicate (LYRIC_ENGINE_API_KEY).
  */
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -55,8 +55,8 @@ export async function POST(req: Request): Promise<Response> {
     const message =
       error instanceof Error
         ? error.message
-        : "Style optimization failed. Check REPLICATE_API_TOKEN and try again.";
-    const status = /not configured|REPLICATE_API/i.test(message) ? 503 : 500;
+        : "Style optimization failed. Check LYRIC_ENGINE_API_KEY and try again.";
+    const status = /not configured|LYRIC_ENGINE_API_KEY|REPLICATE_API/i.test(message) ? 503 : 500;
     return Response.json({ error: message }, { status });
   }
 }

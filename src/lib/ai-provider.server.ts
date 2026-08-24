@@ -17,7 +17,8 @@
  *
  *   Motion / audio generation (Replicate, called directly)
  *     REPLICATE_API_BASE_URL   defaults to https://api.replicate.com/v1
- *     REPLICATE_API_KEY        the single default Replicate token used by every job
+ *     REPLICATE_API_TOKEN      hybrid1 token for Demucs / CWALO (alias: REPLICATE_API_KEY)
+ *     LYRIC_ENGINE_API_KEY     Gemini 2.5 Flash / Co-Producer only
  *
  *   Instant vocal clone (Fish Audio TTS)
  *     FISH_API_KEY             official Fish Audio key (alias: FISH_AUDIO_API_KEY)
@@ -277,9 +278,9 @@ export function replicateBaseUrl(): string {
 }
 
 /**
- * Single source of truth for every Replicate job: the default REPLICATE_API_KEY.
- * No alias keys, no per-engine key mapping, no platform-managed fallback — if
- * this token is missing the job fails loudly instead of billing anything else.
+ * Hybrid Replicate token for Demucs / CWALO (and other non-Gemini jobs).
+ * Prefers REPLICATE_API_TOKEN (hybrid1); falls back to REPLICATE_API_KEY only.
+ * Never reads LYRIC_ENGINE_API_KEY.
  */
 export function hasReplicateKey(): boolean {
   return Boolean(env("REPLICATE_API_TOKEN") ?? env("REPLICATE_API_KEY"));
@@ -287,7 +288,9 @@ export function hasReplicateKey(): boolean {
 
 export function replicateApiKey(label = "The generation engine"): string {
   const key = env("REPLICATE_API_TOKEN") ?? env("REPLICATE_API_KEY");
-  if (!key) throw new Error(`${label} is not configured: set REPLICATE_API_TOKEN to your own token.`);
+  if (!key) {
+    throw new Error(`${label} is not configured: set REPLICATE_API_TOKEN to your hybrid1 token.`);
+  }
   return key;
 }
 

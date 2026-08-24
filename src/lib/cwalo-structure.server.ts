@@ -519,6 +519,10 @@ export async function analyzeMusicStructureWithCwalo(
   }
 
   const token = replicateApiKey("CWALO structure analysis");
+  console.log(
+    "[GATE_3_CWALO] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=",
+    CWALO_MODEL.split(":")[0],
+  );
   const replicate = new Replicate({ auth: token });
 
   const musicInput = await resolveCwaloMusicInput(replicate, audioUrl);

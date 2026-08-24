@@ -6,7 +6,7 @@ import {
 
 /**
  * Co-Producer lyrics: google/gemini-2.5-flash on Replicate via
- * LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY / ENGINE_API_KEY.
+ * LYRIC_ENGINE_API_KEY (alias: ENGINE_API_KEY).
  */
 export async function POST(req: Request): Promise<Response> {
   try {

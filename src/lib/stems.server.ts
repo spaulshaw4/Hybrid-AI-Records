@@ -55,9 +55,11 @@ type PredictionState = {
 };
 
 function credentials() {
+  // Hybrid1 Replicate token — Demucs must not bill LYRIC_ENGINE / Gemini keys.
   const token =
+    (typeof process !== "undefined" && process.env.REPLICATE_API_TOKEN?.trim()) ||
     (typeof process !== "undefined" && process.env.REPLICATE_API_KEY?.trim()) ||
-    requireStageKey("REPLICATE_API_KEY", "Stem Separation");
+    requireStageKey("REPLICATE_API_TOKEN", "Stem Separation");
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
@@ -181,6 +183,9 @@ export async function separateStemsFromPublicUrl(publicAudioUrl: string): Promis
 }
 
 async function runDemucsPrediction(audioUrl: string): Promise<StemResult> {
+  console.log(
+    `[GATE_4_DEMUCS] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=${DEMUCS_MODEL}`,
+  );
   const finish = (stems: StemResult): StemResult => {
     recordPipelineSuccess("stems");
     if (isHttpAudioUrl(stems.vocals) && isHttpAudioUrl(backingStemUrl(stems))) {

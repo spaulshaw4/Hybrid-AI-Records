@@ -3,9 +3,9 @@
  *
  * Every text, script and prompt generation call in the platform — Engine 1.0
  * and the Visual Engine alike — runs through this module. It talks to the
- * Replicate HTTP API directly with `Authorization: Bearer ${REPLICATE_API_TOKEN}`
+ * Replicate HTTP API directly with `Authorization: Bearer ${LYRIC_ENGINE_API_KEY}`
  * and returns OpenAI- or Gemini-shaped responses so existing callers need no
- * changes.
+ * changes. Hybrid Demucs / CWALO calls use REPLICATE_API_TOKEN instead.
  *
  * Video/motion token guards are untouched: this module is text-only.
  */
@@ -34,20 +34,23 @@ function env(name: string): string | undefined {
   return undefined;
 }
 
-/** The single platform token. Accepts either canonical spelling. */
+/** Gemini / Co-Producer token — LYRIC_ENGINE_API_KEY only (never hybrid Demucs token). */
 export function replicateLlmToken(label = "The AI writer"): string {
-  const token =
-    env("LYRIC_ENGINE_API_KEY") ?? env("REPLICATE_API_KEY") ?? env("ENGINE_API_KEY") ?? env("REPLICATE_API_TOKEN");
-  console.log("[Replicate LLM] Using platform token:", Boolean(token));
-  if (!token) throw new Error(`${label} is not configured. Add the lyric engine API key to .env.local.`);
+  const token = env("LYRIC_ENGINE_API_KEY") ?? env("ENGINE_API_KEY");
+  console.log("[Replicate LLM] Using LYRIC_ENGINE_API_KEY:", Boolean(token));
+  if (!token) {
+    throw new Error(`${label} is not configured. Add LYRIC_ENGINE_API_KEY to .env.local.`);
+  }
   return token;
 }
 
-/** Step 1 lyrics only — does not fall through to ENGINE_API_KEY. */
+/** Step 1 lyrics / Gemini Flash — isolated from REPLICATE_API_TOKEN (hybrid1). */
 export function lyricReplicateToken(): string {
-  const token = env("LYRIC_ENGINE_API_KEY") ?? env("REPLICATE_API_KEY");
+  const token = env("LYRIC_ENGINE_API_KEY") ?? env("ENGINE_API_KEY");
   if (!token) {
-    throw new Error("The Co-Producer is not configured. Add the lyric engine API key to .env.local.");
+    throw new Error(
+      "The Co-Producer is not configured. Add LYRIC_ENGINE_API_KEY to .env.local.",
+    );
   }
   return token;
 }
@@ -186,7 +189,7 @@ export const REPLICATE_GEMINI_FLASH = "google/gemini-2.5-flash";
 
 /**
  * Co-Producer lyrics on Gemini 2.5 Flash via Replicate.
- * Authorization uses LYRIC_ENGINE_API_KEY / REPLICATE_API_KEY only.
+ * Authorization uses LYRIC_ENGINE_API_KEY only (not REPLICATE_API_TOKEN).
  */
 export async function replicateGeminiFlashLyrics(input: {
   prompt: string;
