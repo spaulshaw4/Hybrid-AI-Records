@@ -11,7 +11,7 @@ export const GATE_TIMEOUTS_MS = {
   /** Demucs + GPU cold-start; must exceed Cancel-After / poll (see stems.server). */
   4: 360_000,
   5: 300_000, // RVC voice conversion (T4; several minutes) + Fish fallback
-  6: 300_000, // Resemble Enhance + optional Matchering + FFmpeg finish + vault
+  6: 180_000, // Local FFmpeg master EQ + two-pass loudnorm + vault
 } as const;
 
 export type StudioGateId = 1 | 2 | 3 | 4 | 5 | 6;

@@ -73,7 +73,7 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
         send("error", {
           message,
           ...(cause ? { cause } : {}),
-          gate: /Gate\s*6|mastering|Matchering|FFmpeg|Resemble/i.test(message) ? 6 : undefined,
+          gate: /Gate\s*6|mastering|FFmpeg|loudnorm/i.test(message) ? 6 : undefined,
         });
       } finally {
         clearInterval(keepalive);

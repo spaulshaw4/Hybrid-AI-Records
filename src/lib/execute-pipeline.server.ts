@@ -848,13 +848,16 @@ export async function executePipeline(
       const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
       let mastered: Awaited<ReturnType<typeof mixAndMasterHybridTrack>>;
       try {
-        console.log("[Gate 6] Entering mastering utility", {
-          source: isStemPipelineEnabled() ? "stems" : "gate2-vault",
+        console.log("[Gate 6] Entering local FFmpeg master (EQ + two-pass loudnorm)", {
+          source: isStemPipelineEnabled() ? "stems-remux→ffmpeg" : "gate2-vault→ffmpeg",
           instrumentalUrl: Boolean(mixInstrumentalUrl),
           vocalUrl: Boolean(mixVocalUrl),
           gate2Cdn: publicAudioUrl.slice(0, 64),
           ffmpegPath: process.env.FFMPEG_PATH || process.env.FFMPEG_BINARY || "(PATH)",
           gateTimeoutMs: GATE_TIMEOUTS_MS[6],
+          replicate: false,
+          matchering: false,
+          resembleEnhance: false,
         });
         mastered = await withTimeout(
           mixAndMasterHybridTrack({

@@ -7,11 +7,11 @@ export const LOUDNESS_RANGE = 7;
 export const MASTER_AUDIO_BITRATE = "320k";
 
 /** Canonical one-pass / print filter: I=-14, LRA=7, TP=-1.0 */
-export const LOUDNORM_FILTER = `loudnorm=I=${STREAMING_LUFS}:LRA=${LOUDNESS_RANGE}:TP=${TRUE_PEAK_DBTP}`;
+export const LOUDNORM_FILTER = `loudnorm=I=${STREAMING_LUFS}:LRA=${LOUDNESS_RANGE}:TP=-1.0`;
 
 /**
- * Static fallback when dynamic Matchering fails — applied directly to mixed stems.
- * FFmpeg accepts `TP=` / `tp=` for true peak; Gate 6 uses the deterministic linear form.
+ * Static one-pass loudnorm fallback when two-pass measurement JSON is unavailable.
+ * FFmpeg accepts `TP=` / `tp=` for true peak; Gate 6 prefers measured two-pass.
  */
 export const STATIC_EBU_R128_LOUDNORM = "loudnorm=I=-14:LRA=7:TP=-1.0";
 
@@ -22,8 +22,20 @@ export const STATIC_EBU_R128_LOUDNORM = "loudnorm=I=-14:LRA=7:TP=-1.0";
 export const GATE_6_EBU_R128_MASTERING_FILTER =
   "loudnorm=I=-14:LRA=7:tp=-1.0:measured_I=-14:measured_tp=-1.0:offset=0.0:linear=true:print_format=summary";
 
+/**
+ * Local Gate 6 master EQ (FFmpeg only) — light HP + presence / air shelves before loudnorm.
+ * Kept gentle so Gate 2 vault audio keeps punch and stereo width.
+ */
+export const GATE_6_MASTER_EQ =
+  "highpass=f=30,equalizer=f=120:width_type=o:width=1:g=1.2,equalizer=f=3500:width_type=o:width=1.2:g=1.5,equalizer=f=12000:width_type=o:width=1:g=1";
+
 /** FFmpeg argv fragment: `['-af', GATE_6_EBU_R128_MASTERING_FILTER]` */
 export const ffmpegMasteringFilter = ["-af", GATE_6_EBU_R128_MASTERING_FILTER] as const;
+
+/** Compose master EQ + loudnorm into a single `-af` chain. */
+export function gate6MasterAfChain(loudnormPart: string): string {
+  return `${GATE_6_MASTER_EQ},${loudnormPart}`;
+}
 
 export type LoudnormMeasurement = {
   input_i: string;
@@ -42,7 +54,7 @@ export function loudnormFilter(): string {
 export function loudnormTwoPassFilter(measured: LoudnormMeasurement): string {
   return [
     `loudnorm=I=${STREAMING_LUFS}`,
-    `TP=${TRUE_PEAK_DBTP}`,
+    "TP=-1.0",
     `LRA=${LOUDNESS_RANGE}`,
     `measured_I=${measured.input_i}`,
     `measured_TP=${measured.input_tp}`,
@@ -78,14 +90,19 @@ export function parseLoudnormMeasurement(stderr: string): LoudnormMeasurement | 
   }
 }
 
-export function measureLoudnormArgs(inputAudioPath: string): string[] {
+export function measureLoudnormArgs(
+  inputAudioPath: string,
+  options: { withMasterEq?: boolean } = {},
+): string[] {
+  const loudnorm = `${LOUDNORM_FILTER}:print_format=json`;
+  const af = options.withMasterEq ? gate6MasterAfChain(loudnorm) : loudnorm;
   return [
     "-hide_banner",
     "-nostdin",
     "-i",
     inputAudioPath,
     "-af",
-    `${LOUDNORM_FILTER}:print_format=json`,
+    af,
     "-f",
     "null",
     "-",
@@ -110,4 +127,20 @@ export function finalizeTrackMasterArgs(
     MASTER_AUDIO_BITRATE,
     outputMasterPath,
   ];
+}
+
+/**
+ * Gate 6 local master: EQ + two-pass (or one-pass) loudnorm → 320 kbps MP3.
+ * `filter` should already include EQ when using the Gate 6 chain.
+ */
+export function gate6LocalMasterArgs(
+  inputAudioPath: string,
+  outputMasterPath: string,
+  loudnormPart: string,
+): string[] {
+  return finalizeTrackMasterArgs(
+    inputAudioPath,
+    outputMasterPath,
+    gate6MasterAfChain(loudnormPart),
+  );
 }

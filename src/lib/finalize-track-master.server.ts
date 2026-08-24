@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  GATE_6_MASTER_EQ,
   finalizeTrackMasterArgs,
+  gate6LocalMasterArgs,
+  gate6MasterAfChain,
   loudnormFilter,
   loudnormTwoPassFilter,
   measureLoudnormArgs,
@@ -15,9 +18,14 @@ import {
 const execFileAsync = promisify(execFile);
 const FFMPEG_TIMEOUT_MS = 5 * 60 * 1000;
 
+function resolveFfmpegBin(): string {
+  return process.env.FFMPEG_PATH?.trim() || process.env.FFMPEG_BINARY?.trim() || "ffmpeg";
+}
+
 async function runFfmpeg(args: string[]): Promise<string> {
+  const bin = resolveFfmpegBin();
   try {
-    const result = await execFileAsync("ffmpeg", args, {
+    const result = await execFileAsync(bin, args, {
       timeout: FFMPEG_TIMEOUT_MS,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,
@@ -49,6 +57,36 @@ export async function finalizeTrackMaster(
   const filter = measured ? loudnormTwoPassFilter(measured) : loudnormFilter();
   await runFfmpeg(finalizeTrackMasterArgs(inputAudioPath, outputMasterPath, filter));
   return outputMasterPath;
+}
+
+/**
+ * Gate 6 local path: master EQ + two-pass EBU R128 loudnorm → 320 kbps MP3.
+ * No Replicate, Matchering, or Resemble Enhance.
+ */
+export async function applyGate6LocalFfmpegMaster(
+  inputAudioPath: string,
+  outputMasterPath: string,
+): Promise<{ mode: "two-pass" | "one-pass"; af: string }> {
+  console.log("[Gate 6] Local FFmpeg master — EQ + two-pass loudnorm (-14 LUFS / -1.0 dBTP)", {
+    eq: GATE_6_MASTER_EQ,
+    ffmpeg: resolveFfmpegBin(),
+  });
+  const measuredLog = await runFfmpeg(
+    measureLoudnormArgs(inputAudioPath, { withMasterEq: true }),
+  );
+  const measured = parseLoudnormMeasurement(measuredLog);
+  if (measured) {
+    const loudnormPart = loudnormTwoPassFilter(measured);
+    const af = gate6MasterAfChain(loudnormPart);
+    await runFfmpeg(gate6LocalMasterArgs(inputAudioPath, outputMasterPath, loudnormPart));
+    console.log("[Gate 6] Two-pass loudnorm complete", { measured_I: measured.input_i });
+    return { mode: "two-pass", af };
+  }
+  const loudnormPart = loudnormFilter();
+  const af = gate6MasterAfChain(loudnormPart);
+  console.warn("[Gate 6] Loudnorm measure JSON missing — one-pass EQ + loudnorm");
+  await runFfmpeg(gate6LocalMasterArgs(inputAudioPath, outputMasterPath, loudnormPart));
+  return { mode: "one-pass", af };
 }
 
 /**
@@ -121,7 +159,7 @@ export async function finalizeArchivedMaster(options: {
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength < 1024) throw new Error("The mix file was empty before mastering.");
     await writeFile(inputPath, bytes);
-    await finalizeTrackMaster(inputPath, outputPath);
+    await applyGate6LocalFfmpegMaster(inputPath, outputPath);
     const mastered = await readFile(outputPath);
     try {
       const { uploadMasterToVault } = await import("@/lib/audio-vault-upload.server");

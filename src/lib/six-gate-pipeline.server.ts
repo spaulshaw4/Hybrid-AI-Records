@@ -419,7 +419,7 @@ export async function runSixGatePipeline(input: {
     telemetry = bumpTelemetry(telemetry, 6, "gate_6_mastering");
     reportPipelineProgress("master", PIPELINE_PROGRESS.master);
     console.log(
-      `[Gate 6/6] FFmpeg Dynamic Master (${useFallbackStructure ? "fallback" : "CWALO"} markers)...`,
+      `[Gate 6/6] Local FFmpeg master EQ + two-pass loudnorm (${useFallbackStructure ? "fallback" : "CWALO"} plan; no Replicate)…`,
     );
     const { mixAndMasterHybridTrack } = await import("@/lib/matchering-master.server");
     let mastered = await withTimeout(
