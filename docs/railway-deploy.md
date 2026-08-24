@@ -4,8 +4,8 @@
 
 | File | Purpose |
 | --- | --- |
-| `railway.json` | Build and start commands, healthcheck, restart policy |
-| `nixpacks.toml` | Installs FFmpeg and Python Matchering, which the mastering stage shells out to |
+| `railway.json` | Nixpacks builder, start command, healthcheck, restart policy |
+| `nixpacks.toml` | Bun install/build; installs FFmpeg and Python Matchering for mastering |
 | `package.json` | `start` → `node .output/server/index.mjs`; `engines.node` → `>=20` |
 
 The build emits a nitro `node-server` bundle at `.output/`. That server reads
