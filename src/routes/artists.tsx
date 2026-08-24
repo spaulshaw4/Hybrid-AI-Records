@@ -1,14 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Check, Download, ListChecks, Pause, Play, Search, SlidersHorizontal, X } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  ArrowLeft,
+  Check,
+  Download,
+  ListChecks,
+  Pause,
+  Play,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
-
 
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
 import { TrackWaveform } from "@/components/TrackWaveform";
-import { STREAM_TRACKS } from "@/lib/radio-tracks";
+import { ALBUMS, STREAM_TRACKS } from "@/lib/radio-tracks";
 import { CoverImage } from "@/components/CoverImage";
 import {
   Sheet,
@@ -21,17 +30,22 @@ import { CRESTS, type Division } from "@/lib/divisions";
 import { getArtistTrackDownloadCounts } from "@/lib/artist-tokens.functions";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
+type ArtistsSearch = { album?: string };
+
 export const Route = createFileRoute("/artists")({
   errorComponent: RouteErrorFallback,
+  validateSearch: (search: Record<string, unknown>): ArtistsSearch => ({
+    album: typeof search.album === "string" && search.album.trim() ? search.album.trim() : undefined,
+  }),
   head: () =>
     pageHead({
       path: "/artists",
       title: "Artist Tracks & Downloads | Hybrid AI Records",
       description:
-        "Browse the full Hybrid AI Records catalog, preview any song, and unlock permanent downloads with Artist Tokens — $1 per track.",
+        "Browse Hybrid AI Records by album cover, open an album for its tracks, preview any song, and unlock permanent downloads with Artist Tokens — $1 per track.",
       socialTitle: "Artist Tracks & Downloads | Hybrid AI Records",
       socialDescription:
-        "The full label catalog in one place — preview, unlock and download with Artist Tokens.",
+        "Album-first label catalog — pick a cover, preview tracks, unlock and download with Artist Tokens.",
       type: "website",
       card: "summary_large_image",
     }),
@@ -72,9 +86,16 @@ function formatTime(s: number) {
 
 function ArtistTracksPage() {
   const tokens = useArtistTokens();
+  const navigate = useNavigate({ from: "/artists" });
+  const { album: albumParam } = Route.useSearch();
+  const selectedAlbum =
+    ALBUMS.find((a) => a.id === albumParam) ??
+    ALBUMS.find((a) => a.title === albumParam) ??
+    null;
+
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<SortMode>("newest");
+  const [sortBy, setSortBy] = useState<SortMode>("track");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -92,7 +113,6 @@ function ArtistTracksPage() {
   const [popularityError, setPopularityError] = useState(false);
   const [popularityRetry, setPopularityRetry] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
 
   // Load anonymous popularity counts once.
   useEffect(() => {
@@ -116,19 +136,37 @@ function ArtistTracksPage() {
 
 
   const genres = useMemo(
-    () => Array.from(new Set(STREAM_TRACKS.map((t) => t.genre).filter(Boolean))).sort() as string[],
+    () => Array.from(new Set(ALBUMS.map((a) => a.genre).filter(Boolean))).sort() as string[],
     [],
   );
 
-  const tracks = useMemo(() => {
-    let list = STREAM_TRACKS;
+  const albums = useMemo(() => {
+    let list = ALBUMS;
     const q = query.trim().toLowerCase();
     if (q) {
+      list = list.filter((a) => {
+        const hay = `${a.title} ${a.artist} ${a.genre} ${a.tracks.map((t) => t.title).join(" ")}`;
+        return hay.toLowerCase().includes(q);
+      });
+    }
+    if (activeGenre) {
+      list = list.filter((a) => a.genre === activeGenre);
+    }
+    return list;
+  }, [query, activeGenre]);
+
+  const tracks = useMemo(() => {
+    let list = STREAM_TRACKS;
+    if (selectedAlbum) {
+      list = list.filter((t) => t.album === selectedAlbum.title);
+    }
+    const q = query.trim().toLowerCase();
+    if (q && selectedAlbum) {
       list = list.filter((t) =>
         `${t.title} ${t.artist} ${t.album ?? ""} ${t.genre ?? ""}`.toLowerCase().includes(q),
       );
     }
-    if (activeGenre) {
+    if (activeGenre && selectedAlbum) {
       list = list.filter((t) => t.genre === activeGenre);
     }
     switch (sortBy) {
@@ -161,7 +199,7 @@ function ArtistTracksPage() {
         break;
     }
     return list;
-  }, [query, activeGenre, sortBy, popularity]);
+  }, [query, activeGenre, sortBy, popularity, selectedAlbum]);
 
   const totalPages = Math.max(1, Math.ceil(tracks.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -198,6 +236,19 @@ function ArtistTracksPage() {
     setBulkMode(false);
     setSelected(new Set());
     setBulkProgress(null);
+  };
+
+  const openAlbum = (albumId: string) => {
+    void navigate({ search: { album: albumId } });
+    setSortBy("track");
+    setPage(1);
+    exitBulk();
+  };
+
+  const backToAlbums = () => {
+    void navigate({ search: {}, replace: true });
+    setPage(1);
+    exitBulk();
   };
 
   const runBulkDownload = async () => {
@@ -260,15 +311,36 @@ function ArtistTracksPage() {
 
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-5 py-8">
-      <PortalBreadcrumb trail={[{ label: "Artist tracks" }]} />
+    <main className="mx-auto w-full max-w-5xl px-5 py-8">
+      <PortalBreadcrumb
+        trail={
+          selectedAlbum
+            ? [
+                { label: "Artist tracks", to: "/artists", search: {} },
+                { label: selectedAlbum.title },
+              ]
+            : [{ label: "Artist tracks" }]
+        }
+      />
+
+      {selectedAlbum ? (
+        <button
+          type="button"
+          onClick={backToAlbums}
+          className="mt-6 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition hover:text-primary"
+        >
+          <ArrowLeft size={14} aria-hidden />
+          All albums
+        </button>
+      ) : null}
 
       <h1 className="mt-6 font-display text-2xl uppercase tracking-[0.14em] text-foreground">
-        Artist Tracks
+        {selectedAlbum ? selectedAlbum.title : "Artist Tracks"}
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-        The whole catalog in one list — preview any song and unlock a permanent download with an
-        Artist Token. $1 = 1 track, yours forever.
+        {selectedAlbum
+          ? `${selectedAlbum.artist} · ${selectedAlbum.tracks.length} track${selectedAlbum.tracks.length === 1 ? "" : "s"} — preview any song and unlock a permanent download with an Artist Token.`
+          : "Browse by album cover, open an album for its tracks, preview any song, and unlock downloads with Artist Tokens. $1 = 1 track, yours forever."}
       </p>
 
       {/* Token status bar */}
@@ -325,26 +397,32 @@ function ArtistTracksPage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tracks, artists or albums"
-            aria-label="Search tracks"
+            placeholder={
+              selectedAlbum
+                ? "Search tracks on this album"
+                : "Search albums, artists or songs"
+            }
+            aria-label={selectedAlbum ? "Search tracks on this album" : "Search albums"}
             className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
         </label>
-        <div className="flex items-center gap-2">
-          <SlidersHorizontal size={14} className="text-muted-foreground" aria-hidden />
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortMode)}
-            aria-label="Sort tracks"
-            className="rounded-lg border border-border-strong bg-ink/40 px-3 py-2.5 text-sm text-foreground outline-none"
-          >
-            <option value="newest">Newest first</option>
-            <option value="title">Title: A–Z</option>
-            <option value="track">Track position</option>
-            <option value="price">Price: low to high</option>
-            <option value="popularity">Most popular</option>
-          </select>
-        </div>
+        {selectedAlbum ? (
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal size={14} className="text-muted-foreground" aria-hidden />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortMode)}
+              aria-label="Sort tracks"
+              className="rounded-lg border border-border-strong bg-ink/40 px-3 py-2.5 text-sm text-foreground outline-none"
+            >
+              <option value="track">Track order</option>
+              <option value="title">Title: A–Z</option>
+              <option value="newest">Newest first</option>
+              <option value="price">Price: low to high</option>
+              <option value="popularity">Most popular</option>
+            </select>
+          </div>
+        ) : null}
       </div>
 
       {popularityError ? (
@@ -362,8 +440,8 @@ function ArtistTracksPage() {
 
 
 
-      {/* Genre filters */}
-      {genres.length > 0 ? (
+      {/* Genre filters — albums grid only */}
+      {!selectedAlbum && genres.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -393,224 +471,310 @@ function ArtistTracksPage() {
         </div>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          {tracks.length === 0
-            ? "0 tracks"
-            : `${pageStart + 1}–${Math.min(pageStart + pageSize, tracks.length)} of ${tracks.length} track${tracks.length === 1 ? "" : "s"}`}
-        </p>
-        <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          Per page
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            aria-label="Tracks per page"
-            className="rounded-md border border-border-strong bg-ink/40 px-2 py-1.5 text-xs text-foreground outline-none"
-          >
-            {[10, 25, 50, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {!selectedAlbum ? (
+        <>
+          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            {albums.length === 0
+              ? "0 albums"
+              : `${albums.length} album${albums.length === 1 ? "" : "s"}`}
+          </p>
 
-      {tokens.signedIn ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-strong bg-ink/40 px-3 py-2.5">
-          {bulkMode ? (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
+          <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {albums.map((album, ai) => (
+              <li key={album.id}>
                 <button
                   type="button"
-                  onClick={() => setSelected(new Set(ownedTracks.map((t) => t.id)))}
-                  className="rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
+                  onClick={() => openAlbum(album.id)}
+                  className="group flex w-full flex-col overflow-hidden rounded-xl border border-border-strong bg-ink/50 text-start transition hover:border-primary/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  aria-label={`Open album ${album.title} by ${album.artist}`}
                 >
-                  Select all unlocked ({ownedTracks.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelected(new Set())}
-                  className="rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
-                >
-                  Clear
-                </button>
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                  {bulkProgress
-                    ? `Downloading ${bulkProgress.done}/${bulkProgress.total}…`
-                    : `${selected.size} selected`}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={bulkBusy || selected.size === 0}
-                  onClick={() => void runBulkDownload()}
-                  className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-                >
-                  <Download size={13} aria-hidden />
-                  {bulkBusy ? "Downloading…" : `Download ${selected.size || ""}`}
-                </button>
-                <button
-                  type="button"
-                  disabled={bulkBusy}
-                  onClick={exitBulk}
-                  aria-label="Exit bulk download mode"
-                  className="flex size-8 items-center justify-center rounded-md border border-border-strong text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
-                >
-                  <X size={14} aria-hidden />
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Grab several unlocked tracks at once
-              </p>
-              <button
-                type="button"
-                onClick={() => setBulkMode(true)}
-                className="flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
-              >
-                <ListChecks size={13} aria-hidden /> Bulk download
-              </button>
-            </>
-          )}
-        </div>
-      ) : null}
-
-      <ul className="mt-4 space-y-2">
-        {pageTracks.map((t) => {
-          const owned = tokens.unlocked.has(t.id);
-          const busy = tokens.busyTrack === t.id;
-          const isPlaying = playingId === t.id;
-          const isActive = activeId === t.id;
-          // Same clock the drawer waveform reads, so both surfaces always agree.
-          const rowProgress = isActive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
-
-          return (
-            <li
-              key={t.id}
-              onClick={() => setDetailTrackId(t.id)}
-              className="flex cursor-pointer items-center gap-3 rounded-xl border border-border-strong bg-ink/50 p-3 backdrop-blur transition hover:border-primary/50"
-            >
-              {bulkMode ? (
-                <input
-                  type="checkbox"
-                  checked={selected.has(t.id)}
-                  disabled={!owned || bulkBusy}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={() => toggleSelected(t.id)}
-                  aria-label={`Select ${t.title} for bulk download`}
-                  className="size-4 shrink-0 accent-primary disabled:opacity-40"
-                />
-              ) : null}
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  preview(t.id, t.src);
-                }}
-                aria-label={`${isPlaying ? "Pause" : "Preview"} ${t.title} by ${t.artist}`}
-                className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-ink/60 text-muted-foreground transition hover:border-primary hover:text-primary"
-              >
-                {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-              </button>
-
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-foreground">{t.title}</p>
-                <p className="truncate font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  {t.artist}
-                  {t.album ? ` · ${t.album}` : ""}
-                </p>
-                {isActive ? (
-                  <div
-                    role="progressbar"
-                    aria-label={`Playback progress for ${t.title}`}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(rowProgress * 100)}
-                    className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10"
-                  >
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${rowProgress * 100}%` }}
+                  <span className="relative aspect-square w-full overflow-hidden bg-ink">
+                    <CoverImage
+                      src={album.cover}
+                      alt={`${album.title} album cover`}
+                      priority={ai < 4}
+                      sizes="(min-width: 1024px) 20vw, (min-width: 640px) 30vw, 50vw"
+                      width={640}
+                      height={640}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                     />
-                  </div>
+                  </span>
+                  <span className="border-t border-border-strong p-3">
+                    <span className="block truncate font-display text-sm font-semibold text-foreground">
+                      {album.title}
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {album.artist}
+                    </span>
+                    <span className="mt-2 block font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {album.tracks.length} track{album.tracks.length === 1 ? "" : "s"}
+                      {album.genre ? ` · ${album.genre}` : ""}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {albums.length === 0 ? (
+            <p className="mt-6 text-sm text-muted-foreground">No albums match that search.</p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-end">
+            <CoverImage
+              src={selectedAlbum.cover}
+              alt={`${selectedAlbum.title} album cover`}
+              sizes="(min-width: 640px) 11rem, 40vw"
+              width={640}
+              height={640}
+              className="aspect-square w-40 shrink-0 rounded-xl border border-border-strong object-cover shadow-lg sm:w-44"
+            />
+            <div className="min-w-0 space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                {selectedAlbum.artist}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {selectedAlbum.genre ? (
+                  <span className="rounded-full border border-border-strong bg-ink/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    {selectedAlbum.genre}
+                  </span>
                 ) : null}
+                <span className="rounded-full border border-border-strong bg-ink/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {selectedAlbum.tracks.length} tracks
+                </span>
+                <DivisionBadge division={selectedAlbum.division} />
               </div>
+            </div>
+          </div>
 
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {tracks.length === 0
+                ? "0 tracks"
+                : `${pageStart + 1}–${Math.min(pageStart + pageSize, tracks.length)} of ${tracks.length} track${tracks.length === 1 ? "" : "s"}`}
+            </p>
+            <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Per page
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                aria-label="Tracks per page"
+                className="rounded-md border border-border-strong bg-ink/40 px-2 py-1.5 text-xs text-foreground outline-none"
+              >
+                {[10, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
+          {tokens.signedIn ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-strong bg-ink/40 px-3 py-2.5">
+              {bulkMode ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelected(new Set(ownedTracks.map((t) => t.id)))}
+                      className="rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
+                    >
+                      Select all unlocked ({ownedTracks.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelected(new Set())}
+                      className="rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
+                    >
+                      Clear
+                    </button>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {bulkProgress
+                        ? `Downloading ${bulkProgress.done}/${bulkProgress.total}…`
+                        : `${selected.size} selected`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={bulkBusy || selected.size === 0}
+                      onClick={() => void runBulkDownload()}
+                      className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                    >
+                      <Download size={13} aria-hidden />
+                      {bulkBusy ? "Downloading…" : `Download ${selected.size || ""}`}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      onClick={exitBulk}
+                      aria-label="Exit bulk download mode"
+                      className="flex size-8 items-center justify-center rounded-md border border-border-strong text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
+                    >
+                      <X size={14} aria-hidden />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Grab several unlocked tracks at once
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setBulkMode(true)}
+                    className="flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary"
+                  >
+                    <ListChecks size={13} aria-hidden /> Bulk download
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+
+          <ul className="mt-4 space-y-2">
+            {pageTracks.map((t) => {
+              const owned = tokens.unlocked.has(t.id);
+              const busy = tokens.busyTrack === t.id;
+              const isPlaying = playingId === t.id;
+              const isActive = activeId === t.id;
+              const rowProgress =
+                isActive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
+
+              return (
+                <li
+                  key={t.id}
+                  onClick={() => setDetailTrackId(t.id)}
+                  className="flex cursor-pointer items-center gap-3 rounded-xl border border-border-strong bg-ink/50 p-3 backdrop-blur transition hover:border-primary/50"
+                >
+                  {bulkMode ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.id)}
+                      disabled={!owned || bulkBusy}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleSelected(t.id)}
+                      aria-label={`Select ${t.title} for bulk download`}
+                      className="size-4 shrink-0 accent-primary disabled:opacity-40"
+                    />
+                  ) : null}
+
+                  <span className="w-6 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-foreground">
+                    {t.trackNumber ?? "·"}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      preview(t.id, t.src);
+                    }}
+                    aria-label={`${isPlaying ? "Pause" : "Preview"} ${t.title} by ${t.artist}`}
+                    className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-ink/60 text-muted-foreground transition hover:border-primary hover:text-primary"
+                  >
+                    {isPlaying ? (
+                      <Pause size={14} fill="currentColor" />
+                    ) : (
+                      <Play size={14} fill="currentColor" />
+                    )}
+                  </button>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-foreground">{t.title}</p>
+                    <p className="truncate font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {t.artist}
+                    </p>
+                    {isActive ? (
+                      <div
+                        role="progressbar"
+                        aria-label={`Playback progress for ${t.title}`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(rowProgress * 100)}
+                        className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10"
+                      >
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${rowProgress * 100}%` }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={busy || bulkBusy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void tokens.download(t.id);
+                    }}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition disabled:opacity-60 ${
+                      owned
+                        ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
+                        : "border-border-strong text-muted-foreground hover:border-primary hover:text-primary"
+                    }`}
+                  >
+                    {owned ? <Check size={13} aria-hidden /> : <Download size={13} aria-hidden />}
+                    {busy ? "Working…" : owned ? "Download" : "1 token"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {tracks.length === 0 ? (
+            <p className="mt-6 text-sm text-muted-foreground">No tracks match that search.</p>
+          ) : null}
+
+          {totalPages > 1 ? (
+            <nav
+              aria-label="Track pagination"
+              className="mt-5 flex flex-wrap items-center justify-center gap-2"
+            >
               <button
                 type="button"
-                disabled={busy || bulkBusy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void tokens.download(t.id);
-                }}
-                className={`flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition disabled:opacity-60 ${
-                  owned
-                    ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
-                    : "border-border-strong text-muted-foreground hover:border-primary hover:text-primary"
-                }`}
+                onClick={() => setPage(Math.max(1, safePage - 1))}
+                disabled={safePage === 1}
+                className="rounded-md border border-border-strong px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-40"
               >
-                {owned ? <Check size={13} aria-hidden /> : <Download size={13} aria-hidden />}
-                {busy ? "Working…" : owned ? "Download" : "1 token"}
+                Prev
               </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      {tracks.length === 0 ? (
-        <p className="mt-6 text-sm text-muted-foreground">No tracks match that search.</p>
-      ) : null}
-
-      {totalPages > 1 ? (
-        <nav
-          aria-label="Track pagination"
-          className="mt-5 flex flex-wrap items-center justify-center gap-2"
-        >
-          <button
-            type="button"
-            onClick={() => setPage(Math.max(1, safePage - 1))}
-            disabled={safePage === 1}
-            className="rounded-md border border-border-strong px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-40"
-          >
-            Prev
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1)
-            .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 1)
-            .map((n, i, arr) => (
-              <span key={n} className="flex items-center gap-2">
-                {i > 0 && n - (arr[i - 1] as number) > 1 ? (
-                  <span className="font-mono text-[10px] text-muted-foreground">…</span>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setPage(n)}
-                  aria-current={n === safePage ? "page" : undefined}
-                  className={`min-w-9 rounded-md border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
-                    n === safePage
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border-strong text-muted-foreground hover:border-primary hover:text-primary"
-                  }`}
-                >
-                  {n}
-                </button>
-              </span>
-            ))}
-          <button
-            type="button"
-            onClick={() => setPage(Math.min(totalPages, safePage + 1))}
-            disabled={safePage === totalPages}
-            className="rounded-md border border-border-strong px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-40"
-          >
-            Next
-          </button>
-        </nav>
-      ) : null}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 1)
+                .map((n, i, arr) => (
+                  <span key={n} className="flex items-center gap-2">
+                    {i > 0 && n - (arr[i - 1] as number) > 1 ? (
+                      <span className="font-mono text-[10px] text-muted-foreground">…</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setPage(n)}
+                      aria-current={n === safePage ? "page" : undefined}
+                      className={`min-w-9 rounded-md border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
+                        n === safePage
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border-strong text-muted-foreground hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  </span>
+                ))}
+              <button
+                type="button"
+                onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+                disabled={safePage === totalPages}
+                className="rounded-md border border-border-strong px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-40"
+              >
+                Next
+              </button>
+            </nav>
+          ) : null}
+        </>
+      )}
 
       {/* Track details drawer */}
       <Sheet open={detailTrack !== null} onOpenChange={(open) => !open && setDetailTrackId(null)}>
