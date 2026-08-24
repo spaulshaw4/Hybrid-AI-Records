@@ -13,7 +13,7 @@ describe("pipeline gate timeouts", () => {
     expect(gateTimeoutMs(1)).toBe(300_000);
     expect(gateTimeoutMs(2)).toBe(30_000);
     expect(gateTimeoutMs(3)).toBe(60_000);
-    expect(gateTimeoutMs(4)).toBe(90_000);
+    expect(gateTimeoutMs(4)).toBe(360_000);
     expect(gateTimeoutMs(5)).toBe(60_000);
     expect(gateTimeoutMs(6)).toBe(60_000);
     expect(GATE_TIMEOUTS_MS[2]).toBe(30_000);

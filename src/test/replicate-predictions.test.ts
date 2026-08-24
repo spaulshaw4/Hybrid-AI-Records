@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ACE_STEP_MODEL } from "@/lib/ace-step-payload";
 import {
+  DEMUCS_PREDICTION_TIMEOUT_MS,
   REPLICATE_COMMUNITY_PREDICTIONS_PATH,
   REPLICATE_COST_EFFECTIVE_GPU,
+  REPLICATE_PREDICTION_TIMEOUT_MS,
   communityPredictionBody,
   officialModelPredictionsPath,
   replicateRunHeaders,
@@ -31,13 +33,15 @@ describe("replicate prediction routes", () => {
     });
     expect(REPLICATE_COMMUNITY_PREDICTIONS_PATH).toBe("/predictions");
     expect(REPLICATE_COST_EFFECTIVE_GPU).toBe("gpu-t4");
+    expect(REPLICATE_PREDICTION_TIMEOUT_MS).toBe(300_000);
+    expect(DEMUCS_PREDICTION_TIMEOUT_MS).toBe(300_000);
     expect(replicateRunHeaders(120_000)).toEqual({
       "Cancel-After": "120s",
       Prefer: "wait=5",
     });
     // A long sync hold invites a client disconnect, which Replicate records as
     // an aborted prediction, so the wait stays short regardless of the ceiling.
-    expect(replicateRunHeaders(300_000)).toEqual({
+    expect(replicateRunHeaders(DEMUCS_PREDICTION_TIMEOUT_MS)).toEqual({
       "Cancel-After": "300s",
       Prefer: "wait=5",
     });

@@ -11,15 +11,15 @@
  *  - the rhythmic stem drives downbeat detection so scene cuts land on the
  *    track's real bar grid.
  *
- * Predictions request T4 GPU when the API accepts a hardware SKU, and always
- * carry a 120s Cancel-After deadline so a stalled worker cannot bill GPU time.
+ * Predictions request T4 GPU when the API accepts a hardware SKU, and carry a
+ * 5-minute Cancel-After so GPU cold-starts can finish without an Aborted status.
  */
 
 import { replicateBaseUrl } from "@/lib/ai-provider.server";
 import { requireStageKey } from "@/lib/env";
 import {
   communityPredictionBody,
-  REPLICATE_PREDICTION_TIMEOUT_MS,
+  DEMUCS_PREDICTION_TIMEOUT_MS,
   replicateRunHeaders,
 } from "@/lib/replicate-predictions";
 import { parseDemucsOutput, backingStemUrl, type DemucsStemUrls } from "@/lib/stem-urls";
@@ -44,6 +44,10 @@ const DEMUCS_MODEL = process.env["DEMUCS_MODEL"] || "ryan5453/demucs";
 /** Only a private deployment can pin hardware; a public model 422s on it. */
 const DEMUCS_HARDWARE = process.env["DEMUCS_HARDWARE"]?.trim();
 const DEMUCS_DEPLOYMENT = process.env["DEMUCS_DEPLOYMENT"]?.trim();
+
+/** ~5 min poll (120 × 2.5s) — matches DEMUCS_PREDICTION_TIMEOUT_MS / Cancel-After. */
+const DEMUCS_POLL_MAX_ATTEMPTS = 120;
+const DEMUCS_POLL_INTERVAL_MS = 2_500;
 
 export type StemResult = DemucsStemUrls;
 
@@ -184,7 +188,7 @@ export async function separateStemsFromPublicUrl(publicAudioUrl: string): Promis
 
 async function runDemucsPrediction(audioUrl: string): Promise<StemResult> {
   console.log(
-    `[GATE_4_DEMUCS] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=${DEMUCS_MODEL}`,
+    `[GATE_4_DEMUCS] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=${DEMUCS_MODEL}, cancelAfter=${DEMUCS_PREDICTION_TIMEOUT_MS / 1000}s, poll=${DEMUCS_POLL_MAX_ATTEMPTS}×${DEMUCS_POLL_INTERVAL_MS}ms`,
   );
   const finish = (stems: StemResult): StemResult => {
     recordPipelineSuccess("stems");
@@ -211,10 +215,11 @@ async function runDemucsPrediction(audioUrl: string): Promise<StemResult> {
     createUrl,
     {
       method: "POST",
-      headers: { ...credentials(), ...replicateRunHeaders(REPLICATE_PREDICTION_TIMEOUT_MS) },
+      headers: { ...credentials(), ...replicateRunHeaders(DEMUCS_PREDICTION_TIMEOUT_MS) },
       body: JSON.stringify(body),
     },
-    { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 90_000, retries: 0 },
+    // Short Prefer:wait + async poll — do not AbortSignal.timeout the whole job.
+    { label: "stem separation dispatch", breakerKey: "stems:demucs", timeoutMs: 60_000, retries: 0 },
   );
   if (!created.ok) await bail(created, "dispatch");
 
@@ -259,8 +264,8 @@ async function runDemucsPrediction(audioUrl: string): Promise<StemResult> {
       (stems) => stems !== null,
       () => false,
       {
-        maxAttempts: 30,
-        intervalMs: 2000,
+        maxAttempts: DEMUCS_POLL_MAX_ATTEMPTS,
+        intervalMs: DEMUCS_POLL_INTERVAL_MS,
         stepName: "Gate 4 Demucs",
       },
     );

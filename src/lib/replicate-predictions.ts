@@ -14,10 +14,14 @@ export const REPLICATE_COMMUNITY_PREDICTIONS_PATH = "/predictions";
 export const REPLICATE_COST_EFFECTIVE_GPU = "gpu-t4";
 
 /**
- * Hard ceiling for a single stem/audio prediction so GPU time cannot hang.
- * Kept at 90s so a stuck Demucs poll cannot freeze the studio orchestrator.
+ * Server-side Cancel-After ceiling for Replicate predictions.
+ * Demucs needs 3–5 minutes for GPU cold-start + separation; a tight value
+ * (e.g. 60s) marks the job Aborted on Replicate before polling can finish.
  */
-export const REPLICATE_PREDICTION_TIMEOUT_MS = 60_000;
+export const REPLICATE_PREDICTION_TIMEOUT_MS = 300_000;
+
+/** Gate 4 Demucs budget — Cancel-After + local poll must cover cold starts. */
+export const DEMUCS_PREDICTION_TIMEOUT_MS = 300_000;
 
 /**
  * Replicate headers for a prediction create.

@@ -8,7 +8,8 @@ export const GATE_TIMEOUTS_MS = {
   1: 300_000,
   2: 30_000, // Supabase vault upload + public URL verify
   3: 60_000, // CWALO Replicate (soft-fail)
-  4: 90_000, // Demucs separation + stem checks
+  /** Demucs + GPU cold-start; must exceed Cancel-After / poll (see stems.server). */
+  4: 360_000,
   5: 60_000, // Fish Audio conversion
   6: 60_000, // FFmpeg mastering + master Supabase upload
 } as const;
