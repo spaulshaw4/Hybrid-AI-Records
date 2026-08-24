@@ -7,7 +7,9 @@ import type { CatalogPlayable } from "@/lib/artist-catalog";
  * fighting over multiple elements.
  */
 export type CatalogPlaybackState = {
+  /** @deprecated Prefer currentTrack — kept for existing callers. */
   track: CatalogPlayable | null;
+  currentTrack: CatalogPlayable | null;
   playing: boolean;
   currentTime: number;
   duration: number;
@@ -19,6 +21,7 @@ type Listener = () => void;
 let audio: HTMLAudioElement | null = null;
 let state: CatalogPlaybackState = {
   track: null,
+  currentTrack: null,
   playing: false,
   currentTime: 0,
   duration: 0,
@@ -31,15 +34,27 @@ function emit() {
 }
 
 function setState(patch: Partial<CatalogPlaybackState>) {
-  state = { ...state, ...patch };
+  const next = { ...state, ...patch };
+  if ("track" in patch && !("currentTrack" in patch)) {
+    next.currentTrack = patch.track ?? null;
+  }
+  if ("currentTrack" in patch && !("track" in patch)) {
+    next.track = patch.currentTrack ?? null;
+  }
+  state = next;
   emit();
+}
+
+function playbackUrl(track: CatalogPlayable): string {
+  const raw = (track.audio_url ?? track.src ?? "").trim();
+  return raw;
 }
 
 function ensureAudio(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
   if (audio) return audio;
   audio = new Audio();
-  audio.preload = "metadata";
+  audio.preload = "auto";
   audio.addEventListener("timeupdate", () => {
     setState({ currentTime: audio?.currentTime ?? 0 });
   });
@@ -52,6 +67,15 @@ function ensureAudio(): HTMLAudioElement | null {
   audio.addEventListener("play", () => setState({ playing: true }));
   audio.addEventListener("pause", () => setState({ playing: false }));
   audio.addEventListener("ended", () => setState({ playing: false, currentTime: 0 }));
+  audio.addEventListener("error", () => {
+    const err = audio?.error;
+    console.error("[catalog-player] media error", {
+      code: err?.code,
+      message: err?.message,
+      src: audio?.currentSrc || audio?.src,
+    });
+    setState({ playing: false });
+  });
   return audio;
 }
 
@@ -78,19 +102,56 @@ export async function playCatalogTrack(
   owner: NonNullable<CatalogPlaybackState["owner"]>,
 ): Promise<void> {
   const el = ensureAudio();
-  if (!el || !track.src) return;
+  const url = playbackUrl(track);
+  console.log("Playing audio URL:", track.audio_url ?? track.src, { id: track.id, owner });
+
+  if (!el) {
+    console.error("[catalog-player] no Audio element available");
+    return;
+  }
+  if (!url) {
+    console.error("[catalog-player] missing audio_url/src for track", track.id, track.title);
+    return;
+  }
+
   claimCatalogPlayback(owner);
-  if (state.track?.id === track.id && el.src) {
-    if (el.paused) await el.play().catch(() => setState({ playing: false }));
-    else {
+
+  const sameTrack = state.currentTrack?.id === track.id || state.track?.id === track.id;
+  if (sameTrack && el.currentSrc) {
+    if (el.paused) {
+      try {
+        await el.play();
+        setState({ playing: true, currentTrack: track, track });
+      } catch (error) {
+        console.error("[catalog-player] play() failed (resume):", error);
+        setState({ playing: false });
+      }
+    } else {
       el.pause();
       setState({ playing: false });
     }
     return;
   }
-  setState({ track, currentTime: 0, duration: 0, owner, playing: false });
-  el.src = track.src;
-  await el.play().catch(() => setState({ playing: false }));
+
+  setState({
+    track,
+    currentTrack: track,
+    currentTime: 0,
+    duration: 0,
+    owner,
+    playing: false,
+  });
+
+  try {
+    el.pause();
+    el.src = url;
+    el.load();
+    await el.play();
+    setState({ playing: true, currentTrack: track, track });
+  } catch (error) {
+    console.error("[catalog-player] play() failed:", error, { url });
+    setState({ playing: false });
+  }
 }
 
 export function pauseCatalogPlayback() {
@@ -108,5 +169,12 @@ export function seekCatalogPlayback(time: number) {
 }
 
 export function useCatalogPlayback(): CatalogPlaybackState {
-  return useSyncExternalStore(subscribeCatalogPlayback, getCatalogPlayback, () => state);
+  return useSyncExternalStore(subscribeCatalogPlayback, getCatalogPlayback, () => ({
+    track: null,
+    currentTrack: null,
+    playing: false,
+    currentTime: 0,
+    duration: 0,
+    owner: null,
+  }));
 }

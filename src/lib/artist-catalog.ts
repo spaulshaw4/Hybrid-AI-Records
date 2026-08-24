@@ -26,7 +26,10 @@ export type CatalogPlayable = {
   id: string;
   title: string;
   artist: string;
+  /** Public CDN stream URL (from artist_tracks.audio_url). */
   src: string;
+  /** Explicit alias of artist_tracks.audio_url for player controllers. */
+  audio_url?: string;
   cover?: string;
   album?: string;
   genre?: string;
@@ -70,6 +73,34 @@ export function parseTrackFilename(filename: string): {
   };
 }
 
+const COVER_BASENAME_PRIORITY = ["cover", "folder", "album_art", "albumart", "front", "artwork"];
+
+function isImageFileName(name: string): boolean {
+  return /\.(jpe?g|png|webp|gif)$/i.test(name);
+}
+
+/**
+ * Prefer conventional cover filenames (cover/folder/album_art/front), then any
+ * image in the album folder. Matching is case-insensitive.
+ */
+export function pickAlbumArtwork(fileNames: string[]): string | null {
+  const images = fileNames.filter((name) => isImageFileName(name));
+  if (!images.length) return null;
+
+  const scored = images.map((name) => {
+    const base = name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[\s_-]+/g, "");
+    const exactIdx = COVER_BASENAME_PRIORITY.findIndex((p) => base === p.replace(/_/g, ""));
+    const prefixIdx = COVER_BASENAME_PRIORITY.findIndex((p) =>
+      base.startsWith(p.replace(/_/g, "")),
+    );
+    const rank = exactIdx >= 0 ? exactIdx : prefixIdx >= 0 ? 100 + prefixIdx : 1000;
+    return { name, rank, lower: name.toLowerCase() };
+  });
+
+  scored.sort((a, b) => a.rank - b.rank || a.lower.localeCompare(b.lower));
+  return scored[0]?.name ?? null;
+}
+
 function asDivision(raw: string | null | undefined): Division | undefined {
   if (!raw) return undefined;
   const v = raw.trim().toLowerCase();
@@ -82,11 +113,13 @@ function asDivision(raw: string | null | undefined): Division | undefined {
 /** Map a synced artist_tracks row into the global playable shape (`src` = CDN). */
 export function artistTrackToPlayable(row: ArtistCatalogTrack): CatalogPlayable | null {
   if (!row?.id || !row.title || !isPlayableCatalogUrl(row.audio_url)) return null;
+  const audioUrl = row.audio_url.trim();
   return {
     id: row.id,
     title: row.title,
     artist: row.artist_name || "Hybrid AI Records",
-    src: row.audio_url.trim(),
+    src: audioUrl,
+    audio_url: audioUrl,
     cover: row.cover_url?.trim() || undefined,
     album: row.album_title,
     genre: row.genre ?? undefined,
@@ -99,12 +132,33 @@ export function artistTrackToPlayable(row: ArtistCatalogTrack): CatalogPlayable 
   };
 }
 
+/**
+ * Encode each storage path segment so spaces (e.g. "Coordinates of Light")
+ * become valid public CDN URLs.
+ */
+export function encodeStorageObjectPath(path: string): string {
+  return path
+    .split("/")
+    .filter((seg) => seg.length > 0)
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
+}
+
+export function buildArtistCatalogPublicUrl(
+  supabaseUrl: string,
+  bucket: string,
+  objectPath: string,
+): string {
+  const base = supabaseUrl.replace(/\/$/, "");
+  return `${base}/storage/v1/object/public/${bucket}/${encodeStorageObjectPath(objectPath)}`;
+}
+
 export function playableToStreamTrack(track: CatalogPlayable): StreamTrack {
   return {
     id: track.id,
     title: track.title,
     artist: track.artist,
-    src: track.src,
+    src: track.audio_url ?? track.src,
     cover: track.cover,
     album: track.album,
     genre: track.genre,
@@ -121,7 +175,7 @@ export function playableToRadioTrack(track: CatalogPlayable): RadioTrack {
     id: track.id,
     title: track.title,
     artist: track.artist,
-    src: track.src,
+    src: track.audio_url ?? track.src,
     cover: track.cover,
     album: track.album,
     genre: track.genre,

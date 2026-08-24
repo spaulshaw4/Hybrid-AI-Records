@@ -129,8 +129,8 @@ function ArtistTracksPage() {
     albumsSource.find((a) => a.title === albumParam) ??
     null;
 
-  const playingId = playback.playing ? playback.track?.id ?? null : null;
-  const activeId = playback.track?.id ?? null;
+  const playingId = playback.playing ? playback.currentTrack?.id ?? playback.track?.id ?? null : null;
+  const activeId = playback.currentTrack?.id ?? playback.track?.id ?? null;
   const currentTime = playback.currentTime;
   const duration = playback.duration;
 
@@ -305,29 +305,43 @@ function ArtistTracksPage() {
     setSelected(new Set());
   };
 
-  const preview = (id: string, src: string) => {
+  const preview = (id: string, srcOrAudioUrl: string) => {
     const track =
       tracksSource.find((t) => t.id === id) ??
       ({
         id,
         title: id,
         artist: "Hybrid AI Records",
-        src,
+        src: srcOrAudioUrl,
       } satisfies StreamTrack);
+    const fromCatalog = catalog.find((c) => c.id === id);
+    const audioUrl = (
+      fromCatalog?.audio_url ||
+      fromCatalog?.src ||
+      track.src ||
+      srcOrAudioUrl ||
+      ""
+    ).trim();
+    console.log("Playing audio URL:", audioUrl, { id, title: track.title });
+    if (!audioUrl) {
+      console.error("[artists] no audio_url/src for track", id);
+      return;
+    }
     void playCatalogTrack(
       {
         id: track.id,
         title: track.title,
         artist: track.artist,
-        src,
-        cover: track.cover,
-        album: track.album,
-        genre: track.genre,
-        credits: track.credits,
-        trackNumber: track.trackNumber,
-        trackTotal: track.trackTotal,
-        division: track.division,
-        priceTokens: track.priceTokens,
+        src: audioUrl,
+        audio_url: audioUrl,
+        cover: fromCatalog?.cover ?? track.cover,
+        album: fromCatalog?.album ?? track.album,
+        genre: fromCatalog?.genre ?? track.genre,
+        credits: fromCatalog?.credits ?? track.credits,
+        trackNumber: fromCatalog?.trackNumber ?? track.trackNumber,
+        trackTotal: fromCatalog?.trackTotal ?? track.trackTotal,
+        division: fromCatalog?.division ?? track.division,
+        priceTokens: fromCatalog?.priceTokens ?? track.priceTokens,
       },
       selectedAlbum ? "album" : "artists",
     );

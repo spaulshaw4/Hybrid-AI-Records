@@ -19,7 +19,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config as loadEnv } from "dotenv";
 import { createHash } from "node:crypto";
-import { parseTrackFilename } from "../src/lib/artist-catalog";
+import {
+  buildArtistCatalogPublicUrl,
+  parseTrackFilename,
+  pickAlbumArtwork,
+} from "../src/lib/artist-catalog";
 
 loadEnv({ path: ".env.local", override: false });
 loadEnv({ path: ".env", override: false });
@@ -151,12 +155,34 @@ async function listAlbumFiles(
     sortBy: { column: "name", order: "asc" },
   });
   if (error) throw new Error(`list ${folder}: ${error.message}`);
-  return (data ?? []).filter((f) => Boolean(f.name) && f.id != null);
+  // Files have an id; folders do not. Also keep extensioned names in case the
+  // API omits id for some objects.
+  return (data ?? []).filter(
+    (f) =>
+      Boolean(f.name) &&
+      f.name !== ".emptyFolderPlaceholder" &&
+      (f.id != null || isAudio(f.name) || isImage(f.name)),
+  );
 }
 
-function publicUrl(supabase: SupabaseClient, bucket: string, path: string): string {
-  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-  return data.publicUrl;
+function publicUrl(supabaseUrl: string, bucket: string, path: string): string {
+  // Encode each path segment so spaces in album/file names don't break streaming.
+  return buildArtistCatalogPublicUrl(supabaseUrl, bucket, path);
+}
+
+/** Resolve album artwork CDN URL before track ingest. */
+function resolveAlbumCoverUrl(
+  supabaseUrl: string,
+  bucket: string,
+  folder: string,
+  files: StorageFile[],
+): { coverFile: string | null; coverUrl: string | null } {
+  const coverFile = pickAlbumArtwork(files.map((f) => f.name));
+  if (!coverFile) return { coverFile: null, coverUrl: null };
+  return {
+    coverFile,
+    coverUrl: publicUrl(supabaseUrl, bucket, `${folder}/${coverFile}`),
+  };
 }
 
 async function linkRadioQueue(
@@ -248,10 +274,9 @@ async function main(): Promise<void> {
     const meta = albumMeta(folder);
     const albumId = slugify(meta.albumTitle);
     const files = await listAlbumFiles(supabase, bucket, folder);
-    const coverFile = files.find((f) => isImage(f.name));
-    const coverUrl = coverFile
-      ? publicUrl(supabase, bucket, `${folder}/${coverFile.name}`)
-      : null;
+
+    // Artwork first: one cover for the whole album folder, applied to every track.
+    const { coverFile, coverUrl } = resolveAlbumCoverUrl(supabaseUrl, bucket, folder, files);
     const audioFiles = files.filter((f) => isAudio(f.name));
 
     const parsed = audioFiles.map((f, index) => {
@@ -266,7 +291,12 @@ async function main(): Promise<void> {
     const trackTotal = parsed.length;
 
     console.log(`\n${meta.albumTitle} (${folder}) — ${trackTotal} track(s)`);
-    if (coverUrl) console.log(`  cover: ${coverUrl.slice(0, 96)}`);
+    if (coverUrl && coverFile) {
+      console.log(`  cover: ${coverFile}`);
+      console.log(`         ${coverUrl.slice(0, 110)}`);
+    } else {
+      console.warn(`  cover: NONE found in folder (jpg/jpeg/png/webp/gif)`);
+    }
 
     const rows = parsed.map((t) => {
       const storagePath = `${folder}/${t.file}`;
@@ -275,7 +305,7 @@ async function main(): Promise<void> {
         idBase.length >= 4
           ? idBase
           : `${idBase}-${createHash("sha1").update(storagePath).digest("hex").slice(0, 8)}`;
-      const audioUrl = publicUrl(supabase, bucket, storagePath);
+      const audioUrl = publicUrl(supabaseUrl, bucket, storagePath);
       if (radioReady) radioIds.push(id);
       return {
         id,
@@ -297,6 +327,11 @@ async function main(): Promise<void> {
       };
     });
 
+    if (!rows.length) {
+      console.warn(`  no audio files — skipping upsert`);
+      continue;
+    }
+
     const { error: upsertError } = await supabase.from("artist_tracks").upsert(rows, {
       onConflict: "id",
     });
@@ -306,6 +341,30 @@ async function main(): Promise<void> {
         "  Hint: apply supabase/migrations/20260824220000_artist_tracks_catalog.sql then re-run.",
       );
       process.exit(1);
+    }
+
+    // Force cover_url onto every existing row for this album (including older ids).
+    if (coverUrl) {
+      const stamp = new Date().toISOString();
+      const { error: byAlbumError, count: byAlbumCount } = await supabase
+        .from("artist_tracks")
+        .update({ cover_url: coverUrl, updated_at: stamp })
+        .eq("album_id", albumId)
+        .select("id", { count: "exact", head: true });
+      const { error: byPathError, count: byPathCount } = await supabase
+        .from("artist_tracks")
+        .update({ cover_url: coverUrl, updated_at: stamp })
+        .like("storage_path", `${folder}/%`)
+        .select("id", { count: "exact", head: true });
+      if (byAlbumError || byPathError) {
+        console.warn(
+          `  cover backfill warning: ${byAlbumError?.message ?? ""} ${byPathError?.message ?? ""}`.trim(),
+        );
+      } else {
+        console.log(
+          `  cover backfill: album_id=${byAlbumCount ?? 0}, path=${byPathCount ?? 0}`,
+        );
+      }
     }
 
     for (const row of rows) {
