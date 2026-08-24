@@ -15,7 +15,7 @@ export type ConceptPreviewResult =
  */
 export const buildCinematicConcept = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       script: string;
       subjectMode: string;

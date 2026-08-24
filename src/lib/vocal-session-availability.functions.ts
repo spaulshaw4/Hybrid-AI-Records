@@ -68,7 +68,7 @@ function toHourInstant(date: unknown, time: unknown, zone: string): string | nul
  * no names, emails, packages or notes.
  */
 export const getVocalSessionAvailability = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => input.parse(data ?? {}))
+  .validator((data: unknown) => input.parse(data ?? {}))
   .handler(async ({ data }): Promise<AvailabilitySnapshot> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 

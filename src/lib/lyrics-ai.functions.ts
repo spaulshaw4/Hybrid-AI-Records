@@ -16,7 +16,7 @@ const Input = z.object({
  * Writes song lyrics through the Replicate instruction-tuned LLM.
  */
 export const generateLyrics = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => Input.parse(input))
+  .validator((input: unknown) => Input.parse(input))
   .handler(async ({ data }) => {
     console.log("[CO_PRODUCER]", {
       title: data.title ?? null,
@@ -49,7 +49,7 @@ const CoProducerInput = z.object({
  * The Replicate client stays inside the handler so it never ships to the browser.
  */
 export const generateLyricsServerFn = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => CoProducerInput.parse(data ?? {}))
+  .validator((data: unknown) => CoProducerInput.parse(data ?? {}))
   .handler(async ({ data }) => {
     const { isLyricEngineTimeout, LYRIC_ENGINE_TIMEOUT_MESSAGE, writeLyricsWithStudio } = await import("@/lib/coproducer");
     try {
@@ -72,7 +72,7 @@ const ConceptInput = z.object({
 
 /** Writes or expands a song concept through the unified Replicate text engine. */
 export const generateConcept = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => ConceptInput.parse(input))
+  .validator((input: unknown) => ConceptInput.parse(input))
   .handler(async ({ data }) => {
     try {
       const { writeConcept } = await import("./lyrics.server");
@@ -99,7 +99,7 @@ const VocalPromptInput = z.object({
 
 /** Writes a vocal performance prompt through the unified Replicate text engine. */
 export const generateVocalPrompt = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => VocalPromptInput.parse(input))
+  .validator((input: unknown) => VocalPromptInput.parse(input))
   .handler(async ({ data }) => {
     try {
       const { writeVocalPrompt } = await import("./lyrics.server");
@@ -126,7 +126,7 @@ const StyleTagsInput = z.object({
 
 /** Writes production style tags through the unified Replicate text engine. */
 export const generateStyleTags = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => StyleTagsInput.parse(input))
+  .validator((input: unknown) => StyleTagsInput.parse(input))
   .handler(async ({ data }) => {
     try {
       const { writeStyleTags } = await import("./lyrics.server");

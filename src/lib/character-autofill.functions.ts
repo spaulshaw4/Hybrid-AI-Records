@@ -5,7 +5,7 @@ import { isLocalMock, mockCharacterProfile } from "@/lib/local-mock";
 /** Gemini fills in the Character Builder from the reference photo + track info. */
 export const autoFillCharacterProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       referenceImage?: string | null;
       trackTitle?: string;

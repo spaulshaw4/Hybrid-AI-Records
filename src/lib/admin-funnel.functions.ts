@@ -16,7 +16,7 @@ import {
 
 export const getFunnelSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         days: z.number().int().min(1).max(90).default(30),
@@ -57,7 +57,7 @@ export const getFunnelSummary = createServerFn({ method: "POST" })
  */
 export const getHowItWorksCtaClicks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ days: z.number().int().min(1).max(90).default(30) }).parse(data ?? {}),
   )
   .handler(async ({ data, context }): Promise<CtaClickSummary> => {

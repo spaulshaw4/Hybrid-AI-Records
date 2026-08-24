@@ -66,7 +66,7 @@ async function assertStaff(supabase: any, userId: string) {
 }
 
 export const submitStudioRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => submitSchema.parse(data))
+  .validator((data: unknown) => submitSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const reference = makeReference();
@@ -87,7 +87,7 @@ export const submitStudioRequest = createServerFn({ method: "POST" })
   });
 
 export const getStudioRequestStatus = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => statusSchema.parse(data))
+  .validator((data: unknown) => statusSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -136,7 +136,7 @@ export const checkStudioStaff = createServerFn({ method: "POST" })
 
 export const listStudioRequests = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({ status: z.enum([...STUDIO_STATUSES, "all"]).default("all") })
       .parse(data ?? {}),
@@ -176,7 +176,7 @@ export const listStudioRequests = createServerFn({ method: "POST" })
 
 export const updateStudioRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => updateSchema.parse(data))
+  .validator((data: unknown) => updateSchema.parse(data))
   .handler(async ({ data, context }) => {
     await assertStaff(context.supabase as any, context.userId);
 
@@ -199,7 +199,7 @@ export const updateStudioRequest = createServerFn({ method: "POST" })
 
 export const createStudioUploadTicket = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         reference: z.string().trim().min(4).max(40),

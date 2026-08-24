@@ -93,7 +93,7 @@ function aggregate(rows: Array<{ clicks: number; impressions: number; position: 
 
 export const getSearchConsoleReport = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => inputSchema.parse(data ?? {}))
+  .validator((data: unknown) => inputSchema.parse(data ?? {}))
   .handler(async ({ data, context }): Promise<PerformanceReport> => {
     const { data: roles } = await context.supabase
       .from("user_roles")
@@ -207,7 +207,7 @@ const submitSchema = z
 /** Staff-only: (re)submits the sitemap to Search Console and reads back its status. */
 export const submitSitemapToSearchConsole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => submitSchema.parse(data ?? {}))
+  .validator((data: unknown) => submitSchema.parse(data ?? {}))
   .handler(async ({ data, context }): Promise<SitemapSubmissionResult> => {
     const { data: roles } = await context.supabase
       .from("user_roles")

@@ -8,7 +8,7 @@ import { isLocalMock } from "@/lib/local-mock";
  */
 export const lipsyncCinematicShot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { videoUrl: string; audioWavBase64: string; shotIndex: number }) => {
+  .validator((data: { videoUrl: string; audioWavBase64: string; shotIndex: number }) => {
     if (typeof data?.videoUrl !== "string" || !/^https?:\/\//.test(data.videoUrl)) {
       throw new Error("Invalid shot video URL");
     }

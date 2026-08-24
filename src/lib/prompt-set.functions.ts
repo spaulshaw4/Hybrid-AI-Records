@@ -12,7 +12,7 @@ export type PromptSetResult = ({ ok: true } & PromptSet) | { ok: false; error: s
  */
 export const generateTrackPromptSet = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       lyrics: string;
       styleMode?: string;

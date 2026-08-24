@@ -165,7 +165,7 @@ export function parseVoiceProfileSaveError(error: unknown): VoiceProfileSaveFail
 
 export const startVoiceCloneJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => startSchema.parse(data))
+  .validator((data: unknown) => startSchema.parse(data))
   .handler(async ({ data }) => {
     const { startInstantVoiceClone } = await import("@/lib/instant-voice");
     void data.sampleUrl;
@@ -174,7 +174,7 @@ export const startVoiceCloneJob = createServerFn({ method: "POST" })
 
 export const getVoiceCloneJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => taskSchema.parse(data))
+  .validator((data: unknown) => taskSchema.parse(data))
   .handler(async ({ data }) => {
     const { fetchMinimaxVoiceClone } = await import("@/lib/minimax-voice.server");
     return fetchMinimaxVoiceClone(data.id);
@@ -202,7 +202,7 @@ export const listVoiceProfiles = createServerFn({ method: "POST" })
 
 export const saveVoiceProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => saveSchema.parse(data))
+  .validator((data: unknown) => saveSchema.parse(data))
   .handler(async ({ data, context }): Promise<VoiceProfile> => {
     const userId = context.userId?.trim();
     if (!userId) {
@@ -272,7 +272,7 @@ export const saveVoiceProfile = createServerFn({ method: "POST" })
 
 export const renameVoiceProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => renameSchema.parse(data))
+  .validator((data: unknown) => renameSchema.parse(data))
   .handler(async ({ data, context }): Promise<VoiceProfile> => {
     const supabase = await voiceProfilesClient().catch(() => context.supabase);
     const { data: row, error } = await supabase
@@ -288,7 +288,7 @@ export const renameVoiceProfile = createServerFn({ method: "POST" })
 
 export const deleteVoiceProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => deleteSchema.parse(data))
+  .validator((data: unknown) => deleteSchema.parse(data))
   .handler(async ({ data, context }) => {
     const supabase = await voiceProfilesClient().catch(() => context.supabase);
     // Read the row first so we can clean up the stored sample too.

@@ -116,7 +116,7 @@ function makeReference() {
 
 /** Stores the submission so the artist can track it later. Public by design. */
 export const createTrackRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => createSchema.parse(data))
+  .validator((data: unknown) => createSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -148,7 +148,7 @@ export const createTrackRequest = createServerFn({ method: "POST" })
  * email so a guessed code alone never exposes someone else's submission.
  */
 export const lookupTrackRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => lookupSchema.parse(data))
+  .validator((data: unknown) => lookupSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: row, error } = await supabaseAdmin
@@ -207,7 +207,7 @@ export const lookupTrackRequest = createServerFn({ method: "POST" })
  * the same reference-code + matching-email pair used for lookups.
  */
 export const updateTrackArtistNote = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => noteSchema.parse(data))
+  .validator((data: unknown) => noteSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const reference = data.reference.trim().toUpperCase();
@@ -245,7 +245,7 @@ export const updateTrackArtistNote = createServerFn({ method: "POST" })
  * code never changes, so links, receipts, and emails stay valid.
  */
 export const updateTrackRequestDetails = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => editSchema.parse(data))
+  .validator((data: unknown) => editSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const reference = data.reference.trim().toUpperCase();
@@ -307,7 +307,7 @@ export const updateTrackRequestDetails = createServerFn({ method: "POST" })
  * the revision counter so the team can see how many rounds were requested.
  */
 export const updateRevisionRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => revisionSchema.parse(data))
+  .validator((data: unknown) => revisionSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const reference = data.reference.trim().toUpperCase();

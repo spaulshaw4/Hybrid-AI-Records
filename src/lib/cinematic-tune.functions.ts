@@ -26,7 +26,7 @@ export type CinematicTuneDirective = (typeof DIRECTIVES)[number];
 /** One-tap Co-Producer rewrite of the current cinematic script. */
 export const tuneCinematicScript = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       script: string;
       directive: string;

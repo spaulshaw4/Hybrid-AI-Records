@@ -40,7 +40,7 @@ export const listNotifications = createServerFn({ method: "POST" })
 /** Marks one notification, or all of them, as read. */
 export const markNotificationsRead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ id: z.string().uuid().optional() }).parse(input ?? {}),
   )
   .handler(async ({ data, context }) => {
@@ -60,7 +60,7 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
  */
 export const notifyGenerationFailed = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         trackTitle: z.string().trim().max(120).optional(),

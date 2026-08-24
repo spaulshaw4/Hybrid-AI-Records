@@ -31,7 +31,7 @@ export const getSurchargeSettings = createServerFn({ method: "GET" }).handler(
 /** Admin-only write. The role check runs against the database, not the client. */
 export const updateSurchargeSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => updateSchema.parse(data))
+  .validator((data: unknown) => updateSchema.parse(data))
   .handler(async ({ data, context }): Promise<SurchargeSettings> => {
     const { data: roles } = await context.supabase
       .from("user_roles")

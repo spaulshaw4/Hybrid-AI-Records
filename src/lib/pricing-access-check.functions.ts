@@ -26,7 +26,7 @@ export type PricingAccessReport = {
  */
 export const checkVisitorPricingAccess = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => z.undefined().or(z.null()).parse(data ?? undefined))
+  .validator((data: unknown) => z.undefined().or(z.null()).parse(data ?? undefined))
   .handler(async ({ context }): Promise<PricingAccessReport> => {
     const { data: roles } = await context.supabase
       .from("user_roles")

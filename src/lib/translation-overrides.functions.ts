@@ -17,7 +17,7 @@ const removeSchema = z.object({ language: LANGUAGE, sourceText: SOURCE });
 
 /** Public read: the storefront seeds its translation cache with these. */
 export const getTranslationOverrides = createServerFn({ method: "GET" })
-  .inputValidator((data: unknown) => languageSchema.parse(data))
+  .validator((data: unknown) => languageSchema.parse(data))
   .handler(async ({ data }): Promise<TranslationOverride[]> => {
     const { readOverrides } = await import("@/lib/translation-overrides.server");
     return readOverrides(data.language);
@@ -34,7 +34,7 @@ async function assertAdmin(context: { supabase: any; userId: string }) {
 
 export const listTranslationOverrides = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => languageSchema.parse(data))
+  .validator((data: unknown) => languageSchema.parse(data))
   .handler(async ({ data, context }): Promise<TranslationOverride[]> => {
     await assertAdmin(context);
     const { listOverrides } = await import("@/lib/translation-overrides.server");
@@ -43,7 +43,7 @@ export const listTranslationOverrides = createServerFn({ method: "POST" })
 
 export const saveTranslationOverride = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => saveSchema.parse(data))
+  .validator((data: unknown) => saveSchema.parse(data))
   .handler(async ({ data, context }): Promise<TranslationOverride> => {
     await assertAdmin(context);
     const { upsertOverride } = await import("@/lib/translation-overrides.server");
@@ -52,7 +52,7 @@ export const saveTranslationOverride = createServerFn({ method: "POST" })
 
 export const deleteTranslationOverride = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => removeSchema.parse(data))
+  .validator((data: unknown) => removeSchema.parse(data))
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     await assertAdmin(context);
     const { deleteOverride } = await import("@/lib/translation-overrides.server");

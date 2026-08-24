@@ -5,7 +5,7 @@ import { isLocalMock, MOCK_STYLE_DIRECTION } from "@/lib/local-mock";
 /** Gemini tunes the look direction for the selected visual style. */
 export const tuneStylePrompt = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { styleMode?: string; script?: string; notes?: string }) => ({
+  .validator((data: { styleMode?: string; script?: string; notes?: string }) => ({
     styleMode: String(data?.styleMode ?? "photorealistic").slice(0, 60),
     script: String(data?.script ?? "").slice(0, 4000),
     notes: String(data?.notes ?? "").slice(0, 1500),

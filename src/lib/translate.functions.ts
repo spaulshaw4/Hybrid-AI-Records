@@ -15,7 +15,7 @@ const MAX_CHARS = 12_000;
 export type TranslateResult = { texts: string[] } | { error: string };
 
 export const translateTexts = createServerFn({ method: "POST" })
-  .inputValidator((data: { texts: string[]; target: string; targetLabel: string }) => {
+  .validator((data: { texts: string[]; target: string; targetLabel: string }) => {
     if (!Array.isArray(data.texts) || data.texts.length === 0) {
       throw new Error("Nothing to translate");
     }

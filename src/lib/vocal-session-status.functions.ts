@@ -17,7 +17,7 @@ export type BookingStatus = {
  * booking's own status, confirmed slot and video-chat room.
  */
 export const getVocalSessionStatus = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => input.parse(data))
+  .validator((data: unknown) => input.parse(data))
   .handler(async ({ data }): Promise<BookingStatus> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 

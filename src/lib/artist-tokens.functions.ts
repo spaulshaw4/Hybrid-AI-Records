@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { type StripeEnv, createStripeClient, getStripeErrorMessage } from "@/lib/stripe.server";
+import type { StripeEnv } from "@/lib/stripe";
 import { artistBundleFor } from "@/lib/artist-tokens";
 
 type CheckoutResult = { clientSecret: string } | { error: string };
@@ -30,7 +30,7 @@ export const getArtistTokenState = createServerFn({ method: "POST" })
 /** Starts an embedded Stripe Checkout for one Artist Token bundle. */
 export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
+  .validator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.priceId)) throw new Error("Invalid priceId");
     return data;
   })
@@ -40,6 +40,7 @@ export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" 
       if (!bundle) return { error: "That Artist Token pack isn't available." };
 
       const { allowedSiteUrl, defaultSiteOrigin } = await import("@/lib/site-origin.server");
+      const { createStripeClient, getStripeErrorMessage } = await import("@/lib/stripe.server");
       const returnUrl =
         allowedSiteUrl(data.returnUrl) ??
         `${defaultSiteOrigin()}/?artist_token_session={CHECKOUT_SESSION_ID}`;
@@ -67,6 +68,7 @@ export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" 
 
       return { clientSecret: session.client_secret ?? "" };
     } catch (error) {
+      const { getStripeErrorMessage } = await import("@/lib/stripe.server");
       return { error: getStripeErrorMessage(error) };
     }
   });
@@ -81,12 +83,13 @@ type CreditResult =
  */
 export const creditArtistTokenPurchase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { sessionId: string; environment: StripeEnv }) => {
+  .validator((data: { sessionId: string; environment: StripeEnv }) => {
     if (!/^cs_[A-Za-z0-9_]+$/.test(data.sessionId)) throw new Error("Invalid sessionId");
     return data;
   })
   .handler(async ({ data, context }): Promise<CreditResult> => {
     try {
+      const { createStripeClient, getStripeErrorMessage } = await import("@/lib/stripe.server");
       const stripe = createStripeClient(data.environment);
       const session = await stripe.checkout.sessions.retrieve(data.sessionId);
 
@@ -157,6 +160,7 @@ export const creditArtistTokenPurchase = createServerFn({ method: "POST" })
         paid: true,
       };
     } catch (error) {
+      const { getStripeErrorMessage } = await import("@/lib/stripe.server");
       return { ok: false, error: getStripeErrorMessage(error) };
     }
   });
@@ -179,7 +183,7 @@ type UnlockResult =
  */
 export const unlockTrackDownload = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { trackId: string }) => {
+  .validator((data: { trackId: string }) => {
     if (!data?.trackId || typeof data.trackId !== "string" || data.trackId.length > 200) {
       throw new Error("Invalid trackId");
     }
@@ -351,7 +355,7 @@ type DownloadLinkResult =
  */
 export const createTrackDownloadLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { trackId: string }) => {
+  .validator((data: { trackId: string }) => {
     if (!data?.trackId || typeof data.trackId !== "string" || data.trackId.length > 200) {
       throw new Error("Invalid trackId");
     }

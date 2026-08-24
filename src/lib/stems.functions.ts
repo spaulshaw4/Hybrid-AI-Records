@@ -10,7 +10,7 @@ import { isLocalMock } from "@/lib/local-mock";
  */
 export const separateTrackStems = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { audioBase64: string; filename?: string }) => {
+  .validator((data: { audioBase64: string; filename?: string }) => {
     if (
       typeof data?.audioBase64 !== "string" ||
       data.audioBase64.length < 1024 ||

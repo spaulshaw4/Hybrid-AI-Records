@@ -36,7 +36,7 @@ const finishSchema = z.object({
 /** Opens a vault row the moment Generate is pressed. */
 export const createUserVaultTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => createSchema.parse(data ?? {}))
+  .validator((data: unknown) => createSchema.parse(data ?? {}))
   .handler(async ({ data, context }) => {
     const { persistUserVault } = await import("@/lib/user-vault.server");
     const id = await persistUserVault(context.supabase, context.userId, {
@@ -51,7 +51,7 @@ export const createUserVaultTrack = createServerFn({ method: "POST" })
 /** Flips a vault row to completed/failed and stores stem URLs. */
 export const finalizeUserVaultTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => finishSchema.parse(data))
+  .validator((data: unknown) => finishSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { persistUserVault } = await import("@/lib/user-vault.server");
     await persistUserVault(context.supabase, context.userId, {
@@ -98,7 +98,7 @@ export const listUserVaultTracks = createServerFn({ method: "POST" })
 /** Deletes the vault row and purges master + stem files from storage. */
 export const deleteUserVaultTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const { deleteUserVaultApiTrack } = await import("@/lib/user-vault.server");
     const deleted = await deleteUserVaultApiTrack(context.userId, data.id);

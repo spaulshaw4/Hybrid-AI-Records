@@ -30,7 +30,7 @@ const finishSchema = z.object({
 /** Opens a vault row the moment a generation starts, so nothing is ever lost. */
 export const createStudioTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => createSchema.parse(data ?? {}))
+  .validator((data: unknown) => createSchema.parse(data ?? {}))
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("studio_tracks")
@@ -50,7 +50,7 @@ export const createStudioTrack = createServerFn({ method: "POST" })
 /** Stores the permanent audio location (or the failure) for a vault row. */
 export const finalizeStudioTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => finishSchema.parse(data))
+  .validator((data: unknown) => finishSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { storagePathFromUrl, refreshTrackAudio } = await import("./track-refresh.server");
     // Temporary third-party engine URLs never reach the database: they are
@@ -151,7 +151,7 @@ export const listStudioTracks = createServerFn({ method: "POST" })
 /** Permanently removes one of the caller's tracks (row plus stored audio). */
 export const deleteStudioTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const { data: row } = await context.supabase
       .from("studio_tracks")

@@ -38,7 +38,7 @@ type SpendResult =
  */
 export const spendTokens = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { amount?: number; idempotencyKey?: string; note?: string }) => {
+  .validator((data: { amount?: number; idempotencyKey?: string; note?: string }) => {
     const amount = Math.trunc(data?.amount ?? 1);
     if (!Number.isFinite(amount) || amount < 1 || amount > 50) throw new Error("Invalid token amount");
     const key = typeof data?.idempotencyKey === "string" ? data.idempotencyKey.trim().slice(0, 120) : "";
@@ -74,7 +74,7 @@ export const spendTokens = createServerFn({ method: "POST" })
 /** Starts an embedded Stripe Checkout for one token bundle. */
 export const createTokenCheckoutSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
+  .validator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.priceId)) throw new Error("Invalid priceId");
     return data;
   })
@@ -121,7 +121,7 @@ export const createTokenCheckoutSession = createServerFn({ method: "POST" })
  */
 export const creditTokenPurchase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { sessionId: string; environment: StripeEnv }) => {
+  .validator((data: { sessionId: string; environment: StripeEnv }) => {
     if (!/^cs_[A-Za-z0-9_]+$/.test(data.sessionId)) throw new Error("Invalid sessionId");
     return data;
   })

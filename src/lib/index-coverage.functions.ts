@@ -19,7 +19,7 @@ const schema = z
 
 export const getIndexCoverageAudit = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => schema.parse(data ?? {}))
+  .validator((data: unknown) => schema.parse(data ?? {}))
   .handler(async ({ data, context }) => {
     const { data: roles } = await context.supabase
       .from("user_roles")

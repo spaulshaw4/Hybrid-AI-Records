@@ -17,7 +17,7 @@ function safeName(name: string) {
 }
 
 export const requestUploadTicket = createServerFn({ method: "POST" })
-  .inputValidator((data) =>
+  .validator((data) =>
     z
       .object({
         reference: z.string().trim().min(3).max(64).regex(REFERENCE_PATTERN),

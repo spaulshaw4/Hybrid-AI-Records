@@ -47,7 +47,7 @@ const listInput = z.object({
 /** Staff-only: every scheduled session with its full email delivery history. */
 export const listSessionInbox = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => listInput.parse(data ?? {}))
+  .validator((data: unknown) => listInput.parse(data ?? {}))
   .handler(async ({ data, context }) => {
     const { data: roles } = await context.supabase
       .from("user_roles")

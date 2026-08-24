@@ -25,7 +25,7 @@ function esc(v: string) {
 }
 
 export const sendSupportMessage = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => supportSchema.parse(data))
+  .validator((data: unknown) => supportSchema.parse(data))
   .handler(async ({ data }) => {
     const lovableKey = process.env['LOVABLE_API_KEY'];
     const resendKey = process.env['RESEND_API_KEY'];

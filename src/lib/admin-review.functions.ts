@@ -65,7 +65,7 @@ async function assertStaff(
 
 export const listFlaggedPayments = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => listSchema.parse(data ?? {}))
+  .validator((data: unknown) => listSchema.parse(data ?? {}))
   .handler(async ({ data, context }): Promise<{ submissions: FlaggedSubmission[] }> => {
     await assertStaff(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -113,7 +113,7 @@ export const listFlaggedPayments = createServerFn({ method: "POST" })
 
 export const resolveFlaggedPayment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => resolveSchema.parse(data))
+  .validator((data: unknown) => resolveSchema.parse(data))
   .handler(async ({ data, context }) => {
     await assertStaff(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

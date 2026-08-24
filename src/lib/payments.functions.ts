@@ -55,7 +55,7 @@ async function resolveOrCreateCustomer(
 }
 
 export const createCheckoutSession = createServerFn({ method: "POST" })
-  .inputValidator((data: {
+  .validator((data: {
     priceId: string;
     quantity?: number;
     customerEmail?: string;
@@ -231,7 +231,7 @@ type ConfirmResult =
  * second status change.
  */
 export const confirmCheckoutOrder = createServerFn({ method: "POST" })
-  .inputValidator((data: { sessionId: string; environment: StripeEnv }) => {
+  .validator((data: { sessionId: string; environment: StripeEnv }) => {
     if (!/^cs_[A-Za-z0-9_]+$/.test(data.sessionId)) throw new Error("Invalid sessionId");
     return data;
   })

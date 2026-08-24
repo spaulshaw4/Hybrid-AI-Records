@@ -22,7 +22,7 @@ export type UploadAuditRow = {
 
 export const listUploadAudit = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         action: z.enum(["all", "upload", "replace", "delete"]).default("all"),

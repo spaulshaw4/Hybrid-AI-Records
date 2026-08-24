@@ -35,7 +35,7 @@ const loadSchema = z.object({
  * stranger who merely knows the address can't overwrite the draft.
  */
 export const syncDraftToCloud = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => syncSchema.parse(data))
+  .validator((data: unknown) => syncSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { randomBytes, createHash } = await import("node:crypto");
@@ -87,7 +87,7 @@ export const syncDraftToCloud = createServerFn({ method: "POST" })
 
 /** Emails a one-time, 24-hour link that restores the draft on any device. */
 export const emailDraftResumeLink = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => resumeRequestSchema.parse(data))
+  .validator((data: unknown) => resumeRequestSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { randomBytes, createHash } = await import("node:crypto");
@@ -168,7 +168,7 @@ export const emailDraftResumeLink = createServerFn({ method: "POST" })
 
 /** Exchanges a one-time resume token for the stored draft. */
 export const loadDraftByToken = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => loadSchema.parse(data))
+  .validator((data: unknown) => loadSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { createHash, randomBytes } = await import("node:crypto");
@@ -214,7 +214,7 @@ export const loadDraftByToken = createServerFn({ method: "POST" })
  * Requires the owner key, so only the device that created the draft can delete it.
  */
 export const clearCloudDraft = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         email: z.string().trim().email().max(255),

@@ -51,7 +51,7 @@ async function assertAdmin(
 
 export const lookupTokenUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => lookupSchema.parse(input))
+  .validator((input: unknown) => lookupSchema.parse(input))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -90,7 +90,7 @@ export const lookupTokenUser = createServerFn({ method: "POST" })
 
 export const creditUserTokens = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => creditSchema.parse(input))
+  .validator((input: unknown) => creditSchema.parse(input))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -145,7 +145,7 @@ const refundSchema = z.object({
  */
 export const refundUserTokens = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => refundSchema.parse(input))
+  .validator((input: unknown) => refundSchema.parse(input))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -201,7 +201,7 @@ export type TokenLedgerRow = {
 /** Admin-only audit feed with email / reason / amount / date filters. */
 export const listTokenAudit = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => ledgerSchema.parse(input ?? {}))
+  .validator((input: unknown) => ledgerSchema.parse(input ?? {}))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase as never, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

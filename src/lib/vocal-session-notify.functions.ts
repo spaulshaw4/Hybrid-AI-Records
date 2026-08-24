@@ -25,7 +25,7 @@ const statusInput = z.object({
  * takes only a row id and reads every value it emails from the database.
  */
 export const notifyVocalSessionReceived = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => receivedInput.parse(data))
+  .validator((data: unknown) => receivedInput.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { buildSlotRequestConfirmationEmail } = await import("./vocal-session-email");
@@ -89,7 +89,7 @@ const RESEND_COOLDOWN_SECONDS = 60;
  * limited so the button cannot be used to mail-bomb an address.
  */
 export const resendVocalSessionConfirmation = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => receivedInput.parse(data))
+  .validator((data: unknown) => receivedInput.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { buildSlotRequestConfirmationEmail, buildSessionStatusEmail } = await import(
@@ -195,7 +195,7 @@ export const resendVocalSessionConfirmation = createServerFn({ method: "POST" })
  */
 export const notifyVocalSessionStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => statusInput.parse(data))
+  .validator((data: unknown) => statusInput.parse(data))
   .handler(async ({ data, context }) => {
     const { data: roles } = await context.supabase
       .from("user_roles")

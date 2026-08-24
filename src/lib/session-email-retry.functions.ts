@@ -20,7 +20,7 @@ export const RETRY_WINDOW_LIMIT = 10;
  */
 export const retryFailedSessionEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => retryInput.parse(data))
+  .validator((data: unknown) => retryInput.parse(data))
   .handler(async ({ data, context }) => {
     const { data: roles } = await context.supabase
       .from("user_roles")

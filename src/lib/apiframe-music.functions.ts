@@ -587,14 +587,14 @@ export async function runGenerateEngineTrack(
  */
 export const generateEngineTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => parseGenerateEngineTrackInput(data))
+  .validator((data: unknown) => parseGenerateEngineTrackInput(data))
   .handler(async ({ data, context }) => runGenerateEngineTrack(data, context));
 
 
 
 export const getEngineTrackTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => taskSchema.parse(data))
+  .validator((data: unknown) => taskSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { fetchStudioTrackTask } = await import("@/lib/music-generation");
     const { archiveGeneratedAudio, fetchApiframeTask, newCorrelationId } = await import("@/lib/apiframe.server");

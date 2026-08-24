@@ -114,7 +114,7 @@ export const loadRadioSettings = createServerFn({ method: "GET" })
  */
 export const saveRadioSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => settingsSchema.parse(input))
+  .validator((input: unknown) => settingsSchema.parse(input))
   .handler(async ({ data, context }) => {
     const stamp = data.clientUpdatedAt ?? new Date().toISOString();
 

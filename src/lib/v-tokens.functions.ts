@@ -27,7 +27,7 @@ export const getVTokenBalance = createServerFn({ method: "POST" })
 /** Starts an embedded Stripe Checkout for one V Token bundle. */
 export const createVTokenCheckoutSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
+  .validator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.priceId)) throw new Error("Invalid priceId");
     return data;
   })
@@ -74,7 +74,7 @@ export const createVTokenCheckoutSession = createServerFn({ method: "POST" })
  */
 export const creditVTokenPurchase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { sessionId: string; environment: StripeEnv }) => {
+  .validator((data: { sessionId: string; environment: StripeEnv }) => {
     if (!/^cs_[A-Za-z0-9_]+$/.test(data.sessionId)) throw new Error("Invalid sessionId");
     return data;
   })
@@ -184,7 +184,7 @@ type VSpendResult =
  */
 export const spendVTokensForRender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { durationSeconds: number; idempotencyKey?: string }) => {
+  .validator((data: { durationSeconds: number; idempotencyKey?: string }) => {
     if (typeof data?.durationSeconds !== "number" || !Number.isFinite(data.durationSeconds)) {
       throw new Error("Invalid duration");
     }

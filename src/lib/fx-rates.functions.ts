@@ -8,7 +8,7 @@ import type { FxRateMap } from "@/lib/fx";
  */
 export const getFxRates = createServerFn({ method: "GET" })
   // Takes no input: reject anything sent so the endpoint stays a pure read.
-  .inputValidator((data: unknown) => z.undefined().or(z.null()).parse(data ?? undefined))
+  .validator((data: unknown) => z.undefined().or(z.null()).parse(data ?? undefined))
   .handler(
   async (): Promise<FxRateMap> => {
     const { readFxRates } = await import("@/lib/fx-rates.server");

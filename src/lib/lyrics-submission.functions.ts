@@ -34,7 +34,7 @@ const schema = z
   );
 
 export const submitLyrics = createServerFn({ method: "POST" })
-  .inputValidator((data) => schema.parse(data))
+  .validator((data) => schema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 

@@ -14,7 +14,7 @@ export type ScriptTimingPayload = {
 /** Gemini writes (or breaks down) a cinematic script locked to the song's timing map. */
 export const generateCinematicScript = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       timing?: ScriptTimingPayload | null;
       seed?: string;

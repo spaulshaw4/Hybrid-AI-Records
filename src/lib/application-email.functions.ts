@@ -29,7 +29,7 @@ function esc(v: string) {
 }
 
 export const sendApplicationEmail = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => applicationSchema.parse(data))
+  .validator((data: unknown) => applicationSchema.parse(data))
   .handler(async ({ data }) => {
     const lovableKey = process.env.LOVABLE_API_KEY;
     const resendKey = process.env.RESEND_API_KEY;

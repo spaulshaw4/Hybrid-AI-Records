@@ -108,7 +108,7 @@ function sanitizeAudioTiming(input: unknown) {
  */
 export const startCinematicRender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       script: string;
       subjectMode: string;
@@ -273,7 +273,7 @@ export const startCinematicRender = createServerFn({ method: "POST" })
  */
 export const renderCinematicScene = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: {
+  .validator((data: {
     shot: string;
     seconds: number;
     referenceImage?: string;
@@ -375,7 +375,7 @@ export type CinematicPollResult = {
 
 export const pollCinematicRender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { jobId: string }) => {
+  .validator((data: { jobId: string }) => {
     if (typeof data?.jobId !== "string" || !/^[A-Za-z0-9_.-]{4,120}$/.test(data.jobId)) {
       throw new Error("Invalid jobId");
     }
@@ -422,7 +422,7 @@ export const pollCinematicRender = createServerFn({ method: "POST" })
  */
 export const cancelCinematicRender = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { jobId: string }) => {
+  .validator((data: { jobId: string }) => {
     if (typeof data?.jobId !== "string" || !/^[A-Za-z0-9_.-]{4,120}$/.test(data.jobId)) {
       throw new Error("Invalid jobId");
     }

@@ -12,7 +12,7 @@ const confirmInput = z.object({
 /** Staff-only: approve one proposed slot and hand back the session's video-chat link. */
 export const confirmVocalSessionSlot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => confirmInput.parse(data))
+  .validator((data: unknown) => confirmInput.parse(data))
   .handler(async ({ data, context }) => {
     // Role check runs server-side against the DB through the caller's
     // RLS-scoped client — never against anything the browser asserts.
