@@ -14,11 +14,16 @@ import {
 import { resilientFetch } from "@/lib/resilient-fetch.server";
 import { isHttpAudioUrl } from "@/lib/pipeline-contracts";
 
-/** Pinned Cog version — spectral enhance + denoise for Gate 6 finalize. */
+/** Pinned Cog version — spectral enhance for Gate 6 finalize. */
 export const RESEMBLE_ENHANCE_VERSION =
   "93266a7e7f5805fb79bcf213b1a4e0ef2e45aff3c06eefd96c59e850c87fd6a2";
 
 export const RESEMBLE_ENHANCE_MODEL = "resemble-ai/resemble-enhance";
+
+/** Faster CFM solver + fewer NFEs to keep Gate 6 under the poll budget. */
+export const RESEMBLE_ENHANCE_SOLVER = "Euler";
+export const RESEMBLE_ENHANCE_NFE = 20;
+export const RESEMBLE_ENHANCE_DENOISE = false;
 
 /** Cancel-After + poll budget (~47s typical; allow GPU cold-start). */
 export const RESEMBLE_ENHANCE_TIMEOUT_MS = 180_000;
@@ -71,8 +76,8 @@ function assertReachableAudioUri(url: string, label: string): string {
 }
 
 /**
- * Output is an array of URIs: [denoised, enhanced] (or a single enhanced URI).
- * Prefer the last HTTPS URL = enhanced master.
+ * Resemble Enhance outputs `[denoised_url, enhanced_url]`.
+ * Prefer enhanced (`output[1]`), fall back to denoised (`output[0]`).
  */
 export function pickEnhancedAudioUrl(output: unknown): string | null {
   if (typeof output === "string" && output.startsWith("http")) return output;
@@ -80,9 +85,8 @@ export function pickEnhancedAudioUrl(output: unknown): string | null {
     const urls = output.filter(
       (item): item is string => typeof item === "string" && item.startsWith("http"),
     );
-    if (urls.length === 0) return null;
-    // Index 1 is enhanced when both denoised + enhanced are returned.
-    return urls[Math.min(1, urls.length - 1)] ?? urls[urls.length - 1] ?? null;
+    // Matches: const finalMasterUrl = output[1] || output[0]
+    return urls[1] || urls[0] || null;
   }
   if (output && typeof output === "object") {
     const map = output as Record<string, unknown>;
@@ -112,21 +116,21 @@ async function cancelPrediction(id: string): Promise<void> {
  */
 export async function runResembleEnhance(input: {
   audioUrl: string;
-  /** Denoise before enhance — helps Demucs/Fish splice artifacts. */
+  /** Override default `denoise_flag: false` when needed. */
   denoise?: boolean;
 }): Promise<string> {
   const audioUrl = assertReachableAudioUri(input.audioUrl, "input_audio");
+  const denoiseFlag = input.denoise ?? RESEMBLE_ENHANCE_DENOISE;
 
   console.log(
-    `[GATE_6_RESEMBLE_ENHANCE] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=${RESEMBLE_ENHANCE_MODEL}, version=${RESEMBLE_ENHANCE_VERSION.slice(0, 12)}…, cancelAfter=${RESEMBLE_ENHANCE_TIMEOUT_MS / 1000}s`,
+    `[GATE_6_RESEMBLE_ENHANCE] auth=REPLICATE_API_TOKEN|REPLICATE_API_KEY (hybrid1), model=${RESEMBLE_ENHANCE_MODEL}, version=${RESEMBLE_ENHANCE_VERSION.slice(0, 12)}…, solver=${RESEMBLE_ENHANCE_SOLVER}, nfe=${RESEMBLE_ENHANCE_NFE}, denoise=${denoiseFlag}, cancelAfter=${RESEMBLE_ENHANCE_TIMEOUT_MS / 1000}s`,
   );
 
   const body = communityPredictionBody(RESEMBLE_ENHANCE_VERSION, {
     input_audio: audioUrl,
-    solver: "Midpoint",
-    number_function_evaluations: 64,
-    prior_temperature: 0.5,
-    denoise_flag: input.denoise !== false,
+    solver: RESEMBLE_ENHANCE_SOLVER,
+    number_function_evaluations: RESEMBLE_ENHANCE_NFE,
+    denoise_flag: denoiseFlag,
   });
 
   const created = await resilientFetch(

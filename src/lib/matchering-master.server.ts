@@ -460,7 +460,7 @@ async function mixAndMasterOnce(options: {
         premasterWav: sourceBytes,
         userId: options.userId,
         taskId: options.taskId,
-        denoise: true,
+        denoise: false,
       });
       console.log("[master] Resemble Enhance succeeded — downloading enhanced master");
       await downloadStem(enhancedUrl, enhancedPath);

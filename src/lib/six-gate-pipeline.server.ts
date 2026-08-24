@@ -116,6 +116,8 @@ export async function runSixGatePipeline(input: {
   lyrics: string;
   instrumental: boolean;
   referenceSampleUrl?: string;
+  /** Artist RVC v2 model zip URL for Gate 5 pitch-preserving conversion. */
+  rvcModelUrl?: string;
   audioFormat?: "mp3" | "wav";
   title: string;
   userId: string;
@@ -273,30 +275,74 @@ export async function runSixGatePipeline(input: {
       );
     }
 
-    // ── Gate 5 (Fish → Demucs vocal fallback) ─────────────────────────────
+    // ── Gate 5 (RVC → Fish → Demucs vocal fallback) ───────────────────────
     let mixVocalUrl: string | null = null;
     let fishFallback = false;
     if (wantsVocals) {
       telemetry = bumpTelemetry(telemetry, 5, "gate_5_converting");
       reportPipelineProgress("vocals", PIPELINE_PROGRESS.vocals);
-      console.log("[Gate 5/6] Fish Audio Voice Conversion...");
       if (!isolatedVocalUrl) {
         throw haltStem(new Error("Gate 5 pre-flight: Demucs vocal stem URL missing."));
       }
-      try {
-        const { convertVocalsWithStems } = await import("@/lib/fish-tts.server");
-        const converted = await withTimeout(
-          (async () => {
-            const isolatedVocal = await downloadAudioBytes(isolatedVocalUrl!);
-            residue.trackBuffer(isolatedVocal);
-            if (!isolatedVocal.byteLength) {
-              throw new Error("[Circuit Breaker] Gate 5 failed: Empty vocal conversion buffer.");
-            }
-            if (input.referenceSampleUrl) {
+
+      const { resolveRvcModelDownloadUrl, convertVocalsWithRvc } = await import(
+        "@/lib/replicate-rvc.server"
+      );
+      const rvcModelZipUrl = resolveRvcModelDownloadUrl(input.rvcModelUrl);
+      let rvcOk = false;
+
+      if (rvcModelZipUrl) {
+        try {
+          console.log("[Gate 5/6] RVC Voice Conversion (melodic pitch preserve)...");
+          mixVocalUrl = await withTimeout(
+            convertVocalsWithRvc({
+              guideVocalAudioUrl: isolatedVocalUrl,
+              customRvcModelDownloadUrl: rvcModelZipUrl,
+            }),
+            GATE_TIMEOUTS_MS[5],
+            "Gate 5 (RVC)",
+          );
+          if (!mixVocalUrl) {
+            throw new Error("[Circuit Breaker] Gate 5 failed: Empty RVC vocal URL.");
+          }
+          rvcOk = true;
+          console.log("[Gate 5/6] Finished — RVC vocal url ready");
+        } catch (error) {
+          logPipelineStepError("vocals", error);
+          console.warn(
+            "[Gate 5/6] RVC failed — trying Fish Audio fallback",
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+
+      if (!rvcOk) {
+        console.log("[Gate 5/6] Fish Audio Voice Conversion...");
+        try {
+          const { convertVocalsWithStems } = await import("@/lib/fish-tts.server");
+          const converted = await withTimeout(
+            (async () => {
+              const isolatedVocal = await downloadAudioBytes(isolatedVocalUrl!);
+              residue.trackBuffer(isolatedVocal);
+              if (!isolatedVocal.byteLength) {
+                throw new Error("[Circuit Breaker] Gate 5 failed: Empty vocal conversion buffer.");
+              }
+              if (input.referenceSampleUrl) {
+                return convertVocalsWithStems({
+                  lyrics: input.lyrics,
+                  isolatedVocal,
+                  referenceAudio: await downloadAudioBytes(input.referenceSampleUrl),
+                  audioFormat: input.audioFormat,
+                  title: `${input.title} vocals`,
+                  userId: input.userId,
+                  taskId: `${input.taskId}-fish-vocals`,
+                  language: input.language,
+                  customLanguage: input.customLanguage,
+                });
+              }
               return convertVocalsWithStems({
                 lyrics: input.lyrics,
                 isolatedVocal,
-                referenceAudio: await downloadAudioBytes(input.referenceSampleUrl),
                 audioFormat: input.audioFormat,
                 title: `${input.title} vocals`,
                 userId: input.userId,
@@ -304,41 +350,31 @@ export async function runSixGatePipeline(input: {
                 language: input.language,
                 customLanguage: input.customLanguage,
               });
-            }
-            return convertVocalsWithStems({
-              lyrics: input.lyrics,
-              isolatedVocal,
-              audioFormat: input.audioFormat,
-              title: `${input.title} vocals`,
-              userId: input.userId,
-              taskId: `${input.taskId}-fish-vocals`,
-              language: input.language,
-              customLanguage: input.customLanguage,
-            });
-          })(),
-          GATE_TIMEOUTS_MS[5],
-          "Gate 5 (Fish Audio)",
-        );
-        mixVocalUrl = converted.tracks.find((t) => t.audioUrl)?.audioUrl ?? null;
-        if (!mixVocalUrl) {
-          throw new Error("[Circuit Breaker] Gate 5 failed: Empty vocal conversion buffer.");
+            })(),
+            Math.min(GATE_TIMEOUTS_MS[5], 90_000),
+            "Gate 5 (Fish Audio)",
+          );
+          mixVocalUrl = converted.tracks.find((t) => t.audioUrl)?.audioUrl ?? null;
+          if (!mixVocalUrl) {
+            throw new Error("[Circuit Breaker] Gate 5 failed: Empty vocal conversion buffer.");
+          }
+          console.log("[Gate 5/6] Finished — vocal url ready");
+        } catch (error) {
+          logPipelineStepError("vocals", error);
+          logFailedStudioGate(error);
+          if (shouldRethrowPipelineControlError(error)) throw error;
+          console.warn(
+            "[Fallback Triggered] Fish Audio failed — routing Demucs vocal to Gate 6",
+            error instanceof Error ? error.message : error,
+          );
+          const { fetchRawVocalFallback } = await import("@/lib/pipeline-fallbacks.server");
+          const raw = await fetchRawVocalFallback(isolatedVocalUrl, input.taskId);
+          residue.trackBuffer(raw.convertedVocalBuffer);
+          mixVocalUrl = isolatedVocalUrl;
+          fishFallback = true;
+          telemetry = recordFallback(telemetry, FALLBACK_FISH_AUDIO_RAW_VOCALS);
+          console.log("[Gate 5/6] Detour complete — Demucs vocal → Gate 6");
         }
-        console.log("[Gate 5/6] Finished — vocal url ready");
-      } catch (error) {
-        logPipelineStepError("vocals", error);
-        logFailedStudioGate(error);
-        if (shouldRethrowPipelineControlError(error)) throw error;
-        console.warn(
-          "[Fallback Triggered] Fish Audio failed — routing Demucs vocal to Gate 6",
-          error instanceof Error ? error.message : error,
-        );
-        const { fetchRawVocalFallback } = await import("@/lib/pipeline-fallbacks.server");
-        const raw = await fetchRawVocalFallback(isolatedVocalUrl, input.taskId);
-        residue.trackBuffer(raw.convertedVocalBuffer);
-        mixVocalUrl = isolatedVocalUrl;
-        fishFallback = true;
-        telemetry = recordFallback(telemetry, FALLBACK_FISH_AUDIO_RAW_VOCALS);
-        console.log("[Gate 5/6] Detour complete — Demucs vocal → Gate 6");
       }
     }
 

@@ -10,7 +10,7 @@ export const PIPELINE_STEP_LOGS = {
   vault: ">>> [2/6: SUPABASE VAULT] Isolate Gate 1 audio to public HTTPS CDN",
   cwalo: ">>> [3/6: STRUCTURE] CWALO all-in-one music structure analysis",
   stems: ">>> [4/6: STEMS] Replicate Demucs separation",
-  vocals: ">>> [5/6: VOCALS] Fish Audio Plus vocal synthesis",
+  vocals: ">>> [5/6: VOCALS] Replicate RVC (melodic pitch preserve)",
   mastering: ">>> [6/6: MASTERING] Resemble Enhance + FFmpeg finish",
 } as const;
 
@@ -22,7 +22,7 @@ const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   vault: "Supabase audio-vault",
   cwalo: "Replicate CWALO structure analysis",
   stems: "Replicate Demucs",
-  vocals: "Fish Audio Plus",
+  vocals: "Replicate RVC / Fish Audio fallback",
   mastering: "Resemble Enhance + FFmpeg",
 };
 
@@ -62,9 +62,14 @@ export function musicPipelineKey(): string | undefined {
   );
 }
 
-/** Gate 5 — Fish Audio direct TTS. Never Replicate. */
+/** Gate 5 — RVC primary; Fish Audio only as soft fallback. */
 export function vocalPipelineKey(): string | undefined {
-  return trimEnv("FISH_AUDIO_API_KEY") || trimEnv("FISH_API_KEY");
+  return (
+    trimEnv("REPLICATE_API_TOKEN") ||
+    trimEnv("REPLICATE_API_KEY") ||
+    trimEnv("FISH_AUDIO_API_KEY") ||
+    trimEnv("FISH_API_KEY")
+  );
 }
 
 /** Gates 3–4 — Replicate CWALO + Demucs (hybrid1 token). */

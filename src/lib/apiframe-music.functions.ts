@@ -144,6 +144,11 @@ const generateSchema = z.object({
   vocalStyle: z.string().trim().max(400).optional(),
   /** Direct sample URL when the client already resolved the cloned take. */
   referenceAudioUrl: z.string().trim().max(2000).optional(),
+  /**
+   * Artist RVC v2 model zip (HTTPS). Gate 5 uses this with
+   * zsxkib/realistic-voice-cloning for pitch-preserving voice conversion.
+   */
+  rvcModelUrl: z.string().trim().max(2000).optional(),
   /** Open `user_vault` row to flip from processing → completed. */
   vaultId: z.preprocess((value) => {
     if (typeof value !== "string") return undefined;
@@ -232,6 +237,7 @@ export async function runGenerateEngineTrack(
     const correlationId = newCorrelationId("gen");
 
     let referenceSampleUrl = payload.referenceAudioUrl?.trim() || undefined;
+    const rvcModelUrl = payload.rvcModelUrl?.trim() || undefined;
     const voiceId = payload.voiceId?.trim() || undefined;
     if (voiceId && !payload.instrumental) {
       const { VOCAL_CONSENT_REQUIRED_MESSAGE } = await import("@/lib/vocal-consent");
@@ -395,6 +401,7 @@ export async function runGenerateEngineTrack(
           lyrics: lyricContent,
           instrumental: payload.instrumental,
           referenceSampleUrl,
+          rvcModelUrl,
           audioFormat: payload.audioFormat,
           title: payload.title || "Studio Master",
           durationSeconds,

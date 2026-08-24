@@ -9,7 +9,7 @@ export const PipelineGate = {
   STORAGE: 1 << 1, // 000010 (2)  - Gate 2: Vault Ingest
   STRUCTURE: 1 << 2, // 000100 (4)  - Gate 3: CWALO
   DEMUX: 1 << 3, // 001000 (8)  - Gate 4: Demucs Stems
-  VOCALS: 1 << 4, // 010000 (16) - Gate 5: Fish Audio
+  VOCALS: 1 << 4, // 010000 (16) - Gate 5: RVC / Fish Audio
   MASTERING: 1 << 5, // 100000 (32) - Gate 6: FFmpeg Mastering
 } as const;
 

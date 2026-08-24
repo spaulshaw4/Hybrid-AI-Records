@@ -10,7 +10,7 @@ export const GATE_TIMEOUTS_MS = {
   3: 60_000, // CWALO Replicate (soft-fail)
   /** Demucs + GPU cold-start; must exceed Cancel-After / poll (see stems.server). */
   4: 360_000,
-  5: 60_000, // Fish Audio conversion
+  5: 300_000, // RVC voice conversion (T4; several minutes) + Fish fallback
   6: 300_000, // Resemble Enhance + optional Matchering + FFmpeg finish + vault
 } as const;
 
@@ -21,7 +21,7 @@ const GATE_LABELS: Record<StudioGateId, string> = {
   2: "Supabase vault isolation",
   3: "CWALO structure analysis",
   4: "Demucs stem separation",
-  5: "Fish Audio voice conversion",
+  5: "RVC voice conversion",
   6: "Resemble Enhance mastering + final commit",
 };
 
