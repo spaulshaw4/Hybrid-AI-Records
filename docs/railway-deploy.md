@@ -4,7 +4,7 @@
 
 | File | Purpose |
 | --- | --- |
-| `Dockerfile` | Single-stage Bun image: install, `bun run build`, start `.output/server/index.mjs` |
+| `Dockerfile` | Bun image: install → `prisma generate` → `bun run build` → start `.output/server/index.mjs` |
 | `railway.json` | `DOCKERFILE` builder, start command, healthcheck, restart policy |
 | `nixpacks.toml` | Fallback plan if Dockerfile is unused |
 | `package.json` | `"start": "bun .output/server/index.mjs"` |
