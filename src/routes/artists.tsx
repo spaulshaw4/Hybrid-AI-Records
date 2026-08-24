@@ -24,7 +24,7 @@ import {
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
 import { dedupeTracks } from "@/lib/radio-tracks";
-import { fetchArtistCatalogTracks } from "@/lib/fetch-artist-catalog.client";
+import { fetchArtistCatalogTracks } from "@/lib/fetch-artist-catalog";
 import {
   playCatalogTrack,
   seekCatalogPlayback,

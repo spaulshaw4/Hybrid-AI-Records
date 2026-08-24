@@ -6,10 +6,11 @@
 | --- | --- |
 | `railway.json` | Nixpacks builder, start command, healthcheck, restart policy |
 | `nixpacks.toml` | Bun install/build; installs FFmpeg and Python Matchering for mastering |
-| `package.json` | `start` → `node .output/server/index.mjs`; `engines.node` → `>=20` |
+| `package.json` | `start` → `bun .output/server/index.mjs`; `engines.node` → `>=20` |
 
-The build emits a nitro `node-server` bundle at `.output/`. That server reads
+The build emits a Nitro `node-server` bundle at `.output/`. That server reads
 `PORT` and binds `0.0.0.0` on its own, so no custom Express wrapper is needed.
+Start the production server with `bun .output/server/index.mjs` (or `bun run start`).
 
 ## System dependencies
 
@@ -78,7 +79,7 @@ running schema and the pipeline depends on both:
 
 ## Pre-deploy checklist
 
-1. `npm run build` succeeds locally and `.output/server/index.mjs` exists.
+1. `bun run build` (or `npm run build`) succeeds locally and `.output/server/index.mjs` exists.
 2. `ffmpeg -version` and `python3 -c "import matchering"` both succeed in the
    deployed container.
 3. All required variables above are set in the Railway service.

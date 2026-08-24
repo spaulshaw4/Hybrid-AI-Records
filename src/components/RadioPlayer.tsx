@@ -12,7 +12,7 @@ import {
   claimCatalogPlayback,
   getCatalogAudioElement,
 } from "@/lib/catalog-player";
-import { fetchRadioReadyTracks } from "@/lib/fetch-artist-catalog.client";
+import { fetchRadioReadyTracks } from "@/lib/fetch-artist-catalog";
 import { playableToRadioTrack } from "@/lib/artist-catalog";
 
 import { deviceLabel } from "@/lib/radio-device";

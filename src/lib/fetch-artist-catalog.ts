@@ -15,7 +15,7 @@ function mapRows(data: ArtistCatalogTrack[] | null | undefined): CatalogPlayable
     .filter((t): t is CatalogPlayable => Boolean(t));
 }
 
-/** Browser-side catalog load (public RLS). Prefer this over server fns for UI. */
+/** Browser catalog load (public RLS). Named without `.client.` so SSR routes can import it. */
 export async function fetchArtistCatalogTracks(): Promise<CatalogPlayable[]> {
   const { data, error } = await supabase
     .from("artist_tracks")
