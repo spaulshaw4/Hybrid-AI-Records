@@ -1,13 +1,24 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Prisma schema — Track pipeline state (gateMask, vault URLs, status).
+// Connection URLs live in prisma.config.ts (Prisma 7); set DATABASE_URL + DIRECT_URL in .env.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+model Track {
+  id           String   @id @default(uuid())
+  title        String
+  prompt       String
+  gateMask     Int      @default(0)
+  status       String   @default("QUEUED")
+  rawAudioUrl  String?
+  stemsUrl     String?
+  masterUrl    String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
