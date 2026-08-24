@@ -5,6 +5,7 @@ import {
   isPlayableCatalogUrl,
   mergeCatalogIntoStreamTracks,
   playableToRadioTrack,
+  titlesFuzzyMatch,
   type ArtistCatalogTrack,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
@@ -72,5 +73,117 @@ describe("artist catalog playables", () => {
       title: "Centauri Black",
     });
     expect(parseTrackFilename("Africa (2).mp3").title).toBe("Africa");
+  });
+
+  it("does not append catalog rows that already match static album+title", () => {
+    const base: StreamTrack[] = [
+      {
+        id: "com-whiskey",
+        title: "Whiskey",
+        artist: "Stacey LA Bradbury",
+        album: "A Collection Of Me",
+        src: "/static/whiskey.mp3",
+        cover: "/cover.jpg",
+      },
+      {
+        id: "kickn-up-dust",
+        title: "Kick'N Up Dust",
+        artist: "Stephen P. Shaw",
+        album: "The Journey",
+        src: "/static/kickn.mp3",
+        cover: "/cover.jpg",
+      },
+    ];
+    const catalog: CatalogPlayable[] = [
+      {
+        id: "a-collection-of-me-whiskey",
+        title: "Whiskey",
+        artist: "Stacey LA Bradbury",
+        album: "A Collection Of Me",
+        src: "https://cdn.example/whiskey.mp3",
+        cover: "https://cdn.example/com.jpg",
+        radioReady: true,
+      },
+      {
+        id: "the-journey-kickn-up-dust",
+        title: "Kick'N Up Dust",
+        artist: "Stephen P. Shaw",
+        album: "The Journey",
+        src: "https://cdn.example/kickn.mp3",
+        cover: "https://cdn.example/journey.jpg",
+        radioReady: true,
+      },
+      {
+        id: "only-in-catalog",
+        title: "Brand New Song",
+        artist: "Stephen P. Shaw",
+        album: "The Journey",
+        src: "https://cdn.example/new.mp3",
+        radioReady: true,
+      },
+    ];
+
+    const merged = mergeCatalogIntoStreamTracks(base, catalog);
+    expect(merged).toHaveLength(3);
+    expect(merged.map((t) => t.title)).toEqual([
+      "Whiskey",
+      "Kick'N Up Dust",
+      "Brand New Song",
+    ]);
+    expect(merged[0].id).toBe("a-collection-of-me-whiskey");
+    expect(merged[0].src).toBe("https://cdn.example/whiskey.mp3");
+    expect(merged[1].id).toBe("the-journey-kickn-up-dust");
+  });
+
+  it("collapses Campfire title drift (punctuation / filler words)", () => {
+    expect(
+      titlesFuzzyMatch(
+        "Bottle of Redemption (Pour Me a Shot of Forgiveness)",
+        "Bottle of Redemption(pour me shot of forgiveness )",
+      ),
+    ).toBe(true);
+    expect(titlesFuzzyMatch("Purple Kool-Aid", "Purple Kool Aid")).toBe(true);
+
+    const base: StreamTrack[] = [
+      {
+        id: "cc-bottle-of-redemption",
+        title: "Bottle of Redemption (Pour Me a Shot of Forgiveness)",
+        artist: "Phillip S. Thomas",
+        album: "Campfire Confessions",
+        src: "/static/bottle.mp3",
+      },
+      {
+        id: "cc-purple-kool-aid",
+        title: "Purple Kool-Aid",
+        artist: "Phillip S. Thomas",
+        album: "Campfire Confessions",
+        src: "/static/purple.mp3",
+      },
+    ];
+    const catalog: CatalogPlayable[] = [
+      {
+        id: "campfire-confessions-bottle-of-redemption-pour-me-shot-of-forgiveness",
+        title: "Bottle of Redemption(pour me shot of forgiveness )",
+        artist: "Phillip S. Thomas",
+        album: "Campfire Confessions",
+        src: "https://cdn.example/bottle.mp3",
+        radioReady: true,
+      },
+      {
+        id: "campfire-confessions-purple-kool-aid",
+        title: "Purple Kool Aid",
+        artist: "Phillip S. Thomas",
+        album: "Campfire Confessions",
+        src: "https://cdn.example/purple.mp3",
+        radioReady: true,
+      },
+    ];
+
+    const merged = mergeCatalogIntoStreamTracks(base, catalog);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((t) => t.id)).toEqual([
+      "campfire-confessions-bottle-of-redemption-pour-me-shot-of-forgiveness",
+      "campfire-confessions-purple-kool-aid",
+    ]);
   });
 });

@@ -20,9 +20,10 @@ import { TrackWaveform } from "@/components/TrackWaveform";
 import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
 import {
   groupPlayablesAsAlbums,
-  mergeCatalogIntoStreamTracks,
+  playableToStreamTrack,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
+import { dedupeTracks } from "@/lib/radio-tracks";
 import { fetchArtistCatalogTracks } from "@/lib/fetch-artist-catalog.client";
 import {
   playCatalogTrack,
@@ -121,7 +122,9 @@ function ArtistTracksPage() {
   const albumsSource: Album[] = catalogAlbums.length ? catalogAlbums : ALBUMS;
   const tracksSource: StreamTrack[] = useMemo(() => {
     if (!catalog.length) return STREAM_TRACKS;
-    return mergeCatalogIntoStreamTracks(STREAM_TRACKS, catalog);
+    // Live artist_tracks is the only source once loaded — never merge with the
+    // static STREAM_TRACKS list (different ids / drifted titles caused doubles).
+    return dedupeTracks(catalog.map(playableToStreamTrack));
   }, [catalog]);
 
   const selectedAlbum =

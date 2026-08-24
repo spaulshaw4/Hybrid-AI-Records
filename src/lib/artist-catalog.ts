@@ -228,9 +228,72 @@ function slugish(value: string): string {
     .slice(0, 80);
 }
 
+function normalizeCatalogText(value: string): string {
+  return value
+    .replace(/\s*\(\d+\)\s*$/g, "")
+    .replace(/[.]+$/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Stable song key so static ids and catalog ids of the same track collapse. */
+export function catalogTrackIdentity(track: {
+  title: string;
+  album?: string | null;
+  artist?: string | null;
+}): string {
+  const title = normalizeCatalogText(track.title);
+  const album = normalizeCatalogText(track.album ?? "");
+  if (album) return `album:${album}::${title}`;
+  const artist = normalizeCatalogText(track.artist ?? "");
+  return `artist:${artist}::${title}`;
+}
+
+/** True when two titles are the same song despite punctuation / filler-word drift. */
+export function titlesFuzzyMatch(a: string, b: string): boolean {
+  const left = normalizeCatalogText(a);
+  const right = normalizeCatalogText(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (left.includes(right) || right.includes(left)) return true;
+
+  const leftTokens = new Set(left.split(" ").filter(Boolean));
+  const rightTokens = new Set(right.split(" ").filter(Boolean));
+  if (!leftTokens.size || !rightTokens.size) return false;
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+  const union = leftTokens.size + rightTokens.size - overlap;
+  return union > 0 && overlap / union >= 0.72;
+}
+
+function findCatalogMatch(
+  track: StreamTrack,
+  catalog: CatalogPlayable[],
+  byId: Map<string, CatalogPlayable>,
+  byIdentity: Map<string, CatalogPlayable>,
+): CatalogPlayable | undefined {
+  const exact = byId.get(track.id) || byIdentity.get(catalogTrackIdentity(track));
+  if (exact) return exact;
+
+  const album = normalizeCatalogText(track.album ?? "");
+  if (!album) return undefined;
+  return catalog.find(
+    (candidate) =>
+      normalizeCatalogText(candidate.album ?? "") === album &&
+      titlesFuzzyMatch(candidate.title, track.title),
+  );
+}
+
 /**
  * Prefer catalog CDN `src` when ids/titles match static radio tracks so Artist
  * page, album views, and Radio all hit the same public URL.
+ * Catalog rows that already match a static song (same album+title, including
+ * fuzzy title drift) update that row in place — they are never appended again.
  */
 export function mergeCatalogIntoStreamTracks(
   base: StreamTrack[],
@@ -238,30 +301,54 @@ export function mergeCatalogIntoStreamTracks(
 ): StreamTrack[] {
   if (!catalog.length) return base;
   const byId = new Map(catalog.map((t) => [t.id, t]));
-  const byTitle = new Map(
-    catalog.map((t) => [`${(t.album ?? "").toLowerCase()}::${t.title.toLowerCase()}`, t]),
-  );
+  const byIdentity = new Map(catalog.map((t) => [catalogTrackIdentity(t), t]));
+
+  const seenIds = new Set<string>();
+  const seenIdentity = new Set<string>();
+  const claimedCatalogIds = new Set<string>();
 
   const merged = base.map((track) => {
-    const hit =
-      byId.get(track.id) ||
-      byTitle.get(`${(track.album ?? "").toLowerCase()}::${track.title.toLowerCase()}`);
+    const identity = catalogTrackIdentity(track);
+    const hit = findCatalogMatch(track, catalog, byId, byIdentity);
+    seenIds.add(track.id);
+    seenIdentity.add(identity);
+    if (hit) {
+      seenIds.add(hit.id);
+      seenIdentity.add(catalogTrackIdentity(hit));
+      claimedCatalogIds.add(hit.id);
+    }
     if (!hit?.src) return track;
     return {
       ...track,
+      // Prefer live catalog id so Artists/Radio share the same keys.
+      id: hit.id,
       src: hit.src,
       cover: hit.cover ?? track.cover,
       trackNumber: hit.trackNumber ?? track.trackNumber,
       trackTotal: hit.trackTotal ?? track.trackTotal,
+      album: hit.album ?? track.album,
+      artist: hit.artist ?? track.artist,
+      genre: hit.genre ?? track.genre,
+      credits: hit.credits ?? track.credits,
+      division: hit.division ?? track.division,
     };
   });
 
-  const seen = new Set(merged.map((t) => t.id));
   for (const track of catalog) {
-    if (seen.has(track.id)) continue;
     if (track.radioReady === false) continue;
+    if (claimedCatalogIds.has(track.id)) continue;
+    const identity = catalogTrackIdentity(track);
+    if (seenIds.has(track.id) || seenIdentity.has(identity)) continue;
+    const fuzzyHit = merged.some(
+      (existing) =>
+        normalizeCatalogText(existing.album ?? "") ===
+          normalizeCatalogText(track.album ?? "") &&
+        titlesFuzzyMatch(existing.title, track.title),
+    );
+    if (fuzzyHit) continue;
     merged.push(playableToStreamTrack(track));
-    seen.add(track.id);
+    seenIds.add(track.id);
+    seenIdentity.add(identity);
   }
   return merged;
 }

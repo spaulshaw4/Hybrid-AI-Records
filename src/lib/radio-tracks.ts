@@ -175,16 +175,16 @@ export const ALBUMS: Album[] = [
     credits: CC_CREDITS,
     genre: "Dark Country / Gothic Folk",
     tracks: [
-      { id: "cc-bottle-of-redemption", title: "Bottle of Redemption (Pour Me a Shot of Forgiveness)", src: cc1.url },
+      { id: "cc-bottle-of-redemption", title: "Bottle of Redemption(pour me shot of forgiveness )", src: cc1.url },
       { id: "cc-bottle-of-truth", title: "Bottle Of Truth", src: cc2.url },
       { id: "cc-holy-water-and-flames", title: "Holy Water And Flames", src: cc3.url },
       { id: "cc-what-i-told-the-fire", title: "What I Told The Fire At 3am", src: cc4.url },
       { id: "cc-stranger-in-the-smoke", title: "There's A Stranger In The Smoke", src: cc5.url },
-      { id: "cc-time-dont-let-you-own-it", title: "Time Don't Let You Own It", src: cc6.url },
+      { id: "cc-time-dont-let-you-own-it", title: "Time Don't Let You Own IT", src: cc6.url },
       { id: "cc-ghost-in-room-12", title: "The Ghost in Room 12", src: cc7.url },
       { id: "cc-ghost-sitting-across", title: "The Ghost Sitting Across From Me", src: cc8.url },
       { id: "cc-banshee-in-the-hollar", title: "Banshee In The Hollar", src: cc9.url },
-      { id: "cc-purple-kool-aid", title: "Purple Kool-Aid", src: cc10.url },
+      { id: "cc-purple-kool-aid", title: "Purple Kool Aid", src: cc10.url },
     ],
   },
   {
@@ -408,6 +408,7 @@ function normalizeName(value: string): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s*\(\d+\)\s*$/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/^the /, "")
     .trim();
@@ -416,14 +417,16 @@ function normalizeName(value: string): string {
 /**
  * Removes duplicate entries from a playlist: same id, same audio source, or the
  * same song listed twice under slightly different titles (e.g. "Bill
- * Collector's Nebula" vs "The Bill Collector's Nebula"). The first occurrence
- * wins, so album order is preserved.
+ * Collector's Nebula" vs "The Bill Collector's Nebula"). When album is present,
+ * duplicates are scoped to album+title so two albums can share a song name.
+ * The first occurrence wins, so album order is preserved.
  */
-export function dedupeTracks<T extends { id: string; title: string; artist?: string; src?: string }>(
-  tracks: T[],
-): T[] {
+export function dedupeTracks<
+  T extends { id: string; title: string; artist?: string; album?: string; src?: string },
+>(tracks: T[]): T[] {
   const ids = new Set<string>();
   const sources = new Set<string>();
+  const identities = new Set<string>();
   const names: string[] = [];
   const out: T[] = [];
 
@@ -431,18 +434,26 @@ export function dedupeTracks<T extends { id: string; title: string; artist?: str
     if (ids.has(track.id)) continue;
     if (track.src && sources.has(track.src)) continue;
 
-    const name = normalizeName(track.title);
-    const isDuplicateName = names.some(
-      (existing) =>
-        existing === name ||
-        ` ${existing} `.includes(` ${name} `) ||
-        ` ${name} `.includes(` ${existing} `),
-    );
-    if (name && isDuplicateName) continue;
+    const title = normalizeName(track.title);
+    const album = normalizeName(track.album ?? "");
+    const identity = album ? `album:${album}::${title}` : `title:${title}`;
+    if (title && identities.has(identity)) continue;
+
+    // Fallback for rows without album: collapse near-identical titles.
+    if (!album && title) {
+      const isDuplicateName = names.some(
+        (existing) =>
+          existing === title ||
+          ` ${existing} `.includes(` ${title} `) ||
+          ` ${title} `.includes(` ${existing} `),
+      );
+      if (isDuplicateName) continue;
+    }
 
     ids.add(track.id);
     if (track.src) sources.add(track.src);
-    names.push(name);
+    identities.add(identity);
+    if (!album) names.push(title);
     out.push(track);
   }
 
