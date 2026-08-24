@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronDown, Download, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,7 +42,11 @@ import {
   VAULT_POLL_MS,
   type VaultTrackPayload,
 } from "@/lib/vault-client";
-import { isPlayableVaultAudioUrl, sanitizeVaultTracks } from "@/lib/vault-tracks";
+import {
+  groupVaultTracksByArtistAlbum,
+  isPlayableVaultAudioUrl,
+  sanitizeVaultTracks,
+} from "@/lib/vault-tracks";
 
 type Props = {
   /** Bump after Generate starts or finishes so the list refreshes immediately. */
@@ -101,6 +111,8 @@ function fromApi(track: VaultTrackPayload): UserVaultRow {
     vocalUrl: clean?.vocal_url ?? "",
     rawAudioUrl: clean?.raw_audio_url ?? "",
     createdAt: clean?.created_at ?? track.created_at,
+    artistName: clean?.artist_name ?? track.artist_name ?? "Unknown Artist",
+    albumName: clean?.album_name ?? track.album_name ?? "Singles",
   };
 }
 
@@ -205,6 +217,40 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     return () => window.clearInterval(timer);
   }, [processing, signedIn, refresh]);
 
+  const [openAlbums, setOpenAlbums] = useState<string[]>([]);
+
+  const grouped = useMemo(
+    () =>
+      groupVaultTracksByArtistAlbum(
+        rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          style: row.style,
+          status: row.status,
+          master_url: row.masterUrl || null,
+          instrumental_url: row.instrumentalUrl || null,
+          vocal_url: row.vocalUrl || null,
+          raw_audio_url: row.rawAudioUrl || null,
+          created_at: row.createdAt,
+          artist_name: row.artistName,
+          album_name: row.albumName,
+        })),
+      ),
+    [rows],
+  );
+
+  const defaultOpenAlbums = useMemo(
+    () =>
+      grouped.flatMap((artist) =>
+        artist.albums.map((album) => `${artist.artist_name}::${album.album_name}`),
+      ),
+    [grouped],
+  );
+
+  useEffect(() => {
+    setOpenAlbums(defaultOpenAlbums);
+  }, [defaultOpenAlbums]);
+
   async function downloadWav(url: string, title: string, stem: StemKind) {
     const key = `${title}:${stem}:wav`;
     setWavBusy(key);
@@ -263,106 +309,179 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
         ) : rows.length === 0 ? (
           <p className="py-3 text-sm text-zinc-400">No tracks saved. Hit Generate to start.</p>
         ) : (
-          rows.map((row) => (
-            <div
-              key={row.id}
-              id={`vault-track-${row.id}`}
-              className="track-row flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-zinc-100">{row.title}</p>
-                <p className="text-xs text-zinc-400">
-                  Generated: {relativeStamp(row.createdAt)} • Status:{" "}
-                  {row.status === "processing" ? (
-                    <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
-                      <span className="size-1.5 animate-pulse rounded-full bg-amber-400" aria-hidden />
-                      Processing...
-                    </span>
-                  ) : row.status === "failed" ? (
-                    <span className="font-semibold text-destructive">Failed</span>
-                  ) : (
-                    <span className="font-semibold text-emerald-400">Ready</span>
-                  )}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {isPlayableVaultAudioUrl(row.masterUrl) ? (
-                  <>
-                    <audio controls className="h-8 max-w-[200px]" src={row.masterUrl} preload="none">
-                      <track kind="captions" />
-                    </audio>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button type="button" size="sm" className="h-8 px-3 text-xs">
-                          <Download className="size-3.5" aria-hidden />
-                          Download
-                          <ChevronDown className="size-3.5" aria-hidden />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-64">
-                        {EXPORT_ROWS.map(({ kind, label }, index) => {
-                          const url = stemUrl(row, kind);
-                          return (
-                            <div key={kind}>
-                              {index > 0 ? <DropdownMenuSeparator /> : null}
-                              <DropdownMenuLabel className="flex items-center justify-between gap-2">
-                                <span>{label}</span>
-                                {url ? null : (
-                                  <span className="text-[10px] font-normal text-muted-foreground">
-                                    unavailable
-                                  </span>
-                                )}
-                              </DropdownMenuLabel>
-                              <div className="flex gap-1 px-1 pb-1">
-                                <DropdownMenuItem
-                                  className="flex-1 justify-center rounded border border-border/60 text-xs"
-                                  disabled={!url || wavBusy !== null}
-                                  onSelect={() => void downloadWav(url, row.title, kind)}
-                                >
-                                  WAV
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="flex-1 justify-center rounded border border-border/60 text-xs"
-                                  disabled={!url}
-                                  onSelect={() => onDownload(url, stemFileName(row.title, kind, "mp3"))}
-                                >
-                                  MP3
-                                </DropdownMenuItem>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </>
-                ) : row.status === "processing" ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                    Rendering in the background
-                  </span>
-                ) : null}
-
-                {row.status !== "processing" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 px-3 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive"
-                  disabled={deletingId === row.id}
-                  onClick={() => setPendingDelete(row)}
+          <div className="space-y-4 pt-2">
+            {grouped.map((artist) => (
+              <section key={artist.artist_name} className="space-y-2">
+                <h4 className="pt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-400">
+                  {artist.artist_name}
+                </h4>
+                <Accordion
+                  type="multiple"
+                  value={openAlbums.filter((key) => key.startsWith(`${artist.artist_name}::`))}
+                  onValueChange={(values) => {
+                    setOpenAlbums((prev) => {
+                      const other = prev.filter((key) => !key.startsWith(`${artist.artist_name}::`));
+                      return [...other, ...values];
+                    });
+                  }}
+                  className="rounded-lg border border-zinc-800/80 bg-zinc-950/40"
                 >
-                  {deletingId === row.id ? (
-                    <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                  ) : (
-                    <Trash2 className="size-3.5" aria-hidden />
-                  )}
-                  Delete
-                </Button>
-                ) : null}
-              </div>
-            </div>
-          ))
+                  {artist.albums.map((album) => {
+                    const albumKey = `${artist.artist_name}::${album.album_name}`;
+                    return (
+                      <AccordionItem
+                        key={albumKey}
+                        value={albumKey}
+                        className="border-zinc-800/60 px-3"
+                      >
+                        <AccordionTrigger className="py-3 text-zinc-100 hover:no-underline">
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-3 pe-2">
+                            <span className="truncate text-sm font-semibold">{album.album_name}</span>
+                            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                              {album.tracks.length} track
+                              {album.tracks.length === 1 ? "" : "s"}
+                            </span>
+                          </span>
+                        </AccordionTrigger>
+                        <AccordionContent className="pb-3">
+                          <div className="divide-y divide-zinc-800/50">
+                            {album.tracks.map((track) => {
+                              const row =
+                                rows.find((r) => r.id === track.id) ??
+                                fromApi({
+                                  ...track,
+                                  master_url: track.master_url,
+                                  instrumental_url: track.instrumental_url,
+                                  vocal_url: track.vocal_url,
+                                  raw_audio_url: track.raw_audio_url,
+                                });
+                              return (
+                                <div
+                                  key={row.id}
+                                  id={`vault-track-${row.id}`}
+                                  className="track-row flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-zinc-100">
+                                      {row.title}
+                                    </p>
+                                    <p className="text-xs text-zinc-400">
+                                      Generated: {relativeStamp(row.createdAt)} • Status:{" "}
+                                      {row.status === "processing" ? (
+                                        <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
+                                          <span
+                                            className="size-1.5 animate-pulse rounded-full bg-amber-400"
+                                            aria-hidden
+                                          />
+                                          Processing...
+                                        </span>
+                                      ) : row.status === "failed" ? (
+                                        <span className="font-semibold text-destructive">Failed</span>
+                                      ) : (
+                                        <span className="font-semibold text-emerald-400">Ready</span>
+                                      )}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {isPlayableVaultAudioUrl(row.masterUrl) ? (
+                                      <>
+                                        <audio
+                                          controls
+                                          className="h-8 max-w-[200px]"
+                                          src={row.masterUrl}
+                                          preload="none"
+                                        >
+                                          <track kind="captions" />
+                                        </audio>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button type="button" size="sm" className="h-8 px-3 text-xs">
+                                              <Download className="size-3.5" aria-hidden />
+                                              Download
+                                              <ChevronDown className="size-3.5" aria-hidden />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end" className="min-w-64">
+                                            {EXPORT_ROWS.map(({ kind, label }, index) => {
+                                              const url = stemUrl(row, kind);
+                                              return (
+                                                <div key={kind}>
+                                                  {index > 0 ? <DropdownMenuSeparator /> : null}
+                                                  <DropdownMenuLabel className="flex items-center justify-between gap-2">
+                                                    <span>{label}</span>
+                                                    {url ? null : (
+                                                      <span className="text-[10px] font-normal text-muted-foreground">
+                                                        unavailable
+                                                      </span>
+                                                    )}
+                                                  </DropdownMenuLabel>
+                                                  <div className="flex gap-1 px-1 pb-1">
+                                                    <DropdownMenuItem
+                                                      className="flex-1 justify-center rounded border border-border/60 text-xs"
+                                                      disabled={!url || wavBusy !== null}
+                                                      onSelect={() =>
+                                                        void downloadWav(url, row.title, kind)
+                                                      }
+                                                    >
+                                                      WAV
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                      className="flex-1 justify-center rounded border border-border/60 text-xs"
+                                                      disabled={!url}
+                                                      onSelect={() =>
+                                                        onDownload(
+                                                          url,
+                                                          stemFileName(row.title, kind, "mp3"),
+                                                        )
+                                                      }
+                                                    >
+                                                      MP3
+                                                    </DropdownMenuItem>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </>
+                                    ) : row.status === "processing" ? (
+                                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                                        Rendering in the background
+                                      </span>
+                                    ) : null}
+
+                                    {row.status !== "processing" ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 px-3 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive"
+                                        disabled={deletingId === row.id}
+                                        onClick={() => setPendingDelete(row)}
+                                      >
+                                        {deletingId === row.id ? (
+                                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                                        ) : (
+                                          <Trash2 className="size-3.5" aria-hidden />
+                                        )}
+                                        Delete
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    );
+                  })}
+                </Accordion>
+              </section>
+            ))}
+          </div>
         )}
       </div>
 

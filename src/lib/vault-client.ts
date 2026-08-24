@@ -70,6 +70,8 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
   instrumentalUrl?: string | null;
   vocalUrl?: string | null;
   rawAudioUrl?: string | null;
+  artistName?: string | null;
+  albumName?: string | null;
 }) {
   if (typeof window === "undefined") return;
   const status = tempTrackData.status ?? "processing";
@@ -83,6 +85,8 @@ export function notifyVaultOfNewGeneration(tempTrackData: {
     vocal_url: tempTrackData.vocalUrl ?? null,
     raw_audio_url: tempTrackData.rawAudioUrl ?? null,
     created_at: new Date().toISOString(),
+    artist_name: tempTrackData.artistName?.trim() || "Unknown Artist",
+    album_name: tempTrackData.albumName?.trim() || "Singles",
   };
   window.dispatchEvent(new CustomEvent(VAULT_NEW_GENERATION_EVENT, { detail: track }));
 }

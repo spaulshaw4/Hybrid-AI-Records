@@ -14,6 +14,8 @@ export type UserVaultRow = {
   /** Raw Gate 1 engine audio, before stems and mastering. */
   rawAudioUrl: string;
   createdAt: string;
+  artistName: string;
+  albumName: string;
 };
 
 const createSchema = z.object({
@@ -81,6 +83,8 @@ export const listUserVaultTracks = createServerFn({ method: "POST" })
         vocalUrl: row.vocal_url ?? "",
         rawAudioUrl: row.raw_audio_url ?? "",
         createdAt: row.created_at,
+        artistName: row.artist_name,
+        albumName: row.album_name,
       }));
     } catch (error) {
       console.warn(

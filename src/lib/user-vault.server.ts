@@ -27,6 +27,8 @@ export type UserVaultApiTrack = {
   vocal_url: string | null;
   raw_audio_url: string | null;
   created_at: string;
+  artist_name: string;
+  album_name: string;
 };
 
 export function asVaultStatus(value: string | null | undefined): UserVaultStatus {
@@ -140,27 +142,17 @@ export async function persistUserVault(
 }
 
 async function toApiTracks(
-  rows: Array<{
-    id: string;
-    title: string | null;
-    style: string | null;
-    status: string | null;
-    master_url: string | null;
-    instrumental_url: string | null;
-    vocal_url: string | null;
-    raw_audio_url?: string | null;
-    created_at: string;
-  }>,
+  rows: Array<Record<string, unknown>>,
 ): Promise<UserVaultApiTrack[]> {
   let signed = new Map<string, string>();
   try {
     const { signedUrlsForStored } = await import("@/lib/track-refresh.server");
     signed = await signedUrlsForStored(
       rows.flatMap((row) => [
-        row.master_url,
-        row.instrumental_url,
-        row.vocal_url,
-        row.raw_audio_url ?? null,
+        typeof row.master_url === "string" ? row.master_url : null,
+        typeof row.instrumental_url === "string" ? row.instrumental_url : null,
+        typeof row.vocal_url === "string" ? row.vocal_url : null,
+        typeof row.raw_audio_url === "string" ? row.raw_audio_url : null,
       ]),
     );
   } catch (error) {
@@ -169,13 +161,15 @@ async function toApiTracks(
       error instanceof Error ? error.message : error,
     );
   }
-  const resolve = (url: string | null) => (url ? (signed.get(url) ?? url) : null);
+  const resolve = (url: unknown) =>
+    typeof url === "string" && url ? (signed.get(url) ?? url) : null;
   return sanitizeVaultTracks(
     rows.map((row) => ({
+      ...row,
       id: row.id,
       title: row.title || "Untitled Generation",
       style: row.style || "Custom",
-      status: asVaultStatus(row.status),
+      status: asVaultStatus(typeof row.status === "string" ? row.status : null),
       master_url: resolve(row.master_url),
       instrumental_url: resolve(row.instrumental_url),
       vocal_url: resolve(row.vocal_url),
@@ -185,22 +179,47 @@ async function toApiTracks(
   );
 }
 
+const VAULT_SELECT_WITH_RELATIONS = "*, album:albums(*), artist:artists(*)";
+const VAULT_SELECT_FLAT =
+  "id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at, artist_name, album_name, artist_id, album_id";
+
 export async function listUserVaultApiTracks(userId: string): Promise<UserVaultApiTrack[]> {
   let remote: UserVaultApiTrack[] = [];
   try {
     const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = tryGetSupabaseAdmin();
     if (admin) {
-      const { data, error } = await admin
+      let data: unknown[] | null = null;
+      let error: { message: string } | null = null;
+
+      const joined = await admin
         .from("user_vault")
-        .select("id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at")
+        .select(VAULT_SELECT_WITH_RELATIONS)
         .eq("user_id", userId)
         .or("status.eq.completed,status.eq.processing,master_url.not.is.null")
         .order("created_at", { ascending: false });
+
+      if (joined.error) {
+        console.warn(
+          "[user_vault] relation join unavailable — falling back to flat select:",
+          joined.error.message,
+        );
+        const flat = await admin
+          .from("user_vault")
+          .select(VAULT_SELECT_FLAT)
+          .eq("user_id", userId)
+          .or("status.eq.completed,status.eq.processing,master_url.not.is.null")
+          .order("created_at", { ascending: false });
+        data = flat.data;
+        error = flat.error;
+      } else {
+        data = joined.data;
+      }
+
       if (error) {
         console.warn("[user_vault] list failed", error.message);
       } else {
-        remote = await toApiTracks(data ?? []);
+        remote = await toApiTracks((data ?? []) as Array<Record<string, unknown>>);
       }
     }
   } catch (error) {
@@ -227,16 +246,28 @@ export async function getUserVaultApiTrack(
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data, error } = await supabaseAdmin
       .from("user_vault")
-      .select("id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at")
+      .select(VAULT_SELECT_WITH_RELATIONS)
       .eq("user_id", userId)
       .eq("id", trackId)
       .maybeSingle();
     if (error) {
-      console.warn("[user_vault] get failed", error.message);
-      return null;
+      // Relation join may be unavailable before migration — retry flat.
+      const flat = await supabaseAdmin
+        .from("user_vault")
+        .select(VAULT_SELECT_FLAT)
+        .eq("user_id", userId)
+        .eq("id", trackId)
+        .maybeSingle();
+      if (flat.error) {
+        console.warn("[user_vault] get failed", flat.error.message);
+        return null;
+      }
+      if (!flat.data) return null;
+      const [track] = await toApiTracks([flat.data as Record<string, unknown>]);
+      return track ?? null;
     }
     if (!data) return null;
-    const [track] = await toApiTracks([data]);
+    const [track] = await toApiTracks([data as Record<string, unknown>]);
     return track ?? null;
   } catch (error) {
     console.warn(

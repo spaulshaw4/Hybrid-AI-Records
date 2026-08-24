@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   asVaultTrackStatus,
+  groupVaultTracksByArtistAlbum,
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
+  VAULT_DEFAULT_ALBUM,
+  VAULT_DEFAULT_ARTIST,
 } from "@/lib/vault-tracks";
 
 describe("sanitizeVaultTracks", () => {
@@ -24,6 +27,24 @@ describe("sanitizeVaultTracks", () => {
     ]);
     expect(row?.status).toBe("completed");
     expect(row?.master_url).toBe("https://cdn.example/master.mp3");
+    expect(row?.artist_name).toBe(VAULT_DEFAULT_ARTIST);
+    expect(row?.album_name).toBe(VAULT_DEFAULT_ALBUM);
+  });
+
+  it("resolves artist/album from PostgREST embeds", () => {
+    const [row] = sanitizeVaultTracks([
+      {
+        id: "track-rel",
+        title: "Joined",
+        status: "completed",
+        master_url: "https://cdn.example/master.mp3",
+        created_at: "2026-08-22T00:00:00.000Z",
+        artist: { id: "a1", name: "Hybrid AI" },
+        album: { id: "b1", name: "Night Drive" },
+      },
+    ]);
+    expect(row?.artist_name).toBe("Hybrid AI");
+    expect(row?.album_name).toBe("Night Drive");
   });
 
   it("treats completed rows with a null audio_url as failed, not playable", () => {
@@ -66,6 +87,56 @@ describe("sanitizeVaultTracks", () => {
     ]);
     expect(row?.status).toBe("completed");
     expect(row?.master_url).toBe("/api/local-vault/masters/track_master.mp3");
+  });
+});
+
+describe("groupVaultTracksByArtistAlbum", () => {
+  it("groups artist_name → album_name", () => {
+    const grouped = groupVaultTracksByArtistAlbum(
+      sanitizeVaultTracks([
+        {
+          id: "1",
+          title: "B",
+          status: "completed",
+          master_url: "https://cdn.example/b.mp3",
+          created_at: "2026-08-22T02:00:00.000Z",
+          artist_name: "Hybrid AI",
+          album_name: "Night Drive",
+        },
+        {
+          id: "2",
+          title: "A",
+          status: "completed",
+          master_url: "https://cdn.example/a.mp3",
+          created_at: "2026-08-22T03:00:00.000Z",
+          artist_name: "Hybrid AI",
+          album_name: "Night Drive",
+        },
+        {
+          id: "3",
+          title: "Solo",
+          status: "completed",
+          master_url: "https://cdn.example/c.mp3",
+          created_at: "2026-08-22T01:00:00.000Z",
+          artist_name: "Hybrid AI",
+          album_name: "Singles",
+        },
+        {
+          id: "4",
+          title: "Other",
+          status: "completed",
+          master_url: "https://cdn.example/d.mp3",
+          created_at: "2026-08-22T01:00:00.000Z",
+          artist: { name: "Jester AI" },
+          album: { name: "Campfire" },
+        },
+      ]),
+    );
+
+    expect(grouped.map((g) => g.artist_name)).toEqual(["Hybrid AI", "Jester AI"]);
+    expect(grouped[0]?.albums.map((a) => a.album_name)).toEqual(["Night Drive", "Singles"]);
+    expect(grouped[0]?.albums[0]?.tracks.map((t) => t.id)).toEqual(["2", "1"]);
+    expect(grouped[1]?.albums[0]?.album_name).toBe("Campfire");
   });
 });
 

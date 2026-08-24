@@ -1110,6 +1110,10 @@ export type Database = {
       }
       user_vault: {
         Row: {
+          album_id: string | null
+          album_name: string | null
+          artist_id: string | null
+          artist_name: string | null
           created_at: string
           id: string
           instrumental_url: string | null
@@ -1122,6 +1126,10 @@ export type Database = {
           vocal_url: string | null
         }
         Insert: {
+          album_id?: string | null
+          album_name?: string | null
+          artist_id?: string | null
+          artist_name?: string | null
           created_at?: string
           id?: string
           instrumental_url?: string | null
@@ -1134,6 +1142,10 @@ export type Database = {
           vocal_url?: string | null
         }
         Update: {
+          album_id?: string | null
+          album_name?: string | null
+          artist_id?: string | null
+          artist_name?: string | null
           created_at?: string
           id?: string
           instrumental_url?: string | null
@@ -1145,7 +1157,78 @@ export type Database = {
           user_id?: string | null
           vocal_url?: string | null
         }
+        Relationships: [
+          {
+            foreignKeyName: "user_vault_album_id_fkey"
+            columns: ["album_id"]
+            isOneToOne: false
+            referencedRelation: "albums"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_vault_artist_id_fkey"
+            columns: ["artist_id"]
+            isOneToOne: false
+            referencedRelation: "artists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      artists: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          user_id?: string | null
+        }
         Relationships: []
+      }
+      albums: {
+        Row: {
+          artist_id: string | null
+          cover_url: string | null
+          created_at: string
+          id: string
+          name: string
+          user_id: string | null
+        }
+        Insert: {
+          artist_id?: string | null
+          cover_url?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          user_id?: string | null
+        }
+        Update: {
+          artist_id?: string | null
+          cover_url?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "albums_artist_id_fkey"
+            columns: ["artist_id"]
+            isOneToOne: false
+            referencedRelation: "artists"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_notifications: {
         Row: {
