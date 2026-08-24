@@ -26,6 +26,18 @@ import { AudioVault } from "@/components/AudioVault";
 import { supabase } from "@/integrations/supabase/client";
 import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
 
+/** Temporary live-test escape hatch — set in DevTools: localStorage.hybrid:allowTokenless = "1" */
+function allowTokenlessGenerate(): boolean {
+  if (isDevAuthBypass()) return true;
+  if (import.meta.env.VITE_HYBRID_ALLOW_TOKENLESS_GENERATE === "1") return true;
+  if (import.meta.env.VITE_HYBRID_ALLOW_TOKENLESS_GENERATE === "true") return true;
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem("hybrid:allowTokenless") === "1";
+  } catch {
+    return false;
+  }
+}
+
 import { checkEngineHealth, generateEngineTrack, getEngineTrackTask } from "@/lib/apiframe-music.functions";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
 import {
@@ -2121,7 +2133,7 @@ export function AudioStudio() {
     }
     // A failed balance read leaves `balance` unknown (null). Never treat that
     // as "no tokens" — re-check with the server before blocking the render.
-    if (balance !== null && balance < 1) {
+    if (!allowTokenlessGenerate() && balance !== null && balance < 1) {
       setTopUpOpen(true);
       return;
     }
@@ -2242,7 +2254,7 @@ export function AudioStudio() {
       // generated, archived to storage and committed to the vault.
       // A hiccup on this read must not cancel the render: the spend step at
       // the end is the real guard and it can never overdraw.
-      let current: number | null = isDevAuthBypass() ? DEV_TEST_TOKEN_BALANCE : null;
+      let current: number | null = allowTokenlessGenerate() ? DEV_TEST_TOKEN_BALANCE : null;
       for (let attempt = 0; attempt < 2 && current === null; attempt += 1) {
         try {
           current = (await fetchBalance({ data: undefined })).balance;
@@ -2251,7 +2263,7 @@ export function AudioStudio() {
         }
       }
       if (current !== null) setBalance(current);
-      if (current !== null && current < 1) {
+      if (!allowTokenlessGenerate() && current !== null && current < 1) {
         setTopUpOpen(true);
         const message = "You need at least 1 Hybrid Token to generate a track.";
         failPipelineStep("validate", new Error(message));

@@ -180,7 +180,11 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     getMusicApiKey();
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
     const { DEV_TEST_VOICE_ID, isDevAuthBypass } = await import("@/lib/dev-auth");
-    if (!isDevAuthBypass()) {
+    const allowTokenless =
+      isDevAuthBypass() ||
+      process.env.HYBRID_ALLOW_TOKENLESS_GENERATE === "1" ||
+      process.env.HYBRID_ALLOW_TOKENLESS_GENERATE === "true";
+    if (!allowTokenless) {
     // Entitlement gate. Tokens are charged only after a successful render, but
     // the render itself costs real money, so the server refuses to start one
     // for an account with no balance instead of trusting the browser's check.
