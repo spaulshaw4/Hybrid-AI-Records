@@ -260,6 +260,7 @@ export async function replicateGeminiFlashLyrics(input: {
           system_instruction: input.systemInstruction,
           max_output_tokens: 2048,
           temperature: 0.7,
+          thinking_budget: 0,
         },
       }),
     },
