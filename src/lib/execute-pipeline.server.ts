@@ -308,6 +308,18 @@ export async function executePipeline(
         status: "processing",
       });
 
+      // Prisma Track row — soft-fail so missing DATABASE_URL never blocks Gate 1.
+      await runSafeHook("prisma upsert Track", async () => {
+        const { upsertPipelineTrack } = await import("@/lib/prisma.server");
+        await upsertPipelineTrack({
+          id: trackId,
+          title: input.title || "Studio Master",
+          prompt: input.prompt || input.style || "",
+          status: "PROCESSING",
+          gateMask: 0,
+        });
+      });
+
       const supabaseAdmin = requireSupabaseAdmin();
 
       // ── Gate 1: Base Generation (AIMusicAPI) ─────────────────────────────
@@ -379,6 +391,13 @@ export async function executePipeline(
       emitGateProgress(PipelineGate.COMPOSITION);
       billGate(PipelineGate.COMPOSITION);
       await afterGate({ trackId, gate: 1, stage: "gate_1_generating" }, "audio buffer ready");
+      await runSafeHook("prisma patch Gate 1", async () => {
+        const { patchPipelineTrack } = await import("@/lib/prisma.server");
+        await patchPipelineTrack(trackId, {
+          status: "COMPOSITION_DONE",
+          gateMask,
+        });
+      });
 
       // ── Gate 2: Supabase Storage & Public CDN Link ───────────────────────
       if (!hasPassedGate(gateMask, PipelineGate.COMPOSITION)) {
@@ -841,6 +860,14 @@ export async function executePipeline(
         console.error(
           `[Pipeline Failed] Gate ${failedGate}/6 aborted for track ${trackId}: ${message} gateMask=0b${gateMask.toString(2)}`,
         );
+      });
+      await runSafeHook("prisma patch fail", async () => {
+        const { patchPipelineTrack } = await import("@/lib/prisma.server");
+        await patchPipelineTrack(trackId, {
+          status: "FAILED",
+          gateMask,
+          errorMessage: message.slice(0, 2000),
+        });
       });
       telemetry = safeBumpTelemetry(telemetry, failedGate, "landing_aborted");
       // Zero-charge rollback path — incomplete mask never debits tokens.
