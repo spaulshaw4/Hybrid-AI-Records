@@ -749,7 +749,9 @@ export async function executePipeline(
       }
 
       if (!mastered.masterUrl || !mastered.mixed) {
-        throw new Error("[Gate 6 Error] Mastering did not produce a playable master.");
+        throw new Error(
+          `[Gate 6 Error] Mastering did not produce a playable master (mixed=${mastered.mixed}, masterUrl=${mastered.masterUrl ? "set" : "null"}).`,
+        );
       }
 
       let finalMasterUrl = mastered.masterUrl;

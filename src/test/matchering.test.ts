@@ -46,7 +46,7 @@ describe("Matchering 2.0 mix + master contract", () => {
     ]);
     expect(graph).toContain("volume=1.0");
     expect(graph).toContain(
-      "[inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=11:TP=-1.5[core]",
+      "[inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=7:TP=-1.0[core]",
     );
     expect(graph).toContain("[core]anull[out]");
     expect(graph).not.toContain("concat=");
@@ -62,6 +62,8 @@ describe("Matchering 2.0 mix + master contract", () => {
     );
     expect(args).toContain("-filter_complex");
     expect(args).toContain("pcm_s24le");
+    expect(args).toContain("-f");
+    expect(args[args.indexOf("-f") + 1]).toBe("wav");
     expect(args).toContain("mix.wav");
   });
 
@@ -103,6 +105,8 @@ describe("Matchering 2.0 mix + master contract", () => {
       "44100",
       "-b:a",
       "320k",
+      "-f",
+      "mp3",
       "out.mp3",
     ]);
   });
@@ -195,6 +199,6 @@ describe("Matchering 2.0 mix + master contract", () => {
   });
 
   it("caps the pipeline so a stuck worker cannot hang generation", () => {
-    expect(MATCHERING_PIPELINE_TIMEOUT_MS).toBe(90_000);
+    expect(MATCHERING_PIPELINE_TIMEOUT_MS).toBe(300_000);
   });
 });

@@ -399,8 +399,37 @@ async function mixAndMasterOnce(options: {
     const reference = resolveMatcheringReferencePath(cwd);
     let masteredWav = mixPath;
     let matched = false;
-    if (reference && (await fileExists(reference))) {
-      console.log("[master] Running Matchering 2.0 mastering pass...");
+
+    // Preferred path: upload premaster to Supabase, Matchering on Replicate with
+    // REPLICATE_API_TOKEN + reachable HTTPS URIs (never local disk paths).
+    try {
+      const premasterBytes = new Uint8Array(await readFile(mixPath));
+      const { matcheringFromPremasterBytes } = await import(
+        "@/lib/replicate-matchering.server"
+      );
+      const replicateMasterUrl = await matcheringFromPremasterBytes({
+        premasterWav: premasterBytes,
+        userId: options.userId,
+        taskId: options.taskId,
+      });
+      if (replicateMasterUrl) {
+        console.log("[master] Replicate Matchering succeeded — downloading master");
+        await downloadStem(replicateMasterUrl, matchedPath);
+        if (await fileExists(matchedPath)) {
+          masteredWav = matchedPath;
+          matched = true;
+          console.log("[master] Replicate Matchering 2.0 finished");
+        }
+      }
+    } catch (replicateError) {
+      console.warn(
+        "[master] Replicate Matchering failed — trying local / FFmpeg fallback",
+        replicateError instanceof Error ? replicateError.message : replicateError,
+      );
+    }
+
+    if (!matched && reference && (await fileExists(reference))) {
+      console.log("[master] Running local Matchering 2.0 mastering pass...");
       matched = await runMatcheringPython({
         scriptPath: join(cwd, MATCHERING_SCRIPT_RELATIVE),
         target: mixPath,
@@ -411,19 +440,47 @@ async function mixAndMasterOnce(options: {
         masteredWav = matchedPath;
         console.log("[master] Matchering 2.0 finished");
       } else {
-        console.warn("[master] Matchering skipped — applying FFmpeg finish filter");
+        console.warn("[master] Local Matchering skipped — applying FFmpeg finish filter");
       }
-    } else {
+    } else if (!matched) {
       console.warn(
-        `[matchering] no reference at ${MATCHERING_REFERENCE_RELATIVE} — skip Matchering`,
+        `[matchering] no Replicate/local reference at ${MATCHERING_REFERENCE_RELATIVE} — skip Matchering`,
+      );
+    }
+
+    // Gate 6 finalize: Resemble Enhance (pinned version) on the premaster /
+    // matched WAV — public HTTPS upload, REPLICATE_API_TOKEN, poll to succeeded.
+    const enhancedPath = join(tmp, "enhanced.wav");
+    try {
+      const sourceBytes = new Uint8Array(await readFile(masteredWav));
+      const { enhancePremasterBytes } = await import(
+        "@/lib/replicate-resemble-enhance.server"
+      );
+      const enhancedUrl = await enhancePremasterBytes({
+        premasterWav: sourceBytes,
+        userId: options.userId,
+        taskId: options.taskId,
+        denoise: true,
+      });
+      console.log("[master] Resemble Enhance succeeded — downloading enhanced master");
+      await downloadStem(enhancedUrl, enhancedPath);
+      if (await fileExists(enhancedPath)) {
+        masteredWav = enhancedPath;
+        matched = true;
+        console.log("[master] Resemble Enhance finished — ready for FFmpeg LUFS finish");
+      }
+    } catch (enhanceError) {
+      console.warn(
+        "[master] Resemble Enhance failed — continuing with FFmpeg finish on premaster",
+        enhanceError instanceof Error ? enhanceError.message : enhanceError,
       );
     }
 
     // Always finish with deterministic EBU R128 (-14 LUFS / -1.0 dBFS).
-    // Dynamic Matchering may shape the mix; loudnorm is never skipped.
+    // Dynamic Matchering / Enhance may shape the mix; loudnorm is never skipped.
     if (!matched) {
       console.warn(
-        "[Gate 6] Dynamic Matchering unavailable — applying static EBU R128 loudnorm=I=-14:LRA=7:tp=-1.0",
+        "[Gate 6] Dynamic enhance unavailable — applying static EBU R128 loudnorm=I=-14:LRA=7:tp=-1.0",
       );
     }
     console.log("[master] applying deterministic FFmpeg EBU R128 mastering filter (-14 LUFS / -1.0 dBFS)");
@@ -546,10 +603,15 @@ export async function mixAndMasterHybridTrack(options: {
     const { logPipelineStepError } = await import("@/lib/pipeline-steps.server");
     logPipelineStepError("mastering", error);
     if (shouldRethrowPipelineControlError(error)) throw error;
-    console.warn(
-      "[matchering] pipeline skipped",
-      error instanceof Error ? error.message : error,
-    );
+    // Remux / encode failures must surface — returning a null master hides the
+    // real FFmpeg error behind "did not produce a playable master".
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (
+      /FFmpeg|timed out|not installed|Sample rate|GATE_4|remux|empty/i.test(message)
+    ) {
+      throw error instanceof Error ? error : new Error(message);
+    }
+    console.warn("[matchering] pipeline skipped", message);
     return { masterUrl: null, matched: false, mixed: false };
   }
 }

@@ -11,7 +11,7 @@ export const GATE_TIMEOUTS_MS = {
   /** Demucs + GPU cold-start; must exceed Cancel-After / poll (see stems.server). */
   4: 360_000,
   5: 60_000, // Fish Audio conversion
-  6: 60_000, // FFmpeg mastering + master Supabase upload
+  6: 300_000, // Resemble Enhance + optional Matchering + FFmpeg finish + vault
 } as const;
 
 export type StudioGateId = 1 | 2 | 3 | 4 | 5 | 6;
@@ -22,7 +22,7 @@ const GATE_LABELS: Record<StudioGateId, string> = {
   3: "CWALO structure analysis",
   4: "Demucs stem separation",
   5: "Fish Audio voice conversion",
-  6: "FFmpeg mastering + final commit",
+  6: "Resemble Enhance mastering + final commit",
 };
 
 export function gateTimeoutMs(gate: StudioGateId): number {

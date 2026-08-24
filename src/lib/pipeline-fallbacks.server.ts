@@ -110,6 +110,8 @@ export function buildStaticMasterFfmpegArgs(
     "44100",
     "-c:a",
     "pcm_s24le",
+    "-f",
+    "wav",
     outputWav,
   ];
 }

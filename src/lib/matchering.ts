@@ -2,11 +2,13 @@ import { HYBRID_INTRO_SECONDS } from "@/lib/hybrid-track-pipeline";
 import { GATE_6_EBU_R128_MASTERING_FILTER } from "@/lib/loudnorm";
 import { masteredTrackObjectPath } from "@/lib/audio-vault";
 
-/** Hard cap so a stuck Python/FFmpeg child never hangs a generation. */
-export const MATCHERING_PIPELINE_TIMEOUT_MS = 60_000;
-/** Matchering 2.0 itself: after 30s abort and finish with FFmpeg loudnorm. */
+/** Hard cap so a stuck Python/FFmpeg/Replicate child never hangs a generation. */
+export const MATCHERING_PIPELINE_TIMEOUT_MS = 300_000;
+/** Local Matchering 2.0: after 30s abort and finish with FFmpeg loudnorm. */
 export const MATCHERING_PROCESS_TIMEOUT_MS = 30_000;
 export const MATCHERING_MIX_TIMEOUT_MS = 60_000;
+/** Replicate jimothyjohn/matchering Cancel-After + poll budget. */
+export const MATCHERING_REPLICATE_TIMEOUT_MS = 120_000;
 
 export const MATCHERING_REFERENCE_RELATIVE = "public/references/master_reference.wav";
 export const MATCHERING_SCRIPT_RELATIVE = "scripts/matchering_master.py";
@@ -145,6 +147,14 @@ export function hybridMixIncludesLoudnorm(stems: HybridStemInputs): boolean {
   return Boolean(stems.instrumentalPath && stems.vocalPath);
 }
 
+/** Explicit muxer so atomic `*.tmp.wav` / `*.tmp.mp3` paths never confuse FFmpeg. */
+export function ffmpegContainerFlags(outputPath: string): string[] {
+  const lower = outputPath.toLowerCase();
+  if (lower.endsWith(".wav") || lower.includes(".wav.")) return ["-f", "wav"];
+  if (lower.endsWith(".mp3") || lower.includes(".mp3.")) return ["-f", "mp3"];
+  return [];
+}
+
 export function buildHybridMixArgs(
   stems: HybridStemInputs,
   outputWav: string,
@@ -153,6 +163,7 @@ export function buildHybridMixArgs(
   const slots = collectHybridStems(stems);
   if (slots.length === 0) throw new Error("No stems to mix.");
   const inputs = slots.flatMap((slot) => ["-i", slot.path]);
+  const format = ffmpegContainerFlags(outputWav);
   if (slots.length === 1) {
     return [
       "-y",
@@ -162,6 +173,7 @@ export function buildHybridMixArgs(
       ...GATE_6_OUTPUT_SPECS,
       "-c:a",
       "pcm_s24le",
+      ...format,
       outputWav,
     ];
   }
@@ -179,6 +191,7 @@ export function buildHybridMixArgs(
     ...GATE_6_OUTPUT_SPECS,
     "-c:a",
     "pcm_s24le",
+    ...format,
     outputWav,
   ];
 }
@@ -295,6 +308,7 @@ export function matcheringFinishArgs(
     ...GATE_6_OUTPUT_SPECS,
     "-b:a",
     "320k",
+    ...ffmpegContainerFlags(outputMp3),
     outputMp3,
   ];
 }

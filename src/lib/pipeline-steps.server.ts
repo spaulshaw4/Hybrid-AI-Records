@@ -11,7 +11,7 @@ export const PIPELINE_STEP_LOGS = {
   cwalo: ">>> [3/6: STRUCTURE] CWALO all-in-one music structure analysis",
   stems: ">>> [4/6: STEMS] Replicate Demucs separation",
   vocals: ">>> [5/6: VOCALS] Fish Audio Plus vocal synthesis",
-  mastering: ">>> [6/6: MASTERING] FFmpeg remux + final Supabase commit",
+  mastering: ">>> [6/6: MASTERING] Resemble Enhance + FFmpeg finish",
 } as const;
 
 export type PipelineStepId = keyof typeof PIPELINE_STEP_LOGS;
@@ -23,7 +23,7 @@ const PIPELINE_PROVIDERS: Record<PipelineStepId, string> = {
   cwalo: "Replicate CWALO structure analysis",
   stems: "Replicate Demucs",
   vocals: "Fish Audio Plus",
-  mastering: "FFmpeg + Supabase vault",
+  mastering: "Resemble Enhance + FFmpeg",
 };
 
 export function logPipelineStep(step: PipelineStepId): void {

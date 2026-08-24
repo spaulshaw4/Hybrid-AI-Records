@@ -4,7 +4,13 @@
  */
 
 import fs from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
+
+/** Keep the real media extension on atomic temps so FFmpeg can pick a muxer. */
+function atomicTempPath(targetPath: string): string {
+  const ext = extname(targetPath);
+  return `${targetPath}.${Date.now()}.tmp${ext}`;
+}
 
 // ==========================================
 // 1. In-Memory Process Mutex Lock
@@ -81,7 +87,7 @@ export async function writeAtomicAudioFile(
   targetPath: string,
   data: Buffer | Uint8Array,
 ): Promise<string> {
-  const tempPath = `${targetPath}.${Date.now()}.tmp`;
+  const tempPath = atomicTempPath(targetPath);
   const lockPath = `${targetPath}.lock`;
   await fs.promises.mkdir(dirname(targetPath), { recursive: true });
 
@@ -112,7 +118,7 @@ export async function produceAtomicAudioFile(
   targetPath: string,
   producer: (tmpPath: string) => Promise<void>,
 ): Promise<string> {
-  const tempPath = `${targetPath}.${Date.now()}.tmp`;
+  const tempPath = atomicTempPath(targetPath);
   const lockPath = `${targetPath}.lock`;
   await fs.promises.mkdir(dirname(targetPath), { recursive: true });
 
