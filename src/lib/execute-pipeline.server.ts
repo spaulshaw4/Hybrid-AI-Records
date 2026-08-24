@@ -3,7 +3,8 @@
  * lock → Gate 1–6 with circuit breakers → unlock + temp cleanup in finally.
  */
 
-import { AUDIO_VAULT_BUCKET } from "@/lib/audio-vault";
+import { AUDIO_VAULT_BUCKET, resolveAudioVaultBucket } from "@/lib/audio-vault";
+import { ensureAudioVaultBucket } from "@/lib/audio-vault-ensure.server";
 import { requireSupabaseAdmin } from "@/integrations/supabase/client.server";
 import { GATE_TIMEOUTS_MS, withTimeout } from "@/lib/pipeline-gate.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
@@ -409,17 +410,23 @@ export async function executePipeline(
       await beforeGate({ trackId, gate: 2, stage: "gate_2_vaulting" });
       reportPipelineProgress("vault", PIPELINE_PROGRESS.vault, undefined, gateMask);
       const rawPath = `raw/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp3`;
-      console.log(`[Gate 2/6] Vault ingest via supabaseAdmin → ${AUDIO_VAULT_BUCKET}/${rawPath}`);
+      const vaultBucket = resolveAudioVaultBucket() || AUDIO_VAULT_BUCKET;
+      await ensureAudioVaultBucket(supabaseAdmin, vaultBucket);
+      console.log(`[Gate 2/6] Vault ingest via supabaseAdmin → ${vaultBucket}/${rawPath}`);
       await withTimeout(
         (async () => {
           try {
-            const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(
+            const { error } = await supabaseAdmin.storage.from(vaultBucket).upload(
               rawPath,
               rawAudioBuffer,
               { contentType: "audio/mpeg", upsert: true, cacheControl: "31536000" },
             );
             if (error) {
-              console.error("[Gate 2 Error] Supabase vault upload failed:", error.message, error);
+              console.error(
+                `[Gate 2 Error] Supabase vault upload failed (bucket=${vaultBucket}):`,
+                error.message,
+                error,
+              );
               throw new Error(`[Gate 2 Error] ${error.message}`);
             }
           } catch (uploadErr) {
@@ -437,7 +444,7 @@ export async function executePipeline(
       );
       const {
         data: { publicUrl: publicAudioUrl },
-      } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
+      } = supabaseAdmin.storage.from(vaultBucket).getPublicUrl(rawPath);
       if (
         !publicAudioUrl ||
         !publicAudioUrl.startsWith("http") ||
@@ -750,16 +757,22 @@ export async function executePipeline(
         const masterBuffer = await downloadBuffer(mastered.masterUrl);
         residue.trackBuffer(masterBuffer);
         const masterPath = `masters/${trackId.replace(/[^a-zA-Z0-9_-]/g, "_")}_master.wav`;
+        const masterBucket = resolveAudioVaultBucket() || AUDIO_VAULT_BUCKET;
+        await ensureAudioVaultBucket(supabaseAdmin, masterBucket);
         await withTimeout(
           (async () => {
             try {
-              const { error } = await supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).upload(
+              const { error } = await supabaseAdmin.storage.from(masterBucket).upload(
                 masterPath,
                 masterBuffer,
                 { contentType: "audio/wav", upsert: true, cacheControl: "31536000" },
               );
               if (error) {
-                console.error("[Gate 6 Error] Supabase master vault upload failed:", error.message, error);
+                console.error(
+                  `[Gate 6 Error] Supabase master vault upload failed (bucket=${masterBucket}):`,
+                  error.message,
+                  error,
+                );
                 throw new Error(error.message);
               }
             } catch (uploadErr) {
@@ -774,7 +787,7 @@ export async function executePipeline(
         );
         const {
           data: { publicUrl },
-        } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
+        } = supabaseAdmin.storage.from(masterBucket).getPublicUrl(masterPath);
         if (publicUrl?.startsWith("http")) finalMasterUrl = publicUrl;
       } catch (err) {
         console.warn(

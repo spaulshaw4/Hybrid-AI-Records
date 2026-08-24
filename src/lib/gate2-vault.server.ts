@@ -6,7 +6,8 @@
  * Does not alter database column schemas.
  */
 
-import { AUDIO_VAULT_BUCKET } from "@/lib/audio-vault";
+import { AUDIO_VAULT_BUCKET, resolveAudioVaultBucket } from "@/lib/audio-vault";
+import { ensureAudioVaultBucket } from "@/lib/audio-vault-ensure.server";
 import { requireSupabaseAdmin } from "@/integrations/supabase/client.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
 import { GATE_TIMEOUTS_MS, withTimeout } from "@/lib/pipeline-gate.server";
@@ -30,19 +31,21 @@ export async function runGate2SupabaseVault(input: {
   rawAudioBuffer: Uint8Array;
   trackId: string;
 }): Promise<Gate2VaultResult> {
-  console.log("[Gate 2/6] Supabase Vault Upload...");
+  const bucket = resolveAudioVaultBucket() || AUDIO_VAULT_BUCKET;
+  console.log(`[Gate 2/6] Supabase Vault Upload → bucket=${bucket}`);
   if (!input.rawAudioBuffer?.byteLength) {
     throw new Error("[Circuit Breaker] Gate 2 failed: Empty audio buffer for vault upload.");
   }
 
   const rawPath = rawObjectPath(input.trackId);
   const supabaseAdmin = requireSupabaseAdmin();
+  await ensureAudioVaultBucket(supabaseAdmin, bucket);
 
   await withTimeout(
     (async () => {
       try {
         const { error } = await supabaseAdmin.storage
-          .from(AUDIO_VAULT_BUCKET)
+          .from(bucket)
           .upload(rawPath, input.rawAudioBuffer, {
             /** Gate 2 raw tracks are always MPEG. */
             contentType: "audio/mpeg",
@@ -50,7 +53,11 @@ export async function runGate2SupabaseVault(input: {
             cacheControl: "31536000",
           });
         if (error) {
-          console.error("[Gate 2 Error] Supabase vault upload failed:", error.message, error);
+          console.error(
+            `[Gate 2 Error] Supabase vault upload failed (bucket=${bucket}):`,
+            error.message,
+            error,
+          );
           throw new Error(`[Circuit Breaker] Gate 2 upload failed: ${error.message}`);
         }
       } catch (uploadErr) {
@@ -71,7 +78,7 @@ export async function runGate2SupabaseVault(input: {
 
   const {
     data: { publicUrl: publicAudioUrl },
-  } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(rawPath);
+  } = supabaseAdmin.storage.from(bucket).getPublicUrl(rawPath);
 
   if (!publicAudioUrl || !publicAudioUrl.startsWith("http") || !isPublicHttpAudioUrl(publicAudioUrl)) {
     throw new Error(
@@ -91,16 +98,18 @@ export async function commitMasterToVault(input: {
   trackId: string;
   contentType?: string;
 }): Promise<string> {
+  const bucket = resolveAudioVaultBucket() || AUDIO_VAULT_BUCKET;
   const id = input.trackId.replace(/[^a-zA-Z0-9_-]/g, "_") || "track";
   const masterPath = `masters/${id}_master.wav`;
   const supabaseAdmin = requireSupabaseAdmin();
+  await ensureAudioVaultBucket(supabaseAdmin, bucket);
 
   const contentType = "audio/wav";
   await withTimeout(
     (async () => {
       try {
         const { error } = await supabaseAdmin.storage
-          .from(AUDIO_VAULT_BUCKET)
+          .from(bucket)
           .upload(masterPath, input.masterBuffer, {
             /** Gate 6 masters are always WAV at the vault boundary. */
             contentType,
@@ -108,7 +117,11 @@ export async function commitMasterToVault(input: {
             cacheControl: "31536000",
           });
         if (error) {
-          console.error("[Gate 6 Error] Supabase master vault upload failed:", error.message, error);
+          console.error(
+            `[Gate 6 Error] Supabase master vault upload failed (bucket=${bucket}):`,
+            error.message,
+            error,
+          );
           throw new Error(`[Circuit Breaker] Gate 6 final commit failed: ${error.message}`);
         }
       } catch (uploadErr) {
@@ -129,7 +142,7 @@ export async function commitMasterToVault(input: {
 
   const {
     data: { publicUrl: finalMasterUrl },
-  } = supabaseAdmin.storage.from(AUDIO_VAULT_BUCKET).getPublicUrl(masterPath);
+  } = supabaseAdmin.storage.from(bucket).getPublicUrl(masterPath);
 
   if (!finalMasterUrl || !finalMasterUrl.startsWith("http") || !isPublicHttpAudioUrl(finalMasterUrl)) {
     throw new Error(

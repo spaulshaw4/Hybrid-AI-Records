@@ -1,5 +1,22 @@
 /** Dedicated bucket for vault masters (dashboard: Storage → audio-vault). */
-export const AUDIO_VAULT_BUCKET = "audio-vault";
+const DEFAULT_AUDIO_VAULT_BUCKET = "audio-vault";
+
+/**
+ * Resolves the Gate 2 / master vault bucket.
+ * Override with `AUDIO_VAULT_BUCKET` or `SUPABASE_AUDIO_VAULT_BUCKET`
+ * (e.g. `raw-vault` if that is the project’s configured name).
+ */
+export function resolveAudioVaultBucket(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined"
+    ? process.env
+    : {},
+): string {
+  const fromEnv =
+    env.AUDIO_VAULT_BUCKET?.trim() || env.SUPABASE_AUDIO_VAULT_BUCKET?.trim() || "";
+  return fromEnv || DEFAULT_AUDIO_VAULT_BUCKET;
+}
+
+export const AUDIO_VAULT_BUCKET = resolveAudioVaultBucket();
 
 /** Studio engine archive bucket (stems and fallback masters). */
 export const STUDIO_AUDIO_BUCKET = "studio-deliveries";
@@ -28,7 +45,8 @@ export type StoredAudioObject = { bucket: string; path: string };
 export function storageObjectFromUrl(url: string): StoredAudioObject | null {
   try {
     const parsed = new URL(url);
-    for (const bucket of STORAGE_BUCKETS) {
+    const buckets = new Set<string>([...STORAGE_BUCKETS, resolveAudioVaultBucket()]);
+    for (const bucket of buckets) {
       const marker = `/${bucket}/`;
       const index = parsed.pathname.indexOf(marker);
       if (index === -1) continue;

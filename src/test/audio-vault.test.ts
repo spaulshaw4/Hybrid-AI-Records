@@ -3,6 +3,7 @@ import {
   AUDIO_VAULT_BUCKET,
   AUDIO_VAULT_MAX_BYTES,
   AUDIO_VAULT_MIME_TYPES,
+  resolveAudioVaultBucket,
   storageObjectFromUrl,
   masteredTrackObjectPath,
   vaultMasterObjectPath,
@@ -13,6 +14,8 @@ import {
 describe("audio-vault upload contract", () => {
   it("caps objects at 150 MB and allows wav/mpeg/flac MIME types", () => {
     expect(AUDIO_VAULT_BUCKET).toBe("audio-vault");
+    expect(resolveAudioVaultBucket({})).toBe("audio-vault");
+    expect(resolveAudioVaultBucket({ AUDIO_VAULT_BUCKET: " raw-vault " })).toBe("raw-vault");
     expect(AUDIO_VAULT_MAX_BYTES).toBe(157_286_400);
     expect(AUDIO_VAULT_MIME_TYPES).toEqual([
       "audio/wav",
