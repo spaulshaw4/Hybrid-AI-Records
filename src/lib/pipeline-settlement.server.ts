@@ -227,6 +227,25 @@ export async function executePostBinarySettlement(
 
   await finalizeDatabaseRecord({ ...input, totalCharged, chargeLedger });
 
+  // Silent background email — Certificate of Creation + master download link.
+  // Soft-fail and never blocks settlement / UI payload.
+  void (async () => {
+    try {
+      const { sendTrackCompletionReceipt } = await import("@/lib/resend.server");
+      await sendTrackCompletionReceipt({
+        userId: input.userId,
+        trackId: input.trackId,
+        trackTitle: input.title?.trim() || "Untitled Track",
+        masterDownloadUrl: input.masterUrl,
+      });
+    } catch (err) {
+      console.warn(
+        "[Settlement] track completion email soft-fail",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  })();
+
   // Hybrid Tokens are whole units — map USD line total with ceil (min 1).
   const tokenAmount =
     input.tokenAmount ?? Math.max(1, Math.ceil(totalCharged - 1e-9) || 1);
