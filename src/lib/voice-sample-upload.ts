@@ -8,6 +8,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { logUploadAction } from "@/lib/upload-audit";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase-public-env";
 
 export const VOICE_SAMPLE_BUCKET = "voice-samples";
 export const VOICE_SAMPLE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -139,6 +140,21 @@ function safeName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-120) || "sample.wav";
 }
 
+/** Map Storage / network errors to actionable studio copy. */
+function explainVoiceUploadFailure(raw: string): string {
+  const m = raw.toLowerCase();
+  if (/bucket not found|not found|404/i.test(m)) {
+    return `Voice upload bucket "${VOICE_SAMPLE_BUCKET}" is missing in Supabase Storage. Create it (private) and allow authenticated INSERT/SELECT on your user folder.`;
+  }
+  if (/row-level security|rls|policy|403|unauthorized|permission/i.test(m)) {
+    return `Voice upload blocked by Storage RLS on "${VOICE_SAMPLE_BUCKET}". Allow authenticated INSERT/SELECT where the first path folder is your user id.`;
+  }
+  if (/jwt|session|sign in|auth/i.test(m)) {
+    return "Sign in again, then re-upload or re-select your saved voice.";
+  }
+  return "Upload failed. Check your connection and try that clip again.";
+}
+
 /** Records the clip upload (and its exact storage metadata) in the audit log. */
 async function auditClipUpload(args: {
   path: string;
@@ -203,8 +219,8 @@ export async function uploadVoiceSample(
 
   onProgress?.({ loaded: 0, total: file.size, percent: 0 });
 
-  const baseUrl = import.meta.env["VITE_SUPABASE_URL"] as string | undefined;
-  const apiKey = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string | undefined;
+  const baseUrl = supabaseUrl();
+  const apiKey = supabaseAnonKey();
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
 
@@ -235,8 +251,16 @@ export async function uploadVoiceSample(
         errorMessage: result.message,
         details: { transport: "xhr", contentType, storageMetadata: flatMetadata, uploadedBy: userId },
       });
-      return { ok: false, message: "Upload failed. Check your connection and try that clip again." };
+      return {
+        ok: false,
+        message: explainVoiceUploadFailure(result.message),
+      };
     }
+  } else {
+    console.warn(
+      "[VOICE_UPLOAD] XHR path skipped — missing supabaseUrl/anonKey/accessToken; falling back to SDK",
+      { hasUrl: Boolean(baseUrl), hasKey: Boolean(apiKey), hasToken: Boolean(accessToken) },
+    );
   }
 
   if (!uploaded) {
@@ -255,7 +279,7 @@ export async function uploadVoiceSample(
         errorMessage: error.message,
         details: { transport: "sdk", contentType, storageMetadata: flatMetadata, uploadedBy: userId },
       });
-      return { ok: false, message: "Upload failed. Check your connection and try that clip again." };
+      return { ok: false, message: explainVoiceUploadFailure(error.message) };
     }
     transport = "sdk";
     onProgress?.({ loaded: file.size, total: file.size, percent: 100 });

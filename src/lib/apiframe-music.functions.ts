@@ -231,12 +231,17 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
       const isDevTestVoice = voiceId === DEV_TEST_VOICE_ID && isDevAuthBypass();
       const isLocalVoice = isLocalVocalProfileId(voiceId);
       if (!referenceSampleUrl && !isDevTestVoice && !isLocalVoice) {
-        const { data: profile } = await context.supabase
+        const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const voiceDb = tryGetSupabaseAdmin() ?? context.supabase;
+        const { data: profile, error: profileError } = await voiceDb
           .from("voice_profiles")
           .select("sample_url")
           .eq("user_id", context.userId)
           .eq("voice_id", voiceId)
           .maybeSingle();
+        if (profileError) {
+          console.warn("[voice_profiles] resolve failed", profileError.message, profileError.code);
+        }
         referenceSampleUrl = profile?.sample_url ?? undefined;
       }
       if (!referenceSampleUrl && !isDevTestVoice && !isLocalVoice) {
