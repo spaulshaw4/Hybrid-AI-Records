@@ -180,7 +180,7 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Strip inherited Gate 1 circuit-breaker wording (e.g. "timed out after 150s")
+ * Strip inherited Gate 1 circuit-breaker wording (e.g. "timed out after 300s")
  * so Gate 4/5 failures never surface as AIMusicAPI timeouts.
  */
 function sanitizeInheritedGate1Message(message: string): string {
@@ -188,7 +188,7 @@ function sanitizeInheritedGate1Message(message: string): string {
     .replace(/\[Circuit Breaker\]\s*Gate\s*1[^\n]*/gi, "")
     .replace(/Gate\s*1\s*\(AIMusicAPI[^)]*\)/gi, "")
     .replace(/AIMusicAPI[^.\n]*/gi, "")
-    .replace(/timed out after 150s/gi, "")
+    .replace(/timed out after \d+s/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -545,7 +545,7 @@ export async function executePipeline(
         vocalStemUrl = demucsOutput.vocals;
         instrumentalStemUrl = backingStemUrl(demucsOutput);
       } catch (err) {
-        // Never surface Gate 1's 150s AIMusicAPI breaker wording here.
+        // Never surface Gate 1's AIMusicAPI breaker wording here.
         throw new Error(
           `[Gate 4] Stem Separation Failed${
             sanitizeInheritedGate1Message(errorMessage(err))
