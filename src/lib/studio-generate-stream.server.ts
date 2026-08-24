@@ -4,10 +4,8 @@
  * full 6-gate pipeline finishes, which browsers report as "Failed to fetch".
  */
 
-import {
-  runWithPipelineProgressCallback,
-  type StudioProgressCallback,
-} from "@/lib/pipeline-progress";
+import { runWithPipelineProgressCallback } from "@/lib/pipeline-progress-als.server";
+import type { StudioProgressCallback } from "@/lib/pipeline-progress";
 
 /** Keepalive interval so proxies / browsers do not idle-close the socket. */
 export const GENERATE_SSE_KEEPALIVE_MS = 15_000;

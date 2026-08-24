@@ -1,9 +1,9 @@
 /**
  * Shared studio generate progress map (6-gate architecture).
  * Server stages call `reportPipelineProgress`; the studio bar reads the same percents.
+ *
+ * Browser-safe: no node:async_hooks. SSE sinks attach via the server-only ALS bridge.
  */
-
-import { AsyncLocalStorage } from "node:async_hooks";
 
 export const PIPELINE_PROGRESS = {
   lyrics: 12,
@@ -34,16 +34,6 @@ export type StudioProgressCallback = (
   percent: number,
   pipelineState?: number,
 ) => void;
-
-/** Request-scoped progress sink for SSE generate streams. */
-const progressAls = new AsyncLocalStorage<StudioProgressCallback>();
-
-export function runWithPipelineProgressCallback<T>(
-  onProgress: StudioProgressCallback,
-  work: () => Promise<T>,
-): Promise<T> {
-  return progressAls.run(onProgress, work);
-}
 
 export function normalizeProgressStage(stage: string): PipelineProgressStage | null {
   const key = stage.trim().toLowerCase();
@@ -83,5 +73,16 @@ export function reportPipelineProgress(
     console.log("[PROGRESS]", stage, clamped);
   }
   onProgress?.(stage, clamped, pipelineState);
-  progressAls.getStore()?.(stage, clamped, pipelineState);
+  // Optional server-only SSE bridge (set by pipeline-progress-als.server.ts).
+  try {
+    (
+      globalThis as typeof globalThis & {
+        __hybridPipelineProgressAls?: {
+          getStore: () => StudioProgressCallback | undefined;
+        };
+      }
+    ).__hybridPipelineProgressAls?.getStore()?.(stage, clamped, pipelineState);
+  } catch {
+    /* browser / no ALS */
+  }
 }

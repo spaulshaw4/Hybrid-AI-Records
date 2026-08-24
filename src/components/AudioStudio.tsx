@@ -2422,9 +2422,15 @@ export function AudioStudio() {
           streamStudioGenerate({
             signal: abort.signal,
             onProgress: (event) => {
+              if (!event || typeof event !== "object") return;
+              const stage = typeof event.stage === "string" ? event.stage : "composition";
+              const percent =
+                typeof event.percent === "number" && Number.isFinite(event.percent)
+                  ? event.percent
+                  : 0;
               applyPipelineProgress(
-                event.stage,
-                event.percent,
+                stage,
+                percent,
                 typeof event.pipelineState === "number" ? event.pipelineState : undefined,
               );
             },
@@ -3209,31 +3215,33 @@ export function AudioStudio() {
               <p className="font-semibold text-foreground">
                 {busy
                   ? labelForProgressStage(
-                      pipelineState.currentStep === "music" ||
-                      pipelineState.currentStep === "composition"
+                      pipelineState?.currentStep === "music" ||
+                      pipelineState?.currentStep === "composition"
                         ? "sonic"
-                        : pipelineState.currentStep,
+                        : pipelineState?.currentStep ?? "composition",
                     )
-                  : `Step ${studioStep + 1} of ${STUDIO_STEPS.length}: ${STUDIO_STEPS[studioStep]?.label}`}
+                  : `Step ${studioStep + 1} of ${STUDIO_STEPS.length}: ${STUDIO_STEPS[studioStep]?.label ?? "Setup"}`}
               </p>
               <p className="tabular-nums text-muted-foreground">
-                {busy ? `${pipelineState.progress}%` : `${studioStep + 1}/${STUDIO_STEPS.length}`}
+                {busy
+                  ? `${pipelineState?.progress ?? 0}%`
+                  : `${studioStep + 1}/${STUDIO_STEPS.length}`}
               </p>
             </div>
             <Progress
               value={
                 busy
-                  ? pipelineState.progress
+                  ? pipelineState?.progress ?? 0
                   : ((studioStep + 1) / STUDIO_STEPS.length) * 100
               }
               className="pointer-events-none h-1.5"
               aria-label={
                 busy
-                  ? `Generation progress ${pipelineState.progress} percent, ${labelForProgressStage(
-                      pipelineState.currentStep === "music" ||
-                      pipelineState.currentStep === "composition"
+                  ? `Generation progress ${pipelineState?.progress ?? 0} percent, ${labelForProgressStage(
+                      pipelineState?.currentStep === "music" ||
+                      pipelineState?.currentStep === "composition"
                         ? "sonic"
-                        : pipelineState.currentStep,
+                        : pipelineState?.currentStep ?? "composition",
                     )}`
                   : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
               }
