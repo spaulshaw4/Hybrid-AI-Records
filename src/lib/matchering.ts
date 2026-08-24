@@ -19,16 +19,18 @@ export const BRICKWALL_LIMITER = "alimiter=limit=0.891250938:level=false";
 export const MATCHERING_FINISH_FILTER = `${BRICKWALL_LIMITER},${GATE_6_EBU_R128_MASTERING_FILTER}`;
 
 /**
- * Gate 3 instrumental + Fish vocal remux — exact production filter:
- * amix duration=first, dropout_transition=0, normalize=0 (no auto ducking),
- * then loudnorm in the same chain.
+ * Gate 6 instrumental + vocal remux — Windows-stable FFmpeg graph:
+ *   [v]aresample=44100,aformat=…stereo;[inst]aresample=44100,aformat=…stereo;
+ *   [inst][v]amix=inputs=2:duration=first:dropout_transition=2
  *
+ * Loudnorm is applied in the finish pass (not here) so remux stays simple.
  * `duration=first` + CLI `-shortest` keep the master free of trailing dead air.
  */
 export const HYBRID_REMUX_AMIX =
-  "amix=inputs=2:duration=first:dropout_transition=0:normalize=0";
+  "amix=inputs=2:duration=first:dropout_transition=2";
+/** @deprecated Loudnorm lives in the finish pass; kept for older imports. */
 export const HYBRID_REMUX_LOUDNORM = "loudnorm=I=-14:LRA=7:TP=-1.0";
-export const HYBRID_REMUX_MIX_FILTER = `${HYBRID_REMUX_AMIX},${HYBRID_REMUX_LOUDNORM}`;
+export const HYBRID_REMUX_MIX_FILTER = HYBRID_REMUX_AMIX;
 
 /** Gate 6 forced output specs — every remux / finish encode must include these. */
 export const GATE_6_OUTPUT_SAMPLE_RATE = "44100";
@@ -60,7 +62,8 @@ export function collectHybridStems(stems: HybridStemInputs): HybridStemSlot[] {
 
 function stereo(label: string, extra = ""): string {
   const rest = extra ? `,${extra}` : "";
-  return `[${label}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo${rest},asetpts=PTS-STARTPTS`;
+  // Explicit aresample before aformat — more reliable than sample_rates= in aformat alone.
+  return `[${label}]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo${rest},asetpts=PTS-STARTPTS`;
 }
 
 function volumeGain(value: number): string {
@@ -70,14 +73,15 @@ function volumeGain(value: number): string {
 
 
 /**
- * Mix graph: optional intro, then Gate 3 Demucs instrumental under Fish vocals.
+ * Mix graph: optional intro, then Gate 4 instrumental under Gate 5 vocals.
  *
- * Production remux (instrumental + vocal):
- *   [0:a]volume=1.0[inst];[1:a]volume=1.0[vox];
- *   [inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=7:TP=-1.0
+ * Production remux (instrumental + vocal) matches:
+ *   [0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[v];
+ *   [1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[inst];
+ *   [inst][v]amix=inputs=2:duration=first:dropout_transition=2
  *
  * When CWALO section expressions are present, volume uses eval=frame envelopes
- * (full band on chorus/outro; vocal pocketing on verse) instead of static gains.
+ * after aformat (full band on chorus/outro; vocal pocketing on verse).
  */
 export type HybridMixGains = {
   instrumentalVolume?: number;
@@ -142,9 +146,9 @@ export function buildHybridMixFilterComplex(
   return lines.join(";");
 }
 
-/** True when the mix graph already applied the remux loudnorm chain. */
-export function hybridMixIncludesLoudnorm(stems: HybridStemInputs): boolean {
-  return Boolean(stems.instrumentalPath && stems.vocalPath);
+/** True when the mix graph already applied loudnorm (Gate 6 finish owns LUFS now). */
+export function hybridMixIncludesLoudnorm(_stems: HybridStemInputs): boolean {
+  return false;
 }
 
 /** Explicit muxer so atomic `*.tmp.wav` / `*.tmp.mp3` paths never confuse FFmpeg. */

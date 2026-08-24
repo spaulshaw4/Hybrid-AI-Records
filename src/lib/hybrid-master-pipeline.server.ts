@@ -328,7 +328,7 @@ export async function runHybridMasterPipeline(input: {
   console.warn("[GATE_6_REMUX]", {
     instrumental: mixInstrumentalUrl ? "gate4-demucs" : "none",
     vocal: convertedVocalUrl ? "fish" : isolatedVocalUrl ? "demucs-vocal" : "none",
-    amix: "duration=first:dropout_transition=0:normalize=0",
+    amix: "duration=first:dropout_transition=2",
     remuxGains,
     cwalo: masterPlan
       ? {

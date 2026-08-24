@@ -44,15 +44,17 @@ describe("Matchering 2.0 mix + master contract", () => {
       { kind: "instrumental", path: "b" },
       { kind: "vocal", path: "c" },
     ]);
+    expect(graph).toContain("aresample=44100");
+    expect(graph).toContain("aformat=sample_fmts=fltp:channel_layouts=stereo");
     expect(graph).toContain("volume=1.0");
     expect(graph).toContain(
-      "[inst][vox]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:LRA=7:TP=-1.0[core]",
+      "[inst][vox]amix=inputs=2:duration=first:dropout_transition=2[core]",
     );
     expect(graph).toContain("[core]anull[out]");
     expect(graph).not.toContain("concat=");
-    expect(graph).not.toContain("dropout_transition=2");
+    expect(graph).not.toContain("dropout_transition=0");
     expect(graph).not.toContain("duration=longest");
-    expect(graph).not.toContain("normalize=1");
+    expect(graph).not.toContain("loudnorm=");
   });
 
   it("encodes the mix as 24-bit 44.1 kHz stereo PCM", () => {
@@ -172,7 +174,8 @@ describe("Matchering 2.0 mix + master contract", () => {
     );
     expect(graph).toContain("volume='if(between(t\\,8\\,24)\\,0.88\\,1.0)':eval=frame");
     expect(graph).toContain("volume='if(between(t\\,8\\,24)\\,1.12\\,1.0)':eval=frame");
-    expect(graph).toContain("normalize=0");
+    expect(graph).toContain("dropout_transition=2");
+    expect(graph).toContain("aresample=44100");
   });
 
   it("leaves the master untouched when no ceiling is requested", () => {
