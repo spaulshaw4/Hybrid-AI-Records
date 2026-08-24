@@ -53,6 +53,11 @@ function publicLyricError(error: unknown): Error {
   if (/not configured/i.test(raw)) {
     return new Error("The Co-Producer is not configured. Add the lyric engine API key to .env.local.");
   }
+  if (/insufficient|402|credit/i.test(raw)) {
+    return new Error(
+      "The Co-Producer lyric-engine Replicate account needs credit (LYRIC_ENGINE_API_KEY). Top up that account and retry.",
+    );
+  }
   console.error("[LYRIC_ENGINE_ERROR]", error);
   return new Error("The Co-Producer could not write lyrics. Please try again.");
 }

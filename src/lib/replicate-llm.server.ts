@@ -34,28 +34,72 @@ function env(name: string): string | undefined {
   return undefined;
 }
 
-/** Gemini / Co-Producer token — LYRIC_ENGINE_API_KEY only (never hybrid Demucs token). */
-export function replicateLlmToken(label = "The AI writer"): string {
-  const token = env("LYRIC_ENGINE_API_KEY") ?? env("ENGINE_API_KEY");
-  console.log("[Replicate LLM] Using LYRIC_ENGINE_API_KEY:", Boolean(token));
+const HYBRID_REPLICATE_ENV_NAMES = ["REPLICATE_API_TOKEN", "REPLICATE_API_KEY"] as const;
+
+/**
+ * Isolated LLM / Co-Producer auth.
+ * Reads only `process.env.LYRIC_ENGINE_API_KEY` (alias: `ENGINE_API_KEY`).
+ * Never falls back to hybrid Demucs/CWALO `REPLICATE_API_TOKEN`.
+ */
+export function lyricEngineAuthToken(label = "The AI writer"): string {
+  // Explicit process.env reads — do not use readEnv() hybrid aliases.
+  const token =
+    (typeof process !== "undefined" && process.env.LYRIC_ENGINE_API_KEY?.trim()) ||
+    (typeof process !== "undefined" && process.env.ENGINE_API_KEY?.trim()) ||
+    env("LYRIC_ENGINE_API_KEY") ||
+    env("ENGINE_API_KEY") ||
+    undefined;
+
   if (!token) {
+    console.log("[Replicate LLM] Using LYRIC_ENGINE_API_KEY:", false);
     throw new Error(`${label} is not configured. Add LYRIC_ENGINE_API_KEY to .env.local.`);
   }
+
+  const hybrid =
+    (typeof process !== "undefined" && process.env.REPLICATE_API_TOKEN?.trim()) ||
+    (typeof process !== "undefined" && process.env.REPLICATE_API_KEY?.trim()) ||
+    undefined;
+  if (hybrid && token === hybrid) {
+    console.error(
+      "[Replicate LLM] Refusing hybrid REPLICATE_API_TOKEN for LLM/Co-Producer — set a distinct LYRIC_ENGINE_API_KEY.",
+    );
+    throw new Error(
+      `${label} misconfigured: LYRIC_ENGINE_API_KEY must not be the hybrid REPLICATE_API_TOKEN.`,
+    );
+  }
+
+  for (const name of HYBRID_REPLICATE_ENV_NAMES) {
+    // Guard against accidental future fallthrough in this module.
+    if (token === env(name)) {
+      throw new Error(
+        `${label} misconfigured: refuse authenticating Gemini with ${name}.`,
+      );
+    }
+  }
+
+  console.log("[Replicate LLM] Using LYRIC_ENGINE_API_KEY:", true, `prefix=${token.slice(0, 3)}…`);
   return token;
+}
+
+/** @deprecated Prefer lyricEngineAuthToken — same isolated lyric/Gemini key. */
+export function replicateLlmToken(label = "The AI writer"): string {
+  return lyricEngineAuthToken(label);
 }
 
 /** Step 1 lyrics / Gemini Flash — isolated from REPLICATE_API_TOKEN (hybrid1). */
 export function lyricReplicateToken(): string {
-  const token = env("LYRIC_ENGINE_API_KEY") ?? env("ENGINE_API_KEY");
-  if (!token) {
+  try {
+    return lyricEngineAuthToken("The Co-Producer");
+  } catch (error) {
+    if (error instanceof Error && /misconfigured/i.test(error.message)) throw error;
     throw new Error(
       "The Co-Producer is not configured. Add LYRIC_ENGINE_API_KEY to .env.local.",
     );
   }
-  return token;
 }
 
-function headers(label?: string, token = replicateLlmToken(label)): Record<string, string> {
+/** Bearer headers for every Gemini / chat prediction — lyric engine key only. */
+function headers(label?: string, token = lyricEngineAuthToken(label)): Record<string, string> {
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
@@ -137,12 +181,13 @@ export async function replicateChat(
   const model = options.model ?? REPLICATE_LLM_MODEL;
   const { system, prompt } = toReplicateInput(messages);
   const base = replicateBaseUrl();
+  const auth = lyricEngineAuthToken(label);
 
   const create = await resilientFetch(
     `${base}/models/${model}/predictions`,
     {
       method: "POST",
-      headers: headers(label),
+      headers: headers(label, auth),
       body: JSON.stringify({
         input: predictionInput(model, system, prompt, options),
       }),
@@ -152,6 +197,11 @@ export async function replicateChat(
 
   if (!create.ok) {
     const body = await create.text().catch(() => "");
+    if (create.status === 402) {
+      throw new Error(
+        `${label}: lyric-engine Replicate account (LYRIC_ENGINE_API_KEY) needs credit.`,
+      );
+    }
     throw new Error(`${label} failed [${create.status}]: ${body.slice(0, 400)}`);
   }
 
@@ -172,7 +222,7 @@ export async function replicateChat(
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const poll = await resilientFetch(
       `${base}/predictions/${prediction.id}`,
-      { method: "GET", headers: headers(label) },
+      { method: "GET", headers: headers(label, auth) },
       { label, retries: 2, timeoutMs: 30_000, baseDelayMs: 1000 },
     );
     if (!poll.ok) continue;
@@ -198,11 +248,12 @@ export async function replicateGeminiFlashLyrics(input: {
 }): Promise<string> {
   const label = "Co-Producer";
   const base = replicateBaseUrl();
+  const auth = lyricReplicateToken();
   const create = await resilientFetch(
     `${base}/models/${REPLICATE_GEMINI_FLASH}/predictions`,
     {
       method: "POST",
-      headers: headers(label, lyricReplicateToken()),
+      headers: headers(label, auth),
       body: JSON.stringify({
         input: {
           prompt: input.prompt,
@@ -217,6 +268,11 @@ export async function replicateGeminiFlashLyrics(input: {
 
   if (!create.ok) {
     const body = await create.text().catch(() => "");
+    if (create.status === 402) {
+      throw new Error(
+        `${label} lyric-engine account has insufficient Replicate credit (LYRIC_ENGINE_API_KEY). Top up that account — not the hybrid Demucs token.`,
+      );
+    }
     throw new Error(`${label} failed [${create.status}]: ${body.slice(0, 400)}`);
   }
 
@@ -237,7 +293,7 @@ export async function replicateGeminiFlashLyrics(input: {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const poll = await resilientFetch(
       `${base}/predictions/${prediction.id}`,
-      { method: "GET", headers: headers(label) },
+      { method: "GET", headers: headers(label, auth) },
       { label, retries: 2, timeoutMs: 30_000, baseDelayMs: 1000 },
     );
     if (!poll.ok) continue;
