@@ -1,24 +1,12 @@
-# Mastering needs FFmpeg + Python Matchering on the image.
-# Start uses package.json → "bun .output/server/index.mjs"
-
+# Fallback Nixpacks plan (Railway prefers Dockerfile when present).
 [phases.setup]
-nixPkgs = ["bun", "ffmpeg", "python311", "python311Packages.pip"]
+nixPkgs = ["bun", "ffmpeg", "python311"]
 
 [phases.install]
-cmds = [
-  "bun install --frozen-lockfile",
-  "pip install --break-system-packages matchering==2.0.6"
-]
+cmds = ["bun install --frozen-lockfile"]
 
 [phases.build]
-dependsOn = ["install"]
-cmds = [
-  "bun run build",
-  "test -f .output/server/index.mjs || (echo 'ERROR: .output/server/index.mjs missing after build' && pwd && ls -la .output .output/server 2>/dev/null; exit 1)"
-]
-
-[variables]
-NODE_ENV = "production"
+cmds = ["bun run build", "ls -la .output/server"]
 
 [start]
-cmd = "bun run start"
+cmd = "bun run .output/server/index.mjs"

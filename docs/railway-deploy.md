@@ -4,13 +4,13 @@
 
 | File | Purpose |
 | --- | --- |
-| `railway.json` | Nixpacks builder, start command, healthcheck, restart policy |
-| `nixpacks.toml` | Bun install/build; start via `bun run start`; FFmpeg + Matchering |
+| `Dockerfile` | Single-stage Bun image: install, `bun run build`, start `.output/server/index.mjs` |
+| `railway.json` | `DOCKERFILE` builder, start command, healthcheck, restart policy |
+| `nixpacks.toml` | Fallback plan if Dockerfile is unused |
 | `package.json` | `"start": "bun .output/server/index.mjs"` |
-| `.dockerignore` | Excludes noise/secrets but **not** `.output` |
+| `.dockerignore` | Excludes noise/secrets but **not** `.output` or `dist` |
 
-The build emits a Nitro `node-server` bundle at `.output/`. Production start is
-`bun run start` → `bun .output/server/index.mjs`.
+Production start is `bun .output/server/index.mjs` (Dockerfile `CMD` / Railway start).
 
 ## System dependencies
 
