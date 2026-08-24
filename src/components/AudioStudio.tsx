@@ -38,7 +38,8 @@ function allowTokenlessGenerate(): boolean {
   }
 }
 
-import { checkEngineHealth, generateEngineTrack, getEngineTrackTask } from "@/lib/apiframe-music.functions";
+import { checkEngineHealth, getEngineTrackTask } from "@/lib/apiframe-music.functions";
+import { streamStudioGenerate } from "@/lib/studio-generate-fetch";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
 import {
   getEngineBreakerStatus,
@@ -1376,7 +1377,6 @@ export function AudioStudio() {
   const fetchBalance = useServerFn(getTokenBalance);
   const spendToken = useServerFn(spendTokens);
   const reportGenerationFailure = useServerFn(notifyGenerationFailed);
-  const startGeneration = useServerFn(generateEngineTrack);
   const pollGeneration = useServerFn(getEngineTrackTask);
   const runEngineHealthCheck = useServerFn(checkEngineHealth);
   const checkBreakerHealth = useServerFn(getEngineBreakerStatus);
@@ -2399,15 +2399,36 @@ export function AudioStudio() {
           return { ...prev, progress: Math.min(90, prev.progress + 1) };
         });
       }, 4000);
-      let started: Awaited<ReturnType<typeof startGeneration>>;
+      let started: {
+        taskId?: string;
+        tracks?: Array<{ audioUrl: string | null; title: string | null }>;
+        stems?: {
+          masterUrl?: string | null;
+          instrumentalUrl?: string | null;
+          vocalUrl?: string | null;
+          rawAudioUrl?: string | null;
+        };
+        gateMask?: number;
+        landing?: { pipelineState?: number };
+        tokenSettled?: boolean;
+      };
       try {
         // MusicAPI credentials live only on the server (`AIMUSICAPI_KEY` /
         // `MUSICAPI_KEY` in `.env.local`). Never gate generate on
-        // `import.meta.env.VITE_*` — `startGeneration` → `postSonicCreate`
-        // reads `process.env` in the server function.
-        started = await Promise.race([
-          startGeneration({
-        data: {
+        // `import.meta.env.VITE_*` — SSE generate → `runGenerateEngineTrack`
+        // reads `process.env` in the server. Keepalives prevent idle
+        // "Failed to fetch" drops during Demucs / CWALO / Gate 1 waits.
+        started = (await Promise.race([
+          streamStudioGenerate({
+            signal: abort.signal,
+            onProgress: (event) => {
+              applyPipelineProgress(
+                event.stage,
+                event.percent,
+                typeof event.pipelineState === "number" ? event.pipelineState : undefined,
+              );
+            },
+            data: {
           prompt: arrangedLyrics || styleLine || genre,
           tags: styleTags,
           mv: "sonic-v5",
@@ -2451,7 +2472,7 @@ export function AudioStudio() {
         },
           }),
           abortableBarrier(abort.signal),
-        ]);
+        ])) as typeof started;
       } finally {
         window.clearInterval(stopTicker);
       }
@@ -2499,7 +2520,7 @@ export function AudioStudio() {
       // Widened to the poll response shape: start and poll return the same
       // tracks with different nullability, and both feed this variable.
       let ready: Array<{ audioUrl: string | null; title: string | null }> =
-        started.tracks.filter((t) => t.audioUrl);
+        (started.tracks ?? []).filter((t) => t.audioUrl);
       let pollErrors = 0;
       const deadline = startedAt + POLL_TIMEOUT_MS;
       while (ready.length === 0 && started.taskId && Date.now() < deadline) {

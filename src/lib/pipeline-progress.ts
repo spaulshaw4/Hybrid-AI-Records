@@ -3,6 +3,8 @@
  * Server stages call `reportPipelineProgress`; the studio bar reads the same percents.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export const PIPELINE_PROGRESS = {
   lyrics: 12,
   sonic: 28,
@@ -32,6 +34,16 @@ export type StudioProgressCallback = (
   percent: number,
   pipelineState?: number,
 ) => void;
+
+/** Request-scoped progress sink for SSE generate streams. */
+const progressAls = new AsyncLocalStorage<StudioProgressCallback>();
+
+export function runWithPipelineProgressCallback<T>(
+  onProgress: StudioProgressCallback,
+  work: () => Promise<T>,
+): Promise<T> {
+  return progressAls.run(onProgress, work);
+}
 
 export function normalizeProgressStage(stage: string): PipelineProgressStage | null {
   const key = stage.trim().toLowerCase();
@@ -71,4 +83,5 @@ export function reportPipelineProgress(
     console.log("[PROGRESS]", stage, clamped);
   }
   onProgress?.(stage, clamped, pipelineState);
+  progressAls.getStore()?.(stage, clamped, pipelineState);
 }

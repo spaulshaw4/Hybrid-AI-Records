@@ -158,22 +158,33 @@ const generateSchema = z.object({
   idempotencyKey: z.string().trim().max(120).optional(),
 });
 
+export type GenerateEngineTrackInput = z.infer<typeof generateSchema>;
+
+export function parseGenerateEngineTrackInput(data: unknown): GenerateEngineTrackInput {
+  const parsed = generateSchema.safeParse(data);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  const path = issue?.path?.length ? issue.path.join(".") : "payload";
+  throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
+}
+
 const taskSchema = z.object({ taskId: z.string().trim().min(1).max(200) });
 
+type GenerateAuthContext = {
+  userId: string;
+  supabase: import("@supabase/supabase-js").SupabaseClient<
+    import("@/integrations/supabase/types").Database
+  >;
+};
+
 /**
- * Studio generate — TanStack Start server function (Node `process.env`).
- * The browser calls this through `useServerFn`; MusicAPI secrets never ship to the client.
+ * Core studio generate (Gates 1–6). Used by the TanStack server fn and the
+ * SSE keep-alive route so long Replicate waits do not idle-close the socket.
  */
-export const generateEngineTrack = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => {
-    const parsed = generateSchema.safeParse(data);
-    if (parsed.success) return parsed.data;
-    const issue = parsed.error.issues[0];
-    const path = issue?.path?.length ? issue.path.join(".") : "payload";
-    throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
-  })
-  .handler(async ({ data, context }) => {
+export async function runGenerateEngineTrack(
+  data: GenerateEngineTrackInput,
+  context: GenerateAuthContext,
+): Promise<Record<string, unknown>> {
     const { generateStudioTrack, getMusicApiKey, waitForStudioTrack } = await import(
       "@/lib/music-generation"
     );
@@ -560,7 +571,17 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
     clearGenerationTokenIntent(idempotencyKey);
     throw outerError;
   }
-  });
+}
+
+/**
+ * Studio generate — TanStack Start server function (Node `process.env`).
+ * Prefer `/api/studio/generate-stream` from the browser so keepalives prevent
+ * idle "Failed to fetch" drops during long Replicate waits.
+ */
+export const generateEngineTrack = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => parseGenerateEngineTrackInput(data))
+  .handler(async ({ data, context }) => runGenerateEngineTrack(data, context));
 
 
 

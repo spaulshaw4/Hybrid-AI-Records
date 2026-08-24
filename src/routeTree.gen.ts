@@ -64,6 +64,7 @@ import { Route as ApiPublicClientErrorsRouteImport } from './routes/api/public/c
 import { Route as ApiPublicMetricsRouteImport } from './routes/api/public/metrics'
 import { Route as ApiPublicSupportReportsRouteImport } from './routes/api/public/support-reports'
 import { Route as ApiPublicTrackDownloadRouteImport } from './routes/api/public/track-download'
+import { Route as ApiStudioGenerateStreamRouteImport } from './routes/api/studio/generate-stream'
 import { Route as ApiStudioVocalCloneRouteImport } from './routes/api/studio/vocal-clone'
 import { Route as ApiPublicHooksRefreshFxRouteImport } from './routes/api/public/hooks/refresh-fx'
 import { Route as ApiStudioVaultTracksRouteImport } from './routes/api/studio/vault/tracks'
@@ -358,6 +359,11 @@ const ApiPublicTrackDownloadRoute = ApiPublicTrackDownloadRouteImport.update({
   path: '/api/public/track-download',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStudioGenerateStreamRoute = ApiStudioGenerateStreamRouteImport.update({
+  id: '/api/studio/generate-stream',
+  path: '/api/studio/generate-stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiStudioVocalCloneRoute = ApiStudioVocalCloneRouteImport.update({
   id: '/api/studio/vocal-clone',
   path: '/api/studio/vocal-clone',
@@ -435,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
@@ -495,6 +502,7 @@ export interface FileRoutesByTo {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
@@ -557,6 +565,7 @@ export interface FileRoutesById {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
@@ -619,6 +628,7 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/vault/tracks'
@@ -679,6 +689,7 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/vault/tracks'
@@ -740,6 +751,7 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/vault/tracks'
@@ -784,6 +796,7 @@ export interface RootRouteChildren {
   ApiPublicMetricsRoute: typeof ApiPublicMetricsRoute
   ApiPublicSupportReportsRoute: typeof ApiPublicSupportReportsRoute
   ApiPublicTrackDownloadRoute: typeof ApiPublicTrackDownloadRoute
+  ApiStudioGenerateStreamRoute: typeof ApiStudioGenerateStreamRoute
   ApiStudioVocalCloneRoute: typeof ApiStudioVocalCloneRoute
   ApiPublicHooksRefreshFxRoute: typeof ApiPublicHooksRefreshFxRoute
   ApiStudioVaultTracksRoute: typeof ApiStudioVaultTracksRouteWithChildren
@@ -1176,6 +1189,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicTrackDownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/studio/generate-stream': {
+      id: '/api/studio/generate-stream'
+      path: '/api/studio/generate-stream'
+      fullPath: '/api/studio/generate-stream'
+      preLoaderRoute: typeof ApiStudioGenerateStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/studio/vocal-clone': {
       id: '/api/studio/vocal-clone'
       path: '/api/studio/vocal-clone'
@@ -1320,6 +1340,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicMetricsRoute: ApiPublicMetricsRoute,
   ApiPublicSupportReportsRoute: ApiPublicSupportReportsRoute,
   ApiPublicTrackDownloadRoute: ApiPublicTrackDownloadRoute,
+  ApiStudioGenerateStreamRoute: ApiStudioGenerateStreamRoute,
   ApiStudioVocalCloneRoute: ApiStudioVocalCloneRoute,
   ApiPublicHooksRefreshFxRoute: ApiPublicHooksRefreshFxRoute,
   ApiStudioVaultTracksRoute: ApiStudioVaultTracksRouteWithChildren,
