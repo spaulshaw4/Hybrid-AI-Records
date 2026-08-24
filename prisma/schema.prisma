@@ -1,12 +1,18 @@
 // Prisma schema — Track pipeline state (gateMask, vault URLs, status).
-// Connection URLs live in prisma.config.ts (Prisma 7); set DATABASE_URL + DIRECT_URL in .env.
-
-generator client {
-  provider = "prisma-client-js"
-}
+//
+// Prisma 7: `url` / `directUrl` are NOT allowed here.
+// Equivalent of:
+//   url       = env("DATABASE_URL")   → PrismaClient runtime (pooled)
+//   directUrl = env("DIRECT_URL")     → prisma.config.ts CLI / migrate
+// See prisma.config.ts
 
 datasource db {
   provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 model Track {
