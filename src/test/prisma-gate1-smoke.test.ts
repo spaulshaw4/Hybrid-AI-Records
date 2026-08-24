@@ -1,7 +1,7 @@
 /**
  * Gate 1 / Prisma smoke tests.
  *
- * - Asserts Gate 1 circuit breaker covers the poll budget (80 × 2.5s ≈ 200s).
+ * - Asserts Gate 1 circuit breaker covers the poll budget (120 × 2.5s ≈ 300s).
  * - Exercises a Gate 1-shaped studio payload.
  * - Live Prisma Track upsert when DATABASE_URL is reachable (skipped otherwise).
  */
@@ -29,11 +29,11 @@ export const GATE_1_SMOKE_PAYLOAD = {
 };
 
 describe("Gate 1 circuit breaker + poll budget", () => {
-  it("keeps Gate 1 timeout ≥ poll budget (80 × 2.5s)", () => {
+  it("keeps Gate 1 timeout ≥ poll budget (120 × 2.5s)", () => {
     expect(POLLING_INTERVAL_MS).toBe(2500);
-    expect(MAX_POLLING_ATTEMPTS).toBe(80);
-    expect(MAX_POLLING_DURATION_MS).toBe(200_000);
-    expect(GATE_TIMEOUTS_MS[1]).toBe(200_000);
+    expect(MAX_POLLING_ATTEMPTS).toBe(120);
+    expect(MAX_POLLING_DURATION_MS).toBe(300_000);
+    expect(GATE_TIMEOUTS_MS[1]).toBe(300_000);
     expect(GATE_TIMEOUTS_MS[1]).toBeGreaterThanOrEqual(MAX_POLLING_DURATION_MS);
     // Historical “~180s” floor — breaker must not regress below this.
     expect(GATE_TIMEOUTS_MS[1]).toBeGreaterThanOrEqual(180_000);

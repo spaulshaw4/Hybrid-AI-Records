@@ -837,11 +837,11 @@ export async function fetchStudioTrackTask(
 }
 
 /**
- * Poll every 2.5s for up to 80 attempts (~200s). Bounded so Gate 1 cannot hang Node
- * under load while still allowing AIMusicAPI full generations to finish.
+ * Poll every 2.5s for up to 120 attempts (~300s). Gives AIMusicAPI room for
+ * voice-reference / queue delays while still bounding Gate 1 so Node cannot hang.
  */
 export const POLLING_INTERVAL_MS = 2500;
-export const MAX_POLLING_ATTEMPTS = 80;
+export const MAX_POLLING_ATTEMPTS = 120;
 /** @deprecated Prefer MAX_POLLING_ATTEMPTS × POLLING_INTERVAL_MS */
 export const MAX_POLLING_DURATION_MS = MAX_POLLING_ATTEMPTS * POLLING_INTERVAL_MS;
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;

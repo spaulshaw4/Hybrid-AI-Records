@@ -75,6 +75,15 @@ type PostgrestLikeError = {
   hint?: string | null;
 } | null;
 
+/** Exact PostgREST payload for browser console logging (serialized into Error.message). */
+export type VoiceProfileSaveFailure = {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+  columns?: string[];
+};
+
 /**
  * Prefer service-role for voice_profiles writes after JWT auth so RLS / stale
  * PostgREST JWT claims cannot silently zero-row the insert. Still scopes every
@@ -83,6 +92,16 @@ type PostgrestLikeError = {
 async function voiceProfilesClient() {
   const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
   return requireSupabaseAdmin();
+}
+
+function formatPostgrestForClient(error: PostgrestLikeError, columns?: string[]): string {
+  return JSON.stringify({
+    code: error?.code ?? null,
+    message: error?.message ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+    columns: columns ?? null,
+  });
 }
 
 function voiceProfilesErrorMessage(
@@ -101,6 +120,10 @@ function voiceProfilesErrorMessage(
     /Could not find the '.*' column|column voice_profiles\./i.test(message)
   ) {
     return "Voice library columns are out of date (need label + voice_id). Apply supabase/migrations/20260824141000_align_voice_profiles_columns.sql in the Supabase SQL Editor, then try again.";
+  }
+  // Legacy `name` NOT NULL while the app writes `label`.
+  if (code === "23502" || /null value in column \"name\"/i.test(message)) {
+    return "Could not save that voice: legacy column \"name\" is required. Sync failed — generation can still use the uploaded sample.";
   }
   if (code === "23503" || /foreign key|auth\.users/i.test(message)) {
     if (isDevAuthBypass()) {
@@ -125,6 +148,19 @@ function voiceProfilesErrorMessage(
   return action === "save"
     ? "Could not save that voice to your library."
     : `Could not ${action} that voice.`;
+}
+
+/** Parse PostgREST JSON stamped into saveVoiceProfile Error.message for browser logs. */
+export function parseVoiceProfileSaveError(error: unknown): VoiceProfileSaveFailure | null {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const marker = "postgrest=";
+  const idx = message.lastIndexOf(marker);
+  if (idx < 0) return null;
+  try {
+    return JSON.parse(message.slice(idx + marker.length)) as VoiceProfileSaveFailure;
+  } catch {
+    return null;
+  }
 }
 
 export const startVoiceCloneJob = createServerFn({ method: "POST" })
@@ -192,10 +228,11 @@ export const saveVoiceProfile = createServerFn({ method: "POST" })
     }
 
     // Client payload: { label, voiceId, sampleUrl, quality? }
-    // DB row: snake_case columns below (label/voice_id — not legacy name/duration).
+    // Live DB still has legacy NOT NULL `name` alongside app `label` — mirror both.
     const insertRow = {
       user_id: userId,
       label: data.label,
+      name: data.label,
       voice_id: data.voiceId,
       sample_url: data.sampleUrl,
       peak: data.quality?.peak ?? null,
@@ -211,20 +248,24 @@ export const saveVoiceProfile = createServerFn({ method: "POST" })
 
     const { data: row, error } = await supabase
       .from("voice_profiles")
-      .insert(insertRow)
+      // `name` exists on the live table but is absent from generated Database types.
+      .insert(insertRow as typeof insertRow & Record<string, unknown>)
       .select(PROFILE_COLUMNS)
       .maybeSingle();
 
     if (error || !row) {
-      console.error("[voice_profiles] insert failed", {
-        userId,
-        columns: Object.keys(insertRow),
+      const postgrest = {
         code: error?.code,
         message: error?.message,
         details: error?.details,
         hint: error?.hint,
-      });
-      throw new Error(voiceProfilesErrorMessage("save", error));
+        columns: Object.keys(insertRow),
+      };
+      console.error("[voice_profiles] insert failed", postgrest);
+      // Stamp raw PostgREST JSON so the browser catch can console.error it.
+      throw new Error(
+        `${voiceProfilesErrorMessage("save", error)} postgrest=${formatPostgrestForClient(error, Object.keys(insertRow))}`,
+      );
     }
     return row as VoiceProfile;
   });
@@ -236,7 +277,7 @@ export const renameVoiceProfile = createServerFn({ method: "POST" })
     const supabase = await voiceProfilesClient().catch(() => context.supabase);
     const { data: row, error } = await supabase
       .from("voice_profiles")
-      .update({ label: data.label })
+      .update({ label: data.label, name: data.label } as { label: string; name: string })
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .select(PROFILE_COLUMNS)

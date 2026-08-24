@@ -48,6 +48,7 @@ import {
   deleteVoiceProfile,
   getVoiceCloneJob,
   listVoiceProfiles,
+  parseVoiceProfileSaveError,
   renameVoiceProfile,
   saveVoiceProfile,
   startVoiceCloneJob,
@@ -507,39 +508,63 @@ export function VoiceLibrary() {
         percent: 95,
         message: "Saving your voice to the library…",
       });
-      const saved = await saveVoice({
-        data: {
-          label: name,
-          voiceId: current.voiceId,
-          sampleUrl: upload.url,
-          quality: quality
-            ? {
-                peak: quality.peak,
-                rms: quality.rms,
-                clipRatio: quality.clipRatio,
-                silenceRatio: quality.silenceRatio,
-                clipBars: quality.clipBars,
-                silenceBars: quality.silenceBars,
-                totalBars: quality.totalBars,
-                blocked: quality.blocked,
-                trimStartSeconds: appliedStart.current,
-              }
-            : null,
-        },
-      });
-      setVoices((prev) => [saved, ...prev]);
-      setActiveVoiceId(saved.voice_id);
-      notifyActiveVoiceChange();
-      setProgress({
-        phase: "done",
-        percent: 100,
-        message: `"${saved.label}" is ready`,
-        detail: `Voice ID: ${saved.voice_id}`,
-      });
-      setLabel("");
-      toast.success(`"${saved.label}" is in your Voice Library and selected for your next track.`);
+      try {
+        const saved = await saveVoice({
+          data: {
+            label: name,
+            voiceId: current.voiceId,
+            sampleUrl: upload.url,
+            quality: quality
+              ? {
+                  peak: quality.peak,
+                  rms: quality.rms,
+                  clipRatio: quality.clipRatio,
+                  silenceRatio: quality.silenceRatio,
+                  clipBars: quality.clipBars,
+                  silenceBars: quality.silenceBars,
+                  totalBars: quality.totalBars,
+                  blocked: quality.blocked,
+                  trimStartSeconds: appliedStart.current,
+                }
+              : null,
+          },
+        });
+        setVoices((prev) => [saved, ...prev]);
+        setActiveVoiceId(saved.voice_id);
+        notifyActiveVoiceChange();
+        setProgress({
+          phase: "done",
+          percent: 100,
+          message: `"${saved.label}" is ready`,
+          detail: `Voice ID: ${saved.voice_id}`,
+        });
+        setLabel("");
+        toast.success(`"${saved.label}" is in your Voice Library and selected for your next track.`);
+      } catch (libraryError) {
+        const postgrest = parseVoiceProfileSaveError(libraryError);
+        console.error(
+          "[voice_profiles] save failed — sample is in Storage; library row missing",
+          postgrest ?? libraryError,
+        );
+        // Sample URL is already valid in Storage — do not treat as a hard clone failure.
+        setActiveVoiceId(current.voiceId);
+        notifyActiveVoiceChange();
+        setProgress({
+          phase: "done",
+          percent: 100,
+          message: "Uploaded — library sync failed",
+          detail:
+            postgrest?.message ??
+            (libraryError instanceof Error ? libraryError.message : "Could not save voice to library"),
+        });
+        setLabel("");
+        toast.warning(
+          "Voice sample is in Storage and ready to use. Library sync failed — see browser console for the PostgREST error.",
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Voice cloning failed.";
+      console.error("[voice_profiles] clone/upload failed", error);
       setProgress((prev) => ({
         phase: "error",
         percent: prev.percent,

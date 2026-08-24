@@ -4,8 +4,8 @@
  */
 
 export const GATE_TIMEOUTS_MS = {
-  /** AIMusicAPI create+poll — must cover 80 × 2.5s Gate 1 poll budget (~200s). */
-  1: 200_000,
+  /** AIMusicAPI create+poll — must cover 120 × 2.5s Gate 1 poll budget (~300s). */
+  1: 300_000,
   2: 30_000, // Supabase vault upload + public URL verify
   3: 60_000, // CWALO Replicate (soft-fail)
   4: 90_000, // Demucs separation + stem checks

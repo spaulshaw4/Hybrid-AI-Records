@@ -415,6 +415,23 @@
   border-color: #e11d48 !important;
 }
 
+/* Saved-voice select sits on the dark wizard card — never use the default
+   white SelectTrigger (light inherited type washes out labels like "My voice"). */
+#engine-workspace [aria-label="Saved custom voice"],
+.engine-wizard-card [aria-label="Saved custom voice"] {
+  background: rgb(39 39 42 / 0.55) !important;
+  background-color: rgb(39 39 42 / 0.55) !important;
+  color: #fafafa !important;
+  -webkit-text-fill-color: #fafafa !important;
+  border: 2px solid var(--primary, #e11d48) !important;
+}
+
+#engine-workspace [aria-label="Saved custom voice"] span,
+.engine-wizard-card [aria-label="Saved custom voice"] span {
+  color: #fafafa !important;
+  -webkit-text-fill-color: #fafafa !important;
+}
+
 /* Portalled outside #engine-workspace — must not depend on that ancestor.
    --card / --glass are 72% opaque and would show the form through the menu. */
 .engine-opaque-menu,

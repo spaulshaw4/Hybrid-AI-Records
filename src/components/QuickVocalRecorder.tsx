@@ -23,6 +23,7 @@ import {
 import {
   getVoiceCloneJob,
   listVoiceProfiles,
+  parseVoiceProfileSaveError,
   saveVoiceProfile,
   startVoiceCloneJob,
   type VoiceProfile,
@@ -466,19 +467,34 @@ export function QuickVocalRecorder({
       if (!job.voiceId) throw new Error("Your voice took too long to build. Try again.");
 
       setStatus("Saving your voice…");
-      const saved = await saveVoice({
-        data: {
-          label: name.trim() || `My voice ${new Date().toLocaleDateString()}`,
-          voiceId: job.voiceId,
-          sampleUrl: upload.url,
-        },
-      });
-      onVoiceIdChange(saved.voice_id);
+      // Local profile + storage URL are already enough for generate. Library
+      // sync is best-effort and must not block the studio flow.
+      try {
+        const saved = await saveVoice({
+          data: {
+            label: name.trim() || `My voice ${new Date().toLocaleDateString()}`,
+            voiceId: job.voiceId,
+            sampleUrl: upload.url,
+          },
+        });
+        onVoiceIdChange(saved.voice_id);
+        await loadVoices();
+        toast.success("Custom vocals ready — your next track sings in your voice.");
+      } catch (libraryError) {
+        const postgrest = parseVoiceProfileSaveError(libraryError);
+        console.error(
+          "[voice_profiles] save failed — continuing with uploaded sampleUrl",
+          postgrest ?? libraryError,
+        );
+        // Keep the local vocal profile id set earlier; AudioStudio re-uploads /
+        // uses the blob when the cloud library row is missing.
+        toast.warning(
+          "Voice uploaded and ready to generate. Library sync failed — see browser console for the PostgREST error.",
+        );
+      }
       setName("");
       discard();
-      await loadVoices();
       await loadLocalVoices();
-      toast.success("Custom vocals ready — your next track sings in your voice.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not use that take.");
     } finally {
@@ -489,22 +505,48 @@ export function QuickVocalRecorder({
 
   return (
     <div className="space-y-4">
-      {voices.length > 0 ? (
+      {voices.length > 0 || localVoices.length > 0 ? (
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Saved voice</Label>
+          <Label className="text-xs font-semibold text-zinc-300">Saved voice</Label>
           <Select
             value={voiceId || undefined}
             onValueChange={(next) => {
               onCustomVocalIntent?.();
+              const local = localVoices.find((row) => vocalProfileStorageKey(row.id) === next);
+              if (local) {
+                runOrPrompt(() => applyLocalVoice(local));
+                return;
+              }
               runOrPrompt(() => onVoiceIdChange(next));
             }}
           >
-            <SelectTrigger aria-label="Saved custom voice">
+            <SelectTrigger
+              aria-label="Saved custom voice"
+              className="h-11 border-2 border-primary bg-muted/30 px-4 text-sm font-semibold text-zinc-100 shadow-none data-[placeholder]:text-zinc-400 [&>span]:text-zinc-100 [&>svg]:text-zinc-300"
+              style={{
+                backgroundColor: "rgb(39 39 42 / 0.55)",
+                color: "#fafafa",
+                WebkitTextFillColor: "#fafafa",
+              }}
+            >
               <SelectValue placeholder="Choose a saved voice" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="border-zinc-700 bg-zinc-950 text-zinc-100">
+              {localVoices.map((voice) => (
+                <SelectItem
+                  key={vocalProfileStorageKey(voice.id)}
+                  value={vocalProfileStorageKey(voice.id)}
+                  className="font-semibold text-zinc-100 focus:bg-zinc-800 focus:text-zinc-50"
+                >
+                  {voice.name?.trim() || "Saved on this device"}
+                </SelectItem>
+              ))}
               {voices.map((voice) => (
-                <SelectItem key={voice.id} value={voice.voice_id}>
+                <SelectItem
+                  key={voice.id}
+                  value={voice.voice_id}
+                  className="font-semibold text-zinc-100 focus:bg-zinc-800 focus:text-zinc-50"
+                >
                   {voice.label}
                 </SelectItem>
               ))}
@@ -720,8 +762,13 @@ export function QuickVocalRecorder({
               placeholder="Name this voice (optional)"
               onChange={(e) => setName(e.target.value)}
               aria-label="Voice name"
-              className="border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-400"
-              style={{ backgroundColor: "#09090b", color: "#fafafa" }}
+              className="h-11 border-2 border-primary bg-muted/30 text-sm font-semibold text-zinc-100 placeholder:text-zinc-400 shadow-none"
+              style={{
+                backgroundColor: "rgb(39 39 42 / 0.55)",
+                color: "#fafafa",
+                WebkitTextFillColor: "#fafafa",
+                caretColor: "#fafafa",
+              }}
             />
             <Button
               type="button"
