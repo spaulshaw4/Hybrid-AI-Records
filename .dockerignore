@@ -1,7 +1,5 @@
-# Railway / Nixpacks context ignores.
-# IMPORTANT: Do NOT ignore `.output` — Vite+Nitro writes the production server
-# there during `bun run build`, and the start command runs:
-#   bun .output/server/index.mjs
+# Do NOT ignore `.output` or `dist` — Nitro/Vite build artifacts must ship.
+# Railway start: bun run start → bun .output/server/index.mjs
 
 .git
 .agents

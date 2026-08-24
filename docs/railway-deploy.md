@@ -5,13 +5,12 @@
 | File | Purpose |
 | --- | --- |
 | `railway.json` | Nixpacks builder, start command, healthcheck, restart policy |
-| `nixpacks.toml` | Bun install/build + start `bun .output/server/index.mjs`; FFmpeg/Matchering |
-| `package.json` | `start` → `bun .output/server/index.mjs`; `engines.node` → `>=20` |
-| `.dockerignore` | Excludes noise/secrets but **not** `.output` (Nitro server must ship) |
+| `nixpacks.toml` | Bun install/build; start via `bun run start`; FFmpeg + Matchering |
+| `package.json` | `"start": "bun .output/server/index.mjs"` |
+| `.dockerignore` | Excludes noise/secrets but **not** `.output` |
 
-The build emits a Nitro `node-server` bundle at `.output/`. That server reads
-`PORT` and binds `0.0.0.0` on its own, so no custom Express wrapper is needed.
-Start the production server with `bun .output/server/index.mjs` (or `bun run start`).
+The build emits a Nitro `node-server` bundle at `.output/`. Production start is
+`bun run start` → `bun .output/server/index.mjs`.
 
 ## System dependencies
 

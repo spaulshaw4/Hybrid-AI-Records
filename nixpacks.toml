@@ -1,17 +1,15 @@
-# Mastering shells out to FFmpeg (mix, loudnorm, duration ceiling) and to
-# Python Matchering 2.0. Neither is in the default Node image, and without them
-# Gate 5 degrades to loudnorm-only or fails outright.
+# Mastering needs FFmpeg + Python Matchering on the image.
+# Start uses package.json → "bun .output/server/index.mjs"
+
 [phases.setup]
-nixPkgs = ["bun", "nodejs_22", "ffmpeg-full", "python311", "python311Packages.pip"]
+nixPkgs = ["bun", "ffmpeg", "python311", "python311Packages.pip"]
 
 [phases.install]
 cmds = [
-  "bun install --no-frozen-lockfile",
+  "bun install --frozen-lockfile",
   "pip install --break-system-packages matchering==2.0.6"
 ]
 
-# Nitro must emit .output/server/index.mjs for the start command below.
-# Railway/Nixpacks app root is /app; cmds run from that directory.
 [phases.build]
 dependsOn = ["install"]
 cmds = [
@@ -19,5 +17,8 @@ cmds = [
   "test -f .output/server/index.mjs || (echo 'ERROR: .output/server/index.mjs missing after build' && pwd && ls -la .output .output/server 2>/dev/null; exit 1)"
 ]
 
+[variables]
+NODE_ENV = "production"
+
 [start]
-cmd = "bun .output/server/index.mjs"
+cmd = "bun run start"
