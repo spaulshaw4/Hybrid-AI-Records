@@ -6,7 +6,6 @@ import { Check, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
-import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { supabase } from "@/integrations/supabase/client";
 import { getStripe, getStripeEnvironment } from "@/lib/stripe";
@@ -178,8 +177,6 @@ function TokensPage() {
 
   return (
     <main className="min-h-dvh bg-background pb-16">
-      <PaymentTestModeBanner />
-
       <div className="mx-auto w-full max-w-3xl px-4 pt-10">
         <PortalBreadcrumb
           trail={[

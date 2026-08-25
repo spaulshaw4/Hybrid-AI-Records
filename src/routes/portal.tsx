@@ -31,7 +31,6 @@ import { pageHead } from "@/lib/social-meta";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import { Wordmark } from "@/components/Wordmark";
 import { TokenStore } from "@/components/TokenStore";
-import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { TOKEN_BUNDLES, perTokenLabel, usdLabel } from "@/lib/tokens";
 import { SERVICES, VIDEO_SERVICES, type ServicePackage } from "@/lib/services";
 import { buildPageJsonLd } from "@/lib/release-schema";
@@ -109,8 +108,6 @@ function ProjectPortal() {
 
   return (
     <div className="min-h-dvh">
-      <PaymentTestModeBanner />
-
       <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
         <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 sm:flex sm:justify-between sm:gap-4 sm:px-6 sm:py-4">
           <Link to="/" aria-label="Hybrid AI Records home" className="min-w-0">
