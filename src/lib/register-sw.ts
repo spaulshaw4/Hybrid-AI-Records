@@ -1,39 +1,15 @@
-// Single guarded registration point for the offline app shell.
-// Never registers in dev, in an iframe, or in any Lovable preview host.
-const SW_URL = "/sw.js";
+// Service worker registration is paused while we force-clear stale offline
+// shells (cached payment banner / old HTML). Re-enable /sw.js register() when ready.
 
-function shouldRefuse(): boolean {
-  if (!import.meta.env.PROD) return true;
-  if (typeof window === "undefined") return true;
-  try {
-    if (window.self !== window.top) return true;
-  } catch {
-    return true;
-  }
-  const host = window.location.hostname;
-  if (host.startsWith("id-preview--") || host.startsWith("preview--")) return true;
-  if (host === "lovableproject.com" || host.endsWith(".lovableproject.com")) return true;
-  if (host === "lovableproject-dev.com" || host.endsWith(".lovableproject-dev.com")) return true;
-  if (host === "beta.lovable.dev" || host.endsWith(".beta.lovable.dev")) return true;
-  if (new URLSearchParams(window.location.search).get("sw") === "off") return true;
-  return false;
-}
-
-async function unregisterExisting() {
-  if (!("serviceWorker" in navigator)) return;
+async function unregisterAllAndClearCaches() {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
   const registrations = await navigator.serviceWorker.getRegistrations();
-  await Promise.allSettled(
-    registrations
-      .filter((r) => (r.active?.scriptURL ?? r.waiting?.scriptURL ?? "").endsWith(SW_URL))
-      .map((r) => r.unregister()),
-  );
+  await Promise.allSettled(registrations.map((r) => r.unregister()));
+  if (typeof caches === "undefined") return;
+  const names = await caches.keys();
+  await Promise.allSettled(names.map((name) => caches.delete(name)));
 }
 
 export function registerOfflineShell() {
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-  if (shouldRefuse()) {
-    void unregisterExisting();
-    return;
-  }
-  void navigator.serviceWorker.register(SW_URL, { scope: "/" }).catch(() => {});
+  void unregisterAllAndClearCaches();
 }

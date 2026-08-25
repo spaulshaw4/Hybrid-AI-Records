@@ -222,6 +222,25 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en" className="app-bg" data-site-nav="on">
       <head>
         <HeadContent />
+        {/* Drop stale SW/cache so redeploys (e.g. payment banner) aren't stuck. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+      for (let registration of registrations) {
+        registration.unregister();
+      }
+    });
+  }
+  if ('caches' in window) {
+    caches.keys().then(function(names) {
+      for (let name of names) caches.delete(name);
+    });
+  }
+`,
+          }}
+        />
         {/* Silver mesh until the living background paints. Avoid !important
             so the repeating wallpaper can still cover html/body. */}
         <style>{`html,body{margin:0;padding:0;background-color:#07090f;background-image:radial-gradient(circle at 18% 22%,rgba(220,38,38,.4),transparent 42%),radial-gradient(circle at 82% 78%,rgba(29,78,216,.4),transparent 42%),linear-gradient(#07090f,#07090f);background-repeat:no-repeat;background-size:cover;background-attachment:scroll;}`}</style>
