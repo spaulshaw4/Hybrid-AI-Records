@@ -1,9 +1,18 @@
 const clientToken = import.meta.env.VITE_PAYMENTS_CLIENT_TOKEN as string | undefined;
 
 export function PaymentTestModeBanner() {
-  // Intentionally no "Checkout not live" banner when the publishable key is
-  // missing from the client bundle — set VITE_PAYMENTS_CLIENT_TOKEN at Docker
-  // build time on Railway so Stripe Checkout works.
+  if (import.meta.env.DEV && !clientToken) {
+    return (
+      <div
+        role="region"
+        aria-label="Payment configuration notice"
+        className="w-full border-b border-white/10 bg-transparent px-4 py-2 text-center text-sm text-slate-300"
+      >
+        <span className="font-semibold text-white">Checkout not live.</span>{" "}
+        Complete Stripe go-live in your Lovable project to accept real payments.
+      </div>
+    );
+  }
 
   if (clientToken?.startsWith("pk_test_")) {
     return (
