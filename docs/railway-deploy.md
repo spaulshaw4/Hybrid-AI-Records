@@ -38,11 +38,21 @@ Set `MATCHERING_PYTHON` if the interpreter is not on `PATH` as `python3`.
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side storage uploads and vault writes. Without it every artifact falls back to the on-disk local vault, which does not survive a redeploy |
 | `SUPABASE_PUBLISHABLE_KEY` | Browser client. `SUPABASE_ANON_KEY` also accepted |
 | `VITE_SUPABASE_URL` | Baked into the client bundle at build time |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Baked into the client bundle at build time |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY` | Baked into the client bundle at build time |
+| `VITE_PAYMENTS_CLIENT_TOKEN` | Stripe **publishable** key (`pk_live_…`). Baked at build time. Missing → homepage shows **Checkout not live.** |
 
-`VITE_`-prefixed values are inlined into the browser bundle at build time, so
-they must be present during `npm run build`, and only non-secret values belong
-there.
+`VITE_`-prefixed values are inlined into the browser bundle at **Docker build** time,
+so they must be set as Railway **Variables** on the service (available during the
+image build), not only at runtime. Only publishable/public values belong there —
+never bake `STRIPE_SECRET_*` or service-role keys into `VITE_*`.
+
+### Stripe runtime (checkout sessions)
+
+| Variable | Used for |
+| --- | --- |
+| `STRIPE_SECRET_KEY` or live/sandbox secret used by `stripe.server` | Creating Checkout Sessions server-side |
+
+Without the matching Stripe secret at **runtime**, the live publishable key alone cannot complete checkout.
 
 ### Recommended
 

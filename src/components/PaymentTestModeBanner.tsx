@@ -9,7 +9,9 @@ export function PaymentTestModeBanner() {
         className="w-full border-b border-white/10 bg-transparent px-4 py-2 text-center text-sm text-slate-300"
       >
         <span className="font-semibold text-white">Checkout not live.</span>{" "}
-        Complete Stripe go-live in your Lovable project to accept real payments.
+        Set <code className="text-white/90">VITE_PAYMENTS_CLIENT_TOKEN</code> to
+        your Stripe <code className="text-white/90">pk_live_…</code> key as a
+        Railway build variable, then redeploy.
       </div>
     );
   }
