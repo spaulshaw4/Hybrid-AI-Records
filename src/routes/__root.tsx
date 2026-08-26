@@ -244,9 +244,9 @@ function RootShell({ children }: { children: ReactNode }) {
         />
         {/* Silver mesh until the living background paints. Avoid !important
             so the repeating wallpaper can still cover html/body. */}
-        <style>{`html,body{margin:0;padding:0;background-color:#07090f;background-image:radial-gradient(circle at 18% 22%,rgba(220,38,38,.4),transparent 42%),radial-gradient(circle at 82% 78%,rgba(29,78,216,.4),transparent 42%),linear-gradient(#07090f,#07090f);background-repeat:no-repeat;background-size:cover;background-attachment:scroll;}`}</style>
+        <style>{`html,body{margin:0;padding:0;background-color:#121316;background-image:radial-gradient(circle at 18% 22%,rgba(220,38,38,.5),transparent 58%),radial-gradient(circle at 82% 78%,rgba(29,78,216,.5),transparent 58%),radial-gradient(circle at 50% 46%,rgba(248,250,252,.2),transparent 52%),linear-gradient(#121316,#121316);background-repeat:no-repeat;background-size:cover;background-attachment:scroll;}`}</style>
       </head>
-      <body className="min-h-screen bg-[#07090f]">
+      <body className="min-h-screen bg-[#121316]">
         {children}
         <Scripts />
       </body>

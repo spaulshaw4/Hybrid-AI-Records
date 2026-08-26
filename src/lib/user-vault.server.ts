@@ -14,6 +14,8 @@ export type UserVaultStems = {
   vocalUrl?: string | null;
   /** Raw Gate 1 engine audio, before stems and mastering. */
   rawAudioUrl?: string | null;
+  /** Hybrid Tokens charged for this generation. */
+  tokensUsed?: number | null;
 };
 
 /** Wire JSON shape for GET /api/studio/vault/tracks */
@@ -55,6 +57,7 @@ export async function persistUserVault(
     instrumental_url?: string | null;
     vocal_url?: string | null;
     raw_audio_url?: string | null;
+    tokens_used?: number;
   } = {
     user_id: userId,
     title: stems.title.trim() || "Untitled Track",
@@ -65,6 +68,9 @@ export async function persistUserVault(
   if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl;
   if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl;
   if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl;
+  if (typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)) {
+    patch.tokens_used = Math.max(0, Math.min(100, Math.round(stems.tokensUsed)));
+  }
 
   if (stems.id) {
     if (!masterUrl && stems.status === "failed") {
@@ -116,6 +122,12 @@ export async function persistUserVault(
     instrumental_url: stems.instrumentalUrl || null,
     vocal_url: stems.vocalUrl || null,
     raw_audio_url: stems.rawAudioUrl || null,
+    tokens_used:
+      typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
+        ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
+        : masterUrl
+          ? 1
+          : 0,
   };
   const { data, error } = await supabase
     .from("user_vault")
@@ -181,7 +193,7 @@ async function toApiTracks(
 
 const VAULT_SELECT_WITH_RELATIONS = "*, album:albums(*), artist:artists(*)";
 const VAULT_SELECT_FLAT =
-  "id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, created_at, artist_name, album_name, artist_id, album_id";
+  "id, title, style, status, master_url, instrumental_url, vocal_url, raw_audio_url, tokens_used, created_at, artist_name, album_name, artist_id, album_id";
 
 export async function listUserVaultApiTracks(userId: string): Promise<UserVaultApiTrack[]> {
   let remote: UserVaultApiTrack[] = [];

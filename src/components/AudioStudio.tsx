@@ -91,9 +91,15 @@ import {
   listStudioTracks,
 } from "@/lib/studio-tracks.functions";
 import {
+  claimGuestVaultTracks,
   createUserVaultTrack,
   finalizeUserVaultTrack,
 } from "@/lib/user-vault.functions";
+import {
+  clearGuestVaultTracks,
+  listClaimableGuestVaultTracks,
+  upsertGuestVaultTrack,
+} from "@/lib/guest-vault";
 import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration } from "@/lib/vault-client";
 import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
 
@@ -1428,16 +1434,21 @@ export function AudioStudio() {
   const loadVaultTracks = useServerFn(listStudioTracks);
   const openAudioVault = useServerFn(createUserVaultTrack);
   const closeAudioVault = useServerFn(finalizeUserVaultTrack);
+  const claimGuestVault = useServerFn(claimGuestVaultTracks);
   const [vaultTick, setVaultTick] = useState(0);
   /** Bumped when a render finishes so the vault catalog reloads. */
   const [generationCompleted, setGenerationCompleted] = useState(0);
 
-  // Trigger a vault refresh when a track finishes
+  // Trigger a vault refresh when a track finishes (cloud or guest device vault).
   useEffect(() => {
-    if (!generationCompleted || !signedIn) return;
-    void fetchUserVaultTracks().then(() => {
-      setVaultTick((tick) => tick + 1);
-    });
+    if (!generationCompleted) return;
+    if (signedIn) {
+      void fetchUserVaultTracks().then(() => {
+        setVaultTick((tick) => tick + 1);
+      });
+      return;
+    }
+    setVaultTick((tick) => tick + 1);
   }, [generationCompleted, signedIn]);
 
 
@@ -1911,14 +1922,58 @@ export function AudioStudio() {
       setBalance((prev) => prev ?? DEV_TEST_TOKEN_BALANCE);
       return;
     }
+    const claimingRef = { current: false };
+    const claimLocalVault = () => {
+      if (claimingRef.current) return;
+      claimingRef.current = true;
+      void (async () => {
+        try {
+          const guest = await listClaimableGuestVaultTracks();
+          if (!guest.length) return;
+          const result = await claimGuestVault({
+            data: {
+              tracks: guest.map((track) => ({
+                title: track.title,
+                style: track.style,
+                masterUrl: track.masterUrl!,
+                instrumentalUrl: track.instrumentalUrl,
+                vocalUrl: track.vocalUrl,
+                rawAudioUrl: track.rawAudioUrl,
+                tokensUsed: track.tokensUsed,
+                createdAt: track.createdAt,
+              })),
+            },
+          });
+          if (result.claimed > 0) {
+            await clearGuestVaultTracks();
+            setVaultTick((tick) => tick + 1);
+            toast.success(
+              result.claimed === 1
+                ? "Linked 1 local track to your account vault."
+                : `Linked ${result.claimed} local tracks to your account vault.`,
+            );
+          }
+        } catch {
+          /* keep guest vault if claim fails — user can retry on next sign-in */
+        } finally {
+          claimingRef.current = false;
+        }
+      })();
+    };
+
     void supabase.auth.getSession().then(({ data }) => {
       setSignedIn(Boolean(data.session));
-      if (data.session) void refreshBalance();
+      if (data.session) {
+        void refreshBalance();
+        claimLocalVault();
+      }
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setSignedIn(Boolean(session));
-      if (session) void refreshBalance();
-      else setBalance(null);
+      if (session) {
+        void refreshBalance();
+        claimLocalVault();
+      } else setBalance(null);
     });
     const onChanged = (event: Event) => {
       const next = (event as CustomEvent<{ balance?: number }>).detail?.balance;
@@ -2242,10 +2297,20 @@ export function AudioStudio() {
 
     let audioVaultId: string | null = null;
     try {
-      const opened = await openAudioVault({
-        data: { title: trackTitle, style: styleLine },
-      });
-      audioVaultId = opened.id;
+      if (signedIn) {
+        const opened = await openAudioVault({
+          data: { title: trackTitle, style: styleLine },
+        });
+        audioVaultId = opened.id;
+      } else {
+        const guest = await upsertGuestVaultTrack({
+          title: trackTitle,
+          style: styleLine || "Custom",
+          status: "processing",
+          tokensUsed: 0,
+        });
+        audioVaultId = guest.id;
+      }
       notifyVaultOfNewGeneration({
         id: audioVaultId,
         title: trackTitle,
@@ -2253,7 +2318,7 @@ export function AudioStudio() {
       });
       setVaultTick((tick) => tick + 1);
     } catch {
-      /* user_vault migration may not be applied yet */
+      /* user_vault migration may not be applied yet — guest path still works */
     }
 
     const recordAudioVault = async (patch: {
@@ -2262,19 +2327,34 @@ export function AudioStudio() {
       masterUrl?: string;
       instrumentalUrl?: string | null;
       vocalUrl?: string | null;
+      tokensUsed?: number;
     }) => {
       if (!audioVaultId) return;
       try {
-        await closeAudioVault({
-          data: {
+        if (signedIn && !audioVaultId.startsWith("guest-")) {
+          await closeAudioVault({
+            data: {
+              id: audioVaultId,
+              status: patch.status,
+              title: patch.title,
+              masterUrl: patch.masterUrl,
+              instrumentalUrl: patch.instrumentalUrl ?? undefined,
+              vocalUrl: patch.vocalUrl ?? undefined,
+              tokensUsed: patch.tokensUsed,
+            },
+          });
+        } else {
+          await upsertGuestVaultTrack({
             id: audioVaultId,
+            title: patch.title ?? trackTitle,
+            style: styleLine || "Custom",
             status: patch.status,
-            title: patch.title,
-            masterUrl: patch.masterUrl,
-            instrumentalUrl: patch.instrumentalUrl ?? undefined,
-            vocalUrl: patch.vocalUrl ?? undefined,
-          },
-        });
+            masterUrl: patch.masterUrl ?? null,
+            instrumentalUrl: patch.instrumentalUrl ?? null,
+            vocalUrl: patch.vocalUrl ?? null,
+            tokensUsed: patch.tokensUsed ?? (patch.status === "completed" ? 1 : 0),
+          });
+        }
         setVaultTick((tick) => tick + 1);
       } catch {
         /* keep the generator responsive if the vault write fails */
@@ -2665,6 +2745,7 @@ export function AudioStudio() {
         masterUrl: audioUrl,
         instrumentalUrl: stems?.instrumentalUrl,
         vocalUrl: stems?.vocalUrl,
+        tokensUsed: 1,
       });
 
       // Everything landed: audio rendered, archived and committed. Charge now
@@ -2801,6 +2882,7 @@ export function AudioStudio() {
           status: "completed",
           title: recoveredTitle,
           masterUrl: recoveredAudio,
+          tokensUsed: 1,
         });
         notifyVaultOfNewGeneration({
           id: audioVaultId ?? undefined,
@@ -3306,7 +3388,7 @@ export function AudioStudio() {
       >
         <CardContent className="space-y-5 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold tracking-tight">Hybrid Engine 1.0 Alpha</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Create Your Track</h2>
             <div className="flex items-center gap-2">
               <NotificationBell signedIn={signedIn} />
               {signedIn ? (

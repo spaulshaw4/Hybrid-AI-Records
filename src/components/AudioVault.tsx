@@ -48,6 +48,11 @@ import {
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
 } from "@/lib/vault-tracks";
+import {
+  deleteGuestVaultTrack,
+  guestTrackToPayload,
+  listGuestVaultTracks,
+} from "@/lib/guest-vault";
 import { safeReleaseMediaElement } from "@/lib/safe-media";
 
 type Props = {
@@ -160,7 +165,15 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const [wavBusy, setWavBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!signedIn) return;
+    if (!signedIn) {
+      try {
+        const guest = await listGuestVaultTracks();
+        setRows(guest.map((track) => fromApi(guestTrackToPayload(track))));
+      } catch {
+        setRows([]);
+      }
+      return;
+    }
     try {
       const tracks = await fetchVaultTracks();
       setRows((prev) => mergeVaultRows(tracks.map(fromApi), prev));
@@ -179,11 +192,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }, [loadVault, signedIn]);
 
   useEffect(() => {
-    if (!signedIn) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     void (async () => {
@@ -212,7 +220,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const pollStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!processing || !signedIn) {
+    if (!processing) {
       pollStartedAtRef.current = null;
       return;
     }
@@ -226,19 +234,17 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       if (document.visibilityState === "hidden") return;
       const started = pollStartedAtRef.current ?? Date.now();
       if (Date.now() - started > VAULT_POLL_MAX_MS) {
-        // Stop hammering WebKit after the max window — mark stale processing rows failed locally.
         setRows((prev) =>
           prev.map((row) =>
-            row.status === "processing"
-              ? { ...row, status: "failed" as const }
-              : row,
+            row.status === "processing" ? { ...row, status: "failed" as const } : row,
           ),
         );
         pollStartedAtRef.current = null;
         if (timer) window.clearInterval(timer);
         return;
       }
-      void refresh();
+      // Cloud vault only — guest rows update via generation events, not polling.
+      if (signedIn) void refresh();
     };
 
     timer = window.setInterval(tick, VAULT_POLL_MS);
@@ -335,7 +341,9 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     }
 
     try {
-      if (isPersistedVaultId(target.id)) {
+      if (!signedIn || !isPersistedVaultId(target.id)) {
+        await deleteGuestVaultTrack(target.id);
+      } else if (isPersistedVaultId(target.id)) {
         try {
           await deleteVaultTrackApi(target.id);
         } catch {
@@ -366,12 +374,14 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       </div>
 
       <div id="vault-track-list" className="divide-y divide-zinc-800/50">
-        {!signedIn ? (
-          <p className="py-3 text-sm text-zinc-400">Sign in to keep every generate in your vault.</p>
-        ) : loading && rows.length === 0 ? (
+        {loading && rows.length === 0 ? (
           <p className="py-3 text-sm text-zinc-400">Loading vault assets…</p>
         ) : rows.length === 0 ? (
-          <p className="py-3 text-sm text-zinc-400">No tracks saved. Hit Generate to start.</p>
+          <p className="py-3 text-sm text-zinc-400">
+            {signedIn
+              ? "No tracks saved. Hit Generate to start."
+              : "No local tracks yet. Generate without signing in — we keep them on this device until you link an account."}
+          </p>
         ) : (
           <div className="space-y-4 pt-2">
             {grouped.map((artist) => (

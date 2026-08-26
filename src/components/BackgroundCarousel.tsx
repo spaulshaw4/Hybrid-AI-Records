@@ -55,10 +55,10 @@ export const BackgroundCarousel: React.FC = () => {
       `}</style>
 
       {/* 1. Base Crimson Ambient Glow (Deepest Layer) */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_12%_8%,rgba(225,29,72,0.12)_0%,transparent_58%),radial-gradient(ellipse_at_90%_92%,rgba(37,99,235,0.12)_0%,transparent_56%),radial-gradient(ellipse_at_50%_42%,rgba(255,255,255,0.9)_0%,transparent_68%)] z-0" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_12%_8%,rgba(225,29,72,0.42)_0%,transparent_62%),radial-gradient(ellipse_at_90%_92%,rgba(37,99,235,0.4)_0%,transparent_60%),radial-gradient(ellipse_at_50%_42%,rgba(255,255,255,0.95)_0%,transparent_72%)] z-0" />
 
       {/* 2. Guilloche / Subtle Ray Overlay (Optional Accent Layer) */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.35)_0%,transparent_70%)] z-0" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.55)_0%,transparent_74%)] z-0" />
 
       {/* 3. Rotating Crests (Rendered ABOVE the glow so they do not get drowned out) */}
       {LOGOS.map((logo, idx) => (

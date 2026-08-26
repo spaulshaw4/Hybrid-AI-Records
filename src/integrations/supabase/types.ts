@@ -1182,6 +1182,7 @@ export type Database = {
           status: string
           style: string | null
           title: string
+          tokens_used: number
           user_id: string | null
           vocal_url: string | null
         }
@@ -1198,6 +1199,7 @@ export type Database = {
           status?: string
           style?: string | null
           title?: string
+          tokens_used?: number
           user_id?: string | null
           vocal_url?: string | null
         }
@@ -1214,6 +1216,7 @@ export type Database = {
           status?: string
           style?: string | null
           title?: string
+          tokens_used?: number
           user_id?: string | null
           vocal_url?: string | null
         }

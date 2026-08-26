@@ -52,16 +52,16 @@
 }
 
 :root {
-  /* Obsidian studio — dark glass over crimson/cobalt ambient mesh. */
-  --background: #080a10;
+  /* Lifted slate studio — richer zinc base over brighter crimson/cobalt mesh. */
+  --background: #121316;
   --foreground: #f8fafc;
 
-  --surface: rgb(15 23 42 / 0.72);
-  --surface-elevated: #0f172a;
+  --surface: rgb(39 39 42 / 0.6);
+  --surface-elevated: #18181b;
 
-  --card: rgb(15 23 42 / 0.72);
+  --card: rgb(39 39 42 / 0.6);
   --card-foreground: #f8fafc;
-  --popover: #0b0d14;
+  --popover: #18181b;
   --popover-foreground: #f8fafc;
 
   --primary: #e11d48;
@@ -74,10 +74,10 @@
   --glow-white: #ffffff;
   --glow-blue: #60a5fa;
 
-  --secondary: rgb(15 23 42 / 0.85);
+  --secondary: rgb(39 39 42 / 0.75);
   --secondary-foreground: #f8fafc;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
   --accent: #e11d48;
   --accent-foreground: #ffffff;
   --destructive: #e11d48;
@@ -85,7 +85,7 @@
 
   --border: rgb(255 255 255 / 0.1);
   --border-strong: rgb(255 255 255 / 0.16);
-  --input: rgb(15 23 42 / 0.92);
+  --input: rgb(39 39 42 / 0.85);
   --ring: #e11d48;
 
   --status-accent: #be123c;
@@ -99,20 +99,21 @@
   --veteran-gold: #fbbf24;
   --veteran-gold-dim: #f59e0b;
 
-  --charcoal: rgb(15 23 42 / 0.72);
-  --charcoal-soft: #080a10;
-  --overlay: rgb(0 0 0 / 0.62);
-  --glass: rgb(8 10 16 / 0.72);
+  --charcoal: rgb(39 39 42 / 0.6);
+  --charcoal-soft: #121316;
+  --overlay: rgb(0 0 0 / 0.55);
+  --glass: rgb(39 39 42 / 0.6);
   --glass-border: rgb(255 255 255 / 0.1);
   --glass-blur: 16px;
   /* Radials sit above the linear so the glows are visible. */
   --rwb-studio:
-    radial-gradient(circle at 18% 22%, rgba(220, 38, 38, 0.28), transparent 46%),
-    radial-gradient(circle at 82% 78%, rgba(29, 78, 216, 0.28), transparent 46%),
-    #080a10;
+    radial-gradient(circle at 18% 22%, rgba(220, 38, 38, 0.5), transparent 58%),
+    radial-gradient(circle at 82% 78%, rgba(29, 78, 216, 0.5), transparent 58%),
+    radial-gradient(circle at 50% 46%, rgba(248, 250, 252, 0.2), transparent 52%),
+    #121316;
   --mesh-canvas: var(--rwb-studio);
   --gradient-hero: var(--mesh-canvas);
-  --gradient-section: linear-gradient(180deg, rgb(8 10 16 / 0.2) 0%, rgb(8 10 16 / 0.45) 50%, rgb(8 10 16 / 0.7) 100%);
+  --gradient-section: linear-gradient(180deg, rgb(18 19 22 / 0.18) 0%, rgb(18 19 22 / 0.4) 50%, rgb(18 19 22 / 0.62) 100%);
   --gradient-red: linear-gradient(135deg, #e11d48, #be123c);
   --shadow-red: 0 12px 28px -16px rgb(225 29 72 / 0.4);
   --shadow-hard: 0 18px 40px -24px rgb(0 0 0 / 0.55);
@@ -280,7 +281,7 @@
 
   html.app-bg,
   body.app-bg {
-    background-color: #07090f;
+    background-color: #121316;
     background-image: none;
     background-repeat: no-repeat;
     background-size: cover;
@@ -792,12 +793,27 @@ footer {
 }
 
 .living-bg-cinematic {
-  background: none;
-  animation: none;
+  background:
+    radial-gradient(ellipse 72% 58% at 14% 12%, rgba(225, 29, 72, 0.42), transparent 62%),
+    radial-gradient(ellipse 68% 54% at 88% 88%, rgba(37, 99, 235, 0.4), transparent 60%),
+    radial-gradient(ellipse 48% 42% at 50% 44%, rgba(255, 255, 255, 0.22), transparent 68%);
+  animation: living-bg-aurora 22s ease-in-out infinite;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  opacity: 0.95;
+  pointer-events: none;
 }
 
 .living-bg-glow {
-  display: none;
+  display: block;
+  background:
+    radial-gradient(circle at 22% 28%, rgba(251, 113, 133, 0.55), transparent 42%),
+    radial-gradient(circle at 78% 72%, rgba(96, 165, 250, 0.5), transparent 44%),
+    radial-gradient(circle at 52% 48%, rgba(255, 255, 255, 0.28), transparent 36%);
+  filter: blur(56px);
+  opacity: 0.9;
+  animation: living-bg-pulse 18s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .living-bg-matrix {
@@ -815,7 +831,7 @@ footer {
 }
 
 @keyframes living-bg-pulse {
-  0%, 100% { opacity: 0.55; }
+  0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
 }
 
@@ -906,15 +922,15 @@ footer {
 
 
 
-/* Veil: dark scrim so copy stays readable without washing out the mesh. */
+/* Veil: lighter scrim so brighter mesh still leaves copy readable. */
 .living-bg-veil {
   display: block;
   pointer-events: none;
   background: linear-gradient(
     180deg,
-    rgb(7 9 15 / 0.38) 0%,
-    rgb(7 9 15 / 0.22) 42%,
-    rgb(7 9 15 / 0.52) 100%
+    rgb(18 19 22 / 0.28) 0%,
+    rgb(18 19 22 / 0.14) 42%,
+    rgb(18 19 22 / 0.4) 100%
   );
   backdrop-filter: none;
   opacity: 1;
@@ -1267,42 +1283,42 @@ main button:active {
   pointer-events: none;
   background: linear-gradient(
     105deg,
-    rgba(7, 9, 15, 0.55) 0%,
-    rgba(7, 9, 15, 0.22) 46%,
+    rgba(18, 19, 22, 0.42) 0%,
+    rgba(18, 19, 22, 0.16) 46%,
     transparent 78%
   );
 }
 
-/* Flowing RWB mesh: overlapping color fields on a near-black base.
-   Blobs live on ::before; a dark veil on ::after keeps copy high-contrast. */
+/* Flowing RWB mesh: overlapping color fields on a lifted slate base.
+   Blobs live on ::before; a lighter veil on ::after keeps copy high-contrast. */
 .flowing-patriotic-bg {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background-color: #07090f;
+  background-color: #121316;
 }
 
 .flowing-patriotic-bg::before {
   content: "";
   position: absolute;
-  inset: -28%;
+  inset: -32%;
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(closest-side, rgba(220, 38, 38, 0.72), transparent 72%),
-    radial-gradient(closest-side, rgba(248, 250, 252, 0.22), transparent 70%),
-    radial-gradient(closest-side, rgba(29, 78, 216, 0.7), transparent 74%),
-    radial-gradient(closest-side, rgba(185, 28, 28, 0.45), transparent 68%),
-    radial-gradient(closest-side, rgba(96, 165, 250, 0.38), transparent 70%),
-    radial-gradient(closest-side, rgba(255, 255, 255, 0.14), transparent 66%);
+    radial-gradient(closest-side, rgba(220, 38, 38, 0.85), transparent 78%),
+    radial-gradient(closest-side, rgba(248, 250, 252, 0.4), transparent 76%),
+    radial-gradient(closest-side, rgba(29, 78, 216, 0.82), transparent 80%),
+    radial-gradient(closest-side, rgba(185, 28, 28, 0.58), transparent 74%),
+    radial-gradient(closest-side, rgba(96, 165, 250, 0.52), transparent 76%),
+    radial-gradient(closest-side, rgba(255, 255, 255, 0.28), transparent 72%);
   background-repeat: no-repeat;
   background-size:
-    58% 52%,
-    42% 38%,
-    64% 58%,
-    46% 50%,
-    40% 44%,
-    34% 32%;
+    66% 58%,
+    50% 46%,
+    72% 64%,
+    54% 56%,
+    48% 50%,
+    40% 38%;
   background-position:
     8% 18%,
     48% 42%,
@@ -1310,7 +1326,7 @@ main button:active {
     78% 8%,
     18% 88%,
     62% 62%;
-  filter: blur(48px);
+  filter: blur(52px);
   will-change: background-position, transform;
   animation:
     patrioticMeshFlow 16s ease-in-out infinite,
@@ -1326,12 +1342,12 @@ main button:active {
   background:
     linear-gradient(
       105deg,
-      rgba(7, 9, 15, 0.78) 0%,
-      rgba(7, 9, 15, 0.52) 38%,
-      rgba(7, 9, 15, 0.28) 68%,
-      rgba(7, 9, 15, 0.4) 100%
+      rgba(18, 19, 22, 0.58) 0%,
+      rgba(18, 19, 22, 0.36) 38%,
+      rgba(18, 19, 22, 0.18) 68%,
+      rgba(18, 19, 22, 0.3) 100%
     ),
-    linear-gradient(180deg, rgba(7, 9, 15, 0.2) 0%, transparent 36%, rgba(7, 9, 15, 0.45) 100%);
+    linear-gradient(180deg, rgba(18, 19, 22, 0.14) 0%, transparent 36%, rgba(18, 19, 22, 0.32) 100%);
 }
 
 @keyframes patrioticMeshFlow {
@@ -2714,11 +2730,11 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   .bg-surface,
   .site-sidebar,
   .site-dock {
-    background-color: rgb(8 10 16 / 0.96) !important;
+    background-color: rgb(24 24 27 / 0.96) !important;
   }
 
   .site-topbar {
-    background-color: rgb(8 10 16 / 0.96) !important;
+    background-color: rgb(24 24 27 / 0.96) !important;
   }
 
   /* Long-lived `will-change` promotions are pure GPU-memory cost once the
@@ -3121,26 +3137,26 @@ footer .text-muted-foreground {
   color: var(--foreground);
 }
 
-/* Engine wizard, player, and vault: dark translucent glass with sharp zinc type. */
+/* Engine wizard, player, and vault: lifted zinc glass with white highlight rim. */
 .engine-wizard-card,
 .engine-result-card,
 .vault-container {
-  background-color: rgb(24 24 27 / 0.8) !important;
+  background-color: rgb(39 39 42 / 0.6) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgb(39 39 42) !important;
+  border: 1px solid rgb(255 255 255 / 0.1) !important;
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
-  color: #f4f4f5;
+  color: #fafafa;
 }
 
 .engine-wizard-card :is(h2, h3, dt, dd),
 .engine-result-card h3,
 .vault-container h3 {
-  color: #f4f4f5;
+  color: #ffffff;
 }
 
 .site-topbar {
-  background-color: rgb(0 0 0 / 0.6) !important;
+  background-color: rgb(18 19 22 / 0.82) !important;
   backdrop-filter: blur(16px) !important;
   -webkit-backdrop-filter: blur(16px) !important;
   border-bottom: 1px solid rgb(255 255 255 / 0.1);

@@ -67,8 +67,8 @@ test.describe("Homepage keyboard navigation", () => {
     expect(first?.tag).toBe("a");
 
     // Hero CTAs are reachable purely by tabbing.
-    const makeTrack = await tabUntil(page, (i) => /make your track/i.test(i.label));
-    expect(makeTrack, "Make Your Track CTA should be reachable by Tab").not.toBeNull();
+    const makeTrack = await tabUntil(page, (i) => /create your track/i.test(i.label));
+    expect(makeTrack, "Create Your Track CTA should be reachable by Tab").not.toBeNull();
 
     const submit = await tabUntil(page, (i) => /submit your music/i.test(i.label));
     expect(submit, "Submit Your Music CTA should be reachable by Tab").not.toBeNull();

@@ -14,7 +14,7 @@ export type SiteNavItem = {
 );
 
 export const SITE_NAV: SiteNavItem[] = [
-  { id: "make-track", label: "Make Your Track", short: "Create", icon: "audio", to: "/engine" },
+  { id: "make-track", label: "Create Your Track", short: "Create", icon: "audio", to: "/engine" },
   { id: "catalog", label: "Catalog & Tracks", short: "Catalog", icon: "catalog", to: "/artists" },
   { id: "merch", label: "Merch", short: "Merch", icon: "merch", href: MERCH_URL },
   { id: "radio", label: "Hybrid AI Radio", short: "Radio", icon: "radio", to: "/", hash: "radio" },

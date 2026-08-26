@@ -521,10 +521,10 @@ function Home() {
             <div className="mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
               <Link
                 to="/engine"
-                className="group flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 transition-colors hover:border-zinc-600"
+                className="group flex flex-col gap-2 rounded-xl border border-white/10 bg-zinc-800/60 p-6 transition-colors hover:border-white/20"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
-                  Make Your Own Song
+                  Create Your Track
                 </span>
                 <span className="text-base text-slate-100">
                   Write it, describe it, hear it in minutes. No studio, no engineer.
@@ -536,7 +536,7 @@ function Home() {
 
               <Link
                 to="/portal"
-                className="group flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 transition-colors hover:border-zinc-600"
+                className="group flex flex-col gap-2 rounded-xl border border-white/10 bg-zinc-800/60 p-6 transition-colors hover:border-white/20"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
                   Distribution & Video
@@ -555,7 +555,7 @@ function Home() {
                 to="/engine"
                 className="btn-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
-                Make Your Track
+                Create Your Track
               </Link>
               <Link
                 to="/portal"
@@ -594,10 +594,10 @@ function Home() {
               <div
                 key={r.id}
                 id={`release-${r.id}`}
-                className={`group relative flex w-full flex-col overflow-hidden rounded-xl border bg-[#080a10] text-start shadow-lg shadow-black/40 transition-colors ${
+                className={`group relative flex w-full flex-col overflow-hidden rounded-xl border bg-zinc-800/60 text-start shadow-lg shadow-black/40 transition-colors ${
                   highlightCatalog
                     ? "animate-pulse border-primary shadow-[0_0_36px_-6px_rgba(225,29,46,0.75)]"
-                    : "border-zinc-800/60 hover:border-amber-500/40"
+                    : "border-white/10 hover:border-amber-500/40"
                 }`}
               >
                 <button
@@ -840,7 +840,7 @@ function Home() {
               <ul className="mt-5 space-y-3">
                 {[
                   { label: "Distribution & Video", href: "/portal", isLink: true },
-                  { label: "Hybrid Engine 1.0 Alpha", href: "/engine", isLink: true },
+                  { label: "Create Your Track", href: "/engine", isLink: true },
                   { label: "Artists", href: "#catalog", isLink: false },
                   { label: "Hybrid AI Radio", href: "#radio", isLink: false },
                   { label: "Tokens", href: "/tokens", isLink: true },

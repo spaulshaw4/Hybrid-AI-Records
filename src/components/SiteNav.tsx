@@ -181,7 +181,7 @@ function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2.5 backdrop-blur-lg lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-white/10 bg-zinc-900/90 px-3 py-2.5 backdrop-blur-lg lg:hidden"
     >
       <Link
         to="/"

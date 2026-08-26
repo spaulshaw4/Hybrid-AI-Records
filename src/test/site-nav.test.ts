@@ -25,7 +25,7 @@ describe("site nav", () => {
     expect(shouldShowSiteNav("/engine")).toBe(true);
   });
 
-  it("marks Make Your Track active on the engine workspace", () => {
+  it("marks Create Your Track active on the engine workspace", () => {
     const item = SITE_NAV.find((entry) => entry.id === "make-track")!;
     expect(isSiteNavActive(item, "/engine", {}, "")).toBe(true);
     expect(isSiteNavActive(item, "/", {}, "")).toBe(false);
