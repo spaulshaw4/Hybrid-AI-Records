@@ -10,7 +10,6 @@ import {
 
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
-import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { cn } from "@/lib/utils";
@@ -29,28 +28,25 @@ const ICONS = {
   packages: Clapperboard,
 } as const;
 
-/** Language + currency — always visible (never `md:hidden` / `lg:hidden`). */
-function LocaleControls({ className = "" }: { className?: string }) {
+/**
+ * Right-hand action bar: language + currency always render (no auth/token gate).
+ * Token balance lives on /engine and /tokens — not in this top bar.
+ */
+function HeaderActions({ className = "" }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-2 border-l border-zinc-700/80 pl-3",
+        "ms-auto flex shrink-0 items-center justify-end gap-3",
         className,
       )}
       data-no-translate
     >
-      <LanguageSwitcher menuAlign="end" />
-      <CurrencySwitcher variant="pill" />
-    </div>
-  );
-}
-
-/** Right-side desktop/mobile header actions: tokens, locale, settings. */
-function HeaderActions({ className = "" }: { className?: string }) {
-  return (
-    <div className={cn("ms-auto flex shrink-0 items-center justify-end gap-2 sm:gap-3", className)}>
-      <HeaderTokenBalance />
-      <LocaleControls />
+      <div className="flex items-center">
+        <LanguageSwitcher menuAlign="end" />
+      </div>
+      <div className="flex items-center">
+        <CurrencySwitcher variant="pill" />
+      </div>
       <SettingsMenu />
     </div>
   );
@@ -205,8 +201,8 @@ function SiteHeader() {
       >
         <Wordmark size="sm" interactive />
       </Link>
-      {/* Desktop + mobile: language/currency stay in this always-visible action group */}
-      <HeaderActions className="flex" />
+      {/* Language + currency always visible; not gated on auth or tokens */}
+      <HeaderActions />
     </header>
   );
 }
