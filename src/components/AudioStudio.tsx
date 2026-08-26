@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
@@ -94,7 +94,7 @@ import {
   createUserVaultTrack,
   finalizeUserVaultTrack,
 } from "@/lib/user-vault.functions";
-import { notifyVaultOfNewGeneration } from "@/lib/vault-client";
+import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration } from "@/lib/vault-client";
 
 import { hybridMasterFileName, masterWavFromUrl } from "@/lib/audio-mixdown";
 import { abortableBarrier, abortableDelay, isGenerationAborted } from "@/lib/generation-abort";
@@ -1423,6 +1423,16 @@ export function AudioStudio() {
   const openAudioVault = useServerFn(createUserVaultTrack);
   const closeAudioVault = useServerFn(finalizeUserVaultTrack);
   const [vaultTick, setVaultTick] = useState(0);
+  /** Bumped when a render finishes so the vault catalog reloads. */
+  const [generationCompleted, setGenerationCompleted] = useState(0);
+
+  // Trigger a vault refresh when a track finishes
+  useEffect(() => {
+    if (!generationCompleted || !signedIn) return;
+    void fetchUserVaultTracks().then(() => {
+      setVaultTick((tick) => tick + 1);
+    });
+  }, [generationCompleted, signedIn]);
 
 
 
@@ -2091,6 +2101,33 @@ export function AudioStudio() {
     void downloadAudioFile(url, title, applyRepairedUrl);
   }
 
+  async function handleShareResult() {
+    if (!result) return;
+    const trackId = result.taskId?.trim();
+    const shareUrl = trackId
+      ? `https://www.hybrid-ai-records.com/track/${trackId}`
+      : "https://www.hybrid-ai-records.com/engine";
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: `${result.title} | Hybrid AI Records`,
+          text: `Check out this track created on Hybrid AI Records: ${result.title}`,
+          url: shareUrl,
+        });
+        return;
+      } catch (err) {
+        console.log("Share canceled or failed", err);
+        return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(result.audioUrl || shareUrl);
+      toast.success("Link copied to clipboard!");
+    } catch {
+      toast.message("Copy this link", { description: shareUrl });
+    }
+  }
+
 
 
 
@@ -2537,7 +2574,19 @@ export function AudioStudio() {
         try {
           const current = await checkStatus(started.taskId);
           pollErrors = 0;
-          ready = current.tracks.filter((t) => t.audioUrl);
+          const audioReady = current.tracks.filter((t) => t.audioUrl);
+          if (
+            current.status === "completed" ||
+            current.status === "succeeded" ||
+            audioReady.length > 0
+          ) {
+            ready = audioReady;
+            if (ready.length > 0) {
+              setBusy(false);
+              setRollbackNotice(null);
+              runningRef.current = false;
+            }
+          }
         } catch (pollError) {
           // A dropped poll does not mean a dropped render: the engine keeps
           // working server-side, so we keep re-attaching for a few rounds and
@@ -2676,7 +2725,7 @@ export function AudioStudio() {
         vocalUrl: stems?.vocalUrl,
       });
       updateHistory(runId, { title, audioUrl, status: "ready", error: undefined });
-      setVaultTick((tick) => tick + 1);
+      setGenerationCompleted((n) => n + 1);
       toast.success("Master track ready.");
 
     } catch (err) {
@@ -2732,7 +2781,7 @@ export function AudioStudio() {
           status: "completed",
           masterUrl: recoveredAudio,
         });
-        setVaultTick((tick) => tick + 1);
+        setGenerationCompleted((n) => n + 1);
         toast.success("Master track ready.");
         return;
       }
@@ -2837,7 +2886,19 @@ export function AudioStudio() {
           try {
             const current = await checkStatus(job.taskId);
             resumeErrors = 0;
-            ready = current.tracks.filter((t) => t.audioUrl);
+            const audioReady = current.tracks.filter((t) => t.audioUrl);
+            if (
+              current.status === "completed" ||
+              current.status === "succeeded" ||
+              audioReady.length > 0
+            ) {
+              ready = audioReady;
+              if (ready.length > 0) {
+                setBusy(false);
+                setRollbackNotice(null);
+                runningRef.current = false;
+              }
+            }
           } catch (pollError) {
             resumeErrors += 1;
             if (resumeErrors >= POLL_MAX_CONSECUTIVE_ERRORS) throw pollError;
@@ -2901,7 +2962,7 @@ export function AudioStudio() {
           status: "completed",
           masterUrl: audioUrl,
         });
-        setVaultTick((tick) => tick + 1);
+        setGenerationCompleted((n) => n + 1);
         toast.success("Master track ready.");
       } catch (err) {
         setStatusText(null);
@@ -2939,7 +3000,7 @@ export function AudioStudio() {
             status: "completed",
             masterUrl: gotAudio,
           });
-          setVaultTick((tick) => tick + 1);
+          setGenerationCompleted((n) => n + 1);
           toast.success("Master track ready.");
           return;
         }
@@ -3120,11 +3181,37 @@ export function AudioStudio() {
       if (document.visibilityState !== "visible") return;
       const isGenerating = runningRef.current;
       if (!isGenerating) return;
-      const currentTaskId = readPendingJob()?.taskId;
+      const pending = readPendingJob();
+      const currentTaskId = pending?.taskId;
       if (!currentTaskId) return;
-      void checkStatus(currentTaskId).catch(() => {
-        /* in-loop poll will retry */
-      });
+      void checkStatus(currentTaskId)
+        .then((data) => {
+          const audioUrl =
+            data.tracks.find((t) => typeof t.audioUrl === "string" && t.audioUrl)?.audioUrl ?? null;
+          const done =
+            data.status === "completed" ||
+            data.status === "succeeded" ||
+            Boolean(audioUrl);
+          if (!done || !audioUrl || !isPlayableAudioSource(audioUrl)) return;
+          // Upstream finished while this tab was backgrounded — stop the spinner
+          // and surface the track even if the delayed poll interval has not fired.
+          setBusy(false);
+          setRollbackNotice(null);
+          setStatusText(null);
+          runningRef.current = false;
+          setResult({
+            title: data.tracks[0]?.title || pending.title,
+            style: pending.styleLine,
+            vocalProfile: pending.vocalProfile,
+            audioUrl,
+            taskId: data.taskId || currentTaskId,
+          });
+          clearPendingJob();
+          setGenerationCompleted((n) => n + 1);
+        })
+        .catch(() => {
+          /* in-loop poll will retry */
+        });
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -4612,6 +4699,33 @@ export function AudioStudio() {
               onRegenerate={() => void handleGenerate()}
               regenerating={busy && !result}
             />
+
+            {result.audioUrl ? (
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={result.audioUrl}
+                  download={`${result.title || "Hybrid-AI-Track"} - Hybrid AI Records.mp3`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    buttonVariants({ variant: "default", size: "sm" }),
+                    "inline-flex w-fit items-center gap-2",
+                  )}
+                >
+                  <Download className="size-3.5" aria-hidden />
+                  Download Track
+                </a>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleShareResult()}
+                >
+                  <Share2 className="size-3.5" aria-hidden />
+                  Share
+                </Button>
+              </div>
+            ) : null}
 
 
             <div className="flex flex-col gap-2">

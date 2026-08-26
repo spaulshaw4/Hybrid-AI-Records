@@ -45,6 +45,7 @@ import { Route as DevTranslationsRouteImport } from './routes/dev.translations'
 import { Route as StartIndexRouteImport } from './routes/start.index'
 import { Route as StartPackageRouteImport } from './routes/start.$package'
 import { Route as StartOnboardingRouteImport } from './routes/start.onboarding'
+import { Route as TrackTrackIdRouteImport } from './routes/track.$trackId'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as AuthenticatedAdminApplicationsRouteImport } from './routes/_authenticated/admin.applications'
@@ -253,6 +254,11 @@ const StartOnboardingRoute = StartOnboardingRouteImport.update({
   path: '/start/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TrackTrackIdRoute = TrackTrackIdRouteImport.update({
+  id: '/track/$trackId',
+  path: '/track/$trackId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
   id: '/.lovable/oauth/consent',
   path: '/.lovable/oauth/consent',
@@ -427,6 +433,7 @@ export interface FileRoutesByFullPath {
   '/dev/translations': typeof DevTranslationsRoute
   '/start/$package': typeof StartPackageRoute
   '/start/onboarding': typeof StartOnboardingRoute
+  '/track/$trackId': typeof TrackTrackIdRoute
   '/start/': typeof StartIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
@@ -489,6 +496,7 @@ export interface FileRoutesByTo {
   '/dev/translations': typeof DevTranslationsRoute
   '/start/$package': typeof StartPackageRoute
   '/start/onboarding': typeof StartOnboardingRoute
+  '/track/$trackId': typeof TrackTrackIdRoute
   '/start': typeof StartIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
@@ -553,6 +561,7 @@ export interface FileRoutesById {
   '/dev/translations': typeof DevTranslationsRoute
   '/start/$package': typeof StartPackageRoute
   '/start/onboarding': typeof StartOnboardingRoute
+  '/track/$trackId': typeof TrackTrackIdRoute
   '/start/': typeof StartIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
@@ -617,6 +626,7 @@ export interface FileRouteTypes {
     | '/dev/translations'
     | '/start/$package'
     | '/start/onboarding'
+    | '/track/$trackId'
     | '/start/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
@@ -679,6 +689,7 @@ export interface FileRouteTypes {
     | '/dev/translations'
     | '/start/$package'
     | '/start/onboarding'
+    | '/track/$trackId'
     | '/start'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
@@ -742,6 +753,7 @@ export interface FileRouteTypes {
     | '/dev/translations'
     | '/start/$package'
     | '/start/onboarding'
+    | '/track/$trackId'
     | '/start/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
@@ -799,6 +811,7 @@ export interface RootRouteChildren {
   CheckoutReturnRoute: typeof CheckoutReturnRoute
   StartPackageRoute: typeof StartPackageRoute
   StartOnboardingRoute: typeof StartOnboardingRoute
+  TrackTrackIdRoute: typeof TrackTrackIdRoute
   StartIndexRoute: typeof StartIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
@@ -1067,6 +1080,13 @@ declare module '@tanstack/react-router' {
       path: '/start/onboarding'
       fullPath: '/start/onboarding'
       preLoaderRoute: typeof StartOnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/track/$trackId': {
+      id: '/track/$trackId'
+      path: '/track/$trackId'
+      fullPath: '/track/$trackId'
+      preLoaderRoute: typeof TrackTrackIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.lovable/oauth/consent': {
@@ -1351,6 +1371,7 @@ const rootRouteChildren: RootRouteChildren = {
   CheckoutReturnRoute: CheckoutReturnRoute,
   StartPackageRoute: StartPackageRoute,
   StartOnboardingRoute: StartOnboardingRoute,
+  TrackTrackIdRoute: TrackTrackIdRoute,
   StartIndexRoute: StartIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,

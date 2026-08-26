@@ -76,7 +76,7 @@ export type PageHeadOptions = {
    */
   imageVariant?: ShareImageVariant;
   imageAlt?: string;
-  type?: "website" | "article" | "profile";
+  type?: "website" | "article" | "profile" | "music.song";
   card?: "summary" | "summary_large_image";
   /** Private/utility pages: emits robots noindex and skips the canonical. */
   noindex?: boolean;
