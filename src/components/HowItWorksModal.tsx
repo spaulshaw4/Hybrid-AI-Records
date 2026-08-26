@@ -12,9 +12,9 @@ const STEPS = [
   {
     n: "01",
     icon: Music,
-    title: "Hybrid Engine 1.0",
+    title: "Hybrid Engine 1.0 Alpha",
     tag: "Live Now",
-    body: "The only active production pipeline right now is the Hybrid Engine 1.0. Buy Hybrid Tokens, write your concept and lyrics, and generate release-ready single tracks instantly.",
+    body: "The only active production pipeline right now is the Hybrid Engine 1.0 Alpha. Buy Hybrid Tokens, write your concept and lyrics, and generate release-ready single tracks instantly.",
   },
   {
     n: "02",
@@ -28,7 +28,7 @@ const STEPS = [
     icon: Info,
     title: "Full-Service Audio Production Is Retired",
     tag: "Not Available",
-    body: "10-track album production and full-service audio production are not open for new submissions. Distribution-only packages and music-video production are still live, and the Hybrid Engine 1.0 handles single-track generation.",
+    body: "10-track album production and full-service audio production are not open for new submissions. Distribution-only packages and music-video production are still live, and the Hybrid Engine 1.0 Alpha handles single-track generation.",
   },
 ];
 
@@ -92,7 +92,7 @@ export function HowItWorksModal({ open, onClose, onSubmit }: Props) {
               How It Works
             </h2>
             <p className="mt-4 font-mono text-xs uppercase tracking-[0.24em] text-muted-foreground">
-              Hybrid Engine 1.0 is live. Full-service projects are paused.
+              Hybrid Engine 1.0 Alpha is live. Full-service projects are paused.
             </p>
           </header>
 
@@ -136,7 +136,7 @@ export function HowItWorksModal({ open, onClose, onSubmit }: Props) {
               onClick={onClose}
               className="w-full inline-flex items-center justify-center gap-2 bg-[#e11d2e] px-8 py-3 text-xs font-semibold uppercase tracking-widest text-white transition-colors hover:bg-[#c11824] sm:w-auto"
             >
-              Open Hybrid Engine 1.0 <ArrowUpRight size={14} />
+              Open Hybrid Engine 1.0 Alpha <ArrowUpRight size={14} />
             </Link>
             <button
               type="button"

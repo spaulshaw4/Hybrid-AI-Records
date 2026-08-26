@@ -48,7 +48,7 @@ export const Route = createFileRoute("/portal")({
       path: "/portal",
       title: "Hybrid Tokens — Hybrid AI Records",
       description:
-        "Buy Hybrid Tokens and generate single tracks in the Hybrid Engine 1.0. One balance, one engine, no packages or bundles.",
+        "Buy Hybrid Tokens and generate single tracks in the Hybrid Engine 1.0 Alpha. One balance, one engine, no packages or bundles.",
       socialTitle: "Hybrid Tokens — Hybrid AI Records",
       socialDescription:
         "Top up your Hybrid Token balance and generate single tracks in the engine.",
@@ -63,7 +63,7 @@ export const Route = createFileRoute("/portal")({
             path: "/portal",
             name: "Project Portal — Hybrid AI Records",
             description:
-              "Buy Hybrid Tokens, generate single tracks in the Hybrid Engine 1.0, and manage distribution and video services.",
+              "Buy Hybrid Tokens, generate single tracks in the Hybrid Engine 1.0 Alpha, and manage distribution and video services.",
             breadcrumb: [{ name: "Project Portal", path: "/portal" }],
           }),
         ),
@@ -127,7 +127,7 @@ function ProjectPortal() {
                 view === "tokens"
                   ? "Tokens"
                   : view === "studio"
-                    ? "Hybrid Engine 1.0"
+                    ? "Hybrid Engine 1.0 Alpha"
                     : "Distribution & Video",
             },
           ]}
@@ -152,7 +152,7 @@ function ProjectPortal() {
                   : "bg-background/40 text-muted-foreground hover:text-white"
               }`}
             >
-              {tab === "tokens" ? "Tokens" : tab === "studio" ? "Hybrid Engine 1.0" : "Distribution & Video"}
+              {tab === "tokens" ? "Tokens" : tab === "studio" ? "Hybrid Engine 1.0 Alpha" : "Distribution & Video"}
             </button>
           ))}
         </div>
@@ -345,7 +345,7 @@ function ProjectPortal() {
               <div className="max-w-xl">
                 <h3 className="font-display text-xl font-semibold text-white">Not sure which package fits?</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Submit a general project intake and we will route you to distribution, video, or the Hybrid Engine 1.0 based on what you actually need.
+                  Submit a general project intake and we will route you to distribution, video, or the Hybrid Engine 1.0 Alpha based on what you actually need.
                 </p>
               </div>
               <button
@@ -363,7 +363,7 @@ function ProjectPortal() {
 
         <div hidden={view !== "studio"}>
           <h1 className="font-display text-4xl font-bold leading-[1.02] tracking-tight text-white sm:text-5xl">
-            Hybrid Engine 1.0
+            Hybrid Engine 1.0 Alpha
           </h1>
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
             Write your concept, pick a style, choose vocals or instrumental — your mastered track

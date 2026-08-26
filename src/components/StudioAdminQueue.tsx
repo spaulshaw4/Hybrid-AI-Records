@@ -129,7 +129,7 @@ export function StudioAdminQueue() {
           <Badge variant="outline" className="border-primary/40 text-primary">
             Staff only
           </Badge>
-          <CardTitle className="mt-3 text-xl">Hybrid Engine 1.0 review panel</CardTitle>
+          <CardTitle className="mt-3 text-xl">Hybrid Engine 1.0 Alpha review panel</CardTitle>
           <CardDescription>
             Upload or link the finished master for each session. Clients only ever see Hybrid AI Records
             branding.

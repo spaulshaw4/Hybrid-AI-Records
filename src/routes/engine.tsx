@@ -11,26 +11,26 @@ export const Route = createFileRoute("/engine")({
   errorComponent: RouteErrorFallback,
   head: () => ({
     meta: [
-      { title: "Hybrid Engine 1.0 — AI Music Generator" },
+      { title: "Hybrid Engine 1.0 Alpha — AI Music Generator" },
       {
         name: "description",
         content:
-          "Generate release-ready AI music with Hybrid Engine 1.0. Write lyrics, pick a style, set vocals, and download a mastered track in minutes — one Hybrid Token per generation.",
+          "Generate release-ready AI music with Hybrid Engine 1.0 Alpha. Write lyrics, pick a style, set vocals, and download a mastered track in minutes — one Hybrid Token per generation.",
       },
-      { property: "og:title", content: "Hybrid Engine 1.0 — AI Music Generator" },
+      { property: "og:title", content: "Hybrid Engine 1.0 Alpha — AI Music Generator" },
       {
         property: "og:description",
         content:
-          "Generate release-ready AI music with Hybrid Engine 1.0. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
+          "Generate release-ready AI music with Hybrid Engine 1.0 Alpha. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
       },
       { property: "og:type", content: "website" },
       { property: "og:url", content: "https://hybrid-ai-records.com/engine" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "Hybrid Engine 1.0 — AI Music Generator" },
+      { name: "twitter:title", content: "Hybrid Engine 1.0 Alpha — AI Music Generator" },
       {
         name: "twitter:description",
         content:
-          "Generate release-ready AI music with Hybrid Engine 1.0. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
+          "Generate release-ready AI music with Hybrid Engine 1.0 Alpha. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
       },
     ],
     links: [
@@ -42,15 +42,15 @@ export const Route = createFileRoute("/engine")({
         children: JSON.stringify(
           buildPageJsonLd({
             path: "/engine",
-            name: "Hybrid Engine 1.0 — AI Music Generator",
+            name: "Hybrid Engine 1.0 Alpha — AI Music Generator",
             description:
-              "Generate release-ready AI music with Hybrid Engine 1.0. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
-            breadcrumb: [{ name: "Hybrid Engine 1.0", path: "/engine" }],
+              "Generate release-ready AI music with Hybrid Engine 1.0 Alpha. Write lyrics, pick a style, set vocals, and download a mastered track in minutes.",
+            breadcrumb: [{ name: "Hybrid Engine 1.0 Alpha", path: "/engine" }],
             extra: [
               {
                 "@type": ["WebApplication", "SoftwareApplication"],
                 "@id": `${SITE_URL}/engine#app`,
-                name: "Hybrid Engine 1.0",
+                name: "Hybrid Engine 1.0 Alpha",
                 applicationCategory: "MusicApplication",
                 operatingSystem: "Any",
                 softwareVersion: "1.0",
@@ -84,9 +84,9 @@ function EnginePage() {
       className="relative z-40 bg-[#0d0d11] py-3 text-white"
     >
       <div className="mx-auto mb-3 w-full max-w-7xl px-4 sm:px-6">
-        <h1 className="sr-only">Hybrid Engine 1.0</h1>
+        <h1 className="sr-only">Hybrid Engine 1.0 Alpha</h1>
         <PortalBreadcrumb
-          trail={[{ label: "Hybrid Engine 1.0" }]}
+          trail={[{ label: "Hybrid Engine 1.0 Alpha" }]}
         />
         {isDevAuthBypass() ? (
           <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-200">

@@ -1273,8 +1273,24 @@ export function AudioStudio() {
   const [weirdness, setWeirdness] = useState<number>(DEFAULT_WEIRDNESS);
   const [styleInfluence, setStyleInfluence] = useState<number>(DEFAULT_STYLE_INFLUENCE);
   const [studioStep, setStudioStep] = useState(0);
+  const stepTopRef = useRef<HTMLDivElement>(null);
+  const skipStudioStepScrollRef = useRef(true);
   useEffect(() => {
     if (studioStep > STUDIO_STEPS.length - 1) setStudioStep(STUDIO_STEPS.length - 1);
+  }, [studioStep]);
+  // Keep each wizard step starting at the instructions / progress bar — not
+  // the bottom footer (Continue → Generate reuses focus and was scrolling down).
+  useEffect(() => {
+    if (skipStudioStepScrollRef.current) {
+      skipStudioStepScrollRef.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+    const top = stepTopRef.current;
+    if (top) {
+      top.focus({ preventScroll: true });
+      top.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, [studioStep]);
   const engineControlsTouchedRef = useRef(false);
   const [engineControlsTouched, setEngineControlsTouched] = useState(false);
@@ -3280,7 +3296,7 @@ export function AudioStudio() {
       >
         <CardContent className="space-y-5 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold tracking-tight">Hybrid Engine 1.0</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Hybrid Engine 1.0 Alpha</h2>
             <div className="flex items-center gap-2">
               <NotificationBell signedIn={signedIn} />
               {signedIn ? (
@@ -3314,8 +3330,10 @@ export function AudioStudio() {
           </div>
 
           <div
+            ref={stepTopRef}
             id="studio-step-progress"
-            className="relative z-0 space-y-2 border-b border-zinc-800 pb-3"
+            tabIndex={-1}
+            className="relative z-0 space-y-2 border-b border-zinc-800 pb-3 outline-none"
           >
             <div className="flex items-center justify-between gap-3 text-xs">
               <p className="font-semibold text-foreground">

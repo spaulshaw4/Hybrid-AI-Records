@@ -11,7 +11,7 @@ export const Route = createFileRoute("/privacy")({
     ...pageHead({
       title: "Privacy Policy — Hybrid AI Records LLC",
       description:
-        "Learn how Hybrid AI Records LLC collects, processes, and protects your data across the Hybrid Engine 1.0, token purchases, and global distribution services.",
+        "Learn how Hybrid AI Records LLC collects, processes, and protects your data across the Hybrid Engine 1.0 Alpha, token purchases, and global distribution services.",
       socialTitle: "Privacy Policy — Hybrid AI Records LLC",
       socialDescription:
         "How we collect, process, and protect artist data, audio inputs, and transaction records on the Hybrid AI Records platform.",
@@ -52,7 +52,7 @@ function PrivacyPage() {
         <p>
           This Privacy Policy outlines how Hybrid AI Records LLC ("Company," "we," "us," or "our")
           collects, processes, and protects information when users access our platform, utilize the
-          Hybrid Engine 1.0, purchase tokens, or submit music for global distribution.
+          Hybrid Engine 1.0 Alpha, purchase tokens, or submit music for global distribution.
         </p>
       ),
     },
@@ -70,7 +70,7 @@ function PrivacyPage() {
           <li>
             <strong className="text-foreground/80">User-Generated Content & Inputs:</strong> Text
             prompts, lyric entries, concept descriptions, and uploaded audio/vocal samples (e.g.,
-            custom reference vocal takes) submitted into the Hybrid Engine 1.0.
+            custom reference vocal takes) submitted into the Hybrid Engine 1.0 Alpha.
           </li>
           <li>
             <strong className="text-foreground/80">Transaction & Token Data:</strong> Records of
@@ -245,7 +245,7 @@ function PrivacyPage() {
 
           <p className="mt-6 max-w-2xl text-[15px] leading-relaxed text-muted-foreground sm:text-base sm:leading-[1.75]">
             This Privacy Policy outlines how Hybrid AI Records LLC collects, processes, and protects
-            information when users access our platform, utilize the Hybrid Engine 1.0, purchase tokens,
+            information when users access our platform, utilize the Hybrid Engine 1.0 Alpha, purchase tokens,
             or submit music for global distribution.
           </p>
         </section>

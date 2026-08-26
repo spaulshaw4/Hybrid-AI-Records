@@ -9,7 +9,7 @@
 
 export type AudioTags = { title?: string; artist?: string };
 
-const SOFTWARE = "Hybrid Engine 1.0";
+const SOFTWARE = "Hybrid Engine 1.0 Alpha";
 
 /**
  * Normalizes a title/artist for embedding: collapses whitespace (including

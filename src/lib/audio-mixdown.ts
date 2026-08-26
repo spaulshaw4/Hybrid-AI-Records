@@ -37,7 +37,7 @@ function infoChunk(meta: MixMetadata): Uint8Array {
   const artist = sanitizeTagText(meta.artist);
   if (title) fields.push(["INAM", title]);
   if (artist) fields.push(["IART", artist]);
-  fields.push(["ISFT", "Hybrid Engine 1.0"]);
+  fields.push(["ISFT", "Hybrid Engine 1.0 Alpha"]);
 
   const encoder = new TextEncoder();
   const entries = fields.map(([id, value]) => {

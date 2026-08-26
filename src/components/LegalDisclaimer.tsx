@@ -49,7 +49,7 @@ export function LegalDisclaimer({ variant = "full", bare = false, className = ""
               1. Technology Provider Status & Tool Usage
             </h4>
             <p className="text-muted-foreground/80">
-              Hybrid AI Records LLC operates strictly as an infrastructure, audio synthesis, and digital distribution service provider. All audio, lyrical arrangements, vocal synthesis outputs, and visual media created within the Hybrid Engine 1.0 are generated directly via user input, text prompting, and custom asset uploads. The end user retains sole responsibility for the intent, context, and utilization of all generated outputs.
+              Hybrid AI Records LLC operates strictly as an infrastructure, audio synthesis, and digital distribution service provider. All audio, lyrical arrangements, vocal synthesis outputs, and visual media created within the Hybrid Engine 1.0 Alpha are generated directly via user input, text prompting, and custom asset uploads. The end user retains sole responsibility for the intent, context, and utilization of all generated outputs.
             </p>
           </section>
 
@@ -71,7 +71,7 @@ export function LegalDisclaimer({ variant = "full", bare = false, className = ""
                   2. Intellectual Property, Voice Likeness & Provenance Warranties
                 </h4>
                 <p className="mb-2 text-muted-foreground/80">
-                  By utilizing the Hybrid Engine 1.0, users expressly warrant and represent that:
+                  By utilizing the Hybrid Engine 1.0 Alpha, users expressly warrant and represent that:
                 </p>
                 <ul className="list-disc space-y-1 pl-5 text-muted-foreground/80 marker:text-primary/60">
                   <li>
@@ -122,7 +122,7 @@ export function LegalDisclaimer({ variant = "full", bare = false, className = ""
 
               {isCompact && (
                 <p className="text-[12px] leading-5 text-muted-foreground/70">
-                  By using Hybrid Engine 1.0 you warrant that you own all rights to uploaded material, that your outputs do not infringe third-party copyrights or voice-likeness rights, and that you agree to indemnify Hybrid AI Records LLC against any claims arising from your content. Distribution fees do not guarantee permanent placement. Full terms apply.
+                  By using Hybrid Engine 1.0 Alpha you warrant that you own all rights to uploaded material, that your outputs do not infringe third-party copyrights or voice-likeness rights, and that you agree to indemnify Hybrid AI Records LLC against any claims arising from your content. Distribution fees do not guarantee permanent placement. Full terms apply.
                 </p>
               )}
             </div>

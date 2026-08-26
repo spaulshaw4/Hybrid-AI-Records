@@ -1088,7 +1088,7 @@ function Home() {
               <ul className="mt-5 space-y-3">
                 {[
                   { label: "Distribution & Video", href: "/portal", isLink: true },
-                  { label: "Hybrid Engine 1.0", href: "/engine", isLink: true },
+                  { label: "Hybrid Engine 1.0 Alpha", href: "/engine", isLink: true },
                   { label: "Artists", href: "#catalog", isLink: false },
                   { label: "Hybrid AI Radio", href: "#radio", isLink: false },
                   { label: "Tokens", href: "/tokens", isLink: true },

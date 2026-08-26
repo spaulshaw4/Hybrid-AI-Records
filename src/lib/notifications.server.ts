@@ -48,7 +48,7 @@ export async function notifyUser(input: NotifyInput): Promise<{ emailed: boolean
       const html = `<div style="font-family:Arial,sans-serif;color:#111">
   <h2 style="margin:0 0 12px">${escapeHtml(input.title)}</h2>
   <p style="margin:0 0 12px;line-height:1.5">${escapeHtml(input.body)}</p>
-  <p style="margin:0;color:#666;font-size:12px">Hybrid AI Records — Hybrid Engine 1.0</p>
+  <p style="margin:0;color:#666;font-size:12px">Hybrid AI Records — Hybrid Engine 1.0 Alpha</p>
 </div>`;
       const result = await sendSessionEmail({
         to: [email],

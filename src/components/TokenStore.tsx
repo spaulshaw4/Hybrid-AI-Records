@@ -184,7 +184,7 @@ export function TokenStore({
               <HybridTokenIcon className="size-5 text-primary" /> Hybrid Token Store
             </DialogTitle>
             <DialogDescription>
-              Tokens power the Hybrid Engine 1.0. Buy once, spend any time.
+              Tokens power the Hybrid Engine 1.0 Alpha. Buy once, spend any time.
             </DialogDescription>
           </DialogHeader>
 

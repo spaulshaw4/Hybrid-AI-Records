@@ -20,15 +20,15 @@ type StatusView = Awaited<ReturnType<typeof getStudioRequestStatus>> | null;
 
 const STATUS_COPY: Record<string, { label: string; detail: string }> = {
   queued: {
-    label: "Track in Queue — Hybrid Engine 1.0",
+    label: "Track in Queue — Hybrid Engine 1.0 Alpha",
     detail: "Your session is locked in. Our engine and engineers are working through the queue in order.",
   },
   in_production: {
-    label: "In Production — Hybrid Engine 1.0",
+    label: "In Production — Hybrid Engine 1.0 Alpha",
     detail: "Your track is being composed and mixed right now. You'll see the master here as soon as it clears review.",
   },
   delivered: {
-    label: "Delivered — Hybrid Engine 1.0",
+    label: "Delivered — Hybrid Engine 1.0 Alpha",
     detail: "Your master is ready. Stream or download it below.",
   },
 };
@@ -99,7 +99,7 @@ export function StudioQueue() {
       const next = { reference, email: email.trim() };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       setTicket(next);
-      toast.success("Track placed in the Hybrid Engine 1.0 queue.");
+      toast.success("Track placed in the Hybrid Engine 1.0 Alpha queue.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not submit your track.");
     } finally {
@@ -138,7 +138,7 @@ export function StudioQueue() {
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardHeader>
           <Badge className="w-fit border border-primary/30 bg-primary/15 text-primary">
-            <Radio className="mr-1 size-3" aria-hidden /> Hybrid Engine 1.0
+            <Radio className="mr-1 size-3" aria-hidden /> Hybrid Engine 1.0 Alpha
           </Badge>
           <CardTitle className="mt-3 text-2xl md:text-3xl">{copy.label}</CardTitle>
           <CardDescription>{copy.detail}</CardDescription>
@@ -205,7 +205,7 @@ export function StudioQueue() {
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardHeader>
           <Badge className="w-fit border border-primary/30 bg-primary/15 text-primary">
-            <Radio className="mr-1 size-3" aria-hidden /> Hybrid Engine 1.0
+            <Radio className="mr-1 size-3" aria-hidden /> Hybrid Engine 1.0 Alpha
           </Badge>
           <CardTitle className="mt-3 text-2xl md:text-3xl">Submit your track</CardTitle>
           <CardDescription>
@@ -288,7 +288,7 @@ export function StudioQueue() {
               </>
             ) : (
               <>
-                <Music4 className="mr-2 size-4" aria-hidden /> Send to the Hybrid Engine 1.0
+                <Music4 className="mr-2 size-4" aria-hidden /> Send to the Hybrid Engine 1.0 Alpha
               </>
             )}
           </Button>

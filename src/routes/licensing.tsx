@@ -20,7 +20,7 @@ export const Route = createFileRoute("/licensing")({
     ...pageHead({
       title: "Licensing Policy & Terms — Hybrid AI Records LLC",
       description:
-        "Master Commercial Licensing & Terms of Use for Hybrid Engine 1.0, token generation, and enterprise distribution.",
+        "Master Commercial Licensing & Terms of Use for Hybrid Engine 1.0 Alpha, token generation, and enterprise distribution.",
       socialTitle: "Licensing Policy — Hybrid AI Records LLC",
       socialDescription:
         "Commercial licensing terms for AI-generated masters, custom voice models, and global distribution via Hybrid AI Records.",
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/licensing")({
             path: "/licensing",
             name: "Licensing Policy & Terms — Hybrid AI Records LLC",
             description:
-              "Master commercial licensing and terms of use for Hybrid Engine 1.0 masters, custom voice models, and global distribution.",
+              "Master commercial licensing and terms of use for Hybrid Engine 1.0 Alpha masters, custom voice models, and global distribution.",
             breadcrumb: [{ name: "Licensing & Terms", path: "/licensing" }],
           }),
         ),
@@ -61,7 +61,7 @@ function LicensingPage() {
         <>
           <p>
             Upon successful generation and redemption of platform tokens (e.g., Hybrid Tokens at
-            $2.00) within the Hybrid Engine 1.0, Hybrid AI Records LLC grants the user a worldwide,
+            $2.00) within the Hybrid Engine 1.0 Alpha, Hybrid AI Records LLC grants the user a worldwide,
             non-exclusive (or exclusive upon verified unique synthesis), perpetual right to:
           </p>
           <ul className="mt-3 list-disc space-y-2 pl-5 marker:text-primary/60">
@@ -108,7 +108,7 @@ function LicensingPage() {
         <ul className="list-disc space-y-2 pl-5 marker:text-primary/60">
           <li>
             <strong className="text-foreground/80">User-Uploaded Vocals:</strong> If a user uploads
-            custom audio/vocal takes to synthesize or clone a vocal model within the Hybrid Engine 1.0,
+            custom audio/vocal takes to synthesize or clone a vocal model within the Hybrid Engine 1.0 Alpha,
             the user warrants that they own the rights to that voice or have obtained explicit, written
             authorization from the voice owner.
           </li>
@@ -154,7 +154,7 @@ function LicensingPage() {
       title: "5. Limitation of Warranty & \"As-Is\" Generation",
       content: (
         <p>
-          All generative synthesis tools within the Hybrid Engine 1.0 are provided on an "as-is" and
+          All generative synthesis tools within the Hybrid Engine 1.0 Alpha are provided on an "as-is" and
           "as-available" basis. Hybrid AI Records LLC does not warrant that AI-generated audio is free
           from inadvertent sonic similarities to existing works. The user assumes full responsibility for
           legal due diligence prior to major commercial exploitation or third-party sync placements.

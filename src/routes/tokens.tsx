@@ -47,7 +47,7 @@ export const Route = createFileRoute("/tokens")({
             path: "/tokens",
             name: "Buy Hybrid Tokens — Hybrid AI Records",
             description:
-              "Preset Hybrid Token bundles with secure checkout. Tokens power Hybrid Engine 1.0 generations and never expire.",
+              "Preset Hybrid Token bundles with secure checkout. Tokens power Hybrid Engine 1.0 Alpha generations and never expire.",
             breadcrumb: [{ name: "Buy Tokens", path: "/tokens" }],
             extra: [
               {
@@ -55,7 +55,7 @@ export const Route = createFileRoute("/tokens")({
                 "@id": `${SITE_URL}/tokens#product`,
                 name: "Hybrid Tokens",
                 description:
-                  "Prepaid credits for Hybrid Engine 1.0 — one token generates and masters one track. Tokens never expire.",
+                  "Prepaid credits for Hybrid Engine 1.0 Alpha — one token generates and masters one track. Tokens never expire.",
                 brand: { "@id": LABEL_ID },
                 category: "Music production credits",
                 url: `${SITE_URL}/tokens`,

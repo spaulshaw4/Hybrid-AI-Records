@@ -21,7 +21,7 @@ export const Route = createFileRoute("/diagnostics")({
       {
         name: "description",
         content:
-          "Review client-side error reports, stack traces and white-screen events recorded on this device by Hybrid Engine 1.0.",
+          "Review client-side error reports, stack traces and white-screen events recorded on this device by Hybrid Engine 1.0 Alpha.",
       },
       { name: "robots", content: "noindex,nofollow" },
       { property: "og:title", content: "Device Diagnostics — Hybrid AI Records" },
