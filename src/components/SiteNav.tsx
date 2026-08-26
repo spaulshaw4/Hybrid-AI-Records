@@ -10,7 +10,9 @@ import {
 
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
+import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { SettingsMenu } from "@/components/SettingsMenu";
 import { cn } from "@/lib/utils";
 import {
   SITE_NAV,
@@ -26,6 +28,33 @@ const ICONS = {
   radio: Radio,
   packages: Clapperboard,
 } as const;
+
+/** Language + currency — always visible (never `md:hidden` / `lg:hidden`). */
+function LocaleControls({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-l border-zinc-700/80 pl-3",
+        className,
+      )}
+      data-no-translate
+    >
+      <LanguageSwitcher menuAlign="end" />
+      <CurrencySwitcher variant="pill" />
+    </div>
+  );
+}
+
+/** Right-side desktop/mobile header actions: tokens, locale, settings. */
+function HeaderActions({ className = "" }: { className?: string }) {
+  return (
+    <div className={cn("ms-auto flex shrink-0 items-center justify-end gap-2 sm:gap-3", className)}>
+      <HeaderTokenBalance />
+      <LocaleControls />
+      <SettingsMenu />
+    </div>
+  );
+}
 
 function NavItem({
   item,
@@ -176,10 +205,8 @@ function SiteHeader() {
       >
         <Wordmark size="sm" interactive />
       </Link>
-      <div className="ms-auto flex shrink-0 items-center justify-end gap-2">
-        <CurrencySwitcher variant="pill" />
-        <LanguageSwitcher menuAlign="end" />
-      </div>
+      {/* Desktop + mobile: language/currency stay in this always-visible action group */}
+      <HeaderActions className="flex" />
     </header>
   );
 }
