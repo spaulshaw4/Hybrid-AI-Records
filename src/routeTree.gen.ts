@@ -36,6 +36,7 @@ import { Route as Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRouteImpo
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as AccountDownloadsRouteImport } from './routes/account.downloads'
 import { Route as AccountLedgerRouteImport } from './routes/account.ledger'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as CheckoutReturnRouteImport } from './routes/checkout.return'
 import { Route as DevBackgroundReportRouteImport } from './routes/dev.background-report'
 import { Route as DevSyncBadgeRouteImport } from './routes/dev.sync-badge'
@@ -208,6 +209,11 @@ const AccountLedgerRoute = AccountLedgerRouteImport.update({
   id: '/ledger',
   path: '/ledger',
   getParentRoute: () => AccountRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/callback',
+  path: '/callback',
+  getParentRoute: () => AuthRoute,
 } as any)
 const CheckoutReturnRoute = CheckoutReturnRouteImport.update({
   id: '/checkout/return',
@@ -402,7 +408,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRouteWithChildren
   '/artists': typeof ArtistsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/cinematic-studio': typeof CinematicStudioRoute
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
@@ -425,6 +431,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -465,7 +472,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRouteWithChildren
   '/artists': typeof ArtistsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/cinematic-studio': typeof CinematicStudioRoute
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
@@ -488,6 +495,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -530,7 +538,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/account': typeof AccountRouteWithChildren
   '/artists': typeof ArtistsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/cinematic-studio': typeof CinematicStudioRoute
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
@@ -553,6 +561,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
   '/dev/sync-badge': typeof DevSyncBadgeRoute
@@ -618,6 +627,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -681,6 +691,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -745,6 +756,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
     | '/dev/sync-badge'
@@ -787,7 +799,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AccountRoute: typeof AccountRouteWithChildren
   ArtistsRoute: typeof ArtistsRoute
-  AuthRoute: typeof AuthRoute
+  AuthRoute: typeof AuthRouteWithChildren
   CinematicStudioRoute: typeof CinematicStudioRoute
   DevRoute: typeof DevRouteWithChildren
   DiagnosticsRoute: typeof DiagnosticsRoute
@@ -1018,6 +1030,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/account/ledger'
       preLoaderRoute: typeof AccountLedgerRouteImport
       parentRoute: typeof AccountRoute
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/checkout/return': {
       id: '/checkout/return'
@@ -1311,6 +1330,16 @@ const AccountRouteChildren: AccountRouteChildren = {
 const AccountRouteWithChildren =
   AccountRoute._addFileChildren(AccountRouteChildren)
 
+interface AuthRouteChildren {
+  AuthCallbackRoute: typeof AuthCallbackRoute
+}
+
+const AuthRouteChildren: AuthRouteChildren = {
+  AuthCallbackRoute: AuthCallbackRoute,
+}
+
+const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
+
 interface DevRouteChildren {
   DevBackgroundReportRoute: typeof DevBackgroundReportRoute
   DevSyncBadgeRoute: typeof DevSyncBadgeRoute
@@ -1345,7 +1374,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AccountRoute: AccountRouteWithChildren,
   ArtistsRoute: ArtistsRoute,
-  AuthRoute: AuthRoute,
+  AuthRoute: AuthRouteWithChildren,
   CinematicStudioRoute: CinematicStudioRoute,
   DevRoute: DevRouteWithChildren,
   DiagnosticsRoute: DiagnosticsRoute,

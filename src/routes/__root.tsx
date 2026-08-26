@@ -23,6 +23,7 @@ import { PageTranslator, languageInfo, useLanguageState } from "@/lib/i18n";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner";
 import { supabase } from "@/integrations/supabase/client";
+import { ensureUserProfile, takeOAuthNext } from "@/lib/ensure-user-profile";
 
 import { useRouteRetry } from "@/lib/use-route-retry";
 import { installOverlayCompositingGuard } from "@/lib/overlay-compositing";
@@ -260,7 +261,15 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
-    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        void ensureUserProfile(session.user).then(() => {
+          const next = takeOAuthNext();
+          if (next && next !== window.location.pathname) {
+            window.location.assign(next);
+          }
+        });
+      }
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       void router.invalidate();
       if (event !== "SIGNED_OUT") void queryClient.invalidateQueries();

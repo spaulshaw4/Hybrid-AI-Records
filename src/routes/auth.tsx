@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { pageHead } from "@/lib/social-meta";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
+import { ensureUserProfile, stashOAuthNext } from "@/lib/ensure-user-profile";
 
 /** Only same-origin relative paths may be used as a post-login return target. */
 function safeNext(value: unknown): string | undefined {
@@ -87,8 +87,10 @@ function AuthPage() {
 
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) goNext();
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session?.user) return;
+      await ensureUserProfile(data.session.user);
+      goNext();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, next]);
@@ -202,18 +204,23 @@ function AuthPage() {
 
   const google = async () => {
     setError(null);
-    // OAuth must return to this public route; goNext() then forwards to the
-    // page the user originally tried to open, once the session is hydrated.
-    const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}/auth${
-        next ? `?next=${encodeURIComponent(next)}` : ""
-      }`,
+    // No dedicated /auth/callback handler is required: redirect to `/` so
+    // Supabase can finish the PKCE exchange on a real page (avoids a 404).
+    // Stash `next` so home can forward after the session is hydrated.
+    stashOAuthNext(next);
+    const { data, error: err } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/`,
+        queryParams: { prompt: "select_account" },
+      },
     });
-    if (result.error) {
+    if (err) {
       setError("Google sign-in failed. Try again.");
       return;
     }
-    if (result.redirected) return;
+    // Browser navigates to Google when `url` is set.
+    if (data.url) return;
     goNext();
   };
 
