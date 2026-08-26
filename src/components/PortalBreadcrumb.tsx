@@ -74,48 +74,46 @@ export function PortalBreadcrumb({
 
       <nav
         aria-label="Breadcrumb"
-        className="-mx-1 mb-2 flex flex-wrap items-center gap-2"
+        className="mb-2 flex w-full flex-nowrap items-center justify-between gap-3"
       >
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
-          <ol className="flex min-w-max items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <li>
-              <Link
-                to="/"
-                preload="intent"
-                className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Home size={14} aria-hidden="true" className="shrink-0" />
-                <span>Home</span>
-              </Link>
-            </li>
-            {trail.map((crumb, index) => {
-              const isLast = index === trail.length - 1;
-              return (
-                <li key={`${crumb.label}-${index}`} className="flex items-center gap-1">
-                  <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-border" />
-                  {crumb.to && !isLast ? (
-                    <Link
-                      to={crumb.to}
-                      search={crumb.search as never}
-                      preload="intent"
-                      className="inline-flex h-9 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {crumb.label}
-                    </Link>
-                  ) : (
-                    <span
-                      aria-current={isLast ? "page" : undefined}
-                      className="inline-flex h-9 items-center px-2 text-white"
-                    >
-                      {crumb.label}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-          {end ? <div className="shrink-0 px-1">{end}</div> : null}
-        </div>
+        <ol className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <li>
+            <Link
+              to="/"
+              preload="intent"
+              className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Home size={14} aria-hidden="true" className="shrink-0" />
+              <span>Home</span>
+            </Link>
+          </li>
+          {trail.map((crumb, index) => {
+            const isLast = index === trail.length - 1;
+            return (
+              <li key={`${crumb.label}-${index}`} className="flex items-center gap-1">
+                <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-border" />
+                {crumb.to && !isLast ? (
+                  <Link
+                    to={crumb.to}
+                    search={crumb.search as never}
+                    preload="intent"
+                    className="inline-flex h-9 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : (
+                  <span
+                    aria-current={isLast ? "page" : undefined}
+                    className="inline-flex h-9 items-center px-2 text-white"
+                  >
+                    {crumb.label}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+        {end ? <div className="ms-auto shrink-0">{end}</div> : null}
       </nav>
     </>
   );

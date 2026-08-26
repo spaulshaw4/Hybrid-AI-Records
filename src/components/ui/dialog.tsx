@@ -21,7 +21,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 overlay-scrim bg-foreground/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 overlay-scrim bg-foreground/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 lg:ps-[var(--site-sidebar-width)]",
       className,
     )}
     {...props}
@@ -41,8 +41,9 @@ const DialogContent = React.forwardRef<
         // Mobile: full-screen sheet that respects device safe areas.
         "fixed inset-0 z-50 grid w-full grid-rows-[1fr] gap-4 overflow-y-auto overscroll-contain border-0 studio-glass p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         "pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(1.5rem+env(safe-area-inset-bottom))] ps-[calc(1.5rem+env(safe-area-inset-left))] pe-[calc(1.5rem+env(safe-area-inset-right))]",
-        // Desktop / larger phones: centered dialog card.
-        "sm:inset-auto sm:left-[50%] sm:top-[50%] sm:max-h-[90dvh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6 studio-glass",
+        // Desktop / larger phones: centered dialog card within the main column
+        // (offset by the fixed left sidebar on lg+).
+        "sm:inset-auto sm:left-[calc(var(--site-sidebar-width)+((100vw-var(--site-sidebar-width))/2))] sm:top-[50%] sm:max-h-[90dvh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6 studio-glass",
         className,
       )}
       {...props}

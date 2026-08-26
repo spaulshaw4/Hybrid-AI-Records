@@ -206,7 +206,8 @@ function SiteHeader() {
  */
 function DesktopLocaleStrip() {
   const { pathname } = useActiveNav();
-  if (pathname === "/") return null;
+  // Home + catalog place LocaleCluster on the page header row instead.
+  if (pathname === "/" || pathname === "/artists") return null;
 
   return (
     <div

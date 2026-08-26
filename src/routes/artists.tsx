@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
+import { LocaleCluster } from "@/components/SiteNav";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
 import { TrackWaveform } from "@/components/TrackWaveform";
 import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
@@ -369,6 +370,7 @@ function ArtistTracksPage() {
               ]
             : [{ label: "Artist tracks" }]
         }
+        end={<LocaleCluster className="hidden lg:inline-flex" />}
       />
 
       {selectedAlbum ? (
