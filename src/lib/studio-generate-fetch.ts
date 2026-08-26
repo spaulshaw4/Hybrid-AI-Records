@@ -5,6 +5,10 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { isDevAuthBypass } from "@/lib/dev-auth";
+import {
+  ENGINE_BUSY_REFUNDED_MESSAGE,
+  StudioStreamDroppedError,
+} from "@/lib/engine-bounce-back";
 
 /** Soft UI deadline for reading the SSE stream (matches long poll window). */
 export const STUDIO_GENERATE_CLIENT_DEADLINE_MS = 25 * 60 * 1000;
@@ -24,6 +28,8 @@ export type StreamStudioGenerateOptions = {
   deadlineMs?: number;
   onProgress?: (event: StudioGenerateProgressEvent) => void;
 };
+
+export { StudioStreamDroppedError };
 
 async function authHeaders(): Promise<Headers> {
   const headers = new Headers({
@@ -57,22 +63,39 @@ export async function streamStudioGenerate(
   const deadlineMs = options.deadlineMs ?? STUDIO_GENERATE_CLIENT_DEADLINE_MS;
   const startedAt = Date.now();
 
-  const response = await fetch(STUDIO_GENERATE_STREAM_URL, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify(options.data),
-    signal: options.signal,
-    // Do not set a fetch timeout — keepalives keep the socket warm.
-  });
+  let response: Response;
+  try {
+    response = await fetch(STUDIO_GENERATE_STREAM_URL, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(options.data),
+      signal: options.signal,
+      // Do not set a fetch timeout — keepalives keep the socket warm.
+    });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    throw new StudioStreamDroppedError(
+      error instanceof Error ? error.message : "Generation stream failed to connect.",
+    );
+  }
 
   if (!response.ok) {
     const fallback = await response.json().catch(() => null);
     const message =
       fallback && typeof fallback === "object" && "error" in fallback
         ? String((fallback as { error: unknown }).error)
-        : `Generate failed (${response.status}).`;
-    const err = new Error(message) as Error & { statusCode?: number; balance?: number };
+        : response.status >= 500
+          ? ENGINE_BUSY_REFUNDED_MESSAGE
+          : `Generate failed (${response.status}).`;
+    const err = new Error(message) as Error & {
+      statusCode?: number;
+      balance?: number;
+      refunded?: boolean;
+    };
     err.statusCode = response.status;
+    if (message.includes(ENGINE_BUSY_REFUNDED_MESSAGE) || response.status >= 500) {
+      err.refunded = true;
+    }
     if (
       fallback &&
       typeof fallback === "object" &&
@@ -85,7 +108,7 @@ export async function streamStudioGenerate(
   }
 
   if (!response.body) {
-    throw new Error("Generate stream returned no body.");
+    throw new StudioStreamDroppedError("Generate stream returned no body.");
   }
 
   const reader = response.body.getReader();
@@ -93,6 +116,7 @@ export async function streamStudioGenerate(
   let buffer = "";
   let result: Record<string, unknown> | null = null;
   let streamError: string | null = null;
+  let sawProgress = false;
 
   const processBlock = (block: string) => {
     const lines = block.split("\n");
@@ -111,6 +135,7 @@ export async function streamStudioGenerate(
       return;
     }
     if (event === "progress" && payload && typeof payload === "object") {
+      sawProgress = true;
       const p = payload as StudioGenerateProgressEvent;
       if (typeof p.stage === "string" && typeof p.percent === "number") {
         options.onProgress?.(p);
@@ -122,39 +147,58 @@ export async function streamStudioGenerate(
       return;
     }
     if (event === "error" && payload && typeof payload === "object") {
-      const p = payload as { message?: unknown; cause?: unknown };
+      const p = payload as { message?: unknown; cause?: unknown; refunded?: unknown };
       const message = "message" in p ? String(p.message) : "Generation failed.";
       const cause = "cause" in p && p.cause != null ? String(p.cause) : "";
       streamError = cause && !message.includes(cause) ? `${message} (${cause})` : message;
+      if (p.refunded === true && !streamError.includes(ENGINE_BUSY_REFUNDED_MESSAGE)) {
+        streamError = ENGINE_BUSY_REFUNDED_MESSAGE;
+      }
     }
   };
 
-  while (true) {
-    if (Date.now() - startedAt > deadlineMs) {
-      throw new Error(
-        "The render is still going but this connection timed out after 25 minutes. Use Retry to reconnect.",
+  try {
+    while (true) {
+      if (Date.now() - startedAt > deadlineMs) {
+        throw new StudioStreamDroppedError(
+          "The render is still going but this connection timed out after 25 minutes.",
+        );
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+      for (const block of parts) {
+        if (block.trim()) processBlock(block);
+      }
+      if (result || streamError) break;
+    }
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    if (error instanceof StudioStreamDroppedError) throw error;
+    // Mid-render drop (common on mobile Safari) → vault short-poll failover.
+    if (sawProgress || !result) {
+      throw new StudioStreamDroppedError(
+        error instanceof Error ? error.message : "Generation stream dropped mid-render.",
       );
     }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-    for (const block of parts) {
-      if (block.trim()) processBlock(block);
-    }
-    if (result || streamError) break;
+    throw error;
   }
 
   // Drain remaining buffer
   if (buffer.trim()) processBlock(buffer);
 
-  if (streamError) throw new Error(streamError);
+  if (streamError) {
+    const err = new Error(streamError) as Error & { refunded?: boolean };
+    if (streamError.includes(ENGINE_BUSY_REFUNDED_MESSAGE)) err.refunded = true;
+    throw err;
+  }
   if (!result) {
     if (isDevAuthBypass() && options.signal?.aborted) {
       throw new Error("Render canceled.");
     }
-    throw new Error("Generate stream ended without a result.");
+    throw new StudioStreamDroppedError("Generate stream ended without a result.");
   }
   return result;
 }

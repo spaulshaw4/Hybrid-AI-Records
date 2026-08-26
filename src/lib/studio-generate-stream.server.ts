@@ -66,6 +66,11 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
               ? error.cause.message
               : String(error.cause)
             : undefined;
+        const refunded =
+          typeof error === "object" &&
+          error !== null &&
+          "refunded" in error &&
+          Boolean((error as { refunded?: unknown }).refunded);
         console.error("[GENERATE_SSE_ERROR]", message, cause ? `| cause=${cause}` : "");
         if (error instanceof Error && error.stack) {
           console.error("[GENERATE_SSE_ERROR] stack:", error.stack.slice(0, 2500));
@@ -73,6 +78,7 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
         send("error", {
           message,
           ...(cause ? { cause } : {}),
+          ...(refunded ? { refunded: true } : {}),
           gate: /Gate\s*6|mastering|FFmpeg|loudnorm/i.test(message) ? 6 : undefined,
         });
       } finally {

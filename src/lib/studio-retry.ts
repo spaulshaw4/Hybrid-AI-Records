@@ -56,7 +56,14 @@ export function classifyEngineError(error: unknown): EngineErrorInfo {
       retryable: false,
     };
   }
-  if (text.includes("temporarily unavailable") || text.includes("temporarily unreachable") || text.includes("failed to fetch") || text.includes("network")) {
+  if (text.includes("engine busy") || text.includes("token refunded")) {
+    return {
+      kind: "unavailable",
+      message: "Engine busy, token refunded",
+      retryable: true,
+    };
+  }
+  if (text.includes("temporarily unavailable") || text.includes("temporarily unreachable") || text.includes("failed to fetch") || text.includes("network") || text.includes("stream dropped")) {
     return {
       kind: "unavailable",
       message: "The music engine is temporarily unreachable. Retrying automatically…",

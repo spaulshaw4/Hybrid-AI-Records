@@ -74,29 +74,21 @@ async function settleHybridToken(input: {
 }): Promise<boolean> {
   try {
     const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const {
+      authorizeAndSpendGenerationToken,
+    } = await import("@/lib/generation-tokens.server");
     const admin = requireSupabaseAdmin();
-    const rpcArgs = {
-      _user_id: input.userId,
-      _amount: input.amount,
-      _note: input.note || "Studio master generation",
-      _idempotency_key: input.idempotencyKey || undefined,
-    };
-    const { data, error } = await admin.rpc("spend_hybrid_tokens", rpcArgs);
-    const row = (Array.isArray(data) ? data[0] : data) as
-      | { ok?: boolean | null; reason?: string | null }
-      | null
-      | undefined;
-    if (error || !row?.ok) {
-      console.error("[Settlement] spend_hybrid_tokens denied/failed", {
-        rpcArgs,
-        error: error
-          ? { message: error.message, code: error.code, details: error.details, hint: error.hint }
-          : null,
-        row,
-        raw: data,
-      });
+    if (!input.idempotencyKey) {
+      console.warn("[Settlement] missing idempotency key — skipping debit");
       return false;
     }
+    await authorizeAndSpendGenerationToken({
+      userId: input.userId,
+      supabase: admin,
+      idempotencyKey: input.idempotencyKey,
+      amount: input.amount,
+      note: input.note || "Studio master generation",
+    });
     return true;
   } catch (err) {
     console.warn(

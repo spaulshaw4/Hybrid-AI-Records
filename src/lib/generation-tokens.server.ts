@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { isDbLockOrUnexpectedSpendError } from "@/lib/engine-bounce-back";
 
 export class InsufficientTokensError extends Error {
   readonly statusCode = 402 as const;
@@ -283,7 +284,11 @@ export async function authorizeAndSpendGenerationToken(input: {
     });
     const latest = await readTokenBalance(admin, input.userId);
     if (latest >= amount) {
-      const recovered = await tryTableFallback("postgrest_error_with_valid_balance");
+      const recovered = await tryTableFallback(
+        isDbLockOrUnexpectedSpendError(error)
+          ? "db_lock_or_contention"
+          : "postgrest_error_with_valid_balance",
+      );
       if (recovered) return recovered;
       throw new InsufficientTokensError(
         "Could not update your token balance. Try again.",
@@ -414,6 +419,103 @@ export function generationTokenRefundIdempotencyKey(spendKey: string): string {
 }
 
 /**
+ * PostgREST credit fallback when `refund_hybrid_generation_tokens` is missing
+ * or fails while we still need to return the artist's token.
+ */
+async function creditHybridTokensViaAdminTable(input: {
+  admin: DbClient;
+  userId: string;
+  amount: number;
+  note: string;
+  idempotencyKey: string;
+}): Promise<{ ok: boolean; balance: number; alreadyApplied: boolean }> {
+  const { admin, userId, amount, note, idempotencyKey: key } = input;
+
+  const { data: priorLedger } = await admin
+    .from("token_ledger")
+    .select("id, balance_after")
+    .eq("idempotency_key", key)
+    .maybeSingle();
+  if (priorLedger) {
+    const balance =
+      typeof priorLedger.balance_after === "number"
+        ? priorLedger.balance_after
+        : await readTokenBalance(admin, userId);
+    return { ok: true, balance, alreadyApplied: true };
+  }
+
+  await admin.from("token_balances").upsert(
+    { user_id: userId, balance: 0 },
+    { onConflict: "user_id", ignoreDuplicates: true },
+  );
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await readTokenBalance(admin, userId);
+    const next = current + amount;
+    const { data: updated, error: updateError } = await admin
+      .from("token_balances")
+      .update({ balance: next, updated_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("balance", current)
+      .select("balance")
+      .maybeSingle();
+
+    if (updateError) {
+      console.error("[CRITICAL] table refund balance update failed", {
+        userId,
+        amount,
+        message: updateError.message,
+        code: updateError.code,
+      });
+      return { ok: false, balance: current, alreadyApplied: false };
+    }
+    if (!updated) continue;
+
+    const { error: ledgerError } = await admin.from("token_ledger").insert({
+      user_id: userId,
+      delta: amount,
+      kind: "refund",
+      note,
+      balance_after: updated.balance,
+      idempotency_key: key,
+    });
+
+    if (ledgerError) {
+      if (ledgerError.code === "23505") {
+        return {
+          ok: true,
+          balance: await readTokenBalance(admin, userId),
+          alreadyApplied: true,
+        };
+      }
+      console.error("[CRITICAL] table refund ledger insert failed", {
+        userId,
+        amount,
+        key,
+        message: ledgerError.message,
+        code: ledgerError.code,
+      });
+      await admin
+        .from("token_balances")
+        .update({ balance: current, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("balance", updated.balance);
+      return { ok: false, balance: current, alreadyApplied: false };
+    }
+
+    console.warn("[generation-tokens] table refund fallback succeeded", {
+      userId,
+      amount,
+      balance: updated.balance,
+      key,
+    });
+    return { ok: true, balance: updated.balance, alreadyApplied: false };
+  }
+
+  return { ok: false, balance: await readTokenBalance(admin, userId), alreadyApplied: false };
+}
+
+/**
  * Credits tokens back after a failed upstream generation.
  * No-op when the burn was bypassed. Idempotent on the refund key.
  */
@@ -429,13 +531,14 @@ export async function refundGenerationToken(input: {
   }
 
   const refundKey = generationTokenRefundIdempotencyKey(input.spendIdempotencyKey);
+  const note = input.note || "Refund for failed generation";
   const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
   const admin = requireSupabaseAdmin();
 
   const { data, error } = await admin.rpc("refund_hybrid_generation_tokens", {
     _user_id: input.userId,
     _amount: amount,
-    _note: input.note || "Refund for failed generation",
+    _note: note,
     _idempotency_key: refundKey,
   });
 
@@ -450,19 +553,20 @@ export async function refundGenerationToken(input: {
     | undefined;
 
   if (error || !row?.ok) {
-    console.error("[generation-tokens] refund_hybrid_generation_tokens failed", {
-      message: error?.message,
-      code: error?.code,
-      reason: row?.reason,
+    console.error("[CRITICAL] refund_hybrid_generation_tokens RPC failure:", {
+      error,
+      data,
       userId: input.userId,
       amount,
       refundKey,
     });
-    return {
-      ok: false,
-      balance: await readTokenBalance(admin, input.userId),
-      alreadyApplied: false,
-    };
+    return creditHybridTokensViaAdminTable({
+      admin,
+      userId: input.userId,
+      amount,
+      note,
+      idempotencyKey: refundKey,
+    });
   }
 
   console.info("[generation-tokens] refunded generation tokens", {

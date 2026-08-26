@@ -584,6 +584,12 @@ async function postSonicCreate(
   apiKey: string,
   abortSignal?: AbortSignal,
 ): Promise<{ response: Response; raw: unknown; endpoint: string }> {
+  const {
+    UPSTREAM_FAST_RETRY_ATTEMPTS,
+    UPSTREAM_FAST_RETRY_DELAYS_MS,
+    isTransientUpstreamStatus,
+  } = await import("@/lib/engine-bounce-back");
+
   const lyricsPrompt = payload.prompt;
   const styleTags = payload.tags;
   const trackTitle = payload.title;
@@ -612,54 +618,101 @@ async function postSonicCreate(
     const dispatchPayload = buildBody(endpoint);
     console.log("[AIMUSICAPI_DISPATCH]", JSON.stringify(dispatchPayload, null, 2));
     console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
-    logAimusicRequest(endpoint, apiKey);
-    try {
-      const response = await globalThis.fetch(endpoint, {
-        method: "POST",
-        headers: musicApiAuthHeaders(apiKey),
-        body: JSON.stringify(dispatchPayload),
-        signal: mergeAbortSignals(AIMUSICAPI_FETCH_TIMEOUT_MS, abortSignal),
-      });
-      console.log("[MUSICAPI_DISPATCH]", { url: endpoint, status: response.status });
-      const responseText = await response.clone().text();
-      console.log("[AIMUSICAPI_RESPONSE_STATUS]", response.status);
-      console.log("[AIMUSICAPI_RESPONSE_BODY]", responseText);
-      const raw = responseText
-        ? (() => {
-            try {
-              return JSON.parse(responseText) as unknown;
-            } catch {
-              return responseText;
-            }
-          })()
-        : null;
 
-      // Fall back only on hard host/routing failures, not auth / validation errors.
-      if (
-        !response.ok &&
-        endpoint === SONIC_PRIMARY_CREATE_URL &&
-        (response.status === 404 || response.status === 502 || response.status === 503)
-      ) {
-        console.warn("[MUSICAPI_DISPATCH] primary host failed — trying MusicAPI fallback");
-        lastError = new Error(`Primary MusicAPI create failed (${response.status})`);
-        continue;
-      }
+    for (let attempt = 1; attempt <= UPSTREAM_FAST_RETRY_ATTEMPTS; attempt++) {
+      throwIfAborted(abortSignal);
+      logAimusicRequest(endpoint, apiKey);
+      try {
+        const response = await globalThis.fetch(endpoint, {
+          method: "POST",
+          headers: musicApiAuthHeaders(apiKey),
+          body: JSON.stringify(dispatchPayload),
+          signal: mergeAbortSignals(AIMUSICAPI_FETCH_TIMEOUT_MS, abortSignal),
+        });
+        console.log("[MUSICAPI_DISPATCH]", {
+          url: endpoint,
+          status: response.status,
+          attempt,
+        });
+        const responseText = await response.clone().text();
+        console.log("[AIMUSICAPI_RESPONSE_STATUS]", response.status);
+        console.log("[AIMUSICAPI_RESPONSE_BODY]", responseText);
+        const raw = responseText
+          ? (() => {
+              try {
+                return JSON.parse(responseText) as unknown;
+              } catch {
+                return responseText;
+              }
+            })()
+          : null;
 
-      if (!response.ok) {
-        console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+        // Three fast retries on timeout / 5xx / 429 before bouncing hosts.
+        if (!response.ok && isTransientUpstreamStatus(response.status)) {
+          lastError = new Error(`MusicAPI create failed (${response.status})`);
+          if (attempt < UPSTREAM_FAST_RETRY_ATTEMPTS) {
+            const delay =
+              UPSTREAM_FAST_RETRY_DELAYS_MS[
+                Math.min(attempt - 1, UPSTREAM_FAST_RETRY_DELAYS_MS.length - 1)
+              ] ?? 500;
+            console.warn(
+              `[MUSICAPI_DISPATCH] transient ${response.status} — fast retry ${attempt}/${UPSTREAM_FAST_RETRY_ATTEMPTS}`,
+            );
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+          // Exhausted retries on this host — try fallback host when available.
+          if (endpoint === SONIC_PRIMARY_CREATE_URL) {
+            console.warn(
+              "[MUSICAPI_DISPATCH] primary host exhausted fast retries — trying MusicAPI fallback",
+            );
+            break;
+          }
+          if (!response.ok) {
+            console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+          }
+          return { response, raw, endpoint };
+        }
+
+        // Hard host/routing failures → alternate host (no more retries here).
+        if (
+          !response.ok &&
+          endpoint === SONIC_PRIMARY_CREATE_URL &&
+          (response.status === 404 || response.status === 502 || response.status === 503)
+        ) {
+          console.warn("[MUSICAPI_DISPATCH] primary host failed — trying MusicAPI fallback");
+          lastError = new Error(`Primary MusicAPI create failed (${response.status})`);
+          break;
+        }
+
+        if (!response.ok) {
+          console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+        }
+        return { response, raw, endpoint };
+      } catch (error) {
+        if (isGenerationAborted(error)) throw error;
+        lastError = error;
+        if (attempt < UPSTREAM_FAST_RETRY_ATTEMPTS) {
+          const delay =
+            UPSTREAM_FAST_RETRY_DELAYS_MS[
+              Math.min(attempt - 1, UPSTREAM_FAST_RETRY_DELAYS_MS.length - 1)
+            ] ?? 500;
+          console.warn(
+            `[MUSICAPI_DISPATCH] create threw — fast retry ${attempt}/${UPSTREAM_FAST_RETRY_ATTEMPTS}`,
+            error instanceof Error ? error.message : error,
+          );
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        if (endpoint === SONIC_PRIMARY_CREATE_URL) {
+          console.warn(
+            "[MUSICAPI_DISPATCH] primary host unreachable after retries — trying MusicAPI fallback",
+            error instanceof Error ? error.message : error,
+          );
+          break;
+        }
+        throw error;
       }
-      return { response, raw, endpoint };
-    } catch (error) {
-      if (isGenerationAborted(error)) throw error;
-      lastError = error;
-      if (endpoint === SONIC_PRIMARY_CREATE_URL) {
-        console.warn(
-          "[MUSICAPI_DISPATCH] primary host unreachable — trying MusicAPI fallback",
-          error instanceof Error ? error.message : error,
-        );
-        continue;
-      }
-      throw error;
     }
   }
 

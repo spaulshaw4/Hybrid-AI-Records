@@ -147,6 +147,15 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
             );
           });
         }
+        const {
+          isEngineBusyRefundedError,
+          isTransientUpstreamError,
+          markEngineBusyRefunded,
+        } = await import("@/lib/engine-bounce-back");
+        if (isEngineBusyRefundedError(error)) throw error;
+        if (isTransientUpstreamError(error)) {
+          throw markEngineBusyRefunded(error);
+        }
         const message =
           error instanceof Error ? error.message : String(error ?? "Generation failed");
         if (/Gate\s*6|mastering|Matchering|FFmpeg|Resemble|playable master/i.test(message)) {

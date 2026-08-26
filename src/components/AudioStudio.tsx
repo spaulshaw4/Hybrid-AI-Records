@@ -97,11 +97,18 @@ import {
 } from "@/lib/user-vault.functions";
 import {
   clearGuestVaultTracks,
+  isGuestVaultId,
   listClaimableGuestVaultTracks,
+  listGuestVaultTracks,
   upsertGuestVaultTrack,
 } from "@/lib/guest-vault";
-import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration } from "@/lib/vault-client";
+import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration, VAULT_POLL_MAX_MS, VAULT_POLL_MS } from "@/lib/vault-client";
 import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
+import {
+  ENGINE_BUSY_REFUNDED_MESSAGE,
+  isEngineBusyRefundedError,
+  isStudioStreamDroppedError,
+} from "@/lib/engine-bounce-back";
 
 import { hybridMasterFileName, masterWavFromUrl } from "@/lib/audio-mixdown";
 import { abortableBarrier, abortableDelay, isGenerationAborted } from "@/lib/generation-abort";
@@ -2562,23 +2569,7 @@ export function AudioStudio() {
         // `import.meta.env.VITE_*` — SSE generate → `runGenerateEngineTrack`
         // reads `process.env` in the server. Keepalives prevent idle
         // "Failed to fetch" drops during Demucs / CWALO / Gate 1 waits.
-        started = (await Promise.race([
-          streamStudioGenerate({
-            signal: abort.signal,
-            onProgress: (event) => {
-              if (!event || typeof event !== "object") return;
-              const stage = typeof event.stage === "string" ? event.stage : "composition";
-              const percent =
-                typeof event.percent === "number" && Number.isFinite(event.percent)
-                  ? event.percent
-                  : 0;
-              applyPipelineProgress(
-                stage,
-                percent,
-                typeof event.pipelineState === "number" ? event.pipelineState : undefined,
-              );
-            },
-            data: {
+        const generatePayload = {
           prompt: arrangedLyrics || styleLine || genre,
           tags: styleTags,
           mv: "sonic-v5",
@@ -2605,6 +2596,7 @@ export function AudioStudio() {
               ? studioPayload.vocal_config.terms_accepted
               : true,
           customMode: true,
+          idempotencyKey: runId,
 
           model: "V4_5" as const,
           durationSeconds: Math.min(
@@ -2619,10 +2611,73 @@ export function AudioStudio() {
             weirdness: clampWeirdness(weirdness),
             styleInfluence: clampStyleInfluence(styleInfluence),
           },
-        },
-          }),
-          abortableBarrier(abort.signal),
-        ])) as typeof started;
+        };
+
+        const runStream = () =>
+          streamStudioGenerate({
+            signal: abort.signal,
+            onProgress: (event) => {
+              if (!event || typeof event !== "object") return;
+              const stage = typeof event.stage === "string" ? event.stage : "composition";
+              const percent =
+                typeof event.percent === "number" && Number.isFinite(event.percent)
+                  ? event.percent
+                  : 0;
+              applyPipelineProgress(
+                stage,
+                percent,
+                typeof event.pipelineState === "number" ? event.pipelineState : undefined,
+              );
+            },
+            data: generatePayload,
+          });
+
+        try {
+          started = (await Promise.race([
+            runStream(),
+            abortableBarrier(abort.signal),
+          ])) as typeof started;
+        } catch (streamErr) {
+          // Mobile Safari often drops SSE mid-render — short-poll Vault instead of crashing.
+          if (!isStudioStreamDroppedError(streamErr) || !audioVaultId) throw streamErr;
+          setStatusText("Stream dropped — checking Vault for your finished track…");
+          const vaultDeadline = Date.now() + Math.min(VAULT_POLL_MAX_MS, POLL_TIMEOUT_MS);
+          let recovered: {
+            taskId?: string;
+            tracks?: Array<{ audioUrl: string | null; title: string | null }>;
+            tokenSettled?: boolean;
+          } | null = null;
+          while (Date.now() < vaultDeadline) {
+            if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+            if (isGuestVaultId(audioVaultId)) {
+              const guests = await listGuestVaultTracks();
+              const hit = guests.find((t) => t.id === audioVaultId);
+              if (hit?.status === "completed" && hit.masterUrl) {
+                recovered = {
+                  tracks: [{ audioUrl: hit.masterUrl, title: hit.title }],
+                  tokenSettled: true,
+                };
+                break;
+              }
+              if (hit?.status === "failed") break;
+            } else {
+              const catalog = await fetchUserVaultTracks();
+              const hit = catalog.find((t) => t.id === audioVaultId);
+              if (hit?.status === "completed" && hit.master_url) {
+                recovered = {
+                  tracks: [{ audioUrl: hit.master_url, title: hit.title }],
+                  tokenSettled: true,
+                };
+                break;
+              }
+              if (hit?.status === "failed") break;
+            }
+            await abortableDelay(VAULT_POLL_MS, abort.signal);
+          }
+          if (!recovered?.tracks?.[0]?.audioUrl) throw streamErr;
+          toast.message("Reconnected via Vault after the stream dropped.");
+          started = recovered as typeof started;
+        }
       } finally {
         abort.signal.removeEventListener("abort", stopTickerOnAbort);
         window.clearInterval(stopTicker);
@@ -2908,6 +2963,16 @@ export function AudioStudio() {
         toast.error(message);
         setBusy(false);
         runningRef.current = false;
+        return;
+      }
+      // Upstream exhausted retries → server refunded; unlock UI with a clean toast.
+      if (isEngineBusyRefundedError(err) || /token refunded/i.test(raw)) {
+        setRetryPlan({ stage: "render", label: "Retry generation" });
+        setRollbackNotice(ENGINE_BUSY_REFUNDED_MESSAGE);
+        toast.error(ENGINE_BUSY_REFUNDED_MESSAGE);
+        setBusy(false);
+        runningRef.current = false;
+        void refreshBalance();
         return;
       }
       // Remember exactly which part failed so "Retry" only redoes that part.

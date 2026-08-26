@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { AudioStudio } from "@/components/AudioStudio";
+import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
 import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_USER, isDevAuthBypass } from "@/lib/dev-auth";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
@@ -97,7 +98,9 @@ function EnginePage() {
       </div>
 
       <section className="w-full px-4 sm:px-6">
-        <AudioStudio />
+        <StudioErrorBoundary region="engine">
+          <AudioStudio />
+        </StudioErrorBoundary>
       </section>
     </main>
   );

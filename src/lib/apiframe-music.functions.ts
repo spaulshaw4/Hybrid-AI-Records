@@ -595,6 +595,12 @@ export async function runGenerateEngineTrack(
           refundErr instanceof Error ? refundErr.message : refundErr,
         );
       });
+      const { isTransientUpstreamError, markEngineBusyRefunded } = await import(
+        "@/lib/engine-bounce-back"
+      );
+      if (isTransientUpstreamError(outerError)) {
+        throw markEngineBusyRefunded(outerError);
+      }
     }
     throw outerError;
   }

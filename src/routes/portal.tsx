@@ -22,6 +22,7 @@ import { ApplicationModal } from "@/components/ApplicationModal";
 import { ContactModal } from "@/components/ContactModal";
 import { OrderIntakeSection } from "@/components/OrderIntakeSection";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
+import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
 import { LocaleCluster } from "@/components/SiteNav";
 import { pageHead } from "@/lib/social-meta";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
@@ -100,6 +101,7 @@ function DistributionPackagesPage() {
   }, []);
 
   return (
+    <StudioErrorBoundary region="portal">
     <div className="min-h-dvh">
       <main id="main-content" className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 md:pt-12">
         <PortalBreadcrumb
@@ -321,5 +323,6 @@ function DistributionPackagesPage() {
 
       <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
+    </StudioErrorBoundary>
   );
 }

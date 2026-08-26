@@ -244,6 +244,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith("[MUSICAPI_DISPATCH]", {
       url: SONIC_CREATE_URL,
       status: 200,
+      attempt: 1,
     });
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI_RESPONSE_STATUS]", 200);
     expect(log).toHaveBeenCalledWith(
