@@ -48,9 +48,11 @@ const WEBKIT_PATH =
 const WEBKIT_PROTOCOL = WEBKIT_PATH?.replace(/pw_run\.sh$/, "protocol.json");
 const WEBKIT_USABLE =
   process.env.PLAYWRIGHT_FORCE_WEBKIT === "1" ||
-  (!!WEBKIT_PROTOCOL &&
-    existsSync(WEBKIT_PROTOCOL) &&
-    readFileSync(WEBKIT_PROTOCOL, "utf8").includes("PushAPIEnabled"));
+  (!WEBKIT_PATH
+    ? process.env.PLAYWRIGHT_FORCE_WEBKIT !== "0"
+    : !!WEBKIT_PROTOCOL &&
+      existsSync(WEBKIT_PROTOCOL) &&
+      readFileSync(WEBKIT_PROTOCOL, "utf8").includes("PushAPIEnabled"));
 
 if (!WEBKIT_USABLE) {
   console.warn(
@@ -116,7 +118,10 @@ export default defineConfig({
             name: "mobile-safari",
             testMatch: /.*mobile\.spec\.ts/,
             use: {
-              ...devices["iPhone 13"],
+              ...devices["iPhone 14"],
+              viewport: { width: 390, height: 844 },
+              isMobile: true,
+              hasTouch: true,
               launchOptions: {
                 ...browserEnv,
                 ...(WEBKIT_PATH ? { executablePath: WEBKIT_PATH } : {}),

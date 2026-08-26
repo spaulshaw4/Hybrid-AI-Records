@@ -37,6 +37,7 @@
     "test:e2e:a11y:order": "playwright test e2e/order-a11y.spec.ts e2e/homepage-keyboard.spec.ts e2e/reduced-motion-order.spec.ts --project=chromium",
     "test:e2e": "playwright test",
     "test:e2e:ios:redirect": "playwright test e2e/engine-ios-payment-redirect.mobile.spec.ts --project=mobile-chrome --project=mobile-safari --workers=1",
+    "test:e2e:ios:smoke": "playwright test e2e/ios-safari-engine-smoke.mobile.spec.ts --project=mobile-chrome --project=mobile-safari --workers=1",
     "test:e2e:mobile": "playwright test e2e/division-crest-mobile.spec.ts --project=mobile-chrome --project=mobile-safari",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:ios:overlays": "playwright test e2e/overlay-frozen-tiles.mobile.spec.ts --project=mobile-safari --project=mobile-chrome --workers=1"

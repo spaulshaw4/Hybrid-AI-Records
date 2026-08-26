@@ -1361,6 +1361,19 @@ export function AudioStudio() {
   const [signedIn, setSignedIn] = useState(isDevAuthBypass());
   const [topUpOpen, setTopUpOpen] = useState(false);
 
+  // Playwright iOS smoke: open Token Store without a live auth session.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.sessionStorage.getItem("har:e2e:force-token-store") === "1") {
+        window.sessionStorage.removeItem("har:e2e:force-token-store");
+        setTopUpOpen(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const [busy, setBusy] = useState(false);
   /** True while a render is in flight — blocks double submissions instantly. */
   const runningRef = useRef(false);
