@@ -32,26 +32,35 @@ async function authHeaders(): Promise<Headers> {
 }
 
 /** Client-side should ONLY hit the internal generate status endpoint. */
-export async function checkStatus(taskId: string): Promise<GenerateStatusResult> {
+export const checkStatus = async (
+  taskId: string,
+  retries = 3,
+): Promise<GenerateStatusResult> => {
   const id = taskId.trim();
   if (!id) throw new Error("Missing taskId.");
 
-  const res = await fetch(`${GENERATE_STATUS_URL}?taskId=${encodeURIComponent(id)}`, {
-    headers: await authHeaders(),
-  });
-
-  const body = (await res.json().catch(() => null)) as
-    | GenerateStatusResult
-    | { error?: string }
-    | null;
-
-  if (!res.ok) {
-    const message =
-      body && typeof body === "object" && "error" in body && body.error
-        ? String(body.error)
-        : `Status check failed (${res.status}).`;
-    throw new Error(message);
+  try {
+    const res = await fetch(`${GENERATE_STATUS_URL}?taskId=${encodeURIComponent(id)}`, {
+      headers: await authHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 502) {
+        // Upstream still warming up or transient proxy blip
+        if (retries > 0) {
+          await new Promise((r) => setTimeout(r, 3000));
+          return checkStatus(id, retries - 1);
+        }
+      }
+      throw new Error(`Status check returned ${res.status}`);
+    }
+    return (await res.json()) as GenerateStatusResult;
+  } catch (err) {
+    // Retry transient network drops instead of aborting the entire render
+    if (retries > 0) {
+      await new Promise((r) => setTimeout(r, 3000));
+      return checkStatus(id, retries - 1);
+    }
+    throw err;
   }
-
-  return body as GenerateStatusResult;
-}
+};

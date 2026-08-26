@@ -43,8 +43,9 @@ async function handleStatus({ request }: { request: Request }): Promise<Response
   }
 
   try {
-    const result = await pollEngineTrackTask(taskId, userId);
-    return Response.json(result);
+    const upstreamData = await pollEngineTrackTask(taskId, userId);
+    console.log("[Poll Status Proxy]:", JSON.stringify(upstreamData));
+    return Response.json(upstreamData);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not load generation status.";

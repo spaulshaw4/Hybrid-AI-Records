@@ -3112,6 +3112,24 @@ export function AudioStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, resumeRun]);
 
+  // Resume polling immediately when the artist returns to this tab — browsers
+  // throttle timers in the background, so a fresh status check on focus avoids
+  // sitting on a delayed interval after the render may already be done.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const isGenerating = runningRef.current;
+      if (!isGenerating) return;
+      const currentTaskId = readPendingJob()?.taskId;
+      if (!currentTaskId) return;
+      void checkStatus(currentTaskId).catch(() => {
+        /* in-loop poll will retry */
+      });
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
 
 
 
