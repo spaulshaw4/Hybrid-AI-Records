@@ -212,7 +212,7 @@ function DesktopLocaleBar() {
   return (
     <div
       data-site-nav="desktop-locale"
-      className="site-desktop-locale pointer-events-auto sticky top-0 z-40 hidden justify-end items-center gap-3 bg-transparent px-6 py-4 lg:flex"
+      className="site-desktop-locale pointer-events-auto sticky top-0 z-40 hidden min-h-[var(--site-header-height)] items-center justify-end gap-3 bg-transparent pr-6 pt-5 lg:flex"
     >
       <HeaderActions />
     </div>

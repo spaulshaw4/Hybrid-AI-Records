@@ -312,8 +312,8 @@
     html[data-site-nav="on"] {
       --site-sidebar-width: 16.75rem;
       --site-dock-height: 0px;
-      /* Desktop locale bar is in-flow; no fixed topbar offset. */
-      --site-header-height: 0px;
+      /* Keep brand-row height so sidebar logo + desktop locale align. */
+      --site-header-height: 4rem;
     }
   }
 

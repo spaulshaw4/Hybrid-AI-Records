@@ -63,9 +63,9 @@ export function SettingsMenu() {
         aria-expanded={open}
         aria-controls={open ? "site-settings-dialog" : undefined}
         title="Site settings — text glow and divisions (shortcut: S)"
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/60 bg-white/70 text-foreground/80 backdrop-blur-sm transition-colors hover:border-primary hover:bg-primary/10 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2563EB] [&_svg]:pointer-events-none"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none"
       >
-        <Settings size={18} aria-hidden="true" />
+        <Settings className="size-3.5" aria-hidden="true" />
       </DialogTrigger>
 
 
