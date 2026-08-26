@@ -193,14 +193,14 @@ export function PayNowModal({
       role="dialog"
       aria-modal="true"
       aria-label={`Order ${packageLabel}`}
-      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto overlay-scrim bg-foreground/40 p-4 backdrop-blur-md sm:p-8 lg:ps-[var(--site-sidebar-width)]"
+      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto overlay-scrim bg-black/80 p-4 backdrop-blur-md sm:p-8 lg:ps-[var(--site-sidebar-width)]"
       onClick={onClose}
     >
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
         noValidate
-        className="relative my-auto w-full max-w-lg border border-border bg-background/95 p-8"
+        className="relative my-auto w-full max-w-lg border border-white/10 modal-panel-solid p-8 shadow-2xl"
       >
         <button
           type="button"

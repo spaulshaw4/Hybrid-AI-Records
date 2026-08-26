@@ -103,21 +103,70 @@ export async function authorizeAndSpendGenerationToken(input: {
     return { bypassed: true, balance, alreadyApplied: false, idempotencyKey: key };
   }
 
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: row, error } = await supabaseAdmin
-    .rpc("spend_hybrid_tokens", {
-      _user_id: input.userId,
-      _amount: amount,
-      _note: input.note || "Studio master generation",
-      _idempotency_key: key,
-    })
-    .maybeSingle();
+  const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const admin = requireSupabaseAdmin();
 
-  if (error || !row) {
-    console.error("[generation-tokens] spend_hybrid_tokens failed", error?.message);
+  // Pre-read for clearer 402s when underfunded; never trust this alone for the debit.
+  const priorBalance = await readTokenBalance(admin, input.userId);
+  if (priorBalance < amount) {
+    throw new InsufficientTokensError(
+      "Not enough Hybrid Tokens. Buy more to keep generating.",
+      priorBalance,
+    );
+  }
+
+  const { data, error } = await admin.rpc("spend_hybrid_tokens", {
+    _user_id: input.userId,
+    _amount: amount,
+    _note: input.note || "Studio master generation",
+    _idempotency_key: key,
+  });
+
+  // Prefer array form — `.maybeSingle()` can drop a valid SETOF row as PGRST116.
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | {
+        ok?: boolean | null;
+        balance?: number | null;
+        already_applied?: boolean | null;
+        reason?: string | null;
+      }
+    | null
+    | undefined;
+
+  if (error) {
+    console.error("[generation-tokens] spend_hybrid_tokens failed", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      userId: input.userId,
+      amount,
+      priorBalance,
+    });
+    const latest = await readTokenBalance(admin, input.userId);
+    // If funds remain, surface a retryable debit failure — not "insufficient".
+    if (latest >= amount) {
+      throw new InsufficientTokensError(
+        "Could not update your token balance. Try again.",
+        latest,
+      );
+    }
+    throw new InsufficientTokensError(
+      "Not enough Hybrid Tokens. Buy more to keep generating.",
+      latest,
+    );
+  }
+
+  if (!row || typeof row.ok !== "boolean") {
+    console.error("[generation-tokens] spend_hybrid_tokens returned no row", {
+      userId: input.userId,
+      amount,
+      priorBalance,
+      data,
+    });
     throw new InsufficientTokensError(
       "Could not update your token balance. Try again.",
-      await readTokenBalance(input.supabase, input.userId),
+      await readTokenBalance(admin, input.userId),
     );
   }
 
@@ -202,3 +251,76 @@ export async function setAdminTokenTestMode(
 export function generationTokenIdempotencyKey(runKey: string): string {
   return `gen:${runKey.trim().slice(0, 100)}`;
 }
+
+/** Idempotent refund key paired with a prior spend key (`gen:…` → `refund:gen:…`). */
+export function generationTokenRefundIdempotencyKey(spendKey: string): string {
+  const trimmed = spendKey.trim().slice(0, 110);
+  return trimmed.startsWith("refund:") ? trimmed : `refund:${trimmed}`;
+}
+
+/**
+ * Credits tokens back after a failed upstream generation.
+ * No-op when the burn was bypassed. Idempotent on the refund key.
+ */
+export async function refundGenerationToken(input: {
+  userId: string;
+  amount?: number;
+  spendIdempotencyKey: string;
+  note?: string;
+}): Promise<{ ok: boolean; balance: number; alreadyApplied: boolean }> {
+  const amount = Math.trunc(input.amount ?? 1);
+  if (!Number.isFinite(amount) || amount < 1) {
+    return { ok: false, balance: 0, alreadyApplied: false };
+  }
+
+  const refundKey = generationTokenRefundIdempotencyKey(input.spendIdempotencyKey);
+  const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const admin = requireSupabaseAdmin();
+
+  const { data, error } = await admin.rpc("refund_hybrid_generation_tokens", {
+    _user_id: input.userId,
+    _amount: amount,
+    _note: input.note || "Refund for failed generation",
+    _idempotency_key: refundKey,
+  });
+
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | {
+        ok?: boolean | null;
+        balance?: number | null;
+        already_applied?: boolean | null;
+        reason?: string | null;
+      }
+    | null
+    | undefined;
+
+  if (error || !row?.ok) {
+    console.error("[generation-tokens] refund_hybrid_generation_tokens failed", {
+      message: error?.message,
+      code: error?.code,
+      reason: row?.reason,
+      userId: input.userId,
+      amount,
+      refundKey,
+    });
+    return {
+      ok: false,
+      balance: await readTokenBalance(admin, input.userId),
+      alreadyApplied: false,
+    };
+  }
+
+  console.info("[generation-tokens] refunded generation tokens", {
+    userId: input.userId,
+    amount,
+    balance: row.balance,
+    alreadyApplied: row.already_applied,
+  });
+
+  return {
+    ok: true,
+    balance: row.balance ?? 0,
+    alreadyApplied: row.already_applied ?? false,
+  };
+}
+

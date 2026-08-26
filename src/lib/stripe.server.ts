@@ -44,18 +44,36 @@ export function getStripeErrorMessage(error: unknown): string {
     const e = error as {
       message?: string; type?: string; code?: string; decline_code?: string; param?: string; requestId?: string;
       raw?: { message?: string; type?: string; code?: string; decline_code?: string; param?: string; requestId?: string };
+      rawType?: string;
+      statusCode?: number;
     };
     const message = e.raw?.message ?? e.message;
     if (message) {
       const details = [
-        e.raw?.type ?? e.type,
+        e.raw?.type ?? e.type ?? e.rawType,
         e.raw?.code ?? e.code,
         e.raw?.decline_code ?? e.decline_code,
         e.raw?.param ?? e.param,
         e.raw?.requestId ?? e.requestId,
+        typeof e.statusCode === 'number' ? `http ${e.statusCode}` : null,
       ].filter(Boolean);
       return details.length ? `${message} (${details.join(', ')})` : message;
     }
   }
   return 'Stripe request failed';
 }
+
+/** Logs the full Stripe error payload to the server console for debugging. */
+export function logStripeError(context: string, error: unknown): void {
+  const summary = getStripeErrorMessage(error);
+  console.error(`[stripe] ${context}: ${summary}`);
+  try {
+    console.error(
+      `[stripe] ${context} raw=`,
+      JSON.stringify(error, Object.getOwnPropertyNames(error as object), 2),
+    );
+  } catch {
+    console.error(`[stripe] ${context} raw=`, error);
+  }
+}
+

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { type StripeEnv, createStripeClient, getStripeErrorMessage } from "@/lib/stripe.server";
+import { type StripeEnv, createStripeClient, getStripeErrorMessage, logStripeError } from "@/lib/stripe.server";
 import {
   DEFAULT_CURRENCY,
   PACKAGE_PRICES,
@@ -201,6 +201,7 @@ export const createCheckoutSession = createServerFn({ method: "POST" })
 
       return { clientSecret: session.client_secret ?? "" };
     } catch (error) {
+      logStripeError("createCheckoutSession", error);
       return { error: getStripeErrorMessage(error) };
     }
   });

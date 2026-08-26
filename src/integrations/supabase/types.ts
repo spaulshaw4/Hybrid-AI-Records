@@ -1671,6 +1671,20 @@ export type Database = {
           reason: string
         }[]
       }
+      refund_hybrid_generation_tokens: {
+        Args: {
+          _amount: number
+          _idempotency_key?: string
+          _note?: string
+          _user_id: string
+        }
+        Returns: {
+          already_applied: boolean
+          balance: number
+          ok: boolean
+          reason: string
+        }[]
+      }
       spend_v_tokens: {
         Args: {
           _amount: number

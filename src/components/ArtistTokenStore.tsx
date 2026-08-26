@@ -217,7 +217,10 @@ export function ArtistTokenStore({ tokens }: { tokens: ArtistTokens }) {
         if (!open) setPhase({ kind: "browse" });
       }}
     >
-      <DialogContent className="overflow-y-auto border-border bg-background/95 backdrop-blur sm:max-h-[90dvh] sm:max-w-2xl">
+      <DialogContent
+        overlayClassName="bg-black/80 backdrop-blur-md"
+        className="modal-panel-solid overflow-y-auto !border-white/10 sm:max-h-[90dvh] sm:max-w-2xl"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="size-5 text-primary" aria-hidden /> Artist Tokens

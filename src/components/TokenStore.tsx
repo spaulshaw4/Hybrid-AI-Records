@@ -19,6 +19,32 @@ import {
   getTokenBalance,
 } from "@/lib/tokens.functions";
 import { TOKEN_BUNDLES, perTokenLabel, usdLabel, type TokenBundle } from "@/lib/tokens";
+import { useCurrency } from "@/lib/currency";
+import { convertFromUsd } from "@/lib/fx";
+import { CURRENCIES, surchargePercent, type CurrencyCode } from "@/lib/pricing";
+
+function tokenBundleAmountMinor(bundle: TokenBundle, currency: CurrencyCode): number {
+  if (currency === "usd") return bundle.amount;
+  const converted = convertFromUsd(bundle.amount, currency);
+  if (converted == null) return bundle.amount;
+  const bps = Math.round(surchargePercent(currency) * 100);
+  return bps === 0 ? converted : Math.ceil((converted * (10_000 + bps)) / 10_000);
+}
+
+function tokenBundlePriceLabel(bundle: TokenBundle, currency: CurrencyCode): string {
+  if (currency === "usd") return usdLabel(bundle.amount);
+  const minor = tokenBundleAmountMinor(bundle, currency);
+  const meta = CURRENCIES[currency];
+  try {
+    return new Intl.NumberFormat(meta.locale, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      currencyDisplay: "narrowSymbol",
+    }).format(minor / 100);
+  } catch {
+    return `${meta.symbol}${(minor / 100).toFixed(2)}`;
+  }
+}
 
 type Phase =
   | { kind: "browse" }
@@ -51,6 +77,7 @@ export function TokenStore({
   };
   const [phase, setPhase] = useState<Phase>({ kind: "browse" });
   const [notice, setNotice] = useState<string | null>(null);
+  const currency = useCurrency();
 
   const refreshBalance = useCallback(async () => {
     try {
@@ -130,6 +157,7 @@ export function TokenStore({
           priceId: bundle.priceId,
           returnUrl: `${window.location.origin}${window.location.pathname}?token_session={CHECKOUT_SESSION_ID}`,
           environment: getStripeEnvironment(),
+          currency,
         },
       });
       if ("error" in result) {
@@ -143,7 +171,7 @@ export function TokenStore({
         message: "We couldn't reach the payment service. Try again in a moment.",
       });
     }
-  }, []);
+  }, [currency]);
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -178,22 +206,25 @@ export function TokenStore({
       ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="overflow-y-auto border-border bg-background/95 backdrop-blur sm:max-h-[90dvh] sm:max-w-2xl">
+        <DialogContent
+          overlayClassName="bg-zinc-950/80 backdrop-blur-md"
+          className="overflow-y-auto !border-white/10 modal-panel-solid shadow-2xl sm:max-h-[90dvh] sm:max-w-2xl"
+        >
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <HybridTokenIcon className="size-5 text-primary" /> Hybrid Token Store
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-zinc-300">
               Tokens power the Hybrid Engine 1.0 Alpha. Buy once, spend any time.
             </DialogDescription>
           </DialogHeader>
 
           {!signedIn ? (
-            <p className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+            <p className="rounded-lg border border-white/10 bg-zinc-900 p-4 text-sm text-zinc-300">
               Sign in to buy Hybrid Tokens so we can credit them to your account.
             </p>
           ) : phase.kind === "checkout" ? (
-            <div id="token-checkout">
+            <div id="token-checkout" className="rounded-lg bg-zinc-950">
               <EmbeddedCheckoutProvider
                 stripe={getStripe()}
                 options={{ clientSecret: phase.clientSecret }}
@@ -204,7 +235,7 @@ export function TokenStore({
           ) : (
             <div className="space-y-4">
               {phase.kind === "error" ? (
-                <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {phase.message}
                 </p>
               ) : null}
@@ -215,21 +246,25 @@ export function TokenStore({
                     key={bundle.priceId}
                     className={`flex flex-col rounded-xl border p-4 ${
                       bundle.highlight
-                        ? "border-primary/60 bg-primary/5 shadow-[0_0_24px_hsl(var(--primary)/0.25)]"
-                        : "border-border bg-muted/10"
+                        ? "border-primary/60 bg-zinc-900 shadow-[0_0_24px_hsl(var(--primary)/0.25)]"
+                        : "border-white/10 bg-zinc-900"
                     }`}
                   >
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-50">
                       {bundle.name}
                     </h3>
-                    <p className="mt-2 text-2xl font-bold text-foreground">{usdLabel(bundle.amount)}</p>
+                    <p className="mt-2 text-2xl font-bold text-white">
+                      {tokenBundlePriceLabel(bundle, currency)}
+                    </p>
                     <p className="mt-1 flex items-center gap-1 text-sm text-primary">
                       <HybridTokenIcon className="size-4" /> {bundle.tokens} Hybrid Tokens
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-xs text-zinc-400">
                       {bundle.bonus > 0
                         ? `Includes ${bundle.bonus} bonus tokens`
-                        : perTokenLabel(bundle)}
+                        : currency === "usd"
+                          ? perTokenLabel(bundle)
+                          : "Priced in your selected currency"}
                     </p>
                     <Button
                       className="mt-4"
@@ -244,7 +279,7 @@ export function TokenStore({
                 ))}
               </div>
 
-              <ul className="space-y-1 text-xs text-muted-foreground">
+              <ul className="space-y-1 text-xs text-zinc-400">
                 <li className="flex items-center gap-2">
                   <Check className="size-3.5 text-primary" aria-hidden /> Tokens never expire.
                 </li>

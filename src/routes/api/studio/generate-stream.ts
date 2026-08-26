@@ -70,7 +70,9 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
   const supabase = tryGetSupabaseAdmin() ?? createSupabaseUserClient(token);
 
   // Eager token burn so clients on every platform get a real HTTP 402 before
-  // the SSE body starts. The same idempotent key is reused inside the run.
+  // the SSE body starts — and before any upstream AI vendor call. The same
+  // idempotent key is reused inside the run; failures refund automatically.
+  let spendKey = "";
   try {
     const { buildGenerationIdempotencyKey } = await import("@/lib/pipeline-idempotency.server");
     const {
@@ -88,10 +90,11 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
         lyrics: lyricContent,
         instrumental: data.instrumental,
       });
+    spendKey = generationTokenIdempotencyKey(runKey);
     await authorizeAndSpendGenerationToken({
       userId,
       supabase,
-      idempotencyKey: generationTokenIdempotencyKey(runKey),
+      idempotencyKey: spendKey,
       amount: 1,
       note: data.title || "Studio master generation",
     });
@@ -111,9 +114,27 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
       try {
         return await runGenerateEngineTrack(data, { userId: userId!, supabase });
       } catch (error) {
-        const { InsufficientTokensError } = await import("@/lib/generation-tokens.server");
+        const { InsufficientTokensError, refundGenerationToken } = await import(
+          "@/lib/generation-tokens.server"
+        );
         if (error instanceof InsufficientTokensError) {
           throw error;
+        }
+        // Safety-net refund if the pipeline path did not already settle one.
+        if (spendKey) {
+          const reason =
+            error instanceof Error ? error.message : String(error ?? "Generation failed");
+          await refundGenerationToken({
+            userId: userId!,
+            amount: 1,
+            spendIdempotencyKey: spendKey,
+            note: `Refund: ${reason.slice(0, 180)}`,
+          }).catch((refundErr) => {
+            console.error(
+              "[generate-stream] refund threw",
+              refundErr instanceof Error ? refundErr.message : refundErr,
+            );
+          });
         }
         const message =
           error instanceof Error ? error.message : String(error ?? "Generation failed");

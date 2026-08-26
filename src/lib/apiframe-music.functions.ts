@@ -300,6 +300,7 @@ export async function runGenerateEngineTrack(
     const {
       authorizeAndSpendGenerationToken,
       generationTokenIdempotencyKey,
+      refundGenerationToken,
     } = await import("@/lib/generation-tokens.server");
 
     const idempotencyKey =
@@ -312,12 +313,14 @@ export async function runGenerateEngineTrack(
         instrumental: payload.instrumental,
       });
 
+    const spendKey = generationTokenIdempotencyKey(idempotencyKey);
+
     // Universal atomic burn — before any AI vendor call. Disconnect / refresh
-    // after this point does not reverse the ledger row.
+    // after this point does not reverse the ledger row (failures refund below).
     const tokenAuth = await authorizeAndSpendGenerationToken({
       userId: context.userId,
       supabase: context.supabase,
-      idempotencyKey: generationTokenIdempotencyKey(idempotencyKey),
+      idempotencyKey: spendKey,
       amount: 1,
       note: payload.title || "Studio master generation",
     });
@@ -404,7 +407,7 @@ export async function runGenerateEngineTrack(
           durationSeconds,
           language: payload.language,
           customLanguage: payload.customLanguage,
-          tokenIdempotencyKey: generationTokenIdempotencyKey(idempotencyKey),
+          tokenIdempotencyKey: spendKey,
         }),
     });
 
@@ -577,6 +580,22 @@ export async function runGenerateEngineTrack(
     return generateResult;
   } catch (outerError) {
     clearGenerationTokenIntent(idempotencyKey);
+    // Upstream / pipeline failure after a successful burn → automatic refund.
+    if (!tokenAuth.bypassed) {
+      const reason =
+        outerError instanceof Error ? outerError.message : String(outerError ?? "Generation failed");
+      await refundGenerationToken({
+        userId: context.userId,
+        amount: 1,
+        spendIdempotencyKey: spendKey,
+        note: `Refund: ${reason.slice(0, 180)}`,
+      }).catch((refundErr) => {
+        console.error(
+          "[generation-tokens] automatic refund threw",
+          refundErr instanceof Error ? refundErr.message : refundErr,
+        );
+      });
+    }
     throw outerError;
   }
 }

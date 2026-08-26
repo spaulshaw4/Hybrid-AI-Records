@@ -101,7 +101,7 @@
 
   --charcoal: rgb(39 39 42 / 0.6);
   --charcoal-soft: #121316;
-  --overlay: rgb(0 0 0 / 0.55);
+  --overlay: rgb(0 0 0 / 0.8);
   --glass: rgb(39 39 42 / 0.6);
   --glass-border: rgb(255 255 255 / 0.1);
   --glass-blur: 16px;
@@ -3194,9 +3194,18 @@ footer a.vetcert-badge .vetcert-badge-icon {
 }
 
 .overlay-scrim {
-  background-color: var(--overlay) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background-color: rgb(0 0 0 / 0.8) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Opaque modal content — blocks mesh/page bleed on mobile scroll. */
+.modal-panel-solid {
+  background-color: #09090b !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
 }
 
 html.app-bg :is(.text-white, [class*="text-white\/"]):not(.bg-primary):not(.btn-primary) {

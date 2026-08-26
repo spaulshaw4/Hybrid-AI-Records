@@ -100,7 +100,7 @@ export function ContactModal({ open, onClose }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Contact Our Team"
-      className="fixed inset-0 z-[100] flex h-[100dvh] flex-col studio-glass ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)] lg:ps-[var(--site-sidebar-width)]"
+      className="fixed inset-0 z-[100] flex h-[100dvh] flex-col modal-panel-solid ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)] lg:ps-[var(--site-sidebar-width)]"
     >
       <div className="flex items-center justify-between border-b border-border px-6 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:px-10">
         <div className="min-w-0 pe-4">

@@ -1,8 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { type StripeEnv, createStripeClient, getStripeErrorMessage } from "@/lib/stripe.server";
+import { type StripeEnv, createStripeClient, getStripeErrorMessage, logStripeError } from "@/lib/stripe.server";
 import { bundleFor } from "@/lib/tokens";
+import {
+  DEFAULT_CURRENCY,
+  isCurrencyCode,
+  surchargePercent,
+  type CurrencyCode,
+} from "@/lib/pricing";
+import { convertFromUsd } from "@/lib/fx";
 
 type CheckoutResult = { clientSecret: string } | { error: string };
 
@@ -47,18 +54,37 @@ export const spendTokens = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }): Promise<SpendResult> => {
     limitBy("spendTokens", context.userId, RATE_LIMITS.tokenSpend, "token requests");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin
-      .rpc("spend_hybrid_tokens", {
-        _user_id: context.userId,
-        _amount: data.amount,
-        _note: data.note || undefined,
-        _idempotency_key: data.idempotencyKey || undefined,
-      })
-      .maybeSingle();
+    const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = requireSupabaseAdmin();
+    const { data: rpcRows, error } = await admin.rpc("spend_hybrid_tokens", {
+      _user_id: context.userId,
+      _amount: data.amount,
+      _note: data.note || undefined,
+      _idempotency_key: data.idempotencyKey || undefined,
+    });
 
-    if (error || !row) {
-      return { ok: false, error: "Could not update your token balance. Try again.", balance: 0 };
+    const row = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as
+      | {
+          ok?: boolean | null;
+          balance?: number | null;
+          already_applied?: boolean | null;
+          reason?: string | null;
+        }
+      | null
+      | undefined;
+
+    if (error || !row || typeof row.ok !== "boolean") {
+      console.error("[spendTokens] spend_hybrid_tokens failed", error?.message ?? "empty row");
+      const { data: balanceRow } = await admin
+        .from("token_balances")
+        .select("balance")
+        .eq("user_id", context.userId)
+        .maybeSingle();
+      return {
+        ok: false,
+        error: "Could not update your token balance. Try again.",
+        balance: balanceRow?.balance ?? 0,
+      };
     }
     if (!row.ok) {
       return {
@@ -88,11 +114,17 @@ export const setAdminTokenTestModeFn = createServerFn({ method: "POST" })
   });
 
 
-/** Starts an embedded Stripe Checkout for one token bundle. */
+/** Starts an embedded Stripe Checkout for one token bundle (USD catalog or FX price_data). */
 export const createTokenCheckoutSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
+  .validator((data: {
+    priceId: string;
+    returnUrl: string;
+    environment: StripeEnv;
+    currency?: CurrencyCode;
+  }) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.priceId)) throw new Error("Invalid priceId");
+    if (data.currency && !isCurrencyCode(data.currency)) throw new Error("Invalid currency");
     return data;
   })
   .handler(async ({ data, context }): Promise<CheckoutResult> => {
@@ -100,18 +132,71 @@ export const createTokenCheckoutSession = createServerFn({ method: "POST" })
       const bundle = bundleFor(data.priceId);
       if (!bundle) return { error: "That token bundle isn't available." };
 
+      await (await import("@/lib/pricing-settings.server")).readSurchargeSettings();
+      await (await import("@/lib/fx-rates.server")).readFxRates();
+
       const { allowedSiteUrl, defaultSiteOrigin } = await import("@/lib/site-origin.server");
       const returnUrl =
         allowedSiteUrl(data.returnUrl) ??
         `${defaultSiteOrigin()}/studio?token_session={CHECKOUT_SESSION_ID}`;
 
       const stripe = createStripeClient(data.environment);
-      const prices = await stripe.prices.list({ lookup_keys: [data.priceId] });
-      if (!prices.data.length) return { error: "Token pricing isn't published yet." };
-      const price = prices.data[0];
+      const currency: CurrencyCode = data.currency ?? DEFAULT_CURRENCY;
+
+      type LineItem = {
+        price?: string;
+        price_data?: {
+          currency: string;
+          product_data: { name: string; description?: string };
+          unit_amount: number;
+        };
+        quantity: number;
+      };
+      const lineItems: LineItem[] = [];
+
+      if (currency === DEFAULT_CURRENCY) {
+        const prices = await stripe.prices.list({ lookup_keys: [data.priceId] });
+        if (prices.data.length) {
+          lineItems.push({ price: prices.data[0].id, quantity: 1 });
+        } else {
+          // Catalog price missing — still charge via ad-hoc USD price_data.
+          lineItems.push({
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `Hybrid Tokens — ${bundle.name}`,
+                description: `${bundle.tokens} Hybrid Tokens`,
+              },
+              unit_amount: bundle.amount,
+            },
+            quantity: 1,
+          });
+        }
+      } else {
+        const converted = convertFromUsd(bundle.amount, currency);
+        if (converted == null || converted < 1) {
+          return {
+            error: `This token bundle isn't available in ${currency.toUpperCase()} right now. Switch to USD or try again shortly.`,
+          };
+        }
+        const bps = Math.round(surchargePercent(currency) * 100);
+        const unitAmount =
+          bps === 0 ? converted : Math.ceil((converted * (10_000 + bps)) / 10_000);
+        lineItems.push({
+          price_data: {
+            currency,
+            product_data: {
+              name: `Hybrid Tokens — ${bundle.name}`,
+              description: `${bundle.tokens} Hybrid Tokens`,
+            },
+            unit_amount: unitAmount,
+          },
+          quantity: 1,
+        });
+      }
 
       const session = await stripe.checkout.sessions.create({
-        line_items: [{ price: price.id, quantity: 1 }],
+        line_items: lineItems,
         mode: "payment",
         ui_mode: "embedded_page",
         return_url: returnUrl,
@@ -123,11 +208,13 @@ export const createTokenCheckoutSession = createServerFn({ method: "POST" })
           kind: "hybrid_tokens",
           priceId: data.priceId,
           userId: context.userId,
+          currency,
         },
       } as import("stripe").Stripe.Checkout.SessionCreateParams);
 
       return { clientSecret: session.client_secret ?? "" };
     } catch (error) {
+      logStripeError("createTokenCheckoutSession", error);
       return { error: getStripeErrorMessage(error) };
     }
   });

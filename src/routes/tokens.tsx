@@ -15,6 +15,7 @@ import {
   getTokenBalance,
 } from "@/lib/tokens.functions";
 import { TOKEN_BUNDLES, perTokenLabel, usdLabel, type TokenBundle } from "@/lib/tokens";
+import { useCurrency } from "@/lib/currency";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
@@ -90,6 +91,7 @@ function TokensPage() {
   const [balance, setBalance] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "browse" });
   const [notice, setNotice] = useState<string | null>(null);
+  const currency = useCurrency();
 
   const refreshBalance = useCallback(async () => {
     try {
@@ -160,6 +162,7 @@ function TokensPage() {
           priceId: bundle.priceId,
           returnUrl: `${window.location.origin}/tokens?token_session={CHECKOUT_SESSION_ID}`,
           environment: getStripeEnvironment(),
+          currency,
         },
       });
       if ("error" in result) {
@@ -173,7 +176,7 @@ function TokensPage() {
         message: "We couldn't reach the payment service. Try again in a moment.",
       });
     }
-  }, []);
+  }, [currency]);
 
   return (
     <main className="min-h-dvh bg-background pb-16">

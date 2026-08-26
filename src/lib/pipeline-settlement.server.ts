@@ -73,15 +73,18 @@ async function settleHybridToken(input: {
   note?: string;
 }): Promise<boolean> {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin
-      .rpc("spend_hybrid_tokens", {
-        _user_id: input.userId,
-        _amount: input.amount,
-        _note: input.note || "Studio master generation",
-        _idempotency_key: input.idempotencyKey || undefined,
-      })
-      .maybeSingle();
+    const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = requireSupabaseAdmin();
+    const { data, error } = await admin.rpc("spend_hybrid_tokens", {
+      _user_id: input.userId,
+      _amount: input.amount,
+      _note: input.note || "Studio master generation",
+      _idempotency_key: input.idempotencyKey || undefined,
+    });
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { ok?: boolean | null; reason?: string | null }
+      | null
+      | undefined;
     if (error || !row?.ok) {
       console.warn(
         "[Settlement] token debit failed",

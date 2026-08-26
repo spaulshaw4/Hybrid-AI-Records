@@ -2093,15 +2093,15 @@ export function ApplicationModal({
       className={
         inline
           ? "w-full outline-none"
-          : "fixed inset-0 z-[110] flex h-[100dvh] items-stretch justify-center overflow-y-auto overscroll-contain overlay-scrim bg-foreground/40 outline-none backdrop-blur-md p-4 ps-[max(1rem,env(safe-area-inset-left))] pe-[max(1rem,env(safe-area-inset-right))] sm:items-center sm:p-8 lg:ps-[var(--site-sidebar-width)]"
+          : "fixed inset-0 z-[110] flex h-[100dvh] items-stretch justify-center overflow-y-auto overscroll-contain overlay-scrim bg-black/80 outline-none backdrop-blur-md p-4 ps-[max(1rem,env(safe-area-inset-left))] pe-[max(1rem,env(safe-area-inset-right))] sm:items-center sm:p-8 lg:ps-[var(--site-sidebar-width)]"
       }
       onClick={inline ? undefined : resetAndClose}
     >
       <div
         className={
           inline
-            ? "relative w-full border border-border-strong bg-background/60 text-foreground backdrop-blur-sm"
-            : "relative w-full min-h-full border-0 bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground shadow-[var(--shadow-hard)] sm:my-auto sm:min-h-0 sm:max-w-2xl sm:border sm:border-border-strong sm:py-0"
+            ? "relative w-full border border-border-strong modal-panel-solid text-foreground"
+            : "relative w-full min-h-full border-0 modal-panel-solid pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground shadow-[var(--shadow-hard)] sm:my-auto sm:min-h-0 sm:max-w-2xl sm:border sm:border-border-strong sm:py-0"
         }
         onClick={inline ? undefined : (e) => e.stopPropagation()}
       >
@@ -2109,7 +2109,7 @@ export function ApplicationModal({
           <button
             type="button"
             onClick={resetAndClose}
-            className="absolute end-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center border border-border bg-background/80 text-foreground transition-colors hover:border-primary hover:text-primary sm:top-3 sm:h-10 sm:w-10"
+            className="absolute end-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center border border-white/10 !bg-zinc-900 text-foreground transition-colors hover:border-primary hover:text-primary sm:top-3 sm:h-10 sm:w-10"
             aria-label="Close application"
           >
             <X size={18} />
@@ -2918,7 +2918,7 @@ export function ApplicationModal({
               )}
             </div>
 
-            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-border bg-background/95 px-6 py-4 backdrop-blur-md sm:px-8">
+            <div className="sticky bottom-0 flex flex-col gap-3 border-t border-white/10 modal-panel-solid px-6 py-4 sm:px-8">
               {submitFailure && (
                 <div
                   ref={failureRef}
