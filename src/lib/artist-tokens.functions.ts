@@ -3,6 +3,7 @@ import { limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { StripeEnv } from "@/lib/stripe";
 import { artistBundleFor } from "@/lib/artist-tokens";
+import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
 
 type CheckoutResult = { clientSecret: string } | { error: string };
 
@@ -216,8 +217,35 @@ export const unlockTrackDownload = createServerFn({ method: "POST" })
       };
     }
 
-    const safeTitle = `${track.artist} - ${track.title}`.replace(/[^\w\s.-]+/g, "").trim();
-    const fileName = `${safeTitle || track.id}.mp3`;
+    const fileName = hybridTrackDownloadFileName(track.title);
+
+    const { data: catalogRow } = await supabaseAdmin
+      .from("artist_tracks")
+      .select("storage_path, title")
+      .eq("id", track.id)
+      .maybeSingle();
+    const storagePath =
+      typeof catalogRow?.storage_path === "string" ? catalogRow.storage_path.trim() : "";
+    if (storagePath) {
+      const { createTracksBucketSignedDownloadUrl } = await import(
+        "@/lib/track-download-signed.server"
+      );
+      const storageUrl = await createTracksBucketSignedDownloadUrl(
+        storagePath,
+        catalogRow?.title || track.title,
+      );
+      if (storageUrl) {
+        return {
+          ok: true,
+          balance: row.balance ?? 0,
+          alreadyOwned: row.already_owned ?? false,
+          url: storageUrl,
+          fileName,
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        };
+      }
+    }
+
     const { signDownloadToken, downloadPathFor } = await import("@/lib/download-signing.server");
     const signed = await signDownloadToken({
       trackId: track.id,
@@ -330,7 +358,6 @@ export const getArtistDownloads = createServerFn({ method: "POST" })
         const track = byId.get(row.track_id as string);
         const title = track?.title ?? (row.track_title as string | null) ?? (row.track_id as string);
         const artist = track?.artist ?? (row.track_artist as string | null) ?? "Hybrid AI Records";
-        const safe = `${artist} - ${title}`.replace(/[^\w\s.-]+/g, "").trim();
         return {
           trackId: row.track_id as string,
           title,
@@ -338,7 +365,7 @@ export const getArtistDownloads = createServerFn({ method: "POST" })
           album: (track as { album?: string } | undefined)?.album ?? null,
           unlockedAt: row.created_at as string,
           available: Boolean(track?.src),
-          fileName: `${safe || (row.track_id as string)}.mp3`,
+          fileName: hybridTrackDownloadFileName(title),
         };
       }),
     };
@@ -374,8 +401,34 @@ export const createTrackDownloadLink = createServerFn({ method: "POST" })
     const track = STREAM_TRACKS.find((item) => item.id === data.trackId);
     if (!track) return { ok: false, error: "That track isn't in the catalog right now." };
 
-    const safeTitle = `${track.artist} - ${track.title}`.replace(/[^\w\s.-]+/g, "").trim();
-    const fileName = `${safeTitle || track.id}.mp3`;
+    const fileName = hybridTrackDownloadFileName(track.title);
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: catalogRow } = await supabaseAdmin
+      .from("artist_tracks")
+      .select("storage_path, title")
+      .eq("id", data.trackId)
+      .maybeSingle();
+    const storagePath =
+      typeof catalogRow?.storage_path === "string" ? catalogRow.storage_path.trim() : "";
+    if (storagePath) {
+      const { createTracksBucketSignedDownloadUrl } = await import(
+        "@/lib/track-download-signed.server"
+      );
+      const storageUrl = await createTracksBucketSignedDownloadUrl(
+        storagePath,
+        catalogRow?.title || track.title,
+      );
+      if (storageUrl) {
+        return {
+          ok: true,
+          url: storageUrl,
+          fileName,
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        };
+      }
+    }
+
     const { signDownloadToken, downloadPathFor } = await import("@/lib/download-signing.server");
     const signed = await signDownloadToken({
       trackId: track.id,

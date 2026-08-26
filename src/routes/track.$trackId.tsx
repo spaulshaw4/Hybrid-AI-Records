@@ -8,6 +8,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { STREAM_TRACKS, type StreamTrack } from "@/lib/radio-tracks";
 import { absoluteUrl, DEFAULT_OG_IMAGE, pageHead, SITE_ORIGIN } from "@/lib/social-meta";
+import { hybridTrackDownloadFileName, hybridTrackDownloadTitle } from "@/lib/track-download-name";
 
 type TrackLoaderData = { track: StreamTrack };
 
@@ -63,7 +64,8 @@ async function handleShare(track: StreamTrack) {
 
 function TrackSharePage() {
   const { track } = Route.useLoaderData();
-  const downloadName = `${track.title || "Hybrid-AI-Track"} - Hybrid AI Records.mp3`;
+  const trackTitle = hybridTrackDownloadTitle(track.title);
+  const fileName = hybridTrackDownloadFileName(track.title);
 
   return (
     <main className="mx-auto flex min-h-[70vh] w-full max-w-3xl flex-col gap-6 px-4 py-10 text-zinc-100">
@@ -76,12 +78,12 @@ function TrackSharePage() {
       <div className="flex flex-col gap-6 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-2xl sm:flex-row">
         <CoverImage
           src={track.cover || DEFAULT_OG_IMAGE}
-          alt={`${track.title} cover`}
+          alt={`${trackTitle} cover`}
           className="aspect-square w-full max-w-[220px] shrink-0 rounded-lg object-cover"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{track.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{trackTitle}</h1>
             <p className="text-sm text-muted-foreground">{track.artist}</p>
             {track.album ? (
               <p className="text-xs text-muted-foreground">{track.album}</p>
@@ -93,7 +95,7 @@ function TrackSharePage() {
           <div className="flex flex-wrap gap-2">
             <a
               href={track.src}
-              download={downloadName}
+              download={fileName}
               target="_blank"
               rel="noopener noreferrer"
               className={cn(

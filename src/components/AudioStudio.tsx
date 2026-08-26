@@ -95,6 +95,7 @@ import {
   finalizeUserVaultTrack,
 } from "@/lib/user-vault.functions";
 import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration } from "@/lib/vault-client";
+import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
 
 import { hybridMasterFileName, masterWavFromUrl } from "@/lib/audio-mixdown";
 import { abortableBarrier, abortableDelay, isGenerationAborted } from "@/lib/generation-abort";
@@ -4704,7 +4705,7 @@ export function AudioStudio() {
               <div className="flex flex-wrap gap-2">
                 <a
                   href={result.audioUrl}
-                  download={`${result.title || "Hybrid-AI-Track"} - Hybrid AI Records.mp3`}
+                  download={hybridTrackDownloadFileName(result.title)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={cn(
