@@ -1,7 +1,7 @@
 /**
  * Gate 1 / Prisma smoke tests.
  *
- * - Asserts Gate 1 circuit breaker covers the poll budget (120 × 2.5s ≈ 300s).
+ * - Asserts Gate 1 circuit breaker covers the composition poll budget (120s).
  * - Exercises a Gate 1-shaped studio payload.
  * - Live Prisma Track upsert when DATABASE_URL is reachable (skipped otherwise).
  */
@@ -11,6 +11,8 @@ import {
   withTimeout,
 } from "@/lib/pipeline-gate.server";
 import {
+  COMPOSITION_DISPATCH_TIMEOUT_MS,
+  COMPOSITION_POLL_TIMEOUT_MS,
   MAX_POLLING_ATTEMPTS,
   MAX_POLLING_DURATION_MS,
   POLLING_INTERVAL_MS,
@@ -29,14 +31,16 @@ export const GATE_1_SMOKE_PAYLOAD = {
 };
 
 describe("Gate 1 circuit breaker + poll budget", () => {
-  it("keeps Gate 1 timeout ≥ poll budget (120 × 2.5s)", () => {
+  it("keeps Gate 1 timeout ≥ composition dispatch + poll budgets", () => {
+    expect(COMPOSITION_DISPATCH_TIMEOUT_MS).toBe(30_000);
+    expect(COMPOSITION_POLL_TIMEOUT_MS).toBe(120_000);
     expect(POLLING_INTERVAL_MS).toBe(2500);
-    expect(MAX_POLLING_ATTEMPTS).toBe(120);
-    expect(MAX_POLLING_DURATION_MS).toBe(300_000);
-    expect(GATE_TIMEOUTS_MS[1]).toBe(300_000);
-    expect(GATE_TIMEOUTS_MS[1]).toBeGreaterThanOrEqual(MAX_POLLING_DURATION_MS);
-    // Historical “~180s” floor — breaker must not regress below this.
-    expect(GATE_TIMEOUTS_MS[1]).toBeGreaterThanOrEqual(180_000);
+    expect(MAX_POLLING_ATTEMPTS).toBe(Math.ceil(120_000 / 2500));
+    expect(MAX_POLLING_DURATION_MS).toBe(120_000);
+    expect(GATE_TIMEOUTS_MS[1]).toBe(150_000);
+    expect(GATE_TIMEOUTS_MS[1]).toBeGreaterThanOrEqual(
+      COMPOSITION_DISPATCH_TIMEOUT_MS + COMPOSITION_POLL_TIMEOUT_MS,
+    );
   });
 
   it("trips Circuit Breaker wording when Gate 1 work exceeds the deadline", async () => {

@@ -2683,6 +2683,21 @@ export function AudioStudio() {
                 typeof event.pipelineState === "number" ? event.pipelineState : undefined,
               );
             },
+            onTask: (event) => {
+              if (!event?.taskId) return;
+              stageTaskId = event.taskId;
+              stageStartedAt = Date.now();
+              // Persist early so refresh / tab switch can re-attach while Gate 1 polls.
+              savePendingJob({
+                taskId: event.taskId,
+                runId,
+                vaultId: audioVaultId ?? vaultId,
+                title: trackTitle,
+                styleLine,
+                vocalProfile: activeVocalProfile(),
+                startedAt: stageStartedAt,
+              });
+            },
             data: generatePayload,
           });
 
@@ -2881,6 +2896,18 @@ export function AudioStudio() {
       if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
 
 
+
+      // Prefer the service-role confirmed vault id from the SSE result payload.
+      const confirmedVaultId =
+        started &&
+        typeof started === "object" &&
+        "vaultId" in started &&
+        typeof (started as { vaultId?: unknown }).vaultId === "string"
+          ? ((started as { vaultId: string }).vaultId.trim() || null)
+          : null;
+      if (confirmedVaultId && !confirmedVaultId.startsWith("guest-")) {
+        audioVaultId = confirmedVaultId;
+      }
 
       const engineUrl = ready[0]?.audioUrl ?? "";
       // No audio, or something the browser can't stream: fail cleanly and let

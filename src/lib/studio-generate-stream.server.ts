@@ -7,11 +7,24 @@
  * client disconnect / tab switch / reader.cancel() cannot abort vault writes.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { runWithPipelineProgressCallback } from "@/lib/pipeline-progress-als.server";
 import type { StudioProgressCallback } from "@/lib/pipeline-progress";
 
 /** Keepalive interval so proxies / browsers do not idle-close the socket. */
 export const GENERATE_SSE_KEEPALIVE_MS = 15_000;
+
+type SseSend = (event: string, data: unknown) => void;
+
+const sseSendAls = new AsyncLocalStorage<SseSend>();
+
+/**
+ * Emit a mid-flight SSE event from inside `handlers.run()` (e.g. Gate 1 task id).
+ * No-op when not running under an SSE generate stream or after client disconnect.
+ */
+export function emitGenerateSseEvent(event: string, data: unknown): void {
+  sseSendAls.getStore()?.(event, data);
+}
 
 export type GenerateSseHandlers = {
   /** Runs the full studio generate; may take several minutes. */
@@ -31,9 +44,15 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
   const encoder = new TextEncoder();
   let closed = false;
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  /** Bytes produced before `start()` attaches the controller (e.g. early task id). */
+  const pendingChunks: Uint8Array[] = [];
 
   const safeEnqueue = (chunk: Uint8Array) => {
-    if (closed || !streamController) return;
+    if (closed) return;
+    if (!streamController) {
+      pendingChunks.push(chunk);
+      return;
+    }
     try {
       streamController.enqueue(chunk);
     } catch {
@@ -42,7 +61,7 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
     }
   };
 
-  const send = (event: string, data: unknown) => {
+  const send: SseSend = (event, data) => {
     if (closed) return;
     safeEnqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
   };
@@ -57,7 +76,10 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
 
   // Detach synthesis from the HTTP stream lifecycle BEFORE returning the Response.
   // Client abort must not reject this promise or skip user_vault persistence.
-  const jobPromise = runWithPipelineProgressCallback(onProgress, handlers.run);
+  // Nested ALS: progress + optional mid-flight SSE send (task id, etc.).
+  const jobPromise = runWithPipelineProgressCallback(onProgress, () =>
+    sseSendAls.run(send, handlers.run),
+  );
   // Prevent unhandled rejection if the stream is cancelled before `start` awaits.
   jobPromise.catch((error) => {
     console.error(
@@ -69,6 +91,15 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       streamController = controller;
+      for (const chunk of pendingChunks) {
+        try {
+          controller.enqueue(chunk);
+        } catch {
+          closed = true;
+          break;
+        }
+      }
+      pendingChunks.length = 0;
       handlers.onReady?.(send);
       send("status", { state: "started" });
 
@@ -120,6 +151,7 @@ export function createGenerateSseResponse(handlers: GenerateSseHandlers): Respon
     cancel() {
       // Stop writing to the socket only — do NOT abort jobPromise / vault writes.
       closed = true;
+      pendingChunks.length = 0;
       console.info(
         "[GENERATE_SSE] client disconnected — synthesis continues until vault commit",
       );

@@ -136,12 +136,15 @@ export type ExecutePipelineSuccess = LandingSuccessResponse & {
   publicAudioUrl: string;
   mixed: boolean;
   matched: boolean;
+  /** Confirmed `user_vault.id` after settlement persist. */
+  vaultId?: string | null;
   /** True when post-binary settlement debited Hybrid Tokens server-side. */
   tokenSettled?: boolean;
   settlement?: {
     status: "settled" | "rolled_back";
     gateMask: number;
     finalGateMask: number;
+    vaultId?: string | null;
     tokenSettled: boolean;
     chargeLedger?: ChargeLedgerEntry[];
     totalCharged?: number;
@@ -360,10 +363,13 @@ export async function executePipeline(
           throw e;
         }
       } else {
-        const { generateStudioTrack, waitForStudioTrack } = await import(
-          "@/lib/music-generation"
-        );
         try {
+          const {
+            generateStudioTrack,
+            waitForStudioTrack,
+            COMPOSITION_DISPATCH_TIMEOUT_MS,
+            COMPOSITION_POLL_TIMEOUT_MS,
+          } = await import("@/lib/music-generation");
           const started = await withTimeout(
             generateStudioTrack({
               genre: input.style || input.prompt,
@@ -373,13 +379,33 @@ export async function executePipeline(
               mv: "sonic-v5",
               tags: input.style || undefined,
             }),
-            GATE_TIMEOUTS_MS[1],
+            COMPOSITION_DISPATCH_TIMEOUT_MS,
             "Gate 1 (AIMusicAPI create)",
             { step: "composition" },
           );
+          console.log(
+            `[Composition] Initial provider response: accepted & taskId=${started.taskId}`,
+          );
+          if (input.vaultId) {
+            try {
+              const { persistUserVault } = await import("@/lib/user-vault.server");
+              await persistUserVault(supabaseAdmin, input.userId, {
+                id: input.vaultId,
+                title: input.title || "Untitled Track",
+                style: input.style || input.prompt || "",
+                status: "processing",
+                providerTaskId: started.taskId,
+              });
+            } catch (vaultErr) {
+              console.warn(
+                "[Composition] Pending vault write skipped",
+                vaultErr instanceof Error ? vaultErr.message : vaultErr,
+              );
+            }
+          }
           const finished = await withTimeout(
             waitForStudioTrack(input.gate1TaskId ?? started.taskId),
-            GATE_TIMEOUTS_MS[1],
+            COMPOSITION_POLL_TIMEOUT_MS,
             "Gate 1 (AIMusicAPI)",
             { step: "composition" },
           );
@@ -1012,6 +1038,7 @@ export async function executePipeline(
       return {
         status: fallbacksUsed.length ? "completed_fallback" : "success",
         trackId,
+        vaultId: settlement.ui.vaultId ?? input.vaultId ?? null,
         masterUrl: settlement.ui.masterUrl ?? finalMasterUrl,
         duration: settlement.ui.duration || duration,
         structuralMarkers: settlement.ui.structuralMarkers,

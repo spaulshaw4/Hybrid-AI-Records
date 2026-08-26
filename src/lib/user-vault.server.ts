@@ -7,7 +7,8 @@ export type UserVaultStatus = "processing" | "completed" | "failed";
 
 export type UserVaultStems = {
   id?: string;
-  title: string;
+  /** When omitted on update, existing title is preserved. */
+  title?: string;
   style?: string | null;
   status: UserVaultStatus;
   masterUrl?: string | null;
@@ -15,6 +16,8 @@ export type UserVaultStems = {
   vocalUrl?: string | null;
   /** Raw Gate 1 engine audio, before stems and mastering. */
   rawAudioUrl?: string | null;
+  /** Upstream MusicAPI / AIMusicAPI task id (often non-UUID). */
+  providerTaskId?: string | null;
   /** Hybrid Tokens charged for this generation. */
   tokensUsed?: number | null;
 };
@@ -37,6 +40,13 @@ export type UserVaultApiTrack = {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type VaultWriteError = {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+};
+
 /** `user_vault.id` / `generation_tasks.id` are uuid — MusicAPI task ids often are not. */
 export function isUserVaultUuid(value: string | null | undefined): boolean {
   return typeof value === "string" && UUID_RE.test(value.trim());
@@ -47,33 +57,199 @@ export function asVaultStatus(value: string | null | undefined): UserVaultStatus
   return "processing";
 }
 
+function isForeignKeyError(error: VaultWriteError | null | undefined): boolean {
+  if (!error) return false;
+  return (
+    error.code === "23503" ||
+    /foreign key|auth\.users/i.test(error.message ?? "") ||
+    /foreign key|auth\.users/i.test(error.details ?? "")
+  );
+}
+
+function isMissingColumnError(error: VaultWriteError | null | undefined): boolean {
+  if (!error) return false;
+  return /schema cache|Could not find the .* column|column .* does not exist/i.test(
+    error.message ?? "",
+  );
+}
+
+/**
+ * Resolves a service-role client so RLS cannot block vault writes.
+ * Falls back to the caller-supplied client only when credentials are absent.
+ */
 async function resolveVaultWriteClient(
   fallback: SupabaseClient<Database>,
-): Promise<SupabaseClient<Database>> {
+): Promise<{ db: SupabaseClient<Database>; usedServiceRole: boolean }> {
   try {
     const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
-    return tryGetSupabaseAdmin() ?? fallback;
-  } catch {
-    return fallback;
+    const admin = tryGetSupabaseAdmin();
+    if (admin) return { db: admin, usedServiceRole: true };
+  } catch (error) {
+    console.warn(
+      "[user_vault] service-role client unavailable",
+      error instanceof Error ? error.message : error,
+    );
   }
+  console.warn(
+    "[user_vault] SUPABASE_SERVICE_ROLE_KEY missing — falling back to request client (RLS may block writes)",
+  );
+  return { db: fallback, usedServiceRole: false };
+}
+
+/**
+ * Ensures `user_id` exists in `auth.users` so the user_vault FK cannot fail.
+ * Auto-creates only the known local-dev test UUID (not real user ids).
+ */
+export async function ensureVaultAuthUser(
+  db: SupabaseClient<Database>,
+  userId: string,
+): Promise<boolean> {
+  if (!isUserVaultUuid(userId)) return false;
+
+  try {
+    const { data, error } = await db.auth.admin.getUserById(userId);
+    if (!error && data?.user?.id) return true;
+  } catch {
+    /* admin API may be unavailable on the fallback client */
+  }
+
+  try {
+    const { DEV_TEST_USER, DEV_TEST_USER_UUID } = await import("@/lib/dev-auth");
+    if (userId !== DEV_TEST_USER_UUID) {
+      console.error(
+        "[Vault Save Error]: user_id is not present in auth.users — FK will reject the write",
+        { userId },
+      );
+      return false;
+    }
+
+    const { error: createError } = await db.auth.admin.createUser({
+      id: DEV_TEST_USER_UUID,
+      email: DEV_TEST_USER.email,
+      email_confirm: true,
+      user_metadata: { full_name: "Hybrid Dev Test", vault_seed: true },
+      app_metadata: { provider: "vault-ensure", role: "dev-test" },
+    });
+
+    if (createError && !/already|registered|exists|duplicate/i.test(createError.message)) {
+      console.error(
+        "[Vault Save Error]: failed to seed DEV_TEST_USER in auth.users",
+        JSON.stringify(createError, null, 2),
+      );
+      return false;
+    }
+    console.log("[user_vault] seeded DEV_TEST_USER in auth.users for FK-safe vault writes");
+    return true;
+  } catch (error) {
+    console.error(
+      "[Vault Save Error]: ensureVaultAuthUser threw",
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
+}
+
+function buildInsertRow(
+  trackId: string,
+  userId: string,
+  stems: UserVaultStems,
+  status: UserVaultStatus,
+  masterUrl: string | null,
+  options?: { omitOptionalColumns?: boolean },
+): Database["public"]["Tables"]["user_vault"]["Insert"] {
+  const title = stems.title?.trim() || "Untitled Track";
+  const style = stems.style?.trim() || null;
+  const providerTaskId = stems.providerTaskId?.trim() || null;
+  const tokensUsed =
+    typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
+      ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
+      : masterUrl
+        ? 1
+        : 0;
+
+  const row: Database["public"]["Tables"]["user_vault"]["Insert"] = {
+    id: trackId,
+    user_id: userId,
+    title,
+    style,
+    status,
+    master_url: masterUrl,
+    instrumental_url: stems.instrumentalUrl?.trim() || null,
+    vocal_url: stems.vocalUrl?.trim() || null,
+  };
+
+  if (!options?.omitOptionalColumns) {
+    row.raw_audio_url = stems.rawAudioUrl?.trim() || null;
+    row.provider_task_id = providerTaskId;
+    row.tokens_used = tokensUsed;
+  }
+
+  return row;
+}
+
+function buildPatch(
+  userId: string,
+  stems: UserVaultStems,
+  status: UserVaultStatus,
+  masterUrl: string | null,
+  options?: { omitOptionalColumns?: boolean },
+): Record<string, unknown> {
+  const style = stems.style?.trim() || null;
+  const providerTaskId = stems.providerTaskId?.trim() || null;
+  const tokensUsed =
+    typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
+      ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
+      : masterUrl
+        ? 1
+        : undefined;
+
+  const patch: Record<string, unknown> = {
+    user_id: userId,
+    status,
+  };
+  if (typeof stems.title === "string" && stems.title.trim()) {
+    patch.title = stems.title.trim();
+  }
+  if (style) patch.style = style;
+  if (masterUrl) patch.master_url = masterUrl;
+  if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl.trim();
+  if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl.trim();
+
+  if (!options?.omitOptionalColumns) {
+    if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl.trim();
+    if (providerTaskId) patch.provider_task_id = providerTaskId;
+    if (typeof tokensUsed === "number") patch.tokens_used = tokensUsed;
+  }
+
+  return patch;
 }
 
 /**
  * Opens or finishes a vault row via service-role upsert (bypasses RLS).
- * Never throws — a vault miss must not fail the render.
+ * Throws on hard DB failures so callers/SSE surfaces the real error.
+ * Returns the confirmed `user_vault.id`.
  */
 export async function persistUserVault(
   supabase: SupabaseClient<Database>,
   userId: string,
   stems: UserVaultStems,
 ): Promise<string | null> {
-  const db = await resolveVaultWriteClient(supabase);
+  const ownerId = userId?.trim();
+  if (!ownerId || !isUserVaultUuid(ownerId)) {
+    const message = `Failed to save to user_vault: invalid user_id (${ownerId || "empty"})`;
+    console.error("[Vault Save Error]:", message);
+    throw new Error(message);
+  }
+
+  const { db, usedServiceRole } = await resolveVaultWriteClient(supabase);
+  if (usedServiceRole) {
+    await ensureVaultAuthUser(db, ownerId);
+  }
+
   const masterUrl = stems.masterUrl?.trim() || null;
   // A playable master always wins. Never write a phantom `failed` over audio
   // that already landed, and never null out an existing master_url.
   let status: UserVaultStatus = masterUrl ? "completed" : stems.status;
-  const title = stems.title.trim() || "Untitled Track";
-  const style = stems.style?.trim() || null;
   const trackId = isUserVaultUuid(stems.id) ? stems.id!.trim() : randomUUID();
 
   console.log("Writing track to vault:", trackId);
@@ -83,142 +259,102 @@ export async function persistUserVault(
       .from("user_vault")
       .select("master_url")
       .eq("id", stems.id!)
-      .eq("user_id", userId)
+      .eq("user_id", ownerId)
       .maybeSingle();
     if (existing?.master_url) {
       status = "completed";
     }
   }
 
-  const tokensUsed =
-    typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
-      ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
-      : masterUrl
-        ? 1
-        : undefined;
-
-  // Partial patch for UPDATE so we never wipe existing stem URLs.
-  const patch: Record<string, unknown> = {
-    user_id: userId,
-    title,
-    style,
-    status,
-  };
-  if (masterUrl) patch.master_url = masterUrl;
-  if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl.trim();
-  if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl.trim();
-  if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl.trim();
-  if (typeof tokensUsed === "number") patch.tokens_used = tokensUsed;
-
-  try {
+  const writeOnce = async (omitOptionalColumns: boolean) => {
     if (isUserVaultUuid(stems.id)) {
+      const patch = buildPatch(ownerId, stems, status, masterUrl, { omitOptionalColumns });
       const { data: updated, error: updateError } = await db
         .from("user_vault")
         .update(patch as never)
         .eq("id", trackId)
-        .eq("user_id", userId)
+        .eq("user_id", ownerId)
         .select("id, master_url, status")
         .maybeSingle();
 
       if (updateError) {
-        console.error("[user_vault] update failed", {
-          trackId,
-          message: updateError.message,
-          code: updateError.code,
-        });
-      } else if (updated?.id) {
-        console.log("[user_vault] write committed", {
-          trackId: updated.id,
-          status: updated.status,
-          hasMaster: Boolean(updated.master_url ?? masterUrl),
-        });
-        if (status === "completed" || masterUrl) {
-          await syncVaultCompletion(
-            updated.id,
-            userId,
-            masterUrl || updated.master_url,
-            title,
-            style,
-          );
-        }
-        return updated.id;
+        return { data: null as { id: string; master_url: string | null; status: string } | null, error: updateError };
       }
-      // 0-row update (row missing) → fall through to upsert/insert.
+      if (updated?.id) {
+        return { data: updated, error: null };
+      }
       console.warn("[user_vault] update matched 0 rows — upserting", trackId);
     }
 
-    const insertRow: Database["public"]["Tables"]["user_vault"]["Insert"] = {
-      id: trackId,
-      user_id: userId,
-      title,
-      style,
-      status,
-      master_url: masterUrl,
-      instrumental_url: stems.instrumentalUrl?.trim() || null,
-      vocal_url: stems.vocalUrl?.trim() || null,
-      raw_audio_url: stems.rawAudioUrl?.trim() || null,
-      tokens_used: typeof tokensUsed === "number" ? tokensUsed : masterUrl ? 1 : 0,
-    };
-
-    const { data, error } = await db
+    const insertRow = buildInsertRow(trackId, ownerId, stems, status, masterUrl, {
+      omitOptionalColumns,
+    });
+    return db
       .from("user_vault")
       .upsert(insertRow, { onConflict: "id" })
       .select("id, master_url, status")
       .maybeSingle();
+  };
 
-    if (error) {
-      console.error("[user_vault] write failed", {
-        trackId,
+  try {
+    let { data, error } = await writeOnce(false);
+
+    if (error && isMissingColumnError(error)) {
+      console.warn(
+        "[user_vault] optional column missing — retrying core columns only",
+        error.message,
+      );
+      ({ data, error } = await writeOnce(true));
+    }
+
+    if (error && isForeignKeyError(error)) {
+      console.warn("[user_vault] FK violation — ensuring auth user and retrying", {
+        userId: ownerId,
         message: error.message,
         code: error.code,
-        details: error.details,
       });
-      return null;
+      const ok = await ensureVaultAuthUser(db, ownerId);
+      if (ok) {
+        ({ data, error } = await writeOnce(false));
+        if (error && isMissingColumnError(error)) {
+          ({ data, error } = await writeOnce(true));
+        }
+      }
+    }
+
+    if (error) {
+      console.error("[Vault Save Error]:", JSON.stringify(error, null, 2));
+      throw new Error(`Failed to save to user_vault: ${error.message}`);
     }
 
     const id = data?.id ?? trackId;
+    console.log("[Vault Save Success]: Track ID saved ->", data ?? { id, status, master_url: masterUrl });
     console.log("[user_vault] write committed", {
       trackId: id,
       status: data?.status ?? status,
       hasMaster: Boolean(data?.master_url ?? masterUrl),
+      usedServiceRole,
     });
-    if (status === "completed" || masterUrl) {
-      await syncVaultCompletion(id, userId, masterUrl || data?.master_url, title, style);
-    }
     return id;
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Failed to save to user_vault:")) {
+      throw error;
+    }
     console.error(
-      "[user_vault] write threw",
-      trackId,
-      error instanceof Error ? error.message : error,
+      "[Vault Save Error]:",
+      JSON.stringify(
+        {
+          trackId,
+          userId: ownerId,
+          message: error instanceof Error ? error.message : String(error),
+        },
+        null,
+        2,
+      ),
     );
-    return null;
-  }
-}
-
-async function syncVaultCompletion(
-  trackId: string,
-  userId: string,
-  audioUrl: string | null | undefined,
-  title: string,
-  style: string | null,
-): Promise<void> {
-  if (!audioUrl) return;
-  try {
-    const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
-    await completeGenerationTask({
-      taskId: trackId,
-      vaultId: trackId,
-      userId,
-      audioUrl,
-      title,
-      style,
-    });
-  } catch (error) {
-    console.warn(
-      "[user_vault] completion sync skipped",
-      error instanceof Error ? error.message : error,
-    );
+    throw error instanceof Error
+      ? error
+      : new Error(`Failed to save to user_vault: ${String(error)}`);
   }
 }
 

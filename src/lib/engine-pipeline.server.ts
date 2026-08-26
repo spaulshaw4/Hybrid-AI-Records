@@ -5,7 +5,6 @@
  * UI step labels live in `engine-pipeline.ts` (safe for the browser bundle).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
 import { tryGetSupabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   AUDIO_VAULT_BUCKET,
@@ -19,7 +18,7 @@ import {
 
 const SIGNED_URL_TTL = 60 * 60 * 24 * 365;
 
-export function createEngineSupabaseClient(): SupabaseClient<Database> | null {
+export function createEngineSupabaseClient(): SupabaseClient | null {
   // Prefer the shared service-role singleton (custom fetch + auth flags).
   const admin = tryGetSupabaseAdmin();
   if (admin) return admin;
@@ -33,7 +32,7 @@ export function createEngineSupabaseClient(): SupabaseClient<Database> | null {
     console.warn("[engine] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for vault upload");
     return null;
   }
-  return createClient<Database>(url, key, {
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -128,59 +127,25 @@ export async function completeGenerationTask(input: {
   const now = new Date().toISOString();
   const vaultRowId = asVaultUuid(input.vaultId) ?? asVaultUuid(input.taskId);
 
-  if (vaultRowId) {
-    console.log("Writing track to vault:", vaultRowId);
-    const vaultRow: Database["public"]["Tables"]["user_vault"]["Insert"] = {
-      id: vaultRowId,
-      user_id: input.userId,
+  // Canonical user_vault write — service role + FK-safe owner via persistUserVault.
+  try {
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    await persistUserVault(supabase, input.userId, {
+      id: vaultRowId ?? undefined,
       title: input.title?.trim() || "Untitled Track",
       style: input.style?.trim() || null,
       status: "completed",
-      master_url: audioUrl,
-      tokens_used: 1,
-    };
-    if (input.instrumentalUrl) vaultRow.instrumental_url = input.instrumentalUrl;
-    if (input.vocalUrl) vaultRow.vocal_url = input.vocalUrl;
-    if (input.rawAudioUrl) vaultRow.raw_audio_url = input.rawAudioUrl;
-
-    const { error: vaultError } = await supabase
-      .from("user_vault")
-      .upsert(vaultRow, { onConflict: "id" });
-    if (vaultError) {
-      console.error("[engine] user_vault completion upsert failed", {
-        trackId: vaultRowId,
-        message: vaultError.message,
-        code: vaultError.code,
-      });
-    } else {
-      console.log("[engine] user_vault write committed", { trackId: vaultRowId, status: "completed" });
-    }
-  } else {
-    // MusicAPI task ids are often not UUIDs — never use them as user_vault.id.
-    const { randomUUID } = await import("node:crypto");
-    const freshId = randomUUID();
-    console.log("Writing track to vault:", freshId);
-    const { error: insertError } = await supabase.from("user_vault").insert({
-      id: freshId,
-      user_id: input.userId,
-      title: input.title?.trim() || "Untitled Track",
-      style: input.style?.trim() || null,
-      status: "completed",
-      master_url: audioUrl,
-      instrumental_url: input.instrumentalUrl ?? null,
-      vocal_url: input.vocalUrl ?? null,
-      raw_audio_url: input.rawAudioUrl ?? null,
-      tokens_used: 1,
+      masterUrl: audioUrl,
+      instrumentalUrl: input.instrumentalUrl,
+      vocalUrl: input.vocalUrl,
+      rawAudioUrl: input.rawAudioUrl,
+      tokensUsed: 1,
     });
-    if (insertError) {
-      console.error("[engine] user_vault insert failed", {
-        trackId: freshId,
-        message: insertError.message,
-        code: insertError.code,
-      });
-    } else {
-      console.log("[engine] user_vault write committed", { trackId: freshId, status: "completed" });
-    }
+  } catch (error) {
+    console.error(
+      "[engine] user_vault completion persist failed",
+      error instanceof Error ? error.message : error,
+    );
   }
 
   const studioId = vaultRowId ?? asVaultUuid(input.taskId);
@@ -251,24 +216,19 @@ export async function failGenerationTask(input: {
     console.warn("[engine] generation_tasks failure update failed", taskError.message);
   }
 
-  // Never overwrite a row that already has a playable master.
-  const { data: existing } = await supabase
-    .from("user_vault")
-    .select("master_url")
-    .eq("id", rowId)
-    .eq("user_id", input.userId)
-    .maybeSingle();
-  if (existing?.master_url) {
-    console.warn("[engine] user_vault failure skipped — master already present", rowId);
-  } else {
-    const { error: vaultError } = await supabase
-      .from("user_vault")
-      .update({ status: "failed" })
-      .eq("id", rowId)
-      .eq("user_id", input.userId);
-    if (vaultError) {
-      console.warn("[engine] user_vault failure update failed", vaultError.message);
-    }
+  // Never overwrite a row that already has a playable master — persistUserVault
+  // keeps completed when master_url is already set.
+  try {
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    await persistUserVault(supabase, input.userId, {
+      id: rowId,
+      status: "failed",
+    });
+  } catch (error) {
+    console.warn(
+      "[engine] user_vault failure update failed",
+      error instanceof Error ? error.message : error,
+    );
   }
 
   const { error: studioError } = await supabase

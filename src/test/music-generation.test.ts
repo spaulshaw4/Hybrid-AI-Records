@@ -233,6 +233,12 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Target URL:", SONIC_CREATE_URL);
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Using key prefix:", "test-mus...");
     expect(log).toHaveBeenCalledWith("[AIMUSICAPI] Header format:", AIMUSICAPI_HEADER_FORMAT);
+    expect(log).toHaveBeenCalledWith("[Composition] Payload dispatched to provider");
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\[Composition\] Initial provider response: .+ & taskId=task-55/,
+      ),
+    );
     expect(log).toHaveBeenCalledWith(
       "[EXACT_OUTBOUND_BODY]",
       expect.stringContaining(`"mv": "${AIMUSICAPI_MODEL}"`),
@@ -537,6 +543,9 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(/\[SONIC_V5_POLL\] Task: task-poll \| Status: running \| Elapsed: \d+s/),
     );
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/\[Composition\] Polling attempt #\d+: running/),
+    );
   }, 15_000);
 
   it("completes when one clip of a multi-clip task has succeeded", async () => {
@@ -587,46 +596,60 @@ describe("MusicAPI sonic workflow", () => {
     expect(extractAudioUrl(null)).toBeNull();
   });
 
-  it("retries transient 429/500 poll failures instead of aborting immediately", async () => {
+  it("throws immediately on poll HTTP 429 instead of soft-looping", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
-    let polls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo) => {
-      const url = String(input);
-      if (!url.includes("/sonic/task/")) {
-        return new Response(null, { status: 200 });
-      }
-      polls += 1;
-      if (polls === 1) return new Response("rate limited", { status: 429 });
-      if (polls === 2) return new Response("server error", { status: 500 });
-      return jsonResponse({
-        data: {
-          status: "succeeded",
-          audio_url: "https://cdn.example/recovered.mp3",
-          title: "Recovered",
-          id: "clip-9",
-        },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (!url.includes("/sonic/task/")) return new Response(null, { status: 200 });
+        return new Response("rate limited", { status: 429 });
+      }),
+    );
 
-    const pending = waitForStudioTrack("task-retry");
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
-    await Promise.resolve();
-    const finished = await pending;
+    await expect(waitForStudioTrack("task-429")).rejects.toThrow(
+      /task poll failed \(429\)/,
+    );
+    expect(error).toHaveBeenCalledWith(
+      "[Composition] Provider rate-limited (429) on poll",
+      "task-429",
+      expect.any(String),
+    );
+  });
 
-    expect(finished.audioUrl).toBe("https://cdn.example/recovered.mp3");
-    expect(finished.title).toBe("Recovered");
-    expect(finished.trackIds).toEqual(expect.arrayContaining(["task-retry", "clip-9"]));
-    expect(warn).toHaveBeenCalled();
+  it("treats SUCCESS / done status enums as terminal success", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (!url.includes("/sonic/task/")) return new Response(null, { status: 200 });
+        return jsonResponse({
+          data: { status: "SUCCESS", audio_url: "https://cdn.example/success.mp3" },
+        });
+      }),
+    );
+    const finished = await waitForStudioTrack("task-success-case");
+    expect(finished.audioUrl).toBe("https://cdn.example/success.mp3");
+    expect(finished.status).toBe("completed");
+  });
+
+  it("throws immediately when provider status is failed", async () => {
+    clearMusicKeys();
+    process.env.MUSIC_API_KEY = "test-music-key";
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ data: { status: "FAILED" } })),
+    );
+    await expect(waitForStudioTrack("task-fail-case")).rejects.toThrow(
+      "Music engine: generation failed.",
+    );
   });
 
   it("returns data.output when succeeded and audio_url is missing", async () => {

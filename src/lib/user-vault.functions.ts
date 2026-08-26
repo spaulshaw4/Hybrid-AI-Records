@@ -78,16 +78,26 @@ export const finalizeUserVaultTrack = createServerFn({ method: "POST" })
     const { persistUserVault } = await import("@/lib/user-vault.server");
     const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
     const db = tryGetSupabaseAdmin() ?? context.supabase;
-    await persistUserVault(db, context.userId, {
-      id: data.id,
-      title: data.title || "Untitled Track",
-      style: data.style,
-      status: data.status,
-      masterUrl: data.masterUrl,
-      instrumentalUrl: data.instrumentalUrl,
-      vocalUrl: data.vocalUrl,
-      tokensUsed: data.tokensUsed,
-    });
+    try {
+      await persistUserVault(db, context.userId, {
+        id: data.id,
+        title: data.title || "Untitled Track",
+        style: data.style,
+        status: data.status,
+        masterUrl: data.masterUrl,
+        instrumentalUrl: data.instrumentalUrl,
+        vocalUrl: data.vocalUrl,
+        tokensUsed: data.tokensUsed,
+      });
+    } catch (error) {
+      console.error(
+        "[Vault Save Error]: finalizeUserVaultTrack",
+        error instanceof Error ? error.message : error,
+      );
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to save to user_vault");
+    }
     return { ok: true };
   });
 

@@ -21,12 +21,20 @@ export type StudioGenerateProgressEvent = {
   pipelineState?: number;
 };
 
+export type StudioGenerateTaskEvent = {
+  taskId: string;
+  vaultId?: string | null;
+  status?: string;
+};
+
 export type StreamStudioGenerateOptions = {
   data: Record<string, unknown>;
   signal?: AbortSignal;
   /** Soft deadline; does not use AbortSignal.timeout on the fetch itself. */
   deadlineMs?: number;
   onProgress?: (event: StudioGenerateProgressEvent) => void;
+  /** Fired as soon as Gate 1 returns a provider task id (before poll completes). */
+  onTask?: (event: StudioGenerateTaskEvent) => void;
 };
 
 export { StudioStreamDroppedError };
@@ -139,6 +147,18 @@ export async function streamStudioGenerate(
       const p = payload as StudioGenerateProgressEvent;
       if (typeof p.stage === "string" && typeof p.percent === "number") {
         options.onProgress?.(p);
+      }
+      return;
+    }
+    if (event === "task" && payload && typeof payload === "object") {
+      sawProgress = true;
+      const p = payload as { taskId?: unknown; vaultId?: unknown; status?: unknown };
+      if (typeof p.taskId === "string" && p.taskId.trim()) {
+        options.onTask?.({
+          taskId: p.taskId.trim(),
+          vaultId: typeof p.vaultId === "string" ? p.vaultId : null,
+          status: typeof p.status === "string" ? p.status : undefined,
+        });
       }
       return;
     }

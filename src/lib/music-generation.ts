@@ -18,7 +18,6 @@
 
 import { readEnv, requireStageKey } from "@/lib/env";
 import {
-  abortableDelay,
   isGenerationAborted,
   mergeAbortSignals,
   throwIfAborted,
@@ -80,8 +79,17 @@ export const SUNO_CREATE_URL = SONIC_PRIMARY_CREATE_URL;
 export const SUNO_TASK_URL = SONIC_PRIMARY_TASK_URL;
 /** Official MusicAPI / AIMusicAPI auth scheme. */
 export const AIMUSICAPI_HEADER_FORMAT = "Authorization: Bearer";
-/** Minimum abort window for Sonic create + poll HTTP calls. */
-export const AIMUSICAPI_FETCH_TIMEOUT_MS = 60_000;
+/** Hard AbortController budget for Sonic create (dispatch) HTTP call. */
+export const COMPOSITION_DISPATCH_TIMEOUT_MS = 30_000;
+/** Hard composition-local poll ceiling — do not rely on the 6-min UI watchdog. */
+export const COMPOSITION_POLL_TIMEOUT_MS = 120_000;
+/** Per poll GET AbortController budget. */
+export const COMPOSITION_POLL_FETCH_TIMEOUT_MS = 30_000;
+/**
+ * @deprecated Prefer COMPOSITION_DISPATCH_TIMEOUT_MS / COMPOSITION_POLL_FETCH_TIMEOUT_MS.
+ * Kept so older imports keep a sane AbortSignal window.
+ */
+export const AIMUSICAPI_FETCH_TIMEOUT_MS = COMPOSITION_DISPATCH_TIMEOUT_MS;
 /** Locked Sonic v5 model id. MusicAPI names its v5 model this way. */
 export const SONIC_MODEL = "sonic-v5" as const;
 /**
@@ -243,8 +251,39 @@ function asAudioUrl(value: unknown): string | null {
   return asAudioUrl(row.audio_url ?? row.audioUrl ?? row.url ?? row.output);
 }
 
-const TERMINAL_SUCCESS_STATUSES = ["succeeded", "success", "completed", "complete"];
-const TERMINAL_FAILURE_STATUSES = ["failed", "fail", "error", "canceled", "cancelled"];
+/**
+ * Provider success tokens (lowercased). Includes SUCCESS / COMPLETE / done variants
+ * so mismatched casing never leaves the poll loop spinning until the UI watchdog.
+ */
+export const TERMINAL_SUCCESS_STATUSES = [
+  "succeeded",
+  "success",
+  "completed",
+  "complete",
+  "done",
+  "finished",
+  "ok",
+] as const;
+/** Provider failure tokens (lowercased) — must abort the poll immediately. */
+export const TERMINAL_FAILURE_STATUSES = [
+  "failed",
+  "fail",
+  "error",
+  "canceled",
+  "cancelled",
+  "aborted",
+  "timeout",
+  "timed_out",
+  "timedout",
+] as const;
+
+/** Normalize provider status / state / code strings for enum checks. */
+export function normalizeProviderStatus(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
 
 function dataRecords(body: unknown): Record<string, unknown>[] {
   const row = asRecord(body);
@@ -266,14 +305,16 @@ function firstDataRecord(body: unknown): Record<string, unknown> | null {
 }
 
 function clipStatus(clip: Record<string, unknown>): string {
-  return String(clip.status ?? clip.state ?? "").toLowerCase();
+  return normalizeProviderStatus(clip.status ?? clip.state ?? clip.code);
 }
 
 /** A clip that finished and carries playable audio. */
 function succeededClip(body: unknown): Record<string, unknown> | null {
   return (
     dataRecords(body).find(
-      (clip) => TERMINAL_SUCCESS_STATUSES.includes(clipStatus(clip)) && !!asAudioUrl(clip.audio_url),
+      (clip) =>
+        (TERMINAL_SUCCESS_STATUSES as readonly string[]).includes(clipStatus(clip)) &&
+        !!asAudioUrl(clip.audio_url),
     ) ?? null
   );
 }
@@ -289,13 +330,22 @@ function readTaskStatus(body: unknown): string {
   if (clips.length > 1) {
     if (succeededClip(body)) return "succeeded";
     const statuses = clips.map(clipStatus);
-    if (statuses.every((status) => TERMINAL_FAILURE_STATUSES.includes(status))) return "failed";
-    const pending = statuses.find((status) => status && !TERMINAL_FAILURE_STATUSES.includes(status));
+    if (
+      statuses.every((status) =>
+        (TERMINAL_FAILURE_STATUSES as readonly string[]).includes(status),
+      )
+    ) {
+      return "failed";
+    }
+    const pending = statuses.find(
+      (status) => status && !(TERMINAL_FAILURE_STATUSES as readonly string[]).includes(status),
+    );
     if (pending) return pending;
   }
   const data = clips[0];
-  const raw = data?.status ?? data?.state ?? row?.status ?? row?.state ?? "";
-  return String(raw).toLowerCase();
+  const raw =
+    data?.status ?? data?.state ?? data?.code ?? row?.status ?? row?.state ?? row?.code ?? "";
+  return normalizeProviderStatus(raw);
 }
 
 function readTaskDuration(body: unknown): number | null {
@@ -402,21 +452,10 @@ function readTaskResult(body: unknown): {
     (typeof row.title === "string" && row.title) ||
     null;
 
-  if (
-    rawStatus === "failed" ||
-    rawStatus === "fail" ||
-    rawStatus === "error" ||
-    rawStatus === "canceled" ||
-    rawStatus === "cancelled"
-  ) {
+  if ((TERMINAL_FAILURE_STATUSES as readonly string[]).includes(rawStatus)) {
     return { audioUrl: null, imageUrl, title, duration, status: "failed", rawStatus };
   }
-  if (
-    rawStatus === "succeeded" ||
-    rawStatus === "success" ||
-    rawStatus === "completed" ||
-    rawStatus === "complete"
-  ) {
+  if ((TERMINAL_SUCCESS_STATUSES as readonly string[]).includes(rawStatus)) {
     return {
       audioUrl,
       imageUrl,
@@ -584,12 +623,6 @@ async function postSonicCreate(
   apiKey: string,
   abortSignal?: AbortSignal,
 ): Promise<{ response: Response; raw: unknown; endpoint: string }> {
-  const {
-    UPSTREAM_FAST_RETRY_ATTEMPTS,
-    UPSTREAM_FAST_RETRY_DELAYS_MS,
-    isTransientUpstreamStatus,
-  } = await import("@/lib/engine-bounce-back");
-
   const lyricsPrompt = payload.prompt;
   const styleTags = payload.tags;
   const trackTitle = payload.title;
@@ -611,6 +644,7 @@ async function postSonicCreate(
 
   logAuthDiagnostic(apiKey);
 
+  console.log("[Composition] Payload dispatched to provider");
   const endpoints = [SONIC_PRIMARY_CREATE_URL, SONIC_FALLBACK_CREATE_URL];
   let lastError: unknown = null;
 
@@ -619,100 +653,99 @@ async function postSonicCreate(
     console.log("[AIMUSICAPI_DISPATCH]", JSON.stringify(dispatchPayload, null, 2));
     console.log("[EXACT_OUTBOUND_BODY]", JSON.stringify(dispatchPayload, null, 2));
 
-    for (let attempt = 1; attempt <= UPSTREAM_FAST_RETRY_ATTEMPTS; attempt++) {
-      throwIfAborted(abortSignal);
-      logAimusicRequest(endpoint, apiKey);
-      try {
-        const response = await globalThis.fetch(endpoint, {
-          method: "POST",
-          headers: musicApiAuthHeaders(apiKey),
-          body: JSON.stringify(dispatchPayload),
-          signal: mergeAbortSignals(AIMUSICAPI_FETCH_TIMEOUT_MS, abortSignal),
-        });
-        console.log("[MUSICAPI_DISPATCH]", {
-          url: endpoint,
-          status: response.status,
-          attempt,
-        });
-        const responseText = await response.clone().text();
-        console.log("[AIMUSICAPI_RESPONSE_STATUS]", response.status);
-        console.log("[AIMUSICAPI_RESPONSE_BODY]", responseText);
-        const raw = responseText
-          ? (() => {
-              try {
-                return JSON.parse(responseText) as unknown;
-              } catch {
-                return responseText;
-              }
-            })()
-          : null;
+    throwIfAborted(abortSignal);
+    logAimusicRequest(endpoint, apiKey);
+    try {
+      const response = await globalThis.fetch(endpoint, {
+        method: "POST",
+        headers: musicApiAuthHeaders(apiKey),
+        body: JSON.stringify(dispatchPayload),
+        signal: mergeAbortSignals(COMPOSITION_DISPATCH_TIMEOUT_MS, abortSignal),
+      });
+      console.log("[MUSICAPI_DISPATCH]", {
+        url: endpoint,
+        status: response.status,
+        attempt: 1,
+      });
+      const responseText = await response.clone().text();
+      console.log("[AIMUSICAPI_RESPONSE_STATUS]", response.status);
+      console.log("[AIMUSICAPI_RESPONSE_BODY]", responseText);
+      const raw = responseText
+        ? (() => {
+            try {
+              return JSON.parse(responseText) as unknown;
+            } catch {
+              return responseText;
+            }
+          })()
+        : null;
 
-        // Three fast retries on timeout / 5xx / 429 before bouncing hosts.
-        if (!response.ok && isTransientUpstreamStatus(response.status)) {
-          lastError = new Error(`MusicAPI create failed (${response.status})`);
-          if (attempt < UPSTREAM_FAST_RETRY_ATTEMPTS) {
-            const delay =
-              UPSTREAM_FAST_RETRY_DELAYS_MS[
-                Math.min(attempt - 1, UPSTREAM_FAST_RETRY_DELAYS_MS.length - 1)
-              ] ?? 500;
-            console.warn(
-              `[MUSICAPI_DISPATCH] transient ${response.status} — fast retry ${attempt}/${UPSTREAM_FAST_RETRY_ATTEMPTS}`,
-            );
-            await new Promise((r) => setTimeout(r, delay));
-            continue;
-          }
-          // Exhausted retries on this host — try fallback host when available.
-          if (endpoint === SONIC_PRIMARY_CREATE_URL) {
-            console.warn(
-              "[MUSICAPI_DISPATCH] primary host exhausted fast retries — trying MusicAPI fallback",
-            );
-            break;
-          }
-          if (!response.ok) {
-            console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
-          }
-          return { response, raw, endpoint };
-        }
-
-        // Hard host/routing failures → alternate host (no more retries here).
-        if (
-          !response.ok &&
-          endpoint === SONIC_PRIMARY_CREATE_URL &&
-          (response.status === 404 || response.status === 502 || response.status === 503)
-        ) {
-          console.warn("[MUSICAPI_DISPATCH] primary host failed — trying MusicAPI fallback");
-          lastError = new Error(`Primary MusicAPI create failed (${response.status})`);
-          break;
-        }
-
-        if (!response.ok) {
-          console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
-        }
-        return { response, raw, endpoint };
-      } catch (error) {
-        if (isGenerationAborted(error)) throw error;
-        lastError = error;
-        if (attempt < UPSTREAM_FAST_RETRY_ATTEMPTS) {
-          const delay =
-            UPSTREAM_FAST_RETRY_DELAYS_MS[
-              Math.min(attempt - 1, UPSTREAM_FAST_RETRY_DELAYS_MS.length - 1)
-            ] ?? 500;
-          console.warn(
-            `[MUSICAPI_DISPATCH] create threw — fast retry ${attempt}/${UPSTREAM_FAST_RETRY_ATTEMPTS}`,
-            error instanceof Error ? error.message : error,
+      // Hard provider errors — throw immediately (no silent stall / long retry).
+      if (
+        !response.ok &&
+        (response.status === 400 ||
+          response.status === 401 ||
+          response.status === 403 ||
+          response.status === 429 ||
+          response.status >= 500)
+      ) {
+        if (response.status === 429) {
+          console.error(
+            "[Composition] Provider rate-limited (429) on create",
+            endpoint,
+            previewBody(raw),
           );
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-        if (endpoint === SONIC_PRIMARY_CREATE_URL) {
-          console.warn(
-            "[MUSICAPI_DISPATCH] primary host unreachable after retries — trying MusicAPI fallback",
-            error instanceof Error ? error.message : error,
+        } else {
+          console.error(
+            `[Composition] Provider non-200 on create (${response.status})`,
+            endpoint,
+            previewBody(raw),
           );
-          break;
         }
-        throw error;
+        console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+        const detail =
+          raw && typeof raw === "object" && "error" in raw
+            ? String((raw as { error?: unknown }).error)
+            : `create failed (${response.status})`;
+        throw new Error(`Music engine: ${detail}`);
       }
+
+      // Host/routing miss → try fallback host once (not a long poll).
+      if (
+        !response.ok &&
+        endpoint === SONIC_PRIMARY_CREATE_URL &&
+        (response.status === 404 || response.status === 502 || response.status === 503)
+      ) {
+        console.error(
+          `[Composition] Provider non-200 on create (${response.status}) — trying fallback host`,
+          previewBody(raw),
+        );
+        console.warn("[MUSICAPI_DISPATCH] primary host failed — trying MusicAPI fallback");
+        lastError = new Error(`Primary MusicAPI create failed (${response.status})`);
+        continue;
+      }
+
+      if (!response.ok) {
+        console.error(
+          `[Composition] Provider non-200 on create (${response.status})`,
+          previewBody(raw),
+        );
+        console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
+        throw new Error(`Music engine: create failed (${response.status})`);
+      }
+      return { response, raw, endpoint };
+    } catch (error) {
+      if (isGenerationAborted(error)) throw error;
+      if (error instanceof Error && /Music engine:/i.test(error.message)) throw error;
+      lastError = error;
+      if (endpoint === SONIC_PRIMARY_CREATE_URL) {
+        console.warn(
+          "[MUSICAPI_DISPATCH] primary host unreachable — trying MusicAPI fallback",
+          error instanceof Error ? error.message : error,
+        );
+        continue;
+      }
+      throw error;
     }
   }
 
@@ -758,6 +791,13 @@ export async function generateStudioTrack(
       throw new StudioPipelineError("GATE_1", "Base audio URL was not returned");
     }
 
+    const initialStatus =
+      normalizeProviderStatus(
+        asRecord(raw)?.status ?? asRecord(asRecord(raw)?.data)?.status ?? "accepted",
+      ) || "accepted";
+    console.log(
+      `[Composition] Initial provider response: ${initialStatus} & taskId=${taskId}`,
+    );
     logPostConditionPassed("Sonic task accepted");
     return { taskId, payload: request, status: "processing" };
   } catch (error) {
@@ -784,10 +824,6 @@ export function isTransientSonicPollError(error: unknown): error is TransientSon
   return error instanceof TransientSonicPollError;
 }
 
-function isTransientHttpStatus(status: number): boolean {
-  return status === 408 || status === 425 || status === 429 || status >= 500;
-}
-
 export async function fetchStudioTrackTask(
   taskId: string,
   abortSignal?: AbortSignal,
@@ -808,7 +844,7 @@ export async function fetchStudioTrackTask(
       response = await fetch(targetUrl, {
         method: "GET",
         headers: musicApiAuthHeaders(apiKey),
-        signal: mergeAbortSignals(AIMUSICAPI_FETCH_TIMEOUT_MS, abortSignal),
+        signal: mergeAbortSignals(COMPOSITION_POLL_FETCH_TIMEOUT_MS, abortSignal),
       });
       console.log("[MUSICAPI_DISPATCH]", { url: targetUrl, status: response.status });
       raw = await readResponseBody(response);
@@ -834,16 +870,21 @@ export async function fetchStudioTrackTask(
         );
         continue;
       }
-      throw new TransientSonicPollError(
-        error instanceof Error ? error.message : "Network error while polling Sonic task",
+      // Network-only failures surface as a hard error — do not soft-loop for 6 minutes.
+      throw new Error(
+        error instanceof Error
+          ? `Music engine: poll network error (${error.message})`
+          : "Music engine: poll network error",
       );
     }
   }
 
   if (!response) {
-    throw lastError instanceof Error
-      ? new TransientSonicPollError(lastError.message)
-      : new TransientSonicPollError("Network error while polling Sonic task");
+    throw new Error(
+      lastError instanceof Error
+        ? `Music engine: poll network error (${lastError.message})`
+        : "Music engine: poll network error",
+    );
   }
   if (response.status === 202) {
     return {
@@ -859,18 +900,26 @@ export async function fetchStudioTrackTask(
     };
   }
   if (!response.ok) {
-    console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
-    if (isTransientHttpStatus(response.status)) {
-      throw new TransientSonicPollError(
-        `Transient poll failure (${response.status})`,
-        response.status,
+    if (response.status === 429) {
+      console.error(
+        "[Composition] Provider rate-limited (429) on poll",
+        taskId,
+        previewBody(raw),
+      );
+    } else {
+      console.error(
+        `[Composition] Provider non-200 on poll (${response.status})`,
+        taskId,
+        previewBody(raw),
       );
     }
+    console.error("[AIMUSICAPI_ERROR]", response.status, previewBody(raw));
     recordPipelineHttp("music", response.status);
+    // 400/401/429/5xx — exit immediately; never soft-poll until the UI watchdog.
     throw new Error(`Music engine: task poll failed (${response.status})`);
   }
   const clip = readTaskResult(raw);
-  if (TERMINAL_SUCCESS_STATUSES.includes(clip.rawStatus)) {
+  if ((TERMINAL_SUCCESS_STATUSES as readonly string[]).includes(clip.rawStatus)) {
     console.log("[GATE_1_RAW_POLL_RESULT]", JSON.stringify(raw, null, 2));
     if (!clip.audioUrl) {
       console.error("[GATE_1_PARSE_FAIL] Could not locate audio URL in:", raw);
@@ -890,13 +939,14 @@ export async function fetchStudioTrackTask(
 }
 
 /**
- * Poll every 2.5s for up to 120 attempts (~300s). Gives AIMusicAPI room for
- * voice-reference / queue delays while still bounding Gate 1 so Node cannot hang.
+ * Poll every 2.5s for up to COMPOSITION_POLL_TIMEOUT_MS (120s).
+ * Composition-local budget — independent of the 6-minute client UI watchdog.
  */
 export const POLLING_INTERVAL_MS = 2500;
-export const MAX_POLLING_ATTEMPTS = 120;
-/** @deprecated Prefer MAX_POLLING_ATTEMPTS × POLLING_INTERVAL_MS */
-export const MAX_POLLING_DURATION_MS = MAX_POLLING_ATTEMPTS * POLLING_INTERVAL_MS;
+export const MAX_POLLING_ATTEMPTS = Math.ceil(
+  COMPOSITION_POLL_TIMEOUT_MS / POLLING_INTERVAL_MS,
+);
+export const MAX_POLLING_DURATION_MS = COMPOSITION_POLL_TIMEOUT_MS;
 export const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;
 
 const INTERMEDIATE_STATUSES = new Set([
@@ -948,20 +998,28 @@ export async function waitForStudioTrack(
   const { pollWithBreaker, isTerminalPollStatus } = await import(
     "@/lib/poll-with-breaker.server"
   );
+  const { withTimeout } = await import("@/lib/pipeline-gate.server");
 
   type PollTick =
     | { kind: "ready"; result: StudioTrackResult }
     | { kind: "pending"; status: string };
 
+  let pollAttempt = 0;
+  /** Succeeded clips whose CDN probe failed — accept after a few tries. */
+  let unreachableAudioAttempts = 0;
+  const MAX_UNREACHABLE_AUDIO_ATTEMPTS = 3;
+
   let finished: PollTick;
   try {
-    finished = await pollWithBreaker<PollTick>(
-      async () => {
-        throwIfAborted(hooks.abortSignal);
-        try {
+    finished = await withTimeout(
+      pollWithBreaker<PollTick>(
+        async () => {
+          throwIfAborted(hooks.abortSignal);
+          pollAttempt += 1;
           const current = await fetchStudioTrackTask(taskId, hooks.abortSignal);
           const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
           const statusLabel = current.rawStatus || current.status;
+          console.log(`[Composition] Polling attempt #${pollAttempt}: ${statusLabel}`);
           console.log(
             `[GATE_1_POLL_TICK] elapsed: ${elapsedSeconds}s, status:`,
             statusLabel,
@@ -969,13 +1027,35 @@ export async function waitForStudioTrack(
             current.clipCount,
           );
 
-          if (current.status === "failed" || isTerminalPollStatus(statusLabel)) {
+          // Provider terminal failure — exit immediately (do not burn the poll budget).
+          if (
+            current.status === "failed" ||
+            isTerminalPollStatus(statusLabel) ||
+            (TERMINAL_FAILURE_STATUSES as readonly string[]).includes(
+              normalizeProviderStatus(statusLabel),
+            )
+          ) {
             throw new Error("Music engine: generation failed.");
           }
 
           if (current.status === "completed" && isHttpAudioUrl(current.audioUrl)) {
             const reachable = await probeAudioUrlReachable(current.audioUrl);
-            if (reachable) {
+            if (!reachable) {
+              unreachableAudioAttempts += 1;
+              console.warn(
+                `[Composition] Polling attempt #${pollAttempt}: ${statusLabel} (audio_url not reachable yet, try ${unreachableAudioAttempts}/${MAX_UNREACHABLE_AUDIO_ATTEMPTS})`,
+              );
+              console.warn(
+                `[SONIC_V5_POLL] Task: ${taskId} | audio_url not reachable yet — continuing`,
+              );
+            }
+            if (reachable || unreachableAudioAttempts >= MAX_UNREACHABLE_AUDIO_ATTEMPTS) {
+              if (!reachable) {
+                console.warn(
+                  `[Composition] Accepting audio_url after ${unreachableAudioAttempts} unreachable probes`,
+                  current.audioUrl,
+                );
+              }
               logGateCleared(2, `Audio URL verified: ${current.audioUrl}`);
               const output = assertBaseAudioContractOutput({
                 audioUrl: current.audioUrl,
@@ -1003,9 +1083,8 @@ export async function waitForStudioTrack(
                 },
               };
             }
-            console.warn(
-              `[SONIC_V5_POLL] Task: ${taskId} | audio_url not reachable yet — continuing`,
-            );
+          } else {
+            unreachableAudioAttempts = 0;
           }
 
           reportPipelineProgress(
@@ -1017,32 +1096,19 @@ export async function waitForStudioTrack(
             `[SONIC_V5_POLL] Task: ${taskId} | Status: ${statusLabel} | Elapsed: ${elapsedSeconds}s`,
           );
           return { kind: "pending", status: statusLabel };
-        } catch (error) {
-          if (isGenerationAborted(error)) throw error;
-          if (error instanceof StudioPipelineError) throw error;
-          // Permanent Music engine errors abort immediately; HTTP 429/5xx keep polling.
-          if (
-            error instanceof Error &&
-            (/Music engine:/i.test(error.message) || /task poll failed/i.test(error.message)) &&
-            !isTransientSonicPollError(error)
-          ) {
-            throw error;
-          }
-          if (isTransientSonicPollError(error)) {
-            console.warn(`[SONIC_V5_POLL] Transient error Task: ${taskId}`, error.message);
-            return { kind: "pending", status: "transient" };
-          }
-          throw error;
-        }
-      },
-      (tick) => tick.kind === "ready",
-      () => false,
-      {
-        maxAttempts: MAX_POLLING_ATTEMPTS,
-        intervalMs: POLLING_INTERVAL_MS,
-        stepName: "Gate 1 AIMusicAPI",
-        step: "composition",
-      },
+        },
+        (tick) => tick.kind === "ready",
+        () => false,
+        {
+          maxAttempts: MAX_POLLING_ATTEMPTS,
+          intervalMs: POLLING_INTERVAL_MS,
+          stepName: "Gate 1 AIMusicAPI",
+          step: "composition",
+        },
+      ),
+      COMPOSITION_POLL_TIMEOUT_MS,
+      "Gate 1 (AIMusicAPI poll)",
+      { step: "composition" },
     );
   } catch (error) {
     if (isGenerationAborted(error)) throw error;
@@ -1057,7 +1123,7 @@ export async function waitForStudioTrack(
         : String(error ?? "[Circuit Breaker] Gate 1 AIMusicAPI timed out");
     const err = new Error(
       /Breaker tripped|timed out|Circuit Breaker/i.test(message)
-        ? `[Circuit Breaker] Gate 1 (AIMusicAPI) timed out after ${MAX_POLLING_DURATION_MS / 1000}s`
+        ? `[Circuit Breaker] Gate 1 (AIMusicAPI) timed out after ${COMPOSITION_POLL_TIMEOUT_MS / 1000}s`
         : message,
     ) as Error & { step: string };
     err.step = "composition";

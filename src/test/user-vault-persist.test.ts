@@ -5,6 +5,8 @@ const updateMock = vi.fn();
 const selectMock = vi.fn();
 const maybeSingleMock = vi.fn();
 const eqMock = vi.fn();
+const getUserByIdMock = vi.fn();
+const createUserMock = vi.fn();
 
 function chainable(terminal: Record<string, unknown> = {}) {
   const api: Record<string, unknown> = {
@@ -27,6 +29,12 @@ function chainable(terminal: Record<string, unknown> = {}) {
 vi.mock("@/integrations/supabase/client.server", () => ({
   tryGetSupabaseAdmin: () => ({
     from: () => chainable(),
+    auth: {
+      admin: {
+        getUserById: getUserByIdMock,
+        createUser: createUserMock,
+      },
+    },
   }),
 }));
 
@@ -38,6 +46,11 @@ describe("persistUserVault", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chainable();
+    getUserByIdMock.mockResolvedValue({
+      data: { user: { id: "22222222-2222-4222-8222-222222222222" } },
+      error: null,
+    });
+    createUserMock.mockResolvedValue({ data: { user: null }, error: null });
   });
 
   it("upserts a completed master with service-role client and logs the track id", async () => {
@@ -67,6 +80,10 @@ describe("persistUserVault", () => {
 
     expect(id).toBe(vaultId);
     expect(logSpy).toHaveBeenCalledWith("Writing track to vault:", vaultId);
+    expect(logSpy).toHaveBeenCalledWith(
+      "[Vault Save Success]: Track ID saved ->",
+      expect.objectContaining({ id: vaultId, status: "completed" }),
+    );
     expect(upsertMock).toHaveBeenCalled();
     const upsertRow = upsertMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(upsertRow).toMatchObject({
@@ -83,6 +100,81 @@ describe("persistUserVault", () => {
     const { isUserVaultUuid } = await import("@/lib/user-vault.server");
     expect(isUserVaultUuid("sonic-task-abc123")).toBe(false);
     expect(isUserVaultUuid("11111111-1111-4111-8111-111111111111")).toBe(true);
+  });
+
+  it("writes provider_task_id on a pending processing row", async () => {
+    const vaultId = "11111111-1111-4111-8111-111111111111";
+    const userId = "22222222-2222-4222-8222-222222222222";
+
+    maybeSingleMock
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: { id: vaultId, master_url: null, status: "processing" },
+        error: null,
+      });
+
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    const id = await persistUserVault({} as never, userId, {
+      id: vaultId,
+      title: "Pending",
+      style: "Pop",
+      status: "processing",
+      providerTaskId: "sonic-task-xyz",
+    });
+
+    expect(id).toBe(vaultId);
+    expect(upsertMock).toHaveBeenCalled();
+    const upsertRow = upsertMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(upsertRow).toMatchObject({
+      id: vaultId,
+      status: "processing",
+      provider_task_id: "sonic-task-xyz",
+    });
+  });
+
+  it("throws with [Vault Save Error] telemetry when upsert fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vaultId = "11111111-1111-4111-8111-111111111111";
+    const userId = "22222222-2222-4222-8222-222222222222";
+    const dbError = {
+      message: "insert or update on table \"user_vault\" violates foreign key constraint",
+      code: "23503",
+      details: "Key (user_id)=(22222222-2222-4222-8222-222222222222) is not present in table \"users\".",
+    };
+
+    getUserByIdMock.mockResolvedValue({ data: { user: null }, error: { message: "not found" } });
+    maybeSingleMock
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: dbError })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: dbError });
+
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    await expect(
+      persistUserVault({} as never, userId, {
+        id: vaultId,
+        title: "Broken",
+        status: "completed",
+        masterUrl: "https://cdn.example/m.mp3",
+      }),
+    ).rejects.toThrow(/Failed to save to user_vault/);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[Vault Save Error]:",
+      expect.stringContaining("23503"),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("rejects non-uuid user ids before hitting the database", async () => {
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    await expect(
+      persistUserVault({} as never, "GUEST/LOCAL", {
+        title: "Nope",
+        status: "processing",
+      }),
+    ).rejects.toThrow(/invalid user_id/);
+    expect(upsertMock).not.toHaveBeenCalled();
   });
 });
 

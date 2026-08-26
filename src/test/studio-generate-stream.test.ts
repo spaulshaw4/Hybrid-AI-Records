@@ -26,8 +26,28 @@ describe("studio generate SSE keep-alive", () => {
       "utf8",
     );
     expect(src).toMatch(/jobPromise = runWithPipelineProgressCallback/);
+    expect(src).toMatch(/sseSendAls\.run/);
     expect(src).toMatch(/cancel\(\)/);
     expect(src).toMatch(/synthesis continues/);
     expect(src).toMatch(/do NOT abort jobPromise/i);
+  });
+
+  it("exposes emitGenerateSseEvent for mid-flight task ids", async () => {
+    const mod = await import("@/lib/studio-generate-stream.server");
+    expect(typeof mod.emitGenerateSseEvent).toBe("function");
+  });
+
+  it("registers pending vault with provider task id immediately after create", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const src = await readFile(
+      join(process.cwd(), "src/lib/apiframe-music.functions.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(/providerTaskId:\s*started\.taskId/);
+    expect(src).toMatch(/\[Composition\] Audio URL received -> Writing to user_vault/);
+    expect(src).toMatch(/\[Composition\] Marking user_vault failed/);
+    expect(src).toMatch(/emitGenerateSseEvent\("task"/);
+    expect(src).toMatch(/COMPOSITION_POLL_TIMEOUT_MS/);
   });
 });

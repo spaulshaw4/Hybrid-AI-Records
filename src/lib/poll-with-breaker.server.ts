@@ -64,13 +64,20 @@ export async function pollWithBreaker<T>(
 
 /** True for Replicate / vendor statuses that must abort the poll immediately. */
 export function isTerminalPollStatus(status: string | null | undefined): boolean {
-  const value = (status ?? "").trim().toLowerCase();
+  const value = (status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   return (
     value === "failed" ||
+    value === "fail" ||
+    value === "error" ||
     value === "canceled" ||
     value === "cancelled" ||
     value === "aborted" ||
-    value === "error"
+    value === "timeout" ||
+    value === "timed_out" ||
+    value === "timedout"
   );
 }
 

@@ -356,7 +356,44 @@ export async function runGenerateEngineTrack(
       mv: "sonic-v5",
     });
     startedTaskId = started.taskId;
-    const { withTimeout, GATE_TIMEOUTS_MS } = await import("@/lib/pipeline-gate.server");
+    console.log(
+      `[Composition] Initial provider response: accepted & taskId=${started.taskId}`,
+    );
+
+    // Register pending vault + provider task id IMMEDIATELY so a mid-poll
+    // client disconnect cannot orphan the job with no recoverable row.
+    if (payload.vaultId) {
+      try {
+        const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { persistUserVault } = await import("@/lib/user-vault.server");
+        const vaultDb = tryGetSupabaseAdmin() ?? context.supabase;
+        await persistUserVault(vaultDb, context.userId, {
+          id: payload.vaultId,
+          title: payload.title || "Untitled Track",
+          style: genre,
+          status: "processing",
+          providerTaskId: started.taskId,
+        });
+      } catch (error) {
+        console.warn(
+          "[Composition] Pending vault write skipped",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    try {
+      const { emitGenerateSseEvent } = await import("@/lib/studio-generate-stream.server");
+      emitGenerateSseEvent("task", {
+        taskId: started.taskId,
+        vaultId: payload.vaultId ?? null,
+        status: "processing",
+      });
+    } catch {
+      /* not under SSE — TanStack server-fn path */
+    }
+
+    const { withTimeout } = await import("@/lib/pipeline-gate.server");
+    const { COMPOSITION_POLL_TIMEOUT_MS } = await import("@/lib/music-generation");
     const { reportPipelineProgress: reportGate1Progress, PIPELINE_PROGRESS: gate1Progress } =
       await import("@/lib/pipeline-progress");
     reportGate1Progress("composition", gate1Progress.sonic);
@@ -364,7 +401,7 @@ export async function runGenerateEngineTrack(
     try {
       finished = await withTimeout(
         waitForStudioTrack(started.taskId),
-        GATE_TIMEOUTS_MS[1],
+        COMPOSITION_POLL_TIMEOUT_MS,
         "Gate 1 (AIMusicAPI)",
         { step: "composition" },
       );
@@ -393,12 +430,14 @@ export async function runGenerateEngineTrack(
         const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
         const { persistUserVault } = await import("@/lib/user-vault.server");
         const vaultDb = tryGetSupabaseAdmin() ?? context.supabase;
+        console.log("[Composition] Audio URL received -> Writing to user_vault");
         await persistUserVault(vaultDb, context.userId, {
           id: payload.vaultId,
           title: payload.title || "Untitled Track",
           style: genre,
           status: "processing",
           rawAudioUrl: sonicUrl,
+          providerTaskId: started.taskId,
         });
       } catch (error) {
         console.warn(
@@ -484,17 +523,26 @@ export async function runGenerateEngineTrack(
 
     const { persistUserVault } = await import("@/lib/user-vault.server");
     console.log("Writing track to vault:", payload.vaultId ?? taskId);
-    const vaultId = await persistUserVault(db, context.userId, {
-      id: payload.vaultId,
-      title: payload.title || "Untitled Track",
-      style: genre,
-      status: "completed",
-      masterUrl,
-      instrumentalUrl,
-      vocalUrl,
-      rawAudioUrl,
-      tokensUsed: 1,
-    });
+    let vaultId: string | null = null;
+    try {
+      vaultId = await persistUserVault(db, context.userId, {
+        id: payload.vaultId,
+        title: payload.title || "Untitled Track",
+        style: genre,
+        status: "completed",
+        masterUrl,
+        instrumentalUrl,
+        vocalUrl,
+        rawAudioUrl,
+        providerTaskId: taskId,
+        tokensUsed: 1,
+      });
+    } catch (error) {
+      console.error(
+        "[Vault Save Error]: final persist threw",
+        error instanceof Error ? error.message : error,
+      );
+    }
     if (masterUrl) {
       const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
       await completeGenerationTask({
@@ -535,6 +583,8 @@ export async function runGenerateEngineTrack(
 
     return {
       taskId,
+      /** Confirmed `user_vault.id` from service-role persist (SSE `result` event). */
+      vaultId: vaultId ?? payload.vaultId ?? null,
       status: pipeline.status === "completed_fallback" ? ("completed" as const) : ("completed" as const),
       tracks: playableTracks,
       stems: {
@@ -582,12 +632,36 @@ export async function runGenerateEngineTrack(
       // processing, or the vault badge spins forever.
       const { failGenerationTask } = await import("@/lib/engine-pipeline.server");
       const abortLanding = isPipelineAbortError(error) ? error.landing : null;
+      const failReason =
+        abortLanding?.error ?? (error instanceof Error ? error.message : String(error ?? ""));
+      console.error("[Composition] Marking user_vault failed", {
+        vaultId: payload.vaultId ?? null,
+        taskId: startedTaskId,
+        reason: failReason.slice(0, 200),
+      });
       await failGenerationTask({
         taskId: startedTaskId,
         vaultId: payload.vaultId,
         userId: context.userId,
-        reason: abortLanding?.error ?? (error instanceof Error ? error.message : String(error ?? "")),
+        reason: failReason,
       }).catch(() => undefined);
+      // Belt-and-suspenders service-role vault flip when failGenerationTask skips.
+      if (payload.vaultId) {
+        try {
+          const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { persistUserVault } = await import("@/lib/user-vault.server");
+          const vaultDb = tryGetSupabaseAdmin() ?? context.supabase;
+          await persistUserVault(vaultDb, context.userId, {
+            id: payload.vaultId,
+            title: payload.title || "Untitled Track",
+            style: genre,
+            status: "failed",
+            providerTaskId: startedTaskId,
+          });
+        } catch {
+          /* already logged upstream */
+        }
+      }
       if (abortLanding) {
         const abortError = new Error(abortLanding.error) as Error & {
           landing: typeof abortLanding;

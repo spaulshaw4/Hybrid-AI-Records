@@ -41,6 +41,8 @@ export type PostBinaryUiPayload = {
   gateMask: number;
   finalGateMask: number;
   trackId: string;
+  /** Confirmed `user_vault.id` after service-role upsert (when available). */
+  vaultId: string | null;
   masterUrl: string | null;
   vocalUrl: string | null;
   instrumentalUrl: string | null;
@@ -104,7 +106,7 @@ async function settleHybridToken(input: {
 async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
   totalCharged: number;
   chargeLedger: ChargeLedgerEntry[];
-}): Promise<void> {
+}): Promise<string | null> {
   const vaultKey = input.vaultId?.trim() || input.trackId;
   console.log("Writing track to vault:", vaultKey);
 
@@ -137,6 +139,7 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
   }
 
   // Bookkeeping for studio_tracks / generation_tasks (UUID keys only).
+  // completeGenerationTask also routes vault writes through persistUserVault.
   await completeGenerationTask({
     taskId: input.trackId,
     vaultId: committedVaultId ?? input.vaultId ?? input.trackId,
@@ -149,7 +152,7 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
   });
 
   const supabase = createEngineSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return committedVaultId;
   const now = new Date().toISOString();
 
   const uuidRe =
@@ -159,7 +162,7 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
     (input.vaultId && uuidRe.test(input.vaultId) ? input.vaultId : null) ??
     (uuidRe.test(input.trackId) ? input.trackId : null);
 
-  if (!taskIdForBookkeeping) return;
+  if (!taskIdForBookkeeping) return committedVaultId;
 
   const taskPatch: Record<string, unknown> = {
     status: "completed",
@@ -193,6 +196,8 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
     .then(({ error }) => {
       if (error) console.warn("[Settlement] studio_tracks patch:", error.message);
     });
+
+  return committedVaultId;
 }
 
 /**
@@ -224,6 +229,7 @@ export async function executeZeroChargeRollback(input: {
     gateMask: input.gateMask,
     finalGateMask: input.gateMask,
     trackId: input.trackId,
+    vaultId: input.vaultId?.trim() || null,
     masterUrl: null,
     vocalUrl: null,
     instrumentalUrl: null,
@@ -262,7 +268,11 @@ export async function executePostBinarySettlement(
     `[Settlement] PIPELINE_COMPLETE (63) — finalizing track=${input.trackId} totalCharged=$${totalCharged.toFixed(2)} lines=${chargeLedger.length}`,
   );
 
-  await finalizeDatabaseRecord({ ...input, totalCharged, chargeLedger });
+  const committedVaultId = await finalizeDatabaseRecord({
+    ...input,
+    totalCharged,
+    chargeLedger,
+  });
 
   // Silent background email — Certificate of Creation + master download link.
   // Soft-fail and never blocks settlement / UI payload.
@@ -306,6 +316,7 @@ export async function executePostBinarySettlement(
     gateMask: PIPELINE_COMPLETE,
     finalGateMask: PIPELINE_COMPLETE,
     trackId: input.trackId,
+    vaultId: committedVaultId ?? input.vaultId?.trim() ?? null,
     masterUrl: input.masterUrl,
     vocalUrl: input.vocalUrl,
     instrumentalUrl: input.instrumentalUrl,
@@ -318,6 +329,7 @@ export async function executePostBinarySettlement(
 
   console.log("[Settlement] UI payload ready", {
     trackId: ui.trackId,
+    vaultId: ui.vaultId,
     tokenSettled,
     totalCharged: ui.totalCharged,
     lines: chargeLedger.map((l) => l.gate),
