@@ -967,15 +967,11 @@ export async function waitForStudioTrack(
         } catch (error) {
           if (isGenerationAborted(error)) throw error;
           if (error instanceof StudioPipelineError) throw error;
-          // 4xx/5xx and permanent Music engine errors abort immediately.
-          if (isTransientSonicPollError(error) && error.status && error.status >= 400) {
-            throw new Error(
-              `[Polling Gate 1 AIMusicAPI] HTTP ${error.status} — aborting poll.`,
-            );
-          }
+          // Permanent Music engine errors abort immediately; HTTP 429/5xx keep polling.
           if (
             error instanceof Error &&
-            (/Music engine:/i.test(error.message) || /task poll failed/i.test(error.message))
+            (/Music engine:/i.test(error.message) || /task poll failed/i.test(error.message)) &&
+            !isTransientSonicPollError(error)
           ) {
             throw error;
           }

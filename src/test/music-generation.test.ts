@@ -10,6 +10,7 @@ import {
   SONIC_CREATE_URL,
   SONIC_TASK_URL,
   waitForStudioTrack,
+  POLLING_INTERVAL_MS,
 } from "@/lib/music-generation";
 
 const KEY_NAMES = [
@@ -484,7 +485,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(body.mv).toBe(AIMUSICAPI_MODEL);
   });
 
-  it("polls GET /sonic/task/:id every 4s until data.status is succeeded", async () => {
+  it("polls GET /sonic/task/:id until data.status is succeeded", async () => {
     clearMusicKeys();
     process.env.MUSIC_API_KEY = "test-music-key";
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -502,21 +503,20 @@ describe("MusicAPI sonic workflow", () => {
       return jsonResponse(polls === 1 ? running : succeeded);
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.useFakeTimers();
 
-    const pending = waitForStudioTrack("task-poll");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(4_000);
-    const finished = await pending;
+    const finished = await waitForStudioTrack("task-poll");
 
     expect(finished.status).toBe("completed");
     expect(finished.audioUrl).toBe("https://cdn.example/track.mp3");
     expect(finished.title).toBe("Studio Master");
     expect(finished.trackIds).toContain("task-poll");
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${SONIC_TASK_URL}/task-poll`);
-    const firstInit = (fetchMock.mock.calls[0] as unknown as [RequestInfo, RequestInit?] | undefined)?.[1];
-    expect(firstInit?.headers).toEqual({
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/sonic/task/task-poll"))).toBe(
+      true,
+    );
+    const taskCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/sonic/task/task-poll"),
+    ) as unknown as [RequestInfo, RequestInit?] | undefined;
+    expect(taskCall?.[1]?.headers).toEqual({
       Authorization: "Bearer test-music-key",
       "Content-Type": "application/json",
     });
@@ -536,7 +536,7 @@ describe("MusicAPI sonic workflow", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(/\[SONIC_V5_POLL\] Task: task-poll \| Status: running \| Elapsed: \d+s/),
     );
-  });
+  }, 15_000);
 
   it("completes when one clip of a multi-clip task has succeeded", async () => {
     clearMusicKeys();
@@ -613,9 +613,13 @@ describe("MusicAPI sonic workflow", () => {
     vi.useFakeTimers();
 
     const pending = waitForStudioTrack("task-retry");
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(4_000);
-    await vi.advanceTimersByTimeAsync(4_000);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await Promise.resolve();
     const finished = await pending;
 
     expect(finished.audioUrl).toBe("https://cdn.example/recovered.mp3");

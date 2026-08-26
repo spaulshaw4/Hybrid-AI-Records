@@ -763,6 +763,28 @@ function Home() {
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
+              <a
+                ref={orderCtaRef}
+                href="#order"
+                aria-controls="quick-order-form"
+                className="btn-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                onClick={(e) => {
+                  e.preventDefault();
+                  jumpToOrderForm();
+                }}
+              >
+                Connect & Order
+              </a>
+              <a
+                href="#order"
+                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                onClick={(e) => {
+                  e.preventDefault();
+                  jumpToOrderForm();
+                }}
+              >
+                Submit Your Music
+              </a>
               <Link to="/artists" className="btn-ghost">
                 Listen & Download Music
               </Link>
@@ -776,14 +798,30 @@ function Home() {
         </div>
       </section>
 
-
-
-
-
-
-
-
-
+      {/* ORDER — deep-link + keyboard focus target for /#order */}
+      <section
+        id="order"
+        aria-labelledby="order-title"
+        className="relative scroll-mt-20 border-t border-border py-20 md:py-28"
+        onKeyDown={onOrderFormKeyDown}
+      >
+        <div className="mx-auto max-w-3xl px-6">
+          <h2
+            id="order-title"
+            tabIndex={-1}
+            className="rwb-flame rwb-flame-deep font-display text-[clamp(1.75rem,5vw,3rem)] font-extrabold tracking-tight outline-none"
+          >
+            Connect & Order
+          </h2>
+          <p className="mt-3 max-w-2xl text-base text-slate-300">
+            Share your demo link and package choice. We&apos;ll confirm by email with a reference
+            code you can track anytime.
+          </p>
+          <div className="mt-10">
+            <QuickOrderForm />
+          </div>
+        </div>
+      </section>
 
       {/* CATALOG */}
       <section id="catalog" aria-labelledby="catalog-title" className="relative scroll-mt-20 border-t border-border py-20 md:py-28">

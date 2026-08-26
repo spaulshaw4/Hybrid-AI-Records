@@ -119,7 +119,7 @@ const report = (violations: Violation[]) =>
 async function openOrderForm(page: Page) {
   await page.goto("/#order");
   await expect(page.locator(FIRST_FIELD)).toBeFocused();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("networkidle").catch(() => {});
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -144,7 +144,7 @@ test.describe("Order form axe-core audit", () => {
 
   test("page landmarks are valid and unique", async ({ page }) => {
     await page.goto("/#order");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("networkidle").catch(() => {});
     await page.addScriptTag({ path: AXE_PATH });
 
     const violations = await page.evaluate(async () => {

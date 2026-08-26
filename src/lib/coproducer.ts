@@ -55,7 +55,7 @@ function publicLyricError(error: unknown): Error {
   }
   if (/insufficient|402|credit/i.test(raw)) {
     return new Error(
-      "The Co-Producer lyric-engine Replicate account needs credit (LYRIC_ENGINE_API_KEY). Top up that account and retry.",
+      "The Co-Producer lyric engine needs credit (LYRIC_ENGINE_API_KEY). Top up that account and retry.",
     );
   }
   console.error("[LYRIC_ENGINE_ERROR]", error);
