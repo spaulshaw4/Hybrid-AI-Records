@@ -312,6 +312,8 @@
     html[data-site-nav="on"] {
       --site-sidebar-width: 16.75rem;
       --site-dock-height: 0px;
+      /* Desktop locale bar is in-flow; no fixed topbar offset. */
+      --site-header-height: 0px;
     }
   }
 
@@ -335,7 +337,14 @@
 
 @media (min-width: 1024px) {
   .site-chrome-content {
+    padding-top: 0;
     padding-bottom: 0;
+  }
+
+  .site-desktop-locale {
+    background: transparent;
+    border: none;
+    box-shadow: none;
   }
 }
 

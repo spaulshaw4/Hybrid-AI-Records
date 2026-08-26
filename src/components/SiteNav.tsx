@@ -29,16 +29,13 @@ const ICONS = {
 } as const;
 
 /**
- * Right-hand action bar: language + currency always render (no auth/token gate).
- * Token balance lives on /engine and /tokens — not in this top bar.
+ * Language + currency + settings — always render (no auth/token gate).
+ * Token balance lives on /engine and /tokens — not in this chrome.
  */
 function HeaderActions({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn(
-        "ms-auto flex shrink-0 items-center justify-end gap-3",
-        className,
-      )}
+      className={cn("flex shrink-0 items-center gap-3", className)}
       data-no-translate
     >
       <div className="flex items-center">
@@ -188,22 +185,37 @@ function SiteSidebar() {
   );
 }
 
+/** Mobile-only top bar: crest on the left, locale controls on the right. */
 function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-white/10 bg-black/60 px-4 py-3 backdrop-blur-lg"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2.5 backdrop-blur-lg lg:hidden"
     >
       <Link
         to="/"
         aria-label="Hybrid AI Records — home"
-        className={`${WORDMARK_LINK} min-w-0 lg:hidden`}
+        className={`${WORDMARK_LINK} shrink-0`}
       >
-        <Wordmark size="sm" interactive />
+        <Wordmark size="sm" showText={false} interactive />
       </Link>
-      {/* Language + currency always visible; not gated on auth or tokens */}
-      <HeaderActions />
+      <HeaderActions className="ms-auto shrink-0 gap-1.5" />
     </header>
+  );
+}
+
+/**
+ * Desktop: lightweight transparent locale bar in the main column (right of the
+ * sidebar), anchored top-right — not a full-bleed opaque header.
+ */
+function DesktopLocaleBar() {
+  return (
+    <div
+      data-site-nav="desktop-locale"
+      className="site-desktop-locale pointer-events-auto sticky top-0 z-40 hidden justify-end items-center gap-3 bg-transparent px-6 py-4 lg:flex"
+    >
+      <HeaderActions />
+    </div>
   );
 }
 
@@ -246,7 +258,10 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     <>
       <SiteSidebar />
       <SiteHeader />
-      <div className="site-chrome-content min-h-screen bg-transparent">{children}</div>
+      <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
+        <DesktopLocaleBar />
+        <div className="flex-1">{children}</div>
+      </div>
       <SiteDock />
     </>
   );
