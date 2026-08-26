@@ -44,8 +44,8 @@ export type PackageOption = {
 };
 
 export const PACKAGE_OPTIONS: PackageOption[] = [
-  { value: "foundation_single", label: "Enterprise Distribution & Spotlight — Single Track ($50)" },
-  { value: "foundation_bundle", label: "Enterprise Distribution & Spotlight — 10-Track Bundle ($500)" },
+  { value: "foundation_single", label: "Enterprise Distribution & Spotlight — Single Track ($25)" },
+  { value: "foundation_bundle", label: "Enterprise Distribution & Spotlight — 10-Track Bundle ($250)" },
 
   { value: "visual_push_single", label: "The Visual Push — Single Track ($100)" },
   { value: "visual_push_bundle", label: "The Visual Push — 10-Track Bundle ($1,000)" },

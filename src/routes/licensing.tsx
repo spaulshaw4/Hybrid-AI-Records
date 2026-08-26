@@ -61,7 +61,7 @@ function LicensingPage() {
         <>
           <p>
             Upon successful generation and redemption of platform tokens (e.g., Hybrid Tokens at
-            $2.50) within the Hybrid Engine 1.0, Hybrid AI Records LLC grants the user a worldwide,
+            $2.00) within the Hybrid Engine 1.0, Hybrid AI Records LLC grants the user a worldwide,
             non-exclusive (or exclusive upon verified unique synthesis), perpetual right to:
           </p>
           <ul className="mt-3 list-disc space-y-2 pl-5 marker:text-primary/60">
@@ -74,7 +74,7 @@ function LicensingPage() {
             </li>
             <li>
               Distribute the master recordings across digital streaming platforms (DSPs) independently
-              or via our integrated $50 Distribution &amp; Spotlight pipeline.
+              or via our integrated $25 Distribution &amp; Spotlight pipeline.
             </li>
           </ul>
         </>
@@ -94,7 +94,7 @@ function LicensingPage() {
           <li>
             <strong className="text-foreground/80">Platform Exclusions:</strong> Hybrid AI Records LLC
             asserts no claim over backend streaming royalties earned by the creator, outside of agreed
-            enterprise collection terms ($50 one-time distribution processing and standard 80/20
+            enterprise collection terms ($25 one-time distribution processing and standard 80/20
             enterprise collection/publishing facilitation).
           </li>
         </ul>
@@ -135,7 +135,7 @@ function LicensingPage() {
       content: (
         <ul className="list-disc space-y-2 pl-5 marker:text-primary/60">
           <li>
-            Submitting a track through the $50 Enterprise Distribution package grants Hybrid AI Records
+            Submitting a track through the $25 Enterprise Distribution package grants Hybrid AI Records
             LLC and its authorized distribution partners (including Too Lost) the administrative right
             to deliver metadata, artwork, and audio files to 450+ DSPs, manage Content ID registration,
             and collect/route royalties on behalf of the creator.

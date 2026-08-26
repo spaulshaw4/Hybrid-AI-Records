@@ -284,7 +284,7 @@ function ProjectPortal() {
                         onClick={() => setApplyPackage(dist.applySingle)}
                         className="inline-flex w-full items-center justify-center gap-2 bg-[#e11d2e] px-8 py-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition-colors hover:bg-[#c4162a] md:w-auto"
                       >
-                        Distribute Your Track ($50)
+                        Distribute Your Track ($25)
                         <ArrowUpRight size={14} aria-hidden />
                       </button>
                     </div>

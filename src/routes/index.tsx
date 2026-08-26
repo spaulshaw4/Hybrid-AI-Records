@@ -35,7 +35,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 
-/** Rows for the $50 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
+/** Rows for the $25 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
 const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
   { label: "Global distribution (Spotify, Apple Music, etc.)", values: [true, false, true] },
   { label: "Full track production from your vocals/lyrics", values: [false, true, true] },
@@ -45,7 +45,7 @@ const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
   { label: "You keep 100% masters & royalties", values: [true, true, true] },
   { label: "Mix revision rounds included", values: ["None", "2", "2"] },
   { label: "Typical turnaround", values: ["5–7 days", "7–14 days", "10–21 days"] },
-  { label: "10-track bundle price", values: ["$500", "$1,000", "$1,500"] },
+  { label: "10-track bundle price", values: ["$250", "$1,000", "$1,500"] },
 ];
 
 const PODCAST_EPISODES = [

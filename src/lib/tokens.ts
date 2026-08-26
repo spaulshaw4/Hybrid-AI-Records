@@ -17,7 +17,7 @@ export const TOKEN_BUNDLES: TokenBundle[] = [
   {
     priceId: "tokens_single",
     name: "Single Token",
-    amount: 250,
+    amount: 200,
     tokens: 1,
     bonus: 0,
   },
@@ -25,24 +25,25 @@ export const TOKEN_BUNDLES: TokenBundle[] = [
     priceId: "tokens_starter_pack",
     name: "Starter Pack",
     amount: 1000,
-    tokens: 4,
+    tokens: 5,
     bonus: 0,
   },
-
   {
     priceId: "tokens_pro_pack",
     name: "Pro Pack",
     amount: 2500,
-    tokens: 10,
-    bonus: 0,
+    /** 12 paid + 2 bonus — `tokens` is the total credited on purchase. */
+    tokens: 14,
+    bonus: 2,
     highlight: true,
   },
   {
     priceId: "tokens_studio_pack",
     name: "Studio Pack",
     amount: 5000,
-    tokens: 22,
-    bonus: 2,
+    /** 25 paid + 5 bonus — `tokens` is the total credited on purchase. */
+    tokens: 30,
+    bonus: 5,
   },
 ];
 

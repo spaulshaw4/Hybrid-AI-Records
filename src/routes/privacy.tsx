@@ -74,7 +74,7 @@ function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground/80">Transaction & Token Data:</strong> Records of
-            token purchases (Hybrid Tokens, Artist Tokens), distribution fees ($50 package), and
+            token purchases (Hybrid Tokens, Artist Tokens), distribution fees ($25 package), and
             payout routing info. Note: Direct payment processing is securely handled via PCI-compliant
             gateways (e.g., Stripe); we do not store full credit card numbers on our servers.
           </li>
@@ -99,7 +99,7 @@ function PrivacyPage() {
           </li>
           <li>
             <strong className="text-foreground/80">Distribution & DSP Delivery:</strong> Metadata and
-            finalized Master WAVs submitted through our $50 distribution pipeline are securely routed
+            finalized Master WAVs submitted through our $25 distribution pipeline are securely routed
             to our enterprise delivery partner (Too Lost) for dissemination across 450+ digital
             streaming platforms (DSPs).
           </li>

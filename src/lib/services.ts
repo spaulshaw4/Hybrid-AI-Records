@@ -46,7 +46,7 @@ export const SERVICES: ServicePackage[] = [
     slug: "foundation",
     title: "Enterprise Distribution & Spotlight",
     tagline: "Global reach. Zero royalties taken. Dedicated platform real estate.",
-    priceSingle: "$50 / Track",
+    priceSingle: "$25 / Track",
     priceIdSingle: "foundation_song_onetime",
     applySingle: "foundation_single",
     color: "#e11d2e",

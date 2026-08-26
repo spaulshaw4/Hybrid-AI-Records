@@ -1,7 +1,7 @@
 /**
  * Live foreign-exchange layer.
  *
- * USD is the master price ($50 / $100 / $150 …). Every other currency is
+ * USD is the master price ($25 Foundation / $100 Visual Push / $150 Full Hybrid …). Every other currency is
  * derived from the USD amount using the most recent rate we fetched, then
  * rounded up to a tidy increment so the storefront never shows something like
  * "R 913,47". Rates refresh once a day (see

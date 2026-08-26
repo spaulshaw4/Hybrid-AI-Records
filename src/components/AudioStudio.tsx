@@ -4484,7 +4484,7 @@ export function AudioStudio() {
                 </dl>
                 <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
                   <HybridTokenIcon className="size-4 text-primary" />
-                  1 Hybrid Token · $2.50
+                  1 Hybrid Token · $2.00
                 </p>
               </div>
             ) : null}

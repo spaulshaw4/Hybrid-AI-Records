@@ -82,11 +82,11 @@ export type PackagePrice = {
 export const PACKAGE_PRICES: Record<string, PackagePrice> = {
   foundation_song_onetime: {
     name: "The Foundation — 1 Track (Distribution)",
-    amounts: { usd: 5_000, eur: 4_500, gbp: 4_000, ngn: 8_000_000, zar: 90_000 },
+    amounts: { usd: 2_500, eur: 2_250, gbp: 2_000, ngn: 4_000_000, zar: 45_000 },
   },
   foundation_10_onetime: {
     name: "The Foundation — 10 Tracks (Distribution)",
-    amounts: { usd: 50_000, eur: 45_000, gbp: 40_000, ngn: 80_000_000, zar: 900_000 },
+    amounts: { usd: 25_000, eur: 22_500, gbp: 20_000, ngn: 40_000_000, zar: 450_000 },
   },
   visual_push_song_onetime: {
     name: "The Visual Push — 1 Track",
