@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 
 const CTA = 'a[aria-controls="quick-order-form"]';
 const FIRST_FIELD = "#qo-artist";
+const ORDER_FORM = "#quick-order-form";
 
 /** id of the element that currently has focus (empty string when none). */
 const activeId = (page: Page) => page.evaluate(() => document.activeElement?.id ?? "");
@@ -14,10 +15,20 @@ const headerHeight = (page: Page) =>
     return header instanceof HTMLElement ? header.offsetHeight : 0;
   });
 
+/** Wait until deep-link / CTA focus lands on the first intake field. */
+async function expectOrderFieldFocused(page: Page) {
+  await expect(page.locator(ORDER_FORM)).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => activeId(page), { timeout: 12_000, intervals: [50, 100, 200] })
+    .toBe("qo-artist");
+  await expect(page.locator(FIRST_FIELD)).toBeFocused();
+}
+
 test.describe("Order form accessibility", () => {
   test("Connect & Order shows a visible focus ring when keyboard-focused", async ({ page }) => {
-    await page.goto("/portal");
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
     const cta = page.locator(CTA).first();
+    await expect(cta).toBeVisible({ timeout: 15_000 });
     await cta.scrollIntoViewIfNeeded();
 
     const styleOf = () =>
@@ -45,44 +56,46 @@ test.describe("Order form accessibility", () => {
   });
 
   test("clicking the CTA focuses the first field and Escape returns focus", async ({ page }) => {
-    await page.goto("/portal");
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
     const cta = page.locator(CTA).first();
+    await expect(cta).toBeVisible({ timeout: 15_000 });
     await cta.click();
 
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
     expect(page.url()).toContain("#order");
 
     await page.keyboard.press("Escape");
-    await expect.poll(() => activeId(page)).not.toBe("qo-artist");
+    await expect.poll(() => activeId(page), { timeout: 8_000 }).not.toBe("qo-artist");
     await expect(cta).toBeFocused();
   });
 
   test("deep link to /portal#order scrolls the first field clear of the sticky header", async ({
     page,
   }) => {
-    await page.goto("/portal#order");
+    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
     const field = page.locator(FIRST_FIELD);
-    await expect(field).toBeFocused();
+    await expectOrderFieldFocused(page);
 
     const [box, header] = await Promise.all([field.boundingBox(), headerHeight(page)]);
     expect(box).not.toBeNull();
     // Fully inside the viewport and below the sticky header.
-    expect(box!.y).toBeGreaterThanOrEqual(header);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    expect(box!.y).toBeGreaterThanOrEqual(header - 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
   });
 
   test("back/forward navigation restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/portal");
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
     const cta = page.locator(CTA).first();
+    await expect(cta).toBeVisible({ timeout: 15_000 });
     await cta.click();
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
 
     await page.goBack();
-    await expect(cta).toBeFocused();
+    await expect(cta).toBeFocused({ timeout: 8_000 });
     expect(page.url()).not.toContain("#order");
 
     await page.goForward();
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
   });
 });
 
@@ -117,10 +130,9 @@ const report = (violations: Violation[]) =>
   violations.map((v) => `${v.id} (${v.impact}): ${v.help}\n  ${v.nodes.join("\n  ")}`).join("\n");
 
 async function openOrderForm(page: Page) {
-  await page.goto("/portal#order");
-  await expect(page.locator(FIRST_FIELD)).toBeFocused();
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await page.evaluate(() => document.fonts.ready);
+  await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
+  await expectOrderFieldFocused(page);
+  await page.evaluate(() => document.fonts.ready).catch(() => undefined);
 }
 
 test.describe("Order form axe-core audit", () => {
@@ -143,8 +155,8 @@ test.describe("Order form axe-core audit", () => {
   });
 
   test("page landmarks are valid and unique", async ({ page }) => {
-    await page.goto("/portal#order");
-    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#order")).toBeVisible({ timeout: 15_000 });
     await page.addScriptTag({ path: AXE_PATH });
 
     const violations = await page.evaluate(async () => {

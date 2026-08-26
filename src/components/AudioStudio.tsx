@@ -102,13 +102,20 @@ import {
   listGuestVaultTracks,
   upsertGuestVaultTrack,
 } from "@/lib/guest-vault";
-import { fetchVaultTracks as fetchUserVaultTracks, notifyVaultOfNewGeneration, VAULT_POLL_MAX_MS, VAULT_POLL_MS } from "@/lib/vault-client";
+import {
+  fetchVaultTracks as fetchUserVaultTracks,
+  fetchVaultTracksResult,
+  notifyVaultOfNewGeneration,
+  VAULT_POLL_MAX_MS,
+  VAULT_POLL_MS,
+} from "@/lib/vault-client";
 import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
 import {
   ENGINE_BUSY_REFUNDED_MESSAGE,
   isEngineBusyRefundedError,
   isStudioStreamDroppedError,
 } from "@/lib/engine-bounce-back";
+import { logTransientPollDisconnect } from "@/lib/studio-poll-telemetry";
 
 import { hybridMasterFileName, masterWavFromUrl } from "@/lib/audio-mixdown";
 import { abortableBarrier, abortableDelay, isGenerationAborted } from "@/lib/generation-abort";
@@ -355,12 +362,15 @@ function vocalGenderTagLabel(value: string | undefined): string {
 
 
 const PROMPT_MAX = 6000;
-const POLL_INTERVAL_MS = 4000;
-// Full-length renders regularly run well past ten minutes; the UI stays
-// attached for the whole window instead of declaring a failure early.
-const POLL_TIMEOUT_MS = 25 * 60 * 1000;
-/** Consecutive poll errors tolerated before a run is treated as failed. */
-const POLL_MAX_CONSECUTIVE_ERRORS = 5;
+/** Matches vault short-poll cadence (4s). */
+const POLL_INTERVAL_MS = VAULT_POLL_MS;
+/** Client generate / status / vault poll ceiling — 6 minutes (360_000 ms). */
+const POLL_TIMEOUT_MS = VAULT_POLL_MAX_MS;
+/**
+ * Progress bar eases toward ~90% across this span (midpoint of 5–6 min)
+ * so the UI never stalls before the hard deadline.
+ */
+const PROGRESS_UI_SPAN_MS = 330_000;
 const HISTORY_KEY = "hybrid.studio.recent";
 const LANGUAGE_KEY = "hybrid.studio.language";
 const CUSTOM_LANGUAGE_KEY = "hybrid.studio.customLanguage";
@@ -436,7 +446,7 @@ function renderingLabel(startedAt: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
   const mins = Math.floor(seconds / 60);
   const secs = String(seconds % 60).padStart(2, "0");
-  return `Rendering production… ${mins}:${secs} elapsed (usually 3–5 minutes)`;
+  return `Rendering production… ${mins}:${secs} elapsed (usually 5–6 minutes)`;
 }
 
 /**
@@ -2551,16 +2561,23 @@ export function AudioStudio() {
       if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
       // Soft pulse only — never advance stage badges ahead of serverGateMask bits.
       setServerGateMask(PipelineGate.NONE);
+      const progressStartedAt = Date.now();
+      const progressFloor = PIPELINE_PROGRESS.sonic;
       const stopTicker = window.setInterval(() => {
         if (abort.signal.aborted || cancelRef.current) {
           window.clearInterval(stopTicker);
           return;
         }
+        const elapsed = Date.now() - progressStartedAt;
+        // Smoothstep across ~5.5 min so the bar never hangs near a plateau.
+        const t = Math.min(1, elapsed / PROGRESS_UI_SPAN_MS);
+        const eased = t * t * (3 - 2 * t);
+        const target = Math.min(90, Math.round(progressFloor + eased * (90 - progressFloor)));
         setPipelineState((prev) => {
           if (prev.status !== "loading") return prev;
-          return { ...prev, progress: Math.min(90, prev.progress + 1) };
+          return { ...prev, progress: Math.max(prev.progress, target) };
         });
-      }, 4000);
+      }, POLL_INTERVAL_MS);
       const stopTickerOnAbort = () => window.clearInterval(stopTicker);
       abort.signal.addEventListener("abort", stopTickerOnAbort, { once: true });
       let started: {
@@ -2653,7 +2670,12 @@ export function AudioStudio() {
         } catch (streamErr) {
           // Mobile Safari often drops SSE mid-render — short-poll Vault instead of crashing.
           if (!isStudioStreamDroppedError(streamErr) || !audioVaultId) throw streamErr;
-          setStatusText("Stream dropped — checking Vault for your finished track…");
+          logTransientPollDisconnect({
+            source: "sse_stream",
+            message: streamErr instanceof Error ? streamErr.message : "SSE dropped",
+            vaultId: audioVaultId,
+          });
+          setStatusText(renderingLabel(Date.now()));
           const vaultDeadline = Date.now() + Math.min(VAULT_POLL_MAX_MS, POLL_TIMEOUT_MS);
           let recovered: {
             taskId?: string;
@@ -2663,32 +2685,52 @@ export function AudioStudio() {
           while (Date.now() < vaultDeadline) {
             if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
             if (isGuestVaultId(audioVaultId)) {
-              const guests = await listGuestVaultTracks();
-              const hit = guests.find((t) => t.id === audioVaultId);
-              if (hit?.status === "completed" && hit.masterUrl) {
-                recovered = {
-                  tracks: [{ audioUrl: hit.masterUrl, title: hit.title }],
-                  tokenSettled: true,
-                };
-                break;
+              try {
+                const guests = await listGuestVaultTracks();
+                const hit = guests.find((t) => t.id === audioVaultId);
+                if (hit?.status === "completed" && hit.masterUrl) {
+                  recovered = {
+                    tracks: [{ audioUrl: hit.masterUrl, title: hit.title }],
+                    tokenSettled: true,
+                  };
+                  break;
+                }
+                if (hit?.status === "failed") break;
+              } catch (guestErr) {
+                logTransientPollDisconnect({
+                  source: "vault_poll",
+                  message: guestErr instanceof Error ? guestErr.message : "guest vault poll failed",
+                  vaultId: audioVaultId,
+                });
               }
-              if (hit?.status === "failed") break;
             } else {
-              const catalog = await fetchUserVaultTracks();
-              const hit = catalog.find((t) => t.id === audioVaultId);
-              if (hit?.status === "completed" && hit.master_url) {
-                recovered = {
-                  tracks: [{ audioUrl: hit.master_url, title: hit.title }],
-                  tokenSettled: true,
-                };
-                break;
+              const catalog = await fetchVaultTracksResult();
+              if (catalog.transientFailure) {
+                logTransientPollDisconnect({
+                  source: "vault_poll",
+                  message: catalog.message,
+                  vaultId: audioVaultId,
+                  statusCode: catalog.status,
+                });
+              } else {
+                const hit = catalog.tracks.find((t) => t.id === audioVaultId);
+                if (hit?.status === "completed" && hit.master_url) {
+                  recovered = {
+                    tracks: [{ audioUrl: hit.master_url, title: hit.title }],
+                    tokenSettled: true,
+                  };
+                  break;
+                }
+                if (hit?.status === "failed") break;
               }
-              if (hit?.status === "failed") break;
             }
             await abortableDelay(VAULT_POLL_MS, abort.signal);
           }
-          if (!recovered?.tracks?.[0]?.audioUrl) throw streamErr;
-          toast.message("Reconnected via Vault after the stream dropped.");
+          if (!recovered?.tracks?.[0]?.audioUrl) {
+            throw new Error(
+              "Generation timed out after 6 minutes — no completed track in Vault.",
+            );
+          }
           started = recovered as typeof started;
         }
       } finally {
@@ -2740,7 +2782,6 @@ export function AudioStudio() {
       // tracks with different nullability, and both feed this variable.
       let ready: Array<{ audioUrl: string | null; title: string | null }> =
         (started.tracks ?? []).filter((t) => t.audioUrl);
-      let pollErrors = 0;
       const deadline = startedAt + POLL_TIMEOUT_MS;
       while (ready.length === 0 && started.taskId && Date.now() < deadline) {
         if (cancelRef.current || abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
@@ -2749,7 +2790,6 @@ export function AudioStudio() {
         if (cancelRef.current || abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
         try {
           const current = await checkStatus(started.taskId);
-          pollErrors = 0;
           const audioReady = current.tracks.filter((t) => t.audioUrl);
           if (
             current.status === "completed" ||
@@ -2764,18 +2804,19 @@ export function AudioStudio() {
             }
           }
         } catch (pollError) {
-          // A dropped poll does not mean a dropped render: the engine keeps
-          // working server-side, so we keep re-attaching for a few rounds and
-          // tell the artist exactly what is happening.
-          pollErrors += 1;
-          if (pollErrors >= POLL_MAX_CONSECUTIVE_ERRORS) throw pollError;
-          setStatusText(
-            `Still rendering — reconnecting to the engine (attempt ${pollErrors} of ${POLL_MAX_CONSECUTIVE_ERRORS})…`,
-          );
+          // Transient disconnects stay silent in the UI — keep polling until the 6 min ceiling.
+          logTransientPollDisconnect({
+            source: "status_poll",
+            message: pollError instanceof Error ? pollError.message : "status poll failed",
+            taskId: started.taskId,
+            vaultId,
+          });
         }
       }
       if (ready.length === 0 && started.taskId) {
-        throw new Error("The render is still going but timed out on this connection.");
+        throw new Error(
+          "Generation timed out after 6 minutes — no completed track in Vault.",
+        );
       }
       if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
 
@@ -3066,14 +3107,12 @@ export function AudioStudio() {
       setStatusText(renderingLabel(job.startedAt));
       try {
         let ready: { audioUrl?: string | null; title?: string | null }[] = [];
-        let resumeErrors = 0;
         const deadline = job.startedAt + POLL_TIMEOUT_MS;
         while (ready.length === 0 && Date.now() < deadline) {
           if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
           setStatusText(renderingLabel(job.startedAt));
           try {
             const current = await checkStatus(job.taskId);
-            resumeErrors = 0;
             const audioReady = current.tracks.filter((t) => t.audioUrl);
             if (
               current.status === "completed" ||
@@ -3088,11 +3127,12 @@ export function AudioStudio() {
               }
             }
           } catch (pollError) {
-            resumeErrors += 1;
-            if (resumeErrors >= POLL_MAX_CONSECUTIVE_ERRORS) throw pollError;
-            setStatusText(
-              `Still rendering — reconnecting to the engine (attempt ${resumeErrors} of ${POLL_MAX_CONSECUTIVE_ERRORS})…`,
-            );
+            logTransientPollDisconnect({
+              source: "status_poll",
+              message: pollError instanceof Error ? pollError.message : "resume status poll failed",
+              taskId: job.taskId,
+              vaultId: job.vaultId,
+            });
           }
           if (ready.length > 0) break;
           await wait(POLL_INTERVAL_MS);
@@ -3101,7 +3141,11 @@ export function AudioStudio() {
 
         const engineUrl = ready[0]?.audioUrl ?? "";
         if (!engineUrl || !isPlayableAudioSource(engineUrl)) {
-          throw new Error(GENERATION_FAIL_MESSAGE);
+          throw new Error(
+            Date.now() >= deadline
+              ? "Generation timed out after 6 minutes — no completed track in Vault."
+              : GENERATION_FAIL_MESSAGE,
+          );
         }
 
         const finalTitle = ready[0]?.title || job.title;

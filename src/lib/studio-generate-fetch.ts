@@ -10,8 +10,8 @@ import {
   StudioStreamDroppedError,
 } from "@/lib/engine-bounce-back";
 
-/** Soft UI deadline for reading the SSE stream (matches long poll window). */
-export const STUDIO_GENERATE_CLIENT_DEADLINE_MS = 25 * 60 * 1000;
+/** Soft UI deadline for reading the SSE stream (matches vault poll window — 6 min). */
+export const STUDIO_GENERATE_CLIENT_DEADLINE_MS = 360_000;
 
 export const STUDIO_GENERATE_STREAM_URL = "/api/studio/generate-stream";
 
@@ -161,7 +161,7 @@ export async function streamStudioGenerate(
     while (true) {
       if (Date.now() - startedAt > deadlineMs) {
         throw new StudioStreamDroppedError(
-          "The render is still going but this connection timed out after 25 minutes.",
+          "The render is still going but this connection timed out after 6 minutes.",
         );
       }
       const { done, value } = await reader.read();

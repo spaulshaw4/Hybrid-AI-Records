@@ -5,13 +5,26 @@ import { sanitizeVaultTracks, type SanitizedVaultTrack } from "@/lib/vault-track
 export const VAULT_API_URL = "/api/studio/vault";
 export const VAULT_NEW_GENERATION_EVENT = "hybrid:vault-new-generation";
 /** Visible-tab poll cadence while any vault row is still processing. */
-export const VAULT_POLL_MS = 5_000;
-/** Hard stop for processing polls — prevents forever timers on stuck rows. */
-export const VAULT_POLL_MAX_MS = 30 * 60 * 1000;
+export const VAULT_POLL_MS = 4_000;
+/** Hard stop for processing polls — 6 minutes; UI fails only after this with no completed row. */
+export const VAULT_POLL_MAX_MS = 360_000;
 
 export type VaultTrackPayload = SanitizedVaultTrack;
 
+export type VaultTracksFetchResult = {
+  tracks: VaultTrackPayload[];
+  ok: boolean;
+  /** Network / 5xx / 408 / 429 — keep polling; log silently to telemetry. */
+  transientFailure: boolean;
+  status?: number;
+  message?: string;
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isTransientHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
 
 async function vaultAuthHeaders(): Promise<Headers> {
   const headers = new Headers({ Accept: "application/json" });
@@ -21,8 +34,8 @@ async function vaultAuthHeaders(): Promise<Headers> {
   return headers;
 }
 
-/** GET /api/studio/vault/tracks — signed-in artist's catalog. Never throws. */
-export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
+/** GET /api/studio/vault/tracks with ok / transientFailure metadata. Never throws. */
+export async function fetchVaultTracksResult(): Promise<VaultTracksFetchResult> {
   try {
     const response = await fetch(`${VAULT_API_URL}/tracks`, {
       headers: await vaultAuthHeaders(),
@@ -30,17 +43,29 @@ export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
     if (!response.ok) {
       if (isDevAuthBypass() || response.status === 401) {
         console.warn("[vault] catalog unavailable", response.status);
-        return [];
+        return { tracks: [], ok: false, transientFailure: false, status: response.status };
       }
       console.warn("[vault] catalog request failed", response.status);
-      return [];
+      return {
+        tracks: [],
+        ok: false,
+        transientFailure: isTransientHttpStatus(response.status),
+        status: response.status,
+        message: `Vault catalog ${response.status}`,
+      };
     }
     const body: unknown = await response.json().catch(() => []);
-    return sanitizeVaultTracks(body);
+    return { tracks: sanitizeVaultTracks(body), ok: true, transientFailure: false };
   } catch (error) {
-    console.warn("[vault] catalog fetch failed", error instanceof Error ? error.message : error);
-    return [];
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[vault] catalog fetch failed", message);
+    return { tracks: [], ok: false, transientFailure: true, message };
   }
+}
+
+/** GET /api/studio/vault/tracks — signed-in artist's catalog. Never throws. */
+export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
+  return (await fetchVaultTracksResult()).tracks;
 }
 
 /** DELETE /api/studio/vault/tracks/:id — row + storage objects. */

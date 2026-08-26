@@ -36,13 +36,14 @@ import {
 } from "@/lib/user-vault.functions";
 import {
   deleteVaultTrackApi,
-  fetchVaultTracks,
+  fetchVaultTracksResult,
   isPersistedVaultId,
   VAULT_NEW_GENERATION_EVENT,
   VAULT_POLL_MAX_MS,
   VAULT_POLL_MS,
   type VaultTrackPayload,
 } from "@/lib/vault-client";
+import { logTransientPollDisconnect } from "@/lib/studio-poll-telemetry";
 import {
   groupVaultTracksByArtistAlbum,
   isPlayableVaultAudioUrl,
@@ -175,13 +176,24 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       return;
     }
     try {
-      const tracks = await fetchVaultTracks();
-      setRows((prev) => mergeVaultRows(tracks.map(fromApi), prev));
+      const catalog = await fetchVaultTracksResult();
+      if (catalog.transientFailure) {
+        logTransientPollDisconnect({
+          source: "vault_catalog",
+          message: catalog.message,
+          statusCode: catalog.status,
+        });
+      }
+      setRows((prev) => mergeVaultRows(catalog.tracks.map(fromApi), prev));
     } catch {
       try {
         const fallback = await loadVault({ data: undefined });
         setRows((prev) => mergeVaultRows(fallback, prev));
       } catch (error) {
+        logTransientPollDisconnect({
+          source: "vault_catalog",
+          message: error instanceof Error ? error.message : "vault catalog unavailable",
+        });
         console.warn(
           "[vault] Engine catalog unavailable",
           error instanceof Error ? error.message : error,

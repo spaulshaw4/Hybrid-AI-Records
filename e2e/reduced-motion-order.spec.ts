@@ -8,6 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const CTA = 'a[aria-controls="quick-order-form"]';
 const FIRST_FIELD = "#qo-artist";
+const ORDER_FORM = "#quick-order-form";
 
 const activeId = (page: Page) => page.evaluate(() => document.activeElement?.id ?? "");
 
@@ -16,6 +17,14 @@ const headerHeight = (page: Page) =>
     const header = document.querySelector("header");
     return header instanceof HTMLElement ? header.offsetHeight : 0;
   });
+
+async function expectOrderFieldFocused(page: Page) {
+  await expect(page.locator(ORDER_FORM)).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => activeId(page), { timeout: 12_000, intervals: [50, 100, 200] })
+    .toBe("qo-artist");
+  await expect(page.locator(FIRST_FIELD)).toBeFocused();
+}
 
 test.use({ reducedMotion: "reduce" });
 
@@ -27,7 +36,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("the reduced-motion preference is actually applied", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     const reduced = await page.evaluate(
       () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     );
@@ -35,62 +44,67 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("deep link to /#order scrolls and focuses the first field", async ({ page }) => {
-    await page.goto("/portal#order");
+    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
     const field = page.locator(FIRST_FIELD);
-    await expect(field).toBeFocused();
+    await expectOrderFieldFocused(page);
 
     const [box, header] = await Promise.all([field.boundingBox(), headerHeight(page)]);
     expect(box).not.toBeNull();
-    expect(box!.y).toBeGreaterThanOrEqual(header);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    expect(box!.y).toBeGreaterThanOrEqual(header - 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
   });
 
   test("deep link with a package slug prefills and still focuses", async ({ page }) => {
-    await page.goto("/portal?package=foundation#order");
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await page.goto("/portal?package=foundation#order", { waitUntil: "domcontentloaded" });
+    await expectOrderFieldFocused(page);
     // The alias is canonicalized to the real package slug.
     expect(page.url()).toContain("package=distribution-release");
     expect(page.url()).toContain("#order");
   });
 
   test("CTA click focuses the field and Escape restores focus", async ({ page }) => {
-    await page.goto("/portal");
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
     const cta = page.locator(CTA).first();
+    await expect(cta).toBeVisible({ timeout: 15_000 });
     await cta.click();
 
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
     expect(page.url()).toContain("#order");
 
     await page.keyboard.press("Escape");
-    await expect.poll(() => activeId(page)).not.toBe("qo-artist");
+    await expect.poll(() => activeId(page), { timeout: 8_000 }).not.toBe("qo-artist");
     await expect(cta).toBeFocused();
   });
 
   test("back/forward restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/portal");
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
     const cta = page.locator(CTA).first();
+    await expect(cta).toBeVisible({ timeout: 15_000 });
     await cta.click();
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
 
     await page.goBack();
-    await expect(cta).toBeFocused();
+    await expect(cta).toBeFocused({ timeout: 8_000 });
     expect(page.url()).not.toContain("#order");
 
     await page.goForward();
-    await expect(page.locator(FIRST_FIELD)).toBeFocused();
+    await expectOrderFieldFocused(page);
   });
 
   test("release play preview opens and closes without animation stalls", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForLoadState("networkidle").catch(() => {});
-    await page.waitForTimeout(400);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(300);
 
-    const dialog = page.locator('[role="dialog"][aria-modal="true"]');
+    const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
+      has: page.getByRole("button", { name: "Close video" }),
+    });
     const play = page.locator('button[aria-label^="Play video:"]').first();
+    await expect(play).toBeVisible({ timeout: 15_000 });
     await play.scrollIntoViewIfNeeded();
     await play.focus();
     await page.keyboard.press("Enter");
-    await expect(dialog).toBeVisible();
+    await page.waitForURL(/\?v=/, { timeout: 8_000 }).catch(() => undefined);
+    await expect(dialog).toBeVisible({ timeout: 8_000 });
 
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);

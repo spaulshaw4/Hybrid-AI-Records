@@ -187,10 +187,10 @@ function VideoModal({ video, onClose }: { video: VideoItem | null; onClose: () =
       role="dialog"
       aria-modal="true"
       aria-label={video.title}
-      className="fixed inset-0 z-[100] flex animate-fade-in flex-col overflow-y-auto bg-surface"
+      className="fixed inset-0 z-[100] flex animate-fade-in flex-col overflow-y-auto modal-panel-solid"
       onClick={onClose}
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface px-6 py-4">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border modal-panel-solid px-6 py-4">
         <div className="min-w-0 pe-4">
           <div className="truncate font-display text-sm font-bold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] sm:text-base">{video.title}</div>
           {video.subtitle && (
