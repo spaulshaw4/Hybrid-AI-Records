@@ -9,7 +9,6 @@ import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { useStripeCheckout } from "@/hooks/useStripeCheckout";
 import { PayNowModal } from "@/components/PayNowModal";
 import type { ServicePackage } from "@/lib/services";
-import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { Wordmark } from "@/components/Wordmark";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
@@ -48,8 +47,6 @@ function StartPage() {
 
   return (
     <div className="min-h-dvh">
-      <PaymentTestModeBanner />
-
       <header className="sticky top-0 z-50 border-b border-border bg-background/70 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link to="/" aria-label="Hybrid AI Records home">

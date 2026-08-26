@@ -12,7 +12,6 @@ import { trackHowItWorksCtaClick } from "@/lib/cta-analytics";
 
 import { Play, ArrowUpRight, ArrowDown, Youtube, Instagram, Link as LinkIcon, ShoppingBag, Facebook, ShieldCheck, Check, Minus, Search, X } from "lucide-react";
 import { useStripeCheckout } from "@/hooks/useStripeCheckout";
-import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { ApplicationModal } from "@/components/ApplicationModal";
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { AboutModal } from "@/components/AboutModal";
@@ -694,7 +693,6 @@ function Home() {
 
   return (
     <div className="min-h-dvh text-foreground">
-      <PaymentTestModeBanner />
       {/* Wrapped in a landmark so every page node belongs to one (axe `region`). */}
       <nav aria-label="Skip links">
         <a href="#main-content" className="skip-link">Skip to content</a>

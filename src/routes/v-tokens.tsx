@@ -5,7 +5,6 @@ import { Check, Film, Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { PaymentTestModeBanner } from "@/components/PaymentTestModeBanner";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { supabase } from "@/integrations/supabase/client";
 import { getStripe, getStripeEnvironment } from "@/lib/stripe";
@@ -143,8 +142,6 @@ function VTokensPage() {
 
   return (
     <main className="min-h-dvh bg-background pb-16">
-      <PaymentTestModeBanner />
-
       <div className="mx-auto w-full max-w-3xl px-4 pt-10">
         <PortalBreadcrumb
           trail={[{ label: "Visual Engine", to: "/cinematic-studio" }, { label: "Buy V Tokens" }]}
