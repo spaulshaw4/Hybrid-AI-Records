@@ -154,6 +154,7 @@ import { useCurrency } from "@/lib/currency";
 import { useMoneyFormat } from "@/lib/money-format";
 import { SERVICES, type ServicePackage } from "@/lib/services";
 import { PayNowModal } from "@/components/PayNowModal";
+import { LocaleCluster } from "@/components/SiteNav";
 
 import { TikTokIcon } from "@/components/TikTokIcon";
 import { ThreadsIcon } from "@/components/ThreadsIcon";
@@ -711,11 +712,14 @@ function Home() {
         {/* Bounded band instead of a full viewport: the headline now sits near
             the top of the fold rather than under ~1000px of empty space. */}
         <div className="relative z-10 mx-auto flex max-w-7xl flex-col justify-start px-4 pb-24 pt-6 sm:px-6 md:pb-28 md:pt-8">
-          <div className="max-w-4xl">
-            <p className="hero-kicker eyebrow text-slab-none mb-4" dir="auto">
+          <div className="mb-4 flex max-w-7xl flex-wrap items-center justify-between gap-3">
+            <p className="hero-kicker eyebrow text-slab-none" dir="auto">
               <span className="hero-kicker-independent">Independent</span> • SBA Veteran-Certified •{" "}
               <span className="hero-kicker-location">Knoxville, TN</span>
             </p>
+            <LocaleCluster className="hidden lg:inline-flex" />
+          </div>
+          <div className="max-w-4xl">
             <h1 className="font-display text-5xl font-black uppercase leading-[0.95] tracking-tight md:text-7xl">
               <span className="hero-line-red block">RAW WORDS.</span>
               <span className="hero-line-white block">REAL MUSIC.</span>

@@ -29,21 +29,17 @@ const ICONS = {
 } as const;
 
 /**
- * Language + currency + settings — always render (no auth/token gate).
+ * Language → currency → settings. Static inline flow only — never fixed/sticky.
  * Token balance lives on /engine and /tokens — not in this chrome.
  */
-function HeaderActions({ className = "" }: { className?: string }) {
+export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn("flex shrink-0 items-center gap-3", className)}
+      className={cn("inline-flex items-center gap-2", className)}
       data-no-translate
     >
-      <div className="flex items-center">
-        <LanguageSwitcher menuAlign="end" />
-      </div>
-      <div className="flex items-center">
-        <CurrencySwitcher variant="pill" />
-      </div>
+      <LanguageSwitcher menuAlign="end" />
+      <CurrencySwitcher variant="pill" />
       <SettingsMenu />
     </div>
   );
@@ -199,22 +195,25 @@ function SiteHeader() {
       >
         <Wordmark size="sm" showText={false} interactive />
       </Link>
-      <HeaderActions className="ms-auto shrink-0 gap-1.5" />
+      <LocaleCluster className="ms-auto shrink-0" />
     </header>
   );
 }
 
 /**
- * Desktop: lightweight transparent locale bar in the main column (right of the
- * sidebar), anchored top-right — not a full-bleed opaque header.
+ * Desktop (non-home): static in-flow locale row at the top of the main column.
+ * Home places the cluster beside the hero kicker instead.
  */
-function DesktopLocaleBar() {
+function DesktopLocaleStrip() {
+  const { pathname } = useActiveNav();
+  if (pathname === "/") return null;
+
   return (
     <div
       data-site-nav="desktop-locale"
-      className="site-desktop-locale pointer-events-auto sticky top-0 z-40 hidden min-h-[var(--site-header-height)] items-center justify-end gap-3 bg-transparent pr-6 pt-5 lg:flex"
+      className="hidden justify-end px-6 py-3 lg:flex"
     >
-      <HeaderActions />
+      <LocaleCluster />
     </div>
   );
 }
@@ -259,7 +258,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       <SiteSidebar />
       <SiteHeader />
       <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
-        <DesktopLocaleBar />
+        <DesktopLocaleStrip />
         <div className="flex-1">{children}</div>
       </div>
       <SiteDock />

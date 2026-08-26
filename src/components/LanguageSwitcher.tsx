@@ -190,7 +190,7 @@ export function LanguageSwitcher({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-label={`Choose language, current language ${info.label}`}
-        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-background/40 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground backdrop-blur-sm transition-colors hover:border-[#e11d2e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-200 transition-colors hover:border-zinc-700 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         {status === "translating" ? (
           <Loader2 className="size-3.5 animate-spin text-[#e11d2e]" aria-hidden="true" />

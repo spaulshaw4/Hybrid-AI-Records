@@ -340,12 +340,6 @@
     padding-top: 0;
     padding-bottom: 0;
   }
-
-  .site-desktop-locale {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-  }
 }
 
 .site-topbar {

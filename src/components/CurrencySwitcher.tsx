@@ -226,7 +226,7 @@ function CurrencyDropdown({
         onKeyDown={onTriggerKeyDown}
         className={
           compact
-            ? "inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-background/40 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground backdrop-blur-sm transition-colors hover:border-[#e11d2e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e]"
+            ? "inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-200 transition-colors hover:border-zinc-700 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e]"
             : "flex min-h-11 w-full items-center gap-2 border border-border bg-background/40 px-3 py-2 text-start backdrop-blur-sm transition-colors hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b8bff]"
         }
       >
