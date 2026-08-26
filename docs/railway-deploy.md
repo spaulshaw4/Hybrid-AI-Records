@@ -4,7 +4,7 @@
 
 | File | Purpose |
 | --- | --- |
-| `Dockerfile` | Bun image: install → `prisma generate` → `bun run build` → start `.output/server/index.mjs` |
+| `Dockerfile` | Bun image: install → `prisma generate` → `bun run build` (BuildKit secrets / Railway `ARG`, no `ENV` for `VITE_*`) → start `.output/server/index.mjs` |
 | `railway.json` | `DOCKERFILE` builder, start command, healthcheck, restart policy |
 | `nixpacks.toml` | Fallback plan if Dockerfile is unused |
 | `package.json` | `"start": "bun .output/server/index.mjs"` |
@@ -43,8 +43,47 @@ Set `MATCHERING_PYTHON` if the interpreter is not on `PATH` as `python3`.
 
 `VITE_`-prefixed values are inlined into the browser bundle at **Docker build** time,
 so they must be set as Railway **Variables** on the service (available during the
-image build), not only at runtime. Only publishable/public values belong there —
-never bake `STRIPE_SECRET_*` or service-role keys into `VITE_*`.
+image build via matching `ARG` names in the Dockerfile), not only at runtime. Only
+publishable/public values belong there — never bake `STRIPE_SECRET_*` or
+service-role keys into `VITE_*`.
+
+The Dockerfile does **not** promote `VITE_*` to `ENV` (that would store them in
+image config). Optional `VITE_SENTRY_DSN` is also declared as an `ARG` when you
+want browser Sentry in the production bundle.
+
+### Local / CI Docker build (BuildKit secrets)
+
+Railway’s Dockerfile builder does **not** support `docker build --secret`. For
+local or CI image builds, enable BuildKit and mount the same ids as secrets so
+values are not passed via leaky `ENV` layers:
+
+```bash
+# PowerShell
+$env:DOCKER_BUILDKIT = "1"
+docker build `
+  --secret id=VITE_SUPABASE_URL,env=VITE_SUPABASE_URL `
+  --secret id=VITE_SUPABASE_ANON_KEY,env=VITE_SUPABASE_ANON_KEY `
+  --secret id=VITE_SUPABASE_PUBLISHABLE_KEY,env=VITE_SUPABASE_PUBLISHABLE_KEY `
+  --secret id=VITE_PAYMENTS_CLIENT_TOKEN,env=VITE_PAYMENTS_CLIENT_TOKEN `
+  --secret id=VITE_SENTRY_DSN,env=VITE_SENTRY_DSN `
+  -t hybrid-ai-forge .
+```
+
+```bash
+# bash
+DOCKER_BUILDKIT=1 docker build \
+  --secret id=VITE_SUPABASE_URL,env=VITE_SUPABASE_URL \
+  --secret id=VITE_SUPABASE_ANON_KEY,env=VITE_SUPABASE_ANON_KEY \
+  --secret id=VITE_SUPABASE_PUBLISHABLE_KEY,env=VITE_SUPABASE_PUBLISHABLE_KEY \
+  --secret id=VITE_PAYMENTS_CLIENT_TOKEN,env=VITE_PAYMENTS_CLIENT_TOKEN \
+  --secret id=VITE_SENTRY_DSN,env=VITE_SENTRY_DSN \
+  -t hybrid-ai-forge .
+```
+
+Provide either `VITE_SUPABASE_ANON_KEY` or `VITE_SUPABASE_PUBLISHABLE_KEY` (the
+app accepts both). Omit `VITE_SENTRY_DSN` if unused (`required=false` mounts).
+You can also use `--secret id=NAME,src=/path/to/file` instead of `env=`.
+Do not commit secret files or real key values into the repo.
 
 ### Stripe runtime (checkout sessions)
 

@@ -118,8 +118,8 @@ export function QuickOrderForm() {
       const focusId = apply(false);
       // Only restore in-form focus while still on the order deep link —
       // leaving #order is owned by OrderIntakeSection (Escape → CTA).
+      // Re-check hash after paint so a same-tick Escape/back dismiss wins.
       if (!focusId || window.location.hash !== "#order") return;
-      // Restore focus after React commits the restored package value.
       requestAnimationFrame(() => {
         if (window.location.hash !== "#order") return;
         const el = document.getElementById(focusId) as HTMLElement | null;
@@ -433,6 +433,7 @@ export function QuickOrderForm() {
         </label>
         <input
           id="qo-artist"
+          name="artist"
           required
           value={artist}
           maxLength={200}
