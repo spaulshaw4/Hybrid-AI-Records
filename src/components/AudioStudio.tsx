@@ -38,7 +38,8 @@ function allowTokenlessGenerate(): boolean {
   }
 }
 
-import { checkEngineHealth, getEngineTrackTask } from "@/lib/apiframe-music.functions";
+import { checkEngineHealth } from "@/lib/apiframe-music.functions";
+import { checkStatus } from "@/lib/generate-status-fetch";
 import { streamStudioGenerate } from "@/lib/studio-generate-fetch";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
 import {
@@ -1377,7 +1378,6 @@ export function AudioStudio() {
   const fetchBalance = useServerFn(getTokenBalance);
   const spendToken = useServerFn(spendTokens);
   const reportGenerationFailure = useServerFn(notifyGenerationFailed);
-  const pollGeneration = useServerFn(getEngineTrackTask);
   const runEngineHealthCheck = useServerFn(checkEngineHealth);
   const checkBreakerHealth = useServerFn(getEngineBreakerStatus);
 
@@ -2535,7 +2535,7 @@ export function AudioStudio() {
         await abortableDelay(POLL_INTERVAL_MS, abort.signal);
         if (cancelRef.current || abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
         try {
-          const current = await pollGeneration({ data: { taskId: started.taskId } });
+          const current = await checkStatus(started.taskId);
           pollErrors = 0;
           ready = current.tracks.filter((t) => t.audioUrl);
         } catch (pollError) {
@@ -2835,7 +2835,7 @@ export function AudioStudio() {
           if (cancelRef.current) throw new Error(CANCELLED_MESSAGE);
           setStatusText(renderingLabel(job.startedAt));
           try {
-            const current = await pollGeneration({ data: { taskId: job.taskId } });
+            const current = await checkStatus(job.taskId);
             resumeErrors = 0;
             ready = current.tracks.filter((t) => t.audioUrl);
           } catch (pollError) {
@@ -2987,7 +2987,7 @@ export function AudioStudio() {
       }
 
     },
-    [pollGeneration, closeVaultTrack, spendToken],
+    [closeVaultTrack, spendToken],
   );
 
   /**

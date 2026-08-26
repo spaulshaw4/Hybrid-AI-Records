@@ -592,45 +592,77 @@ export const generateEngineTrack = createServerFn({ method: "POST" })
 
 
 
+export type EngineTrackTaskPollResult = {
+  taskId: string;
+  status: string;
+  tracks: Array<{
+    id: string;
+    title: string | null;
+    audioUrl: string | null;
+    imageUrl?: string | null;
+    duration: number | null;
+  }>;
+  correlationId: string;
+};
+
+/**
+ * Server-side MusicAPI / Apiframe poll. Used by the TanStack server fn and by
+ * GET /api/generate/status so the browser never calls provider URLs directly.
+ */
+export async function pollEngineTrackTask(
+  taskId: string,
+  userId: string,
+): Promise<EngineTrackTaskPollResult> {
+  const { fetchStudioTrackTask } = await import("@/lib/music-generation");
+  const { archiveGeneratedAudio, fetchApiframeTask, newCorrelationId } = await import(
+    "@/lib/apiframe.server"
+  );
+  const correlationId = newCorrelationId("poll");
+  try {
+    const sonic = await fetchStudioTrackTask(taskId);
+    const audioUrl = sonic.audioUrl
+      ? await archiveGeneratedAudio(sonic.audioUrl, userId, taskId).catch(() => sonic.audioUrl)
+      : null;
+    return {
+      taskId: sonic.taskId,
+      status: sonic.status === "completed" ? "succeeded" : sonic.status,
+      tracks: audioUrl
+        ? [
+            {
+              id: sonic.taskId,
+              title: sonic.title || "Mastered track",
+              audioUrl,
+              imageUrl: sonic.imageUrl,
+              duration: null,
+            },
+          ]
+        : [],
+      correlationId,
+    };
+  } catch {
+    const result = await fetchApiframeTask(taskId, correlationId);
+    const tracks = await Promise.all(
+      result.tracks.map(async (track) => ({
+        ...track,
+        audioUrl: track.audioUrl
+          ? await archiveGeneratedAudio(track.audioUrl, userId, taskId).catch(() => null)
+          : null,
+      })),
+    );
+
+    return {
+      taskId: result.taskId ?? taskId,
+      status: result.status,
+      tracks,
+      correlationId,
+    };
+  }
+}
+
 export const getEngineTrackTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) => taskSchema.parse(data))
-  .handler(async ({ data, context }) => {
-    const { fetchStudioTrackTask } = await import("@/lib/music-generation");
-    const { archiveGeneratedAudio, fetchApiframeTask, newCorrelationId } = await import("@/lib/apiframe.server");
-    const correlationId = newCorrelationId("poll");
-    try {
-      const sonic = await fetchStudioTrackTask(data.taskId);
-      const audioUrl = sonic.audioUrl
-        ? await archiveGeneratedAudio(sonic.audioUrl, context.userId, data.taskId).catch(() => sonic.audioUrl)
-        : null;
-      return {
-        taskId: sonic.taskId,
-        status: sonic.status === "completed" ? "succeeded" : sonic.status,
-        tracks: audioUrl
-          ? [{ id: sonic.taskId, title: sonic.title || "Mastered track", audioUrl, imageUrl: sonic.imageUrl, duration: null }]
-          : [],
-        correlationId,
-      };
-    } catch {
-      const result = await fetchApiframeTask(data.taskId, correlationId);
-      const tracks = await Promise.all(
-        result.tracks.map(async (track) => ({
-          ...track,
-          audioUrl: track.audioUrl
-            ? await archiveGeneratedAudio(track.audioUrl, context.userId, data.taskId).catch(() => null)
-            : null,
-        })),
-      );
-
-      return {
-        taskId: result.taskId ?? data.taskId,
-        status: result.status,
-        tracks,
-        correlationId,
-      };
-    }
-  });
+  .handler(async ({ data, context }) => pollEngineTrackTask(data.taskId, context.userId));
 
 /** Preflight check so the studio can warn before anyone starts a generation. */
 export const checkEngineHealth = createServerFn({ method: "GET" })

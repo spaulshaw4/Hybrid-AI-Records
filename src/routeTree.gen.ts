@@ -58,6 +58,7 @@ import { Route as AuthenticatedAdminTokenLedgerRouteImport } from './routes/_aut
 import { Route as AuthenticatedAdminTokensRouteImport } from './routes/_authenticated/admin.tokens'
 import { Route as AuthenticatedAdminTranslationsRouteImport } from './routes/_authenticated/admin.translations'
 import { Route as AuthenticatedAdminUploadsRouteImport } from './routes/_authenticated/admin.uploads'
+import { Route as ApiGenerateStatusRouteImport } from './routes/api/generate/status'
 import { Route as ApiLocalVaultFileNameRouteImport } from './routes/api/local-vault.$fileName'
 import { Route as ApiPublicAudioProxyRouteImport } from './routes/api/public/audio-proxy'
 import { Route as ApiPublicClientErrorsRouteImport } from './routes/api/public/client-errors'
@@ -329,6 +330,11 @@ const AuthenticatedAdminUploadsRoute =
     path: '/admin/uploads',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiGenerateStatusRoute = ApiGenerateStatusRouteImport.update({
+  id: '/api/generate/status',
+  path: '/api/generate/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiLocalVaultFileNameRoute = ApiLocalVaultFileNameRouteImport.update({
   id: '/api/local-vault/$fileName',
   path: '/api/local-vault/$fileName',
@@ -435,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
@@ -496,6 +503,7 @@ export interface FileRoutesByTo {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
@@ -559,6 +567,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/_authenticated/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/_authenticated/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
@@ -622,6 +631,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
@@ -683,6 +693,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
@@ -745,6 +756,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/tokens'
     | '/_authenticated/admin/translations'
     | '/_authenticated/admin/uploads'
+    | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
@@ -790,6 +802,7 @@ export interface RootRouteChildren {
   StartIndexRoute: typeof StartIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
+  ApiGenerateStatusRoute: typeof ApiGenerateStatusRoute
   ApiLocalVaultFileNameRoute: typeof ApiLocalVaultFileNameRoute
   ApiPublicAudioProxyRoute: typeof ApiPublicAudioProxyRoute
   ApiPublicClientErrorsRoute: typeof ApiPublicClientErrorsRoute
@@ -1147,6 +1160,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminUploadsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/generate/status': {
+      id: '/api/generate/status'
+      path: '/api/generate/status'
+      fullPath: '/api/generate/status'
+      preLoaderRoute: typeof ApiGenerateStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/local-vault/$fileName': {
       id: '/api/local-vault/$fileName'
       path: '/api/local-vault/$fileName'
@@ -1334,6 +1354,7 @@ const rootRouteChildren: RootRouteChildren = {
   StartIndexRoute: StartIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
+  ApiGenerateStatusRoute: ApiGenerateStatusRoute,
   ApiLocalVaultFileNameRoute: ApiLocalVaultFileNameRoute,
   ApiPublicAudioProxyRoute: ApiPublicAudioProxyRoute,
   ApiPublicClientErrorsRoute: ApiPublicClientErrorsRoute,
@@ -1348,13 +1369,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
