@@ -56,12 +56,13 @@ export const spendTokens = createServerFn({ method: "POST" })
     limitBy("spendTokens", context.userId, RATE_LIMITS.tokenSpend, "token requests");
     const { requireSupabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = requireSupabaseAdmin();
-    const { data: rpcRows, error } = await admin.rpc("spend_hybrid_tokens", {
+    const rpcArgs = {
       _user_id: context.userId,
       _amount: data.amount,
       _note: data.note || undefined,
       _idempotency_key: data.idempotencyKey || undefined,
-    });
+    };
+    const { data: rpcRows, error } = await admin.rpc("spend_hybrid_tokens", rpcArgs);
 
     const row = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as
       | {
@@ -74,7 +75,13 @@ export const spendTokens = createServerFn({ method: "POST" })
       | undefined;
 
     if (error || !row || typeof row.ok !== "boolean") {
-      console.error("[spendTokens] spend_hybrid_tokens failed", error?.message ?? "empty row");
+      console.error("[spendTokens] spend_hybrid_tokens failed", {
+        rpcArgs,
+        error: error
+          ? { message: error.message, code: error.code, details: error.details, hint: error.hint }
+          : null,
+        raw: rpcRows,
+      });
       const { data: balanceRow } = await admin
         .from("token_balances")
         .select("balance")
@@ -87,6 +94,11 @@ export const spendTokens = createServerFn({ method: "POST" })
       };
     }
     if (!row.ok) {
+      console.error("[spendTokens] spend_hybrid_tokens denied (402)", {
+        rpcArgs,
+        row,
+        raw: rpcRows,
+      });
       return {
         ok: false,
         error: row.reason ?? "Not enough Hybrid Tokens. Buy more to keep generating.",

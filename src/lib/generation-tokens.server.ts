@@ -115,12 +115,14 @@ export async function authorizeAndSpendGenerationToken(input: {
     );
   }
 
-  const { data, error } = await admin.rpc("spend_hybrid_tokens", {
+  // Params must match SQL exactly: spend_hybrid_tokens(_user_id, _amount, _note, _idempotency_key).
+  const rpcArgs = {
     _user_id: input.userId,
     _amount: amount,
     _note: input.note || "Studio master generation",
     _idempotency_key: key,
-  });
+  } as const;
+  const { data, error } = await admin.rpc("spend_hybrid_tokens", rpcArgs);
 
   // Prefer array form — `.maybeSingle()` can drop a valid SETOF row as PGRST116.
   const row = (Array.isArray(data) ? data[0] : data) as
@@ -139,9 +141,9 @@ export async function authorizeAndSpendGenerationToken(input: {
       code: error.code,
       details: error.details,
       hint: error.hint,
-      userId: input.userId,
-      amount,
+      rpcArgs,
       priorBalance,
+      raw: data,
     });
     const latest = await readTokenBalance(admin, input.userId);
     // If funds remain, surface a retryable debit failure — not "insufficient".
@@ -159,10 +161,9 @@ export async function authorizeAndSpendGenerationToken(input: {
 
   if (!row || typeof row.ok !== "boolean") {
     console.error("[generation-tokens] spend_hybrid_tokens returned no row", {
-      userId: input.userId,
-      amount,
+      rpcArgs,
       priorBalance,
-      data,
+      raw: data,
     });
     throw new InsufficientTokensError(
       "Could not update your token balance. Try again.",
@@ -171,6 +172,13 @@ export async function authorizeAndSpendGenerationToken(input: {
   }
 
   if (!row.ok) {
+    // Log raw RPC payload on soft-fail / 402 so we can spot user-id or schema mismatch.
+    console.error("[generation-tokens] spend_hybrid_tokens denied (402)", {
+      rpcArgs,
+      priorBalance,
+      row,
+      raw: data,
+    });
     throw new InsufficientTokensError(
       row.reason ?? "Not enough Hybrid Tokens. Buy more to keep generating.",
       row.balance ?? 0,
