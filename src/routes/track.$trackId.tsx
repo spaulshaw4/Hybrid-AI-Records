@@ -4,8 +4,6 @@ import { toast } from "sonner";
 
 import { CoverImage } from "@/components/CoverImage";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { STREAM_TRACKS, type StreamTrack } from "@/lib/radio-tracks";
 import { absoluteUrl, DEFAULT_OG_IMAGE, pageHead, SITE_ORIGIN } from "@/lib/social-meta";
 import { hybridTrackDownloadFileName, hybridTrackDownloadTitle } from "@/lib/track-download-name";
@@ -39,33 +37,48 @@ export const Route = createFileRoute("/track/$trackId")({
   component: TrackSharePage,
 });
 
+function handleDownload(track: StreamTrack) {
+  const fileName = hybridTrackDownloadFileName(track.title);
+  const link = document.createElement("a");
+  link.href = track.src;
+  link.download = fileName;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 async function handleShare(track: StreamTrack) {
-  const url = `${SITE_ORIGIN}/track/${track.id}`;
+  const trackTitle = hybridTrackDownloadTitle(track.title);
+  const pageUrl = `${SITE_ORIGIN}/track/${track.id}`;
+  const audioUrl = track.src;
+
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
       await navigator.share({
-        title: `${track.title} | Hybrid AI Records`,
-        text: `Check out this track created on Hybrid AI Records: ${track.title}`,
-        url,
+        title: `${trackTitle} - Hybrid AI Records`,
+        text: `Listen to ${trackTitle} on Hybrid AI Records`,
+        url: audioUrl || pageUrl,
       });
       return;
-    } catch (err) {
-      console.log("Share canceled or failed", err);
+    } catch {
+      /* canceled or failed */
       return;
     }
   }
+
   try {
-    await navigator.clipboard.writeText(track.src || url);
+    await navigator.clipboard.writeText(audioUrl || pageUrl);
     toast.success("Link copied to clipboard!");
   } catch {
-    toast.message("Copy this link", { description: url });
+    toast.message("Copy this link", { description: audioUrl || pageUrl });
   }
 }
 
 function TrackSharePage() {
   const { track } = Route.useLoaderData();
   const trackTitle = hybridTrackDownloadTitle(track.title);
-  const fileName = hybridTrackDownloadFileName(track.title);
 
   return (
     <main className="mx-auto flex min-h-[70vh] w-full max-w-3xl flex-col gap-6 px-4 py-10 text-zinc-100">
@@ -90,31 +103,31 @@ function TrackSharePage() {
             ) : null}
           </div>
 
-          <audio controls preload="metadata" src={track.src} className="w-full" />
+          <audio
+            controls
+            controlsList="nodownload"
+            preload="metadata"
+            src={track.src}
+            className="w-full"
+          />
 
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={track.src}
-              download={fileName}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                buttonVariants({ variant: "default", size: "sm" }),
-                "inline-flex items-center gap-2",
-              )}
-            >
-              <Download className="size-3.5" aria-hidden />
-              Download Track
-            </a>
-            <Button
+          <div className="mt-3 flex gap-2">
+            <button
               type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleShare(track)}
+              onClick={() => handleDownload(track)}
+              className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700"
             >
-              <Share2 className="size-3.5" aria-hidden />
+              <Download className="h-4 w-4" aria-hidden />
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleShare(track)}
+              className="flex items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 font-semibold text-white hover:bg-neutral-700"
+            >
+              <Share2 className="h-4 w-4" aria-hidden />
               Share
-            </Button>
+            </button>
           </div>
         </div>
       </div>
