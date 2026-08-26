@@ -91,6 +91,11 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
         instrumental: data.instrumental,
       });
     spendKey = generationTokenIdempotencyKey(runKey);
+    console.info("[generate-stream] burning token for authenticated user", {
+      userId,
+      spendKey,
+      title: data.title || null,
+    });
     await authorizeAndSpendGenerationToken({
       userId,
       supabase,
@@ -101,6 +106,12 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
   } catch (error) {
     const { InsufficientTokensError } = await import("@/lib/generation-tokens.server");
     if (error instanceof InsufficientTokensError) {
+      console.error("[generate-stream] token burn rejected (402)", {
+        userId,
+        spendKey,
+        balance: error.balance,
+        message: error.message,
+      });
       return Response.json(
         { error: error.message, balance: error.balance, statusCode: 402 },
         { status: 402 },

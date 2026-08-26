@@ -30,8 +30,20 @@ async function authHeaders(): Promise<Headers> {
     Accept: "text/event-stream",
     "Content-Type": "application/json",
   });
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  // Prefer getUser() so we never attach a stale anonymous/cached session JWT.
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return headers;
+  }
+  const { data: sessionData } = await supabase.auth.getSession();
+  let token = sessionData.session?.access_token;
+  if (!token || sessionData.session?.user?.id !== userData.user.id) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    token = refreshed.session?.access_token;
+  }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   return headers;
 }

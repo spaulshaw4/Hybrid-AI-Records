@@ -48,23 +48,63 @@ function createMockAdmin(options: {
   const refundCalls: Record<string, unknown>[] = [];
   const spentKeys = new Set<string>();
   const refundKeys = new Set<string>();
+  const ledgerKeys = new Set<string>();
 
   const admin = {
     from(table: string) {
       return {
-        select() {
+        select(_cols?: string) {
+          const filters: Record<string, unknown> = {};
           const query = {
-            eq() {
+            eq(col: string, val: unknown) {
+              filters[col] = val;
               return query;
             },
             maybeSingle: async () => {
               if (table === "user_roles") return { data: null };
               if (table === "profiles") return { data: { preferences: {} } };
               if (table === "token_balances") return { data: { balance } };
+              if (table === "token_ledger") {
+                const key = String(filters.idempotency_key ?? "");
+                if (key && ledgerKeys.has(key)) {
+                  return { data: { id: "ledger-1", balance_after: balance } };
+                }
+                return { data: null };
+              }
               return { data: null };
             },
           };
           return query;
+        },
+        upsert: async () => ({ data: null, error: null }),
+        update(values: { balance?: number; updated_at?: string }) {
+          const filters: Record<string, unknown> = {};
+          const query = {
+            eq(col: string, val: unknown) {
+              filters[col] = val;
+              return query;
+            },
+            select() {
+              return {
+                maybeSingle: async () => {
+                  if (table !== "token_balances") return { data: null, error: null };
+                  if (filters.user_id !== USER_ID) return { data: null, error: null };
+                  if (filters.balance !== undefined && Number(filters.balance) !== balance) {
+                    return { data: null, error: null };
+                  }
+                  if (typeof values.balance === "number") balance = values.balance;
+                  return { data: { balance }, error: null };
+                },
+              };
+            },
+          };
+          return query;
+        },
+        insert: async (row: { idempotency_key?: string | null }) => {
+          if (table === "token_ledger" && row.idempotency_key) {
+            ledgerKeys.add(row.idempotency_key);
+          }
+          return { data: null, error: null };
         },
       };
     },
@@ -95,6 +135,7 @@ function createMockAdmin(options: {
         }
         balance -= amount;
         spentKeys.add(key);
+        if (key) ledgerKeys.add(key);
         return Promise.resolve({
           data: [{ ok: true, balance, already_applied: false, reason: null }],
           error: null,
@@ -214,6 +255,38 @@ describe("Hybrid Engine diagnostic — token transaction integrity", () => {
       expect((err as InstanceType<typeof InsufficientTokensError>).balance).toBe(0);
       return true;
     });
+  });
+
+  it("recovers from paradoxical RPC deny when balance is still valid (shadowing bug)", async () => {
+    const { admin, getBalance } = createMockAdmin({
+      balance: 2,
+      spend: () => ({
+        data: [
+          {
+            ok: false,
+            balance: 2,
+            already_applied: false,
+            reason: "Not enough Hybrid Tokens. Buy more to keep generating.",
+          },
+        ],
+        error: null,
+      }),
+    });
+    vi.doMock("@/integrations/supabase/client.server", () => ({
+      requireSupabaseAdmin: () => admin,
+      tryGetSupabaseAdmin: () => admin,
+    }));
+
+    const tokens = await import("@/lib/generation-tokens.server");
+    await expect(
+      tokens.authorizeAndSpendGenerationToken({
+        userId: USER_ID,
+        supabase: admin as never,
+        idempotencyKey: "gen:diagnostic-shadow-fallback",
+        amount: 1,
+      }),
+    ).resolves.toMatchObject({ bypassed: false, balance: 1, alreadyApplied: false });
+    expect(getBalance()).toBe(1);
   });
 
   it("refunds idempotently after a simulated upstream failure", async () => {

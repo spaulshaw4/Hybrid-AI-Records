@@ -83,6 +83,122 @@ export async function readTokenBalance(supabase: DbClient, userId: string): Prom
   return data?.balance ?? 0;
 }
 
+type SpendRpcRow = {
+  ok?: boolean | null;
+  balance?: number | null;
+  already_applied?: boolean | null;
+  reason?: string | null;
+};
+
+/**
+ * PostgREST fallback when `spend_hybrid_tokens` returns a paradoxical denial
+ * (balance >= amount but ok=false) — classic PL/pgSQL OUT-column shadowing on
+ * an unmigrated DB. Uses optimistic locking on `token_balances.balance`.
+ */
+async function debitHybridTokensViaAdminTable(input: {
+  admin: DbClient;
+  userId: string;
+  amount: number;
+  note: string;
+  idempotencyKey: string;
+}): Promise<GenerationTokenAuth | null> {
+  const { admin, userId, amount, note, idempotencyKey: key } = input;
+
+  const { data: priorLedger } = await admin
+    .from("token_ledger")
+    .select("id, balance_after")
+    .eq("idempotency_key", key)
+    .maybeSingle();
+  if (priorLedger) {
+    const balance =
+      typeof priorLedger.balance_after === "number"
+        ? priorLedger.balance_after
+        : await readTokenBalance(admin, userId);
+    console.warn("[generation-tokens] table fallback: idempotent hit", { userId, key, balance });
+    return { bypassed: false, balance, alreadyApplied: true, idempotencyKey: key };
+  }
+
+  // Ensure a row exists so the optimistic update can match.
+  await admin.from("token_balances").upsert(
+    { user_id: userId, balance: 0 },
+    { onConflict: "user_id", ignoreDuplicates: true },
+  );
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await readTokenBalance(admin, userId);
+    if (current < amount) return null;
+
+    const next = current - amount;
+    const { data: updated, error: updateError } = await admin
+      .from("token_balances")
+      .update({ balance: next, updated_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("balance", current)
+      .select("balance")
+      .maybeSingle();
+
+    if (updateError) {
+      console.error("[CRITICAL] table fallback balance update failed", {
+        userId,
+        amount,
+        current,
+        message: updateError.message,
+        code: updateError.code,
+        details: updateError.details,
+      });
+      return null;
+    }
+    if (!updated) continue; // lost race — retry
+
+    const { error: ledgerError } = await admin.from("token_ledger").insert({
+      user_id: userId,
+      delta: -amount,
+      kind: "generation",
+      note,
+      balance_after: updated.balance,
+      idempotency_key: key,
+    });
+
+    if (ledgerError) {
+      // Unique idempotency collision after a concurrent writer — treat as applied.
+      if (ledgerError.code === "23505") {
+        const balance = await readTokenBalance(admin, userId);
+        return { bypassed: false, balance, alreadyApplied: true, idempotencyKey: key };
+      }
+      console.error("[CRITICAL] table fallback ledger insert failed", {
+        userId,
+        amount,
+        key,
+        message: ledgerError.message,
+        code: ledgerError.code,
+        details: ledgerError.details,
+      });
+      // Best-effort restore so we do not keep a silent debit without a ledger row.
+      await admin
+        .from("token_balances")
+        .update({ balance: current, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("balance", updated.balance);
+      return null;
+    }
+
+    console.warn("[generation-tokens] table fallback debit succeeded", {
+      userId,
+      amount,
+      balance: updated.balance,
+      key,
+    });
+    return {
+      bypassed: false,
+      balance: updated.balance,
+      alreadyApplied: false,
+      idempotencyKey: key,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Atomically validates + burns one (or more) Hybrid Tokens for a generation.
  * Idempotent on `idempotencyKey` — retries / coalesced runs never double-charge.
@@ -115,25 +231,45 @@ export async function authorizeAndSpendGenerationToken(input: {
     );
   }
 
+  const note = input.note || "Studio master generation";
   // Params must match SQL exactly: spend_hybrid_tokens(_user_id, _amount, _note, _idempotency_key).
   const rpcArgs = {
     _user_id: input.userId,
     _amount: amount,
-    _note: input.note || "Studio master generation",
+    _note: note,
     _idempotency_key: key,
   } as const;
   const { data, error } = await admin.rpc("spend_hybrid_tokens", rpcArgs);
 
   // Prefer array form — `.maybeSingle()` can drop a valid SETOF row as PGRST116.
-  const row = (Array.isArray(data) ? data[0] : data) as
-    | {
-        ok?: boolean | null;
-        balance?: number | null;
-        already_applied?: boolean | null;
-        reason?: string | null;
-      }
-    | null
-    | undefined;
+  const row = (Array.isArray(data) ? data[0] : data) as SpendRpcRow | null | undefined;
+
+  const tryTableFallback = async (reason: string): Promise<GenerationTokenAuth | null> => {
+    console.error("[CRITICAL] spend_hybrid_tokens RPC failure:", {
+      reason,
+      error: error
+        ? {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+          }
+        : null,
+      data,
+      userId: input.userId,
+      amount,
+      priorBalance,
+      rpcArgs,
+      row,
+    });
+    return debitHybridTokensViaAdminTable({
+      admin,
+      userId: input.userId,
+      amount,
+      note,
+      idempotencyKey: key,
+    });
+  };
 
   if (error) {
     console.error("[generation-tokens] spend_hybrid_tokens failed", {
@@ -146,8 +282,9 @@ export async function authorizeAndSpendGenerationToken(input: {
       raw: data,
     });
     const latest = await readTokenBalance(admin, input.userId);
-    // If funds remain, surface a retryable debit failure — not "insufficient".
     if (latest >= amount) {
+      const recovered = await tryTableFallback("postgrest_error_with_valid_balance");
+      if (recovered) return recovered;
       throw new InsufficientTokensError(
         "Could not update your token balance. Try again.",
         latest,
@@ -165,6 +302,10 @@ export async function authorizeAndSpendGenerationToken(input: {
       priorBalance,
       raw: data,
     });
+    if (priorBalance >= amount) {
+      const recovered = await tryTableFallback("empty_or_malformed_row");
+      if (recovered) return recovered;
+    }
     throw new InsufficientTokensError(
       "Could not update your token balance. Try again.",
       await readTokenBalance(admin, input.userId),
@@ -172,13 +313,19 @@ export async function authorizeAndSpendGenerationToken(input: {
   }
 
   if (!row.ok) {
-    // Log raw RPC payload on soft-fail / 402 so we can spot user-id or schema mismatch.
+    // Paradoxical 402: RPC reports insufficient while returned/prior balance still funds the burn.
+    // Note: a reused idempotency key on the fixed SQL returns ok=true (already_applied), not 402.
+    const reported = row.balance ?? priorBalance;
     console.error("[generation-tokens] spend_hybrid_tokens denied (402)", {
       rpcArgs,
       priorBalance,
       row,
       raw: data,
     });
+    if (reported >= amount && priorBalance >= amount) {
+      const recovered = await tryTableFallback("paradoxical_deny_valid_balance");
+      if (recovered) return recovered;
+    }
     throw new InsufficientTokensError(
       row.reason ?? "Not enough Hybrid Tokens. Buy more to keep generating.",
       row.balance ?? 0,
