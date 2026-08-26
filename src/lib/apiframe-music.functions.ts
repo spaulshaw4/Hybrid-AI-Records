@@ -386,6 +386,28 @@ export async function runGenerateEngineTrack(
     }
     console.log("[Gate 1/6] Finished — audio_url ready");
 
+    // Persist Gate 1 raw audio into user_vault immediately (service role) so a
+    // mid-render client disconnect cannot orphan the job with no vault row.
+    if (payload.vaultId && sonicUrl) {
+      try {
+        const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { persistUserVault } = await import("@/lib/user-vault.server");
+        const vaultDb = tryGetSupabaseAdmin() ?? context.supabase;
+        await persistUserVault(vaultDb, context.userId, {
+          id: payload.vaultId,
+          title: payload.title || "Untitled Track",
+          style: genre,
+          status: "processing",
+          rawAudioUrl: sonicUrl,
+        });
+      } catch (error) {
+        console.warn(
+          "[user_vault] Gate 1 raw persist skipped",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+
     const { executePipeline } = await import("@/lib/execute-pipeline.server");
     const { runHeavyPipelineJob } = await import("@/lib/pipeline-worker.server");
     const pipeline = await runHeavyPipelineJob({
@@ -408,6 +430,7 @@ export async function runGenerateEngineTrack(
           language: payload.language,
           customLanguage: payload.customLanguage,
           tokenIdempotencyKey: spendKey,
+          vaultId: payload.vaultId,
         }),
     });
 
@@ -460,6 +483,7 @@ export async function runGenerateEngineTrack(
     });
 
     const { persistUserVault } = await import("@/lib/user-vault.server");
+    console.log("Writing track to vault:", payload.vaultId ?? taskId);
     const vaultId = await persistUserVault(db, context.userId, {
       id: payload.vaultId,
       title: payload.title || "Untitled Track",
@@ -469,13 +493,20 @@ export async function runGenerateEngineTrack(
       instrumentalUrl,
       vocalUrl,
       rawAudioUrl,
+      tokensUsed: 1,
     });
     if (masterUrl) {
       const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
       await completeGenerationTask({
         taskId: payload.vaultId ?? vaultId ?? taskId,
+        vaultId: payload.vaultId ?? vaultId,
         userId: context.userId,
         audioUrl: masterUrl,
+        title: payload.title || "Untitled Track",
+        style: genre,
+        instrumentalUrl,
+        vocalUrl,
+        rawAudioUrl,
       });
     }
     if (!vaultId && masterUrl) {
@@ -553,6 +584,7 @@ export async function runGenerateEngineTrack(
       const abortLanding = isPipelineAbortError(error) ? error.landing : null;
       await failGenerationTask({
         taskId: startedTaskId,
+        vaultId: payload.vaultId,
         userId: context.userId,
         reason: abortLanding?.error ?? (error instanceof Error ? error.message : String(error ?? "")),
       }).catch(() => undefined);

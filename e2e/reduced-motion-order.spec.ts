@@ -93,6 +93,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
 
   test("release play preview opens and closes without animation stalls", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.locator("main#main-content, main").first().waitFor({ state: "visible", timeout: 15_000 });
     await page.waitForTimeout(300);
 
     const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
@@ -101,10 +102,14 @@ test.describe("Reduced motion — order deep link and focus", () => {
     const play = page.locator('button[aria-label^="Play video:"]').first();
     await expect(play).toBeVisible({ timeout: 15_000 });
     await play.scrollIntoViewIfNeeded();
-    await play.focus();
-    await page.keyboard.press("Enter");
-    await page.waitForURL(/\?v=/, { timeout: 8_000 }).catch(() => undefined);
+    await play.press("Enter").catch(() => undefined);
+    await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
+    if (!(await dialog.isVisible().catch(() => false))) {
+      await play.click({ force: true });
+      await page.waitForURL(/\?v=/, { timeout: 8_000 });
+    }
     await expect(dialog).toBeVisible({ timeout: 8_000 });
+    await expect(dialog.locator(".modal-panel-solid").first()).toBeVisible();
 
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);

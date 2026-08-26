@@ -126,6 +126,8 @@ export type ExecutePipelineInput = {
   customLanguage?: string;
   /** Ledger key for Hybrid Token burn (must match authorize-at-queue). */
   tokenIdempotencyKey?: string;
+  /** Client-opened `user_vault` UUID — settlement upserts this row, not the MusicAPI task id. */
+  vaultId?: string;
 };
 
 export type ExecutePipelineSuccess = LandingSuccessResponse & {
@@ -974,6 +976,7 @@ export async function executePipeline(
         gateMask,
         trackId,
         userId: input.userId,
+        vaultId: input.vaultId,
         masterUrl: finalMasterUrl,
         vocalUrl: mixVocalUrl,
         instrumentalUrl: mixInstrumentalUrl,

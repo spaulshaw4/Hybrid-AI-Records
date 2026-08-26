@@ -18,6 +18,8 @@ export type PostBinarySettlementInput = {
   gateMask: number;
   trackId: string;
   userId: string;
+  /** Client-opened `user_vault` row (UUID). Prefer over MusicAPI task id. */
+  vaultId?: string | null;
   masterUrl: string;
   vocalUrl: string | null;
   instrumentalUrl: string | null;
@@ -103,31 +105,61 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
   totalCharged: number;
   chargeLedger: ChargeLedgerEntry[];
 }): Promise<void> {
+  const vaultKey = input.vaultId?.trim() || input.trackId;
+  console.log("Writing track to vault:", vaultKey);
+
+  let committedVaultId: string | null = input.vaultId?.trim() || null;
+
+  // Canonical service-role upsert — survives SSE client disconnect.
+  try {
+    const { persistUserVault } = await import("@/lib/user-vault.server");
+    const admin = createEngineSupabaseClient();
+    if (admin) {
+      committedVaultId =
+        (await persistUserVault(admin, input.userId, {
+          id: input.vaultId ?? undefined,
+          title: input.title || "Untitled Track",
+          status: "completed",
+          masterUrl: input.masterUrl,
+          instrumentalUrl: input.instrumentalUrl,
+          vocalUrl: input.vocalUrl,
+          rawAudioUrl: input.publicAudioUrl,
+          tokensUsed: 1,
+        })) ?? committedVaultId;
+    } else {
+      console.error("[Settlement] no service-role client — vault write skipped");
+    }
+  } catch (error) {
+    console.error(
+      "[Settlement] persistUserVault threw",
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  // Bookkeeping for studio_tracks / generation_tasks (UUID keys only).
   await completeGenerationTask({
     taskId: input.trackId,
+    vaultId: committedVaultId ?? input.vaultId ?? input.trackId,
     userId: input.userId,
     audioUrl: input.masterUrl,
+    title: input.title,
+    instrumentalUrl: input.instrumentalUrl,
+    vocalUrl: input.vocalUrl,
+    rawAudioUrl: input.publicAudioUrl,
   });
 
   const supabase = createEngineSupabaseClient();
   if (!supabase) return;
   const now = new Date().toISOString();
 
-  // Best-effort extras — soft-fail if columns are absent (no forced migrations).
-  const vaultPatch: Record<string, unknown> = {
-    status: "completed",
-    master_url: input.masterUrl,
-    instrumental_url: input.instrumentalUrl,
-    vocal_url: input.vocalUrl,
-  };
-  await supabase
-    .from("user_vault")
-    .update(vaultPatch as never)
-    .eq("id", input.trackId)
-    .eq("user_id", input.userId)
-    .then(({ error }) => {
-      if (error) console.warn("[Settlement] user_vault patch:", error.message);
-    });
+  const uuidRe =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const taskIdForBookkeeping =
+    (committedVaultId && uuidRe.test(committedVaultId) ? committedVaultId : null) ??
+    (input.vaultId && uuidRe.test(input.vaultId) ? input.vaultId : null) ??
+    (uuidRe.test(input.trackId) ? input.trackId : null);
+
+  if (!taskIdForBookkeeping) return;
 
   const taskPatch: Record<string, unknown> = {
     status: "completed",
@@ -139,8 +171,10 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
   };
   await supabase
     .from("generation_tasks")
-    .update(taskPatch as never)
-    .eq("id", input.trackId)
+    .upsert(
+      { id: taskIdForBookkeeping, user_id: input.userId, ...taskPatch } as never,
+      { onConflict: "id" },
+    )
     .then(({ error }) => {
       if (error && !/final_gate_mask|total_charged|charge_ledger|column/i.test(error.message)) {
         console.warn("[Settlement] generation_tasks patch:", error.message);
@@ -154,7 +188,7 @@ async function finalizeDatabaseRecord(input: PostBinarySettlementInput & {
       mastered_status: "ready",
       updated_at: now,
     } as never)
-    .eq("id", input.trackId)
+    .eq("id", taskIdForBookkeeping)
     .eq("user_id", input.userId)
     .then(({ error }) => {
       if (error) console.warn("[Settlement] studio_tracks patch:", error.message);
@@ -169,6 +203,7 @@ export async function executeZeroChargeRollback(input: {
   gateMask: number;
   trackId: string;
   userId: string;
+  vaultId?: string | null;
   reason: string;
   residue?: ResidueCleanup;
   tmpPaths?: string[];
@@ -179,6 +214,7 @@ export async function executeZeroChargeRollback(input: {
   );
   await failGenerationTask({
     taskId: input.trackId,
+    vaultId: input.vaultId,
     userId: input.userId,
     reason: input.reason,
   }).catch(() => undefined);
@@ -214,6 +250,7 @@ export async function executePostBinarySettlement(
       gateMask: input.gateMask,
       trackId: input.trackId,
       userId: input.userId,
+      vaultId: input.vaultId,
       reason: `Incomplete gate mask ${input.gateMask} (need ${PIPELINE_COMPLETE})`,
       residue: input.residue,
       tmpPaths: input.tmpPaths,

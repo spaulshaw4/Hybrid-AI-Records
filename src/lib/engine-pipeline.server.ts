@@ -90,58 +90,129 @@ export async function uploadEngineMaster(
   return saveLocalAudioFile(bytes, objectPath, fileType);
 }
 
+const VAULT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function asVaultUuid(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && VAULT_UUID_RE.test(trimmed) ? trimmed : null;
+}
+
 /**
  * Marks the generate as completed in Supabase the moment a playable master
- * URL exists. Writes `user_vault` and `studio_tracks`, and best-effort
- * `generation_tasks` (same contract: status + audio_url).
+ * URL exists. Upserts `user_vault` (service role) and best-effort patches
+ * `studio_tracks` / `generation_tasks` when ids are real UUIDs.
+ *
+ * Prefer `vaultId` (client-opened `user_vault` row). MusicAPI `taskId` values
+ * are often not UUIDs and must not be used as `user_vault.id`.
  */
 export async function completeGenerationTask(input: {
   taskId?: string | null;
+  /** Client / pipeline vault row id — preferred key for `user_vault`. */
+  vaultId?: string | null;
   userId: string;
   audioUrl: string;
+  title?: string | null;
+  style?: string | null;
+  instrumentalUrl?: string | null;
+  vocalUrl?: string | null;
+  rawAudioUrl?: string | null;
 }): Promise<void> {
-  const taskId = input.taskId?.trim();
   const audioUrl = input.audioUrl.trim();
-  if (!taskId || !audioUrl) return;
+  if (!audioUrl) return;
   const supabase = createEngineSupabaseClient();
   if (!supabase) {
     console.warn("[engine] completeGenerationTask skipped — no admin client");
     return;
   }
   const now = new Date().toISOString();
+  const vaultRowId = asVaultUuid(input.vaultId) ?? asVaultUuid(input.taskId);
 
-  const { error: vaultError } = await supabase
-    .from("user_vault")
-    .update({ status: "completed", master_url: audioUrl })
-    .eq("id", taskId)
-    .eq("user_id", input.userId);
-  if (vaultError) {
-    console.warn("[engine] user_vault completion update failed", vaultError.message);
-  }
-
-  const { error: studioError } = await supabase
-    .from("studio_tracks")
-    .update({
-      audio_url: audioUrl,
-      mastered_status: "ready",
-      updated_at: now,
-    })
-    .eq("id", taskId)
-    .eq("user_id", input.userId);
-  if (studioError) {
-    console.warn("[engine] studio_tracks completion update failed", studioError.message);
-  }
-
-  const { error: taskError } = await supabase
-    .from("generation_tasks")
-    .update({
+  if (vaultRowId) {
+    console.log("Writing track to vault:", vaultRowId);
+    const vaultRow: Database["public"]["Tables"]["user_vault"]["Insert"] = {
+      id: vaultRowId,
+      user_id: input.userId,
+      title: input.title?.trim() || "Untitled Track",
+      style: input.style?.trim() || null,
       status: "completed",
-      audio_url: audioUrl,
-      updated_at: now,
-    })
-    .eq("id", taskId);
-  if (taskError) {
-    console.warn("[engine] generation_tasks completion update failed", taskError.message);
+      master_url: audioUrl,
+      tokens_used: 1,
+    };
+    if (input.instrumentalUrl) vaultRow.instrumental_url = input.instrumentalUrl;
+    if (input.vocalUrl) vaultRow.vocal_url = input.vocalUrl;
+    if (input.rawAudioUrl) vaultRow.raw_audio_url = input.rawAudioUrl;
+
+    const { error: vaultError } = await supabase
+      .from("user_vault")
+      .upsert(vaultRow, { onConflict: "id" });
+    if (vaultError) {
+      console.error("[engine] user_vault completion upsert failed", {
+        trackId: vaultRowId,
+        message: vaultError.message,
+        code: vaultError.code,
+      });
+    } else {
+      console.log("[engine] user_vault write committed", { trackId: vaultRowId, status: "completed" });
+    }
+  } else {
+    // MusicAPI task ids are often not UUIDs — never use them as user_vault.id.
+    const { randomUUID } = await import("node:crypto");
+    const freshId = randomUUID();
+    console.log("Writing track to vault:", freshId);
+    const { error: insertError } = await supabase.from("user_vault").insert({
+      id: freshId,
+      user_id: input.userId,
+      title: input.title?.trim() || "Untitled Track",
+      style: input.style?.trim() || null,
+      status: "completed",
+      master_url: audioUrl,
+      instrumental_url: input.instrumentalUrl ?? null,
+      vocal_url: input.vocalUrl ?? null,
+      raw_audio_url: input.rawAudioUrl ?? null,
+      tokens_used: 1,
+    });
+    if (insertError) {
+      console.error("[engine] user_vault insert failed", {
+        trackId: freshId,
+        message: insertError.message,
+        code: insertError.code,
+      });
+    } else {
+      console.log("[engine] user_vault write committed", { trackId: freshId, status: "completed" });
+    }
+  }
+
+  const studioId = vaultRowId ?? asVaultUuid(input.taskId);
+  if (studioId) {
+    const { error: studioError } = await supabase
+      .from("studio_tracks")
+      .update({
+        audio_url: audioUrl,
+        mastered_status: "ready",
+        updated_at: now,
+      })
+      .eq("id", studioId)
+      .eq("user_id", input.userId);
+    if (studioError) {
+      console.warn("[engine] studio_tracks completion update failed", studioError.message);
+    }
+
+    const { error: taskError } = await supabase
+      .from("generation_tasks")
+      .upsert(
+        {
+          id: studioId,
+          user_id: input.userId,
+          status: "completed",
+          audio_url: audioUrl,
+          updated_at: now,
+        } as never,
+        { onConflict: "id" },
+      );
+    if (taskError) {
+      console.warn("[engine] generation_tasks completion upsert failed", taskError.message);
+    }
   }
 }
 
@@ -152,40 +223,58 @@ export async function completeGenerationTask(input: {
  */
 export async function failGenerationTask(input: {
   taskId?: string | null;
+  vaultId?: string | null;
   userId: string;
   reason: string;
 }): Promise<void> {
-  const taskId = input.taskId?.trim();
-  if (!taskId) return;
+  const rowId = asVaultUuid(input.vaultId) ?? asVaultUuid(input.taskId);
+  if (!rowId) {
+    console.warn("[engine] failGenerationTask skipped — no UUID vault/task id", {
+      taskId: input.taskId,
+      vaultId: input.vaultId,
+    });
+    return;
+  }
   const supabase = createEngineSupabaseClient();
   if (!supabase) {
     console.warn("[engine] failGenerationTask skipped — no admin client");
     return;
   }
   const now = new Date().toISOString();
-  console.error("[GATE_FAIL] marking render failed", { taskId, reason: input.reason });
+  console.error("[GATE_FAIL] marking render failed", { taskId: rowId, reason: input.reason });
 
   const { error: taskError } = await supabase
     .from("generation_tasks")
     .update({ status: "failed", updated_at: now })
-    .eq("id", taskId);
+    .eq("id", rowId);
   if (taskError) {
     console.warn("[engine] generation_tasks failure update failed", taskError.message);
   }
 
-  const { error: vaultError } = await supabase
+  // Never overwrite a row that already has a playable master.
+  const { data: existing } = await supabase
     .from("user_vault")
-    .update({ status: "failed" })
-    .eq("id", taskId)
-    .eq("user_id", input.userId);
-  if (vaultError) {
-    console.warn("[engine] user_vault failure update failed", vaultError.message);
+    .select("master_url")
+    .eq("id", rowId)
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (existing?.master_url) {
+    console.warn("[engine] user_vault failure skipped — master already present", rowId);
+  } else {
+    const { error: vaultError } = await supabase
+      .from("user_vault")
+      .update({ status: "failed" })
+      .eq("id", rowId)
+      .eq("user_id", input.userId);
+    if (vaultError) {
+      console.warn("[engine] user_vault failure update failed", vaultError.message);
+    }
   }
 
   const { error: studioError } = await supabase
     .from("studio_tracks")
     .update({ mastered_status: "failed", updated_at: now })
-    .eq("id", taskId)
+    .eq("id", rowId)
     .eq("user_id", input.userId);
   if (studioError) {
     console.warn("[engine] studio_tracks failure update failed", studioError.message);

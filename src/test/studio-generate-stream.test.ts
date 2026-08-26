@@ -17,4 +17,17 @@ describe("studio generate SSE keep-alive", () => {
     expect(vault.VAULT_POLL_MS).toBe(4_000);
     expect(vault.VAULT_POLL_MAX_MS).toBe(360_000);
   });
+
+  it("starts synthesis before the stream controller so cancel cannot kill the job", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const src = await readFile(
+      join(process.cwd(), "src/lib/studio-generate-stream.server.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(/jobPromise = runWithPipelineProgressCallback/);
+    expect(src).toMatch(/cancel\(\)/);
+    expect(src).toMatch(/synthesis continues/);
+    expect(src).toMatch(/do NOT abort jobPromise/i);
+  });
 });

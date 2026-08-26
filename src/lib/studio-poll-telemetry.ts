@@ -12,12 +12,18 @@ export type StudioPollDisconnectDetails = {
   vaultId?: string | null;
   taskId?: string | null;
   statusCode?: number;
+  /** e.g. StudioStreamDroppedError — telemetry only, never shown in UI */
+  errorName?: string | null;
 };
 
 /** Best-effort insert; must never throw or block the poll loop. */
 export function logTransientPollDisconnect(details: StudioPollDisconnectDetails): void {
   if (typeof window === "undefined") return;
   const reference = (details.vaultId || details.taskId || "").slice(0, 40) || null;
+  const isStreamDrop =
+    details.source === "sse_stream" ||
+    details.errorName === "StudioStreamDroppedError" ||
+    /stream.?drop/i.test(details.message ?? "");
   void supabase
     .from("funnel_events")
     .insert({
@@ -26,9 +32,10 @@ export function logTransientPollDisconnect(details: StudioPollDisconnectDetails)
       reference,
       visitor_session: visitorSessionId(),
       details: {
-        kind: "transient_network",
+        kind: isStreamDrop ? "stream_drop" : "transient_network",
         source: details.source,
         message: details.message?.slice(0, 200) ?? null,
+        errorName: details.errorName?.slice(0, 80) ?? null,
         statusCode: details.statusCode ?? null,
         at: new Date().toISOString(),
       },

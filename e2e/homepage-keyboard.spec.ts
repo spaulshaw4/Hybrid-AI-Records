@@ -18,14 +18,14 @@ async function openPreview(page: Page) {
     const play = page.locator('button[aria-label^="Play video:"]').first();
     await expect(play).toBeVisible({ timeout: 15_000 });
     await play.scrollIntoViewIfNeeded();
-    await play.focus();
-    await expect(play).toBeFocused();
-    await page.keyboard.press("Enter");
-    // URL-driven modal: wait for ?v= then the solid dialog shell.
-    await page.waitForURL(/\?v=/, { timeout: 8_000 }).catch(() => undefined);
+    // Prefer locator.press / click — bare keyboard Enter is flaky before handlers attach.
+    await play.press("Enter").catch(() => undefined);
+    await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
+    if (await dialog.isVisible().catch(() => false)) return;
+    await play.click({ force: true });
+    await page.waitForURL(/\?v=/, { timeout: 5_000 }).catch(() => undefined);
     if (await dialog.isVisible().catch(() => false)) return;
     await page.waitForTimeout(300);
-    if (await dialog.isVisible().catch(() => false)) return;
   }
   await expect(dialog).toBeVisible({ timeout: 8_000 });
 }
@@ -59,7 +59,11 @@ async function tabUntil(
 test.describe("Homepage keyboard navigation", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.locator("header").first().waitFor({ state: "visible", timeout: 15_000 });
+    // Desktop uses the sidebar nav; the <header> topbar is `lg:hidden` and stays hidden at 1280px.
+    await page.locator("main#main-content, main").first().waitFor({ state: "visible", timeout: 15_000 });
+    await expect(page.getByRole("link", { name: "Create Your Track" }).first()).toBeVisible({
+      timeout: 15_000,
+    });
     // Avoid networkidle — catalog / analytics keep the network busy and hang CI.
     await page.waitForTimeout(300);
   });

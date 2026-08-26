@@ -114,6 +114,7 @@ import {
   ENGINE_BUSY_REFUNDED_MESSAGE,
   isEngineBusyRefundedError,
   isStudioStreamDroppedError,
+  isTransientUpstreamError,
 } from "@/lib/engine-bounce-back";
 import { logTransientPollDisconnect } from "@/lib/studio-poll-telemetry";
 
@@ -1570,25 +1571,44 @@ export function AudioStudio() {
   }, []);
 
   const failPipelineStep = useCallback((step: string, error: unknown) => {
+    // Recoverable SSE/network drops must never paint the red pipeline card —
+    // vault short-poll failover keeps the progress bar alive instead.
+    if (isStudioStreamDroppedError(error)) {
+      logTransientPollDisconnect({
+        source: "sse_stream",
+        message: error instanceof Error ? error.message : "SSE dropped",
+        errorName: "StudioStreamDroppedError",
+      });
+      return null;
+    }
     const message =
       error instanceof Error
         ? error.message
         : typeof error === "object" && error && "message" in error
           ? String((error as { message?: unknown }).message ?? "Pipeline execution failed")
           : String(error ?? "Pipeline execution failed");
+    // Never surface class names / stacks in the artist-facing notice.
+    const safeMessage = message
+      .replace(/\bStudioStreamDroppedError\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
     const resolvedStep = displayPipelineStep(
       step || readErrorStep(error),
       pipelineStepRef.current,
     );
-    const lastError: PipelineLastError = { step: resolvedStep, message, raw: error };
-    console.error(`[PIPELINE_ERROR] Step: ${resolvedStep} ->`, message, error);
+    const lastError: PipelineLastError = {
+      step: resolvedStep,
+      message: safeMessage || "Pipeline execution failed",
+      raw: error,
+    };
+    console.error(`[PIPELINE_ERROR] Step: ${resolvedStep} ->`, safeMessage, error);
     setPipelineState((prev) => ({
       ...prev,
       currentStep: (resolvedStep === "idle" ? "validate" : resolvedStep) as PipelineStepId,
       status: "error",
       lastError,
     }));
-    setRollbackNotice(`${resolvedStep}: ${message}`);
+    setRollbackNotice(`${resolvedStep}: ${lastError.message}`);
     return lastError;
   }, []);
 
@@ -2292,6 +2312,10 @@ export function AudioStudio() {
     setPlaybackSrc(null);
     setStatusText("Checking your Hybrid Tokens…");
     beginPipelineStep("validate", { style: styleLine, lyricsLength: lyrics.length });
+    // Mobile: jump to the live % / progress bar as soon as Generate is tapped.
+    requestAnimationFrame(() => {
+      stepTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 
     let runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const trackTitle = title.trim() || "Untitled master track";
@@ -2668,13 +2692,31 @@ export function AudioStudio() {
             abortableBarrier(abort.signal),
           ])) as typeof started;
         } catch (streamErr) {
-          // Mobile Safari often drops SSE mid-render — short-poll Vault instead of crashing.
-          if (!isStudioStreamDroppedError(streamErr) || !audioVaultId) throw streamErr;
+          // Mobile Safari often drops SSE mid-render — never paint an error card;
+          // short-poll Vault silently until the 6-minute ceiling.
+          if (
+            isGenerationAborted(streamErr) ||
+            abort.signal.aborted ||
+            cancelRef.current
+          ) {
+            throw streamErr;
+          }
+          const recoverableDrop =
+            isStudioStreamDroppedError(streamErr) || isTransientUpstreamError(streamErr);
+          if (!recoverableDrop) throw streamErr;
+
+          const pollVaultId = audioVaultId ?? vaultId;
           logTransientPollDisconnect({
             source: "sse_stream",
             message: streamErr instanceof Error ? streamErr.message : "SSE dropped",
-            vaultId: audioVaultId,
+            vaultId: pollVaultId,
+            errorName: isStudioStreamDroppedError(streamErr)
+              ? "StudioStreamDroppedError"
+              : streamErr instanceof Error
+                ? streamErr.name
+                : "network",
           });
+          // Keep progress UI active — do not set pipeline error / rollback notice.
           setStatusText(renderingLabel(Date.now()));
           const vaultDeadline = Date.now() + Math.min(VAULT_POLL_MAX_MS, POLL_TIMEOUT_MS);
           let recovered: {
@@ -2684,10 +2726,17 @@ export function AudioStudio() {
           } | null = null;
           while (Date.now() < vaultDeadline) {
             if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
-            if (isGuestVaultId(audioVaultId)) {
+            if (pollVaultId && isGuestVaultId(pollVaultId)) {
               try {
                 const guests = await listGuestVaultTracks();
-                const hit = guests.find((t) => t.id === audioVaultId);
+                const hit =
+                  guests.find((t) => t.id === pollVaultId) ??
+                  guests.find(
+                    (t) =>
+                      t.status === "completed" &&
+                      t.masterUrl &&
+                      (t.title === trackTitle || !t.title),
+                  );
                 if (hit?.status === "completed" && hit.masterUrl) {
                   recovered = {
                     tracks: [{ audioUrl: hit.masterUrl, title: hit.title }],
@@ -2695,12 +2744,12 @@ export function AudioStudio() {
                   };
                   break;
                 }
-                if (hit?.status === "failed") break;
+                if (hit?.status === "failed" && hit.id === pollVaultId) break;
               } catch (guestErr) {
                 logTransientPollDisconnect({
                   source: "vault_poll",
                   message: guestErr instanceof Error ? guestErr.message : "guest vault poll failed",
-                  vaultId: audioVaultId,
+                  vaultId: pollVaultId,
                 });
               }
             } else {
@@ -2709,24 +2758,35 @@ export function AudioStudio() {
                 logTransientPollDisconnect({
                   source: "vault_poll",
                   message: catalog.message,
-                  vaultId: audioVaultId,
+                  vaultId: pollVaultId,
                   statusCode: catalog.status,
                 });
               } else {
-                const hit = catalog.tracks.find((t) => t.id === audioVaultId);
+                const hit =
+                  (pollVaultId
+                    ? catalog.tracks.find((t) => t.id === pollVaultId)
+                    : undefined) ??
+                  catalog.tracks.find(
+                    (t) =>
+                      t.status === "completed" &&
+                      t.master_url &&
+                      t.title === trackTitle,
+                  );
                 if (hit?.status === "completed" && hit.master_url) {
+                  if (pollVaultId && !audioVaultId) audioVaultId = pollVaultId;
                   recovered = {
                     tracks: [{ audioUrl: hit.master_url, title: hit.title }],
                     tokenSettled: true,
                   };
                   break;
                 }
-                if (hit?.status === "failed") break;
+                if (pollVaultId && hit?.status === "failed" && hit.id === pollVaultId) break;
               }
             }
             await abortableDelay(VAULT_POLL_MS, abort.signal);
           }
           if (!recovered?.tracks?.[0]?.audioUrl) {
+            // Hard failure only after the full vault poll window — clean copy, no stream-drop class names.
             throw new Error(
               "Generation timed out after 6 minutes — no completed track in Vault.",
             );
@@ -2948,6 +3008,86 @@ export function AudioStudio() {
 
     } catch (err) {
       setStatusText(null);
+      // Defensive: recoverable stream drops must never paint the red card or raw class names.
+      // The SSE catch above normally vault-polls; if one still escapes, stay silent on pipeline
+      // error UI and offer a clean reconnect — never surface StudioStreamDroppedError.
+      if (isStudioStreamDroppedError(err)) {
+        logTransientPollDisconnect({
+          source: "sse_stream",
+          message: err instanceof Error ? err.message : "SSE dropped",
+          vaultId: audioVaultId ?? vaultId,
+          errorName: "StudioStreamDroppedError",
+        });
+        setPipelineState((prev) => ({
+          ...prev,
+          status: "idle",
+          lastError: null,
+        }));
+        const recoveredAudio =
+          stageAudio && isPlayableAudioSource(stageAudio) ? stageAudio : null;
+        if (recoveredAudio) {
+          const recoveredTitle = stageTitle || trackTitle;
+          setResult({
+            title: recoveredTitle,
+            style: styleLine,
+            vocalProfile: activeVocalProfile(),
+            audioUrl: recoveredAudio,
+          });
+          setBusy(false);
+          updateHistory(runId, {
+            title: recoveredTitle,
+            audioUrl: recoveredAudio,
+            status: "ready",
+          });
+          await recordVault({
+            status: "ready",
+            audioUrl: recoveredAudio,
+            title: recoveredTitle,
+          });
+          await recordAudioVault({
+            status: "completed",
+            title: recoveredTitle,
+            masterUrl: recoveredAudio,
+            tokensUsed: 1,
+          });
+          notifyVaultOfNewGeneration({
+            id: audioVaultId ?? undefined,
+            title: recoveredTitle,
+            style: styleLine || "Custom",
+            status: "completed",
+            masterUrl: recoveredAudio,
+          });
+          setGenerationCompleted((n) => n + 1);
+          toast.success("Master track ready.");
+          return;
+        }
+        const reconnectMsg =
+          "The connection dropped mid-render. Your track may still finish in Vault — tap Retry to reconnect.";
+        setResult(null);
+        updateHistory(runId, { status: "failed", error: reconnectMsg });
+        await recordVault({ status: "failed", error: reconnectMsg });
+        await recordAudioVault({ status: "failed", title: trackTitle });
+        if (stageTaskId && Date.now() - stageStartedAt < POLL_TIMEOUT_MS) {
+          setRetryPlan({
+            stage: "poll",
+            label: "Retry — reconnect to the render already running",
+            job: {
+              taskId: stageTaskId,
+              runId,
+              vaultId,
+              title: stageTitle,
+              styleLine,
+              vocalProfile: activeVocalProfile(),
+              startedAt: stageStartedAt,
+            },
+          });
+        } else {
+          setRetryPlan({ stage: "render", label: "Retry generation" });
+        }
+        setRollbackNotice(reconnectMsg);
+        toast.error("Connection dropped", { description: reconnectMsg });
+        return;
+      }
       const raw = err instanceof Error ? err.message : GENERATION_FAIL_MESSAGE;
       const message = readableEngineError(raw);
       const cancelled = message === CANCELLED_MESSAGE || isGenerationAborted(err);
@@ -4802,9 +4942,11 @@ export function AudioStudio() {
                   pipelineState.currentStep,
                 )}
               </p>
-              <p>{pipelineState.lastError.message}</p>
-              <p className="break-all font-mono text-[11px] opacity-80">
-                {previewPipelinePayload(pipelineState.lastError.raw, 240)}
+              <p>
+                {String(pipelineState.lastError.message ?? "")
+                  .replace(/\bStudioStreamDroppedError\b/gi, "")
+                  .replace(/\s{2,}/g, " ")
+                  .trim() || "Something went wrong. Please try again."}
               </p>
               <Button
                 type="button"
@@ -4851,7 +4993,12 @@ export function AudioStudio() {
               className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-center text-xs text-destructive-foreground"
               role="alert"
             >
-              <p>{rollbackNotice}</p>
+              <p>
+                {rollbackNotice
+                  .replace(/\bStudioStreamDroppedError\b/gi, "")
+                  .replace(/\s{2,}/g, " ")
+                  .trim()}
+              </p>
               {retryPlan ? (
                 <Button
                   type="button"

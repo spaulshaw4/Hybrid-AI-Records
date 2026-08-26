@@ -12,6 +12,10 @@ import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
  * SSE generate with keepalives so long Demucs / CWALO / Gate 1 waits do not
  * surface as browser "Failed to fetch" on idle HTTP connections.
  *
+ * Synthesis is fully detached from the SSE ReadableStream (see
+ * createGenerateSseResponse): client disconnect / tab switch must not abort
+ * the pipeline or the service-role `user_vault` upsert.
+ *
  * Token burns happen server-side before the AI pipeline. Insufficient balance
  * returns HTTP 402 before the event-stream opens.
  */

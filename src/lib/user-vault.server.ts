@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { sanitizeVaultTracks } from "@/lib/vault-tracks";
+import { randomUUID } from "node:crypto";
 
 export type UserVaultStatus = "processing" | "completed" | "failed";
 
@@ -33,124 +34,192 @@ export type UserVaultApiTrack = {
   album_name: string;
 };
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** `user_vault.id` / `generation_tasks.id` are uuid — MusicAPI task ids often are not. */
+export function isUserVaultUuid(value: string | null | undefined): boolean {
+  return typeof value === "string" && UUID_RE.test(value.trim());
+}
+
 export function asVaultStatus(value: string | null | undefined): UserVaultStatus {
   if (value === "completed" || value === "failed" || value === "processing") return value;
   return "processing";
 }
 
-/** Opens or finishes a vault row. Never throws — a vault miss must not fail the render. */
+async function resolveVaultWriteClient(
+  fallback: SupabaseClient<Database>,
+): Promise<SupabaseClient<Database>> {
+  try {
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    return tryGetSupabaseAdmin() ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Opens or finishes a vault row via service-role upsert (bypasses RLS).
+ * Never throws — a vault miss must not fail the render.
+ */
 export async function persistUserVault(
   supabase: SupabaseClient<Database>,
   userId: string,
   stems: UserVaultStems,
 ): Promise<string | null> {
+  const db = await resolveVaultWriteClient(supabase);
   const masterUrl = stems.masterUrl?.trim() || null;
   // A playable master always wins. Never write a phantom `failed` over audio
   // that already landed, and never null out an existing master_url.
   let status: UserVaultStatus = masterUrl ? "completed" : stems.status;
-  const patch: {
-    user_id: string;
-    title: string;
-    style: string | null;
-    status: UserVaultStatus;
-    master_url?: string | null;
-    instrumental_url?: string | null;
-    vocal_url?: string | null;
-    raw_audio_url?: string | null;
-    tokens_used?: number;
-  } = {
+  const title = stems.title.trim() || "Untitled Track";
+  const style = stems.style?.trim() || null;
+  const trackId = isUserVaultUuid(stems.id) ? stems.id!.trim() : randomUUID();
+
+  console.log("Writing track to vault:", trackId);
+
+  if (!masterUrl && stems.status === "failed" && isUserVaultUuid(stems.id)) {
+    const { data: existing } = await db
+      .from("user_vault")
+      .select("master_url")
+      .eq("id", stems.id!)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existing?.master_url) {
+      status = "completed";
+    }
+  }
+
+  const tokensUsed =
+    typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
+      ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
+      : masterUrl
+        ? 1
+        : undefined;
+
+  // Partial patch for UPDATE so we never wipe existing stem URLs.
+  const patch: Record<string, unknown> = {
     user_id: userId,
-    title: stems.title.trim() || "Untitled Track",
-    style: stems.style?.trim() || null,
+    title,
+    style,
     status,
   };
   if (masterUrl) patch.master_url = masterUrl;
-  if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl;
-  if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl;
-  if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl;
-  if (typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)) {
-    patch.tokens_used = Math.max(0, Math.min(100, Math.round(stems.tokensUsed)));
-  }
+  if (stems.instrumentalUrl) patch.instrumental_url = stems.instrumentalUrl.trim();
+  if (stems.vocalUrl) patch.vocal_url = stems.vocalUrl.trim();
+  if (stems.rawAudioUrl) patch.raw_audio_url = stems.rawAudioUrl.trim();
+  if (typeof tokensUsed === "number") patch.tokens_used = tokensUsed;
 
-  if (stems.id) {
-    if (!masterUrl && stems.status === "failed") {
-      const { data: existing } = await supabase
+  try {
+    if (isUserVaultUuid(stems.id)) {
+      const { data: updated, error: updateError } = await db
         .from("user_vault")
-        .select("master_url")
-        .eq("id", stems.id)
+        .update(patch as never)
+        .eq("id", trackId)
         .eq("user_id", userId)
+        .select("id, master_url, status")
         .maybeSingle();
-      if (existing?.master_url) {
-        status = "completed";
-        patch.status = "completed";
-        patch.master_url = existing.master_url;
-      }
-    }
-    const { error } = await supabase
-      .from("user_vault")
-      .update(patch)
-      .eq("id", stems.id)
-      .eq("user_id", userId);
-    if (error) {
-      console.warn("[user_vault] update failed", error.message);
-      return stems.id;
-    }
-    if (status === "completed") {
-      const audioUrl = masterUrl || patch.master_url || null;
-      if (audioUrl) {
-        try {
-          const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
-          await completeGenerationTask({
-            taskId: stems.id,
+
+      if (updateError) {
+        console.error("[user_vault] update failed", {
+          trackId,
+          message: updateError.message,
+          code: updateError.code,
+        });
+      } else if (updated?.id) {
+        console.log("[user_vault] write committed", {
+          trackId: updated.id,
+          status: updated.status,
+          hasMaster: Boolean(updated.master_url ?? masterUrl),
+        });
+        if (status === "completed" || masterUrl) {
+          await syncVaultCompletion(
+            updated.id,
             userId,
-            audioUrl,
-          });
-        } catch (error) {
-          console.warn(
-            "[user_vault] completion sync skipped",
-            error instanceof Error ? error.message : error,
+            masterUrl || updated.master_url,
+            title,
+            style,
           );
         }
+        return updated.id;
       }
+      // 0-row update (row missing) → fall through to upsert/insert.
+      console.warn("[user_vault] update matched 0 rows — upserting", trackId);
     }
-    return stems.id;
-  }
 
-  const insertRow = {
-    ...patch,
-    master_url: masterUrl,
-    instrumental_url: stems.instrumentalUrl || null,
-    vocal_url: stems.vocalUrl || null,
-    raw_audio_url: stems.rawAudioUrl || null,
-    tokens_used:
-      typeof stems.tokensUsed === "number" && Number.isFinite(stems.tokensUsed)
-        ? Math.max(0, Math.min(100, Math.round(stems.tokensUsed)))
-        : masterUrl
-          ? 1
-          : 0,
-  };
-  const { data, error } = await supabase
-    .from("user_vault")
-    .insert(insertRow)
-    .select("id")
-    .maybeSingle();
-  if (error) {
-    console.warn("[user_vault] insert failed", error.message);
+    const insertRow: Database["public"]["Tables"]["user_vault"]["Insert"] = {
+      id: trackId,
+      user_id: userId,
+      title,
+      style,
+      status,
+      master_url: masterUrl,
+      instrumental_url: stems.instrumentalUrl?.trim() || null,
+      vocal_url: stems.vocalUrl?.trim() || null,
+      raw_audio_url: stems.rawAudioUrl?.trim() || null,
+      tokens_used: typeof tokensUsed === "number" ? tokensUsed : masterUrl ? 1 : 0,
+    };
+
+    const { data, error } = await db
+      .from("user_vault")
+      .upsert(insertRow, { onConflict: "id" })
+      .select("id, master_url, status")
+      .maybeSingle();
+
+    if (error) {
+      console.error("[user_vault] write failed", {
+        trackId,
+        message: error.message,
+        code: error.code,
+        details: error.details,
+      });
+      return null;
+    }
+
+    const id = data?.id ?? trackId;
+    console.log("[user_vault] write committed", {
+      trackId: id,
+      status: data?.status ?? status,
+      hasMaster: Boolean(data?.master_url ?? masterUrl),
+    });
+    if (status === "completed" || masterUrl) {
+      await syncVaultCompletion(id, userId, masterUrl || data?.master_url, title, style);
+    }
+    return id;
+  } catch (error) {
+    console.error(
+      "[user_vault] write threw",
+      trackId,
+      error instanceof Error ? error.message : error,
+    );
     return null;
   }
-  const id = data?.id ?? null;
-  if (id && masterUrl) {
-    try {
-      const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
-      await completeGenerationTask({ taskId: id, userId, audioUrl: masterUrl });
-    } catch (error) {
-      console.warn(
-        "[user_vault] completion sync skipped",
-        error instanceof Error ? error.message : error,
-      );
-    }
+}
+
+async function syncVaultCompletion(
+  trackId: string,
+  userId: string,
+  audioUrl: string | null | undefined,
+  title: string,
+  style: string | null,
+): Promise<void> {
+  if (!audioUrl) return;
+  try {
+    const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
+    await completeGenerationTask({
+      taskId: trackId,
+      vaultId: trackId,
+      userId,
+      audioUrl,
+      title,
+      style,
+    });
+  } catch (error) {
+    console.warn(
+      "[user_vault] completion sync skipped",
+      error instanceof Error ? error.message : error,
+    );
   }
-  return id;
 }
 
 async function toApiTracks(

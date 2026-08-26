@@ -30,6 +30,25 @@ describe("engine bounce-back contracts", () => {
     const err = new StudioStreamDroppedError();
     expect(isStudioStreamDroppedError(err)).toBe(true);
     expect(err.recoverable).toBe(true);
+    expect(
+      isStudioStreamDroppedError({
+        name: "StudioStreamDroppedError",
+        message: "network error",
+        recoverable: true,
+      }),
+    ).toBe(true);
+    expect(
+      isStudioStreamDroppedError({
+        recoverable: true,
+        message: "Generation stream dropped mid-render.",
+      }),
+    ).toBe(true);
+    expect(
+      isStudioStreamDroppedError({
+        recoverable: true,
+        message: "unrelated recoverable flag",
+      }),
+    ).toBe(false);
   });
 
   it("detects DB lock / contention codes for debit fallback", () => {

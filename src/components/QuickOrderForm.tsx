@@ -116,9 +116,12 @@ export function QuickOrderForm() {
     apply(true);
     const onPop = () => {
       const focusId = apply(false);
-      if (!focusId) return;
+      // Only restore in-form focus while still on the order deep link —
+      // leaving #order is owned by OrderIntakeSection (Escape → CTA).
+      if (!focusId || window.location.hash !== "#order") return;
       // Restore focus after React commits the restored package value.
       requestAnimationFrame(() => {
+        if (window.location.hash !== "#order") return;
         const el = document.getElementById(focusId) as HTMLElement | null;
         el?.focus({ preventScroll: false });
       });

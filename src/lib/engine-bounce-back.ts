@@ -67,13 +67,23 @@ export class StudioStreamDroppedError extends Error {
 }
 
 export function isStudioStreamDroppedError(error: unknown): error is StudioStreamDroppedError {
-  return (
-    error instanceof StudioStreamDroppedError ||
-    (typeof error === "object" &&
-      error !== null &&
-      "name" in error &&
-      (error as { name?: unknown }).name === "StudioStreamDroppedError")
-  );
+  if (!error || typeof error !== "object") return false;
+  if (error instanceof StudioStreamDroppedError) return true;
+  const named = error as { name?: unknown; recoverable?: unknown; message?: unknown };
+  if (named.name === "StudioStreamDroppedError") return true;
+  // Mid-render SSE/fetch drops marked recoverable — treat as vault-poll failover, not UI failure.
+  if (named.recoverable === true) {
+    const msg = String(named.message ?? "").toLowerCase();
+    return (
+      msg.includes("stream") ||
+      msg.includes("network") ||
+      msg.includes("failed to fetch") ||
+      msg.includes("fetch failed") ||
+      msg.includes("connection") ||
+      msg.includes("dropped")
+    );
+  }
+  return false;
 }
 
 export function isDbLockOrUnexpectedSpendError(error: {

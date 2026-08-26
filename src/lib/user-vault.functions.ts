@@ -57,7 +57,11 @@ export const createUserVaultTrack = createServerFn({ method: "POST" })
   .validator((data: unknown) => createSchema.parse(data ?? {}))
   .handler(async ({ data, context }) => {
     const { persistUserVault } = await import("@/lib/user-vault.server");
-    const id = await persistUserVault(context.supabase, context.userId, {
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Prefer service role so the processing badge is visible even if the
+    // request JWT cannot satisfy RLS (stale session / clock skew).
+    const db = tryGetSupabaseAdmin() ?? context.supabase;
+    const id = await persistUserVault(db, context.userId, {
       title: data.title || "Untitled Track",
       style: data.style,
       status: "processing",
@@ -72,7 +76,9 @@ export const finalizeUserVaultTrack = createServerFn({ method: "POST" })
   .validator((data: unknown) => finishSchema.parse(data))
   .handler(async ({ data, context }) => {
     const { persistUserVault } = await import("@/lib/user-vault.server");
-    await persistUserVault(context.supabase, context.userId, {
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const db = tryGetSupabaseAdmin() ?? context.supabase;
+    await persistUserVault(db, context.userId, {
       id: data.id,
       title: data.title || "Untitled Track",
       style: data.style,
@@ -94,9 +100,11 @@ export const claimGuestVaultTracks = createServerFn({ method: "POST" })
   .validator((data: unknown) => claimSchema.parse(data ?? { tracks: [] }))
   .handler(async ({ data, context }) => {
     const { persistUserVault } = await import("@/lib/user-vault.server");
+    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const db = tryGetSupabaseAdmin() ?? context.supabase;
     let claimed = 0;
     for (const track of data.tracks) {
-      const id = await persistUserVault(context.supabase, context.userId, {
+      const id = await persistUserVault(db, context.userId, {
         title: track.title,
         style: track.style,
         status: "completed",

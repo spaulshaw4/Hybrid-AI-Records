@@ -11,6 +11,8 @@ export function OrderIntakeSection() {
   const orderCtaRef = useRef<HTMLAnchorElement>(null);
   const orderReturnFocusRef = useRef<HTMLElement | null>(null);
   const orderPushedRef = useRef(false);
+  /** Bumps to cancel in-flight focus-settle loops when Escape restores the CTA. */
+  const focusGenRef = useRef(0);
 
   const headerOffset = () => {
     const header = document.querySelector("header");
@@ -68,8 +70,10 @@ export function OrderIntakeSection() {
       "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled])",
     );
     if (first) {
+      const gen = ++focusGenRef.current;
       let attempts = 0;
       const settle = () => {
+        if (gen !== focusGenRef.current) return;
         if (document.activeElement === first) return;
         first.focus({ preventScroll: true });
         if (++attempts < 60) window.requestAnimationFrame(settle);
@@ -84,12 +88,23 @@ export function OrderIntakeSection() {
   };
 
   const restoreOrderFocus = (announce = false) => {
+    // Cancel any settle loop that would steal focus back onto the first field.
+    focusGenRef.current += 1;
     const form = document.getElementById("quick-order-form");
     const active = document.activeElement as HTMLElement | null;
     if (active && active !== document.body && form && !form.contains(active)) return;
     const target = orderReturnFocusRef.current ?? orderCtaRef.current;
     if (!target || !target.isConnected) return;
-    target.focus({ preventScroll: true });
+    const focusCta = () => {
+      if (!target.isConnected) return;
+      target.focus({ preventScroll: true });
+    };
+    focusCta();
+    // Win races against QuickOrderForm's popstate focus restore (rAF).
+    window.requestAnimationFrame(() => {
+      focusCta();
+      window.requestAnimationFrame(focusCta);
+    });
     if (announce) {
       setScrollAnnouncement("");
       window.requestAnimationFrame(() =>
@@ -133,6 +148,9 @@ export function OrderIntakeSection() {
     if (window.location.hash === "#order" && orderPushedRef.current) {
       orderPushedRef.current = false;
       window.history.back();
+      // popstate restores focus; also schedule a late pass in case another
+      // listener re-focuses a form field on the same tick.
+      window.requestAnimationFrame(() => restoreOrderFocus(true));
       return;
     }
     if (window.location.hash === "#order") {
