@@ -30,7 +30,7 @@ async function scan(page: Page, selector: string): Promise<string[]> {
 
 const copyButton = (page: Page) => page.getByRole("button", { name: /copy share link/i }).first();
 
-async function open(page: Page, entry = "/?package=visual-push#order") {
+async function open(page: Page, entry = "/portal?package=visual-push#order") {
   await page.goto(entry, { waitUntil: "domcontentloaded" });
   await expect(page.locator("#qo-package")).toBeEnabled();
   await expect(copyButton(page)).toBeVisible();

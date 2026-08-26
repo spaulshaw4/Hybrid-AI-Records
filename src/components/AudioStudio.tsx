@@ -707,17 +707,6 @@ function resolveExtension(url: string, contentType: string | null): string {
   return "mp3";
 }
 
-/** Fires an immediate browser download for a URL. */
-function triggerAnchorDownload(href: string, fileName: string): void {
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = fileName;
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
 /** What the proxy reports about an audio source, using the upstream headers. */
 export type AudioProbe = { ok: boolean; status: string; gone: boolean; transient?: boolean };
 
@@ -783,8 +772,8 @@ async function resolveAudioSource(
 
 /**
  * Downloads the exact generated file exactly once. The source is resolved (and
- * repaired if the link expired) first, then a single anchor click hands the
- * file off to the browser and the handler returns.
+ * repaired if the link expired) first, then the shared iOS-safe blob downloader
+ * hands the file off to Files / Downloads.
  */
 const inFlightDownloads = new Set<string>();
 
@@ -798,52 +787,21 @@ async function downloadAudioFile(
   inFlightDownloads.add(url);
 
   try {
-    let sourceUrl = url;
-    const proxyUrl = proxiedAudioUrl(sourceUrl, safeFileName(title, "mp3"));
-    let response: Response | null = null;
-    try {
-      response = await fetch(proxyUrl);
-    } catch {
-      response = null;
-    }
-
-    if (!response || !response.ok) {
-      const resolved = await resolveAudioSource(sourceUrl);
-      if (resolved.repaired) onUrlRepaired?.(sourceUrl, resolved.url);
-      if (!resolved.probe.ok) {
-        toast.error(
-          resolved.probe.gone
-            ? "This track's engine link has expired. Regenerate the track to download it."
-            : `${AUDIO_FAIL_MESSAGE} (${resolved.probe.status}).`,
-        );
-        return;
-      }
-      sourceUrl = resolved.url;
-      const retryUrl = proxiedAudioUrl(sourceUrl, safeFileName(title, "mp3"));
-      try {
-        response = await fetch(retryUrl);
-      } catch {
-        response = null;
-      }
-      if (!response || !response.ok) {
-        // Last resort: a single direct hand-off to the browser.
-        triggerAnchorDownload(retryUrl, safeFileName(title, "mp3"));
-        return;
-      }
-    }
-
-    const blob = await response.blob();
-    const extension = resolveExtension(sourceUrl, response.headers.get("content-type") ?? blob.type);
-    if (blob.size < 1024 || /^(text|application\/json)/.test(blob.type)) {
-      toast.error(AUDIO_FAIL_MESSAGE);
+    const { downloadTrack } = await import("@/lib/download-track");
+    const resolved = await resolveAudioSource(url);
+    if (resolved.repaired) onUrlRepaired?.(url, resolved.url);
+    if (!resolved.probe.ok) {
+      toast.error(
+        resolved.probe.gone
+          ? "This track's engine link has expired. Regenerate the track to download it."
+          : `${AUDIO_FAIL_MESSAGE} (${resolved.probe.status}).`,
+      );
       return;
     }
-    const typedBlob = blob.type.startsWith("audio/")
-      ? blob
-      : new Blob([blob], { type: `audio/${extension}` });
-    const objectUrl = URL.createObjectURL(typedBlob);
-    triggerAnchorDownload(objectUrl, safeFileName(title, extension));
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+
+    const extension = resolveExtension(resolved.url, null);
+    const fileName = safeFileName(title, extension);
+    await downloadTrack(proxiedAudioUrl(resolved.url, fileName), fileName);
   } finally {
     inFlightDownloads.delete(url);
   }
@@ -930,6 +888,20 @@ function WaveformPlayer({
     setAutoplayBlocked(false);
 
   }, [src]);
+
+  useEffect(() => {
+    return () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      try {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      } catch {
+        /* WebKit media teardown must not freeze the thread */
+      }
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -1065,6 +1037,7 @@ function WaveformPlayer({
         ref={audioRef}
         {...(sources[sourceIndex] ? { src: sources[sourceIndex] } : {})}
         preload="metadata"
+        playsInline
 
         onError={() => {
           setErrorCause("proxy-http");
@@ -1074,6 +1047,15 @@ function WaveformPlayer({
             void diagnose();
             return prev;
           });
+          try {
+            const audio = audioRef.current;
+            if (audio && sourceIndex >= sources.length - 1) {
+              audio.removeAttribute("src");
+              audio.load();
+            }
+          } catch {
+            /* WebKit teardown must never freeze the thread */
+          }
         }}
 
         onCanPlay={() => {
@@ -1082,7 +1064,14 @@ function WaveformPlayer({
           setErrorStatus(null);
           const audio = audioRef.current;
           if (wantPlayRef.current && audio?.paused) {
-            void audio.play().catch(() => {
+            void audio.play().catch((error: unknown) => {
+              if (error instanceof DOMException && error.name === "NotAllowedError") {
+                setAutoplayBlocked(true);
+                setErrorCause("autoplay-blocked");
+                setErrorStatus(null);
+                return;
+              }
+              if (error instanceof DOMException && error.name === "AbortError") return;
               setAutoplayBlocked(true);
               setErrorCause("autoplay-blocked");
               setErrorStatus(null);
@@ -1566,6 +1555,21 @@ export function AudioStudio() {
     cancelRef.current = true;
     abortRef.current?.abort();
   }
+
+  // Hard-stop generation timers / AbortController when the engine unmounts
+  // (route change, WebKit freeze recovery) so polling cannot run unbound.
+  useEffect(() => {
+    return () => {
+      cancelRef.current = true;
+      runningRef.current = false;
+      try {
+        abortRef.current?.abort();
+      } catch {
+        /* ignore */
+      }
+      abortRef.current = null;
+    };
+  }, []);
 
   const coproducerLock = useRef(false);
 
@@ -2448,11 +2452,17 @@ export function AudioStudio() {
       // Soft pulse only — never advance stage badges ahead of serverGateMask bits.
       setServerGateMask(PipelineGate.NONE);
       const stopTicker = window.setInterval(() => {
+        if (abort.signal.aborted || cancelRef.current) {
+          window.clearInterval(stopTicker);
+          return;
+        }
         setPipelineState((prev) => {
           if (prev.status !== "loading") return prev;
           return { ...prev, progress: Math.min(90, prev.progress + 1) };
         });
       }, 4000);
+      const stopTickerOnAbort = () => window.clearInterval(stopTicker);
+      abort.signal.addEventListener("abort", stopTickerOnAbort, { once: true });
       let started: {
         taskId?: string;
         tracks?: Array<{ audioUrl: string | null; title: string | null }>;
@@ -2534,6 +2544,7 @@ export function AudioStudio() {
           abortableBarrier(abort.signal),
         ])) as typeof started;
       } finally {
+        abort.signal.removeEventListener("abort", stopTickerOnAbort);
         window.clearInterval(stopTicker);
       }
       if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
@@ -3250,11 +3261,10 @@ export function AudioStudio() {
         // Remote host may block direct fetches — retry through our own origin.
         master = await masterWavFromUrl(proxiedAudioUrl(audioUrl), { title: trackTitle });
       }
-      const link = document.createElement("a");
-      link.href = master.url;
-      link.download = hybridMasterFileName(trackTitle);
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(master.url), 30_000);
+      const masterUrl = master.url;
+      const { downloadTrack } = await import("@/lib/download-track");
+      await downloadTrack(masterUrl, hybridMasterFileName(trackTitle));
+      setTimeout(() => URL.revokeObjectURL(masterUrl), 60_000);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "WAV export failed.");
     } finally {

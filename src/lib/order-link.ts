@@ -2,8 +2,8 @@
  * Shareable links into the quick order form.
  *
  * Every entry point (header CTA, package cards, WhatsApp follow-ups) should use
- * these helpers so the URL is always the same shape: `/?package=<slug>#order`,
- * or plain `/#order` when no package is preselected.
+ * these helpers so the URL is always the same shape: `/portal?package=<slug>#order`,
+ * or plain `/portal#order` when no package is preselected.
  */
 
 export const ORDER_PACKAGES = [
@@ -146,7 +146,7 @@ export function trackingParamsFromSearch(search: string): [string, string][] {
 export function orderUrl(
   pkg?: OrderPackage | null,
   prefill?: OrderPrefill | null,
-  pathname = "/",
+  pathname = "/portal",
 ): string {
   const params = new URLSearchParams();
   if (pkg) params.set("package", PACKAGE_SLUGS[pkg]);

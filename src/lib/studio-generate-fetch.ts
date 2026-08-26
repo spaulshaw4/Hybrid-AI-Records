@@ -59,7 +59,17 @@ export async function streamStudioGenerate(
       fallback && typeof fallback === "object" && "error" in fallback
         ? String((fallback as { error: unknown }).error)
         : `Generate failed (${response.status}).`;
-    throw new Error(message);
+    const err = new Error(message) as Error & { statusCode?: number; balance?: number };
+    err.statusCode = response.status;
+    if (
+      fallback &&
+      typeof fallback === "object" &&
+      "balance" in fallback &&
+      typeof (fallback as { balance: unknown }).balance === "number"
+    ) {
+      err.balance = (fallback as { balance: number }).balance;
+    }
+    throw err;
   }
 
   if (!response.body) {

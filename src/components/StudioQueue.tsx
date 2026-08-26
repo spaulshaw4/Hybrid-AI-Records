@@ -66,16 +66,22 @@ export function StudioQueue() {
     const load = async () => {
       try {
         const result = await getStatus({ data: ticket });
-        if (!cancelled) setView(result);
+        if (cancelled) return;
+        setView(result);
+        // Stop polling once delivered — no forever timers on mobile.
+        if (result?.status === "delivered") {
+          if (timer) clearInterval(timer);
+          timer = null;
+        }
       } catch {
         /* ignore transient */
       }
     };
     void load();
-    const timer = setInterval(load, 30000);
+    let timer: ReturnType<typeof setInterval> | null = setInterval(load, 30000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
   }, [ticket, getStatus]);
 
@@ -179,10 +185,18 @@ export function StudioQueue() {
                 <CheckCircle2 className="size-4" aria-hidden /> Your master is ready
               </p>
               <audio controls preload="none" src={view.audioUrl} className="w-full" />
-              <Button asChild variant="outline" size="sm" className="w-full">
-                <a href={view.audioUrl} download target="_blank" rel="noreferrer">
-                  <Download className="mr-2 size-4" aria-hidden /> Download master
-                </a>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => {
+                  void import("@/lib/download-track").then(({ downloadTrack }) =>
+                    downloadTrack(view.audioUrl!, `hybrid-master-${view.reference || "track"}.mp3`),
+                  );
+                }}
+              >
+                <Download className="mr-2 size-4" aria-hidden /> Download master
               </Button>
             </div>
           ) : (

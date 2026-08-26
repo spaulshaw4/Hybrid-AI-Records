@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchArrayBuffer } from "@/lib/safe-fetch";
+import { safeCloseAudioContext } from "@/lib/safe-media";
 
 const BUCKETS = 96;
 const peakCache = new Map<string, number[]>();
@@ -31,7 +32,7 @@ async function decodePeaks(src: string): Promise<number[]> {
     window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new Ctx();
   try {
-    const audio = await ctx.decodeAudioData(buf);
+    const audio = await ctx.decodeAudioData(buf.slice(0));
     const data = audio.getChannelData(0);
     const size = Math.floor(data.length / BUCKETS) || 1;
     const peaks: number[] = [];
@@ -49,7 +50,7 @@ async function decodePeaks(src: string): Promise<number[]> {
     peakCache.set(src, normalized);
     return normalized;
   } finally {
-    void ctx.close();
+    await safeCloseAudioContext(ctx);
   }
 }
 

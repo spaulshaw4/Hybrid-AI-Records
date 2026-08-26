@@ -7,6 +7,7 @@ import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { DataLoadError } from "@/components/DataLoadError";
 import { hasSupabaseSession } from "@/lib/has-session";
+import { downloadTrack } from "@/lib/download-track";
 import {
   createTrackDownloadLink,
   getArtistDownloads,
@@ -81,12 +82,7 @@ function DownloadsPage() {
         setError(result.error);
         return;
       }
-      const anchor = document.createElement("a");
-      anchor.href = result.url;
-      anchor.download = result.fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
+      await downloadTrack(result.url, result.fileName);
     } catch {
       setError("We couldn't start that download. Try again.");
     } finally {

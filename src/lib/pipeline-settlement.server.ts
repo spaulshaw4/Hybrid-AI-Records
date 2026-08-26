@@ -250,10 +250,13 @@ export async function executePostBinarySettlement(
   const tokenAmount =
     input.tokenAmount ?? Math.max(1, Math.ceil(totalCharged - 1e-9) || 1);
 
+  // Same key as authorizeAndSpendGenerationToken — alreadyApplied when burned at queue.
+  const { generationTokenIdempotencyKey } = await import("@/lib/generation-tokens.server");
   const tokenSettled = await settleHybridToken({
     userId: input.userId,
     amount: tokenAmount,
-    idempotencyKey: input.idempotencyKey ?? `pipeline:${input.trackId}`,
+    idempotencyKey:
+      input.idempotencyKey ?? generationTokenIdempotencyKey(input.trackId),
     note:
       input.title ||
       `Studio master ($${totalCharged.toFixed(2)} line items → ${tokenAmount} token)`,

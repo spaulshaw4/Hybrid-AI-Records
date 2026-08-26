@@ -16,7 +16,7 @@ const headerHeight = (page: Page) =>
 
 test.describe("Order form accessibility", () => {
   test("Connect & Order shows a visible focus ring when keyboard-focused", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/portal");
     const cta = page.locator(CTA).first();
     await cta.scrollIntoViewIfNeeded();
 
@@ -45,7 +45,7 @@ test.describe("Order form accessibility", () => {
   });
 
   test("clicking the CTA focuses the first field and Escape returns focus", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/portal");
     const cta = page.locator(CTA).first();
     await cta.click();
 
@@ -57,10 +57,10 @@ test.describe("Order form accessibility", () => {
     await expect(cta).toBeFocused();
   });
 
-  test("deep link to /#order scrolls the first field clear of the sticky header", async ({
+  test("deep link to /portal#order scrolls the first field clear of the sticky header", async ({
     page,
   }) => {
-    await page.goto("/#order");
+    await page.goto("/portal#order");
     const field = page.locator(FIRST_FIELD);
     await expect(field).toBeFocused();
 
@@ -72,7 +72,7 @@ test.describe("Order form accessibility", () => {
   });
 
   test("back/forward navigation restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/portal");
     const cta = page.locator(CTA).first();
     await cta.click();
     await expect(page.locator(FIRST_FIELD)).toBeFocused();
@@ -117,7 +117,7 @@ const report = (violations: Violation[]) =>
   violations.map((v) => `${v.id} (${v.impact}): ${v.help}\n  ${v.nodes.join("\n  ")}`).join("\n");
 
 async function openOrderForm(page: Page) {
-  await page.goto("/#order");
+  await page.goto("/portal#order");
   await expect(page.locator(FIRST_FIELD)).toBeFocused();
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.evaluate(() => document.fonts.ready);
@@ -143,7 +143,7 @@ test.describe("Order form axe-core audit", () => {
   });
 
   test("page landmarks are valid and unique", async ({ page }) => {
-    await page.goto("/#order");
+    await page.goto("/portal#order");
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.addScriptTag({ path: AXE_PATH });
 

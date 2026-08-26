@@ -70,7 +70,7 @@ async function copyUntil(page: Page, check: (copied: string) => void): Promise<s
 
 /** Produces a share URL carrying a tier plus prefilled artist/email. */
 async function makeShareLink(page: Page, slug: keyof typeof LABELS): Promise<string> {
-  await open(page, `/?package=${slug}#order`);
+  await open(page, `/portal?package=${slug}#order`);
   let copied = "";
   await expect(async () => {
     await typeInto(page, ARTIST, DETAILS.artist);

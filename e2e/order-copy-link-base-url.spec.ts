@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
  * whoever receives them.
  *
  * Coverage: canonical package slugs, alias slugs (which must be normalized to
- * their canonical form in the shared URL), and the no-package `/#order` case.
+ * their canonical form in the shared URL), and the no-package `/portal#order` case.
  */
 
 const PACKAGE_SELECT = "#qo-package";
@@ -28,13 +28,13 @@ const CANONICAL_SLUGS = ["distribution-release", "visual-push", "full-label"];
 const CASES: Array<{ name: string; entry: string; slug?: string | null }> = [
   // No `?package=`: the form falls back to its default tier, so the copied
   // link may carry any canonical slug (or none) — origin/shape still matter.
-  { name: "no package", entry: "/#order", slug: undefined },
-  { name: "canonical: distribution-release", entry: "/?package=distribution-release#order", slug: "distribution-release" },
-  { name: "canonical: visual-push", entry: "/?package=visual-push#order", slug: "visual-push" },
-  { name: "canonical: full-label", entry: "/?package=full-label#order", slug: "full-label" },
-  { name: "alias: foundation", entry: "/?package=foundation#order", slug: "distribution-release" },
-  { name: "alias: the-visual-push", entry: "/?package=the-visual-push#order", slug: "visual-push" },
-  { name: "alias: full-hybrid", entry: "/?package=full-hybrid#order", slug: "full-label" },
+  { name: "no package", entry: "/portal#order", slug: undefined },
+  { name: "canonical: distribution-release", entry: "/portal?package=distribution-release#order", slug: "distribution-release" },
+  { name: "canonical: visual-push", entry: "/portal?package=visual-push#order", slug: "visual-push" },
+  { name: "canonical: full-label", entry: "/portal?package=full-label#order", slug: "full-label" },
+  { name: "alias: foundation", entry: "/portal?package=foundation#order", slug: "distribution-release" },
+  { name: "alias: the-visual-push", entry: "/portal?package=the-visual-push#order", slug: "visual-push" },
+  { name: "alias: full-hybrid", entry: "/portal?package=full-hybrid#order", slug: "full-label" },
 ];
 
 const copyButton = (page: Page) => page.getByRole("button", { name: /copy share link/i }).first();
@@ -109,7 +109,7 @@ test.describe("Copy Share Link — environment-correct base URL", () => {
   }
 
   test("origin tracks the host the page is served from, not a hardcoded one", async ({ page }) => {
-    await open(page, "/?package=foundation#order");
+    await open(page, "/portal?package=foundation#order");
 
     const copied = await copyLink(page, "distribution-release");
     const runtimeOrigin = await page.evaluate(() => window.location.origin);
@@ -125,7 +125,7 @@ test.describe("Copy Share Link — environment-correct base URL", () => {
   });
 
   test("prefill details ride along without changing the origin", async ({ page }) => {
-    await open(page, "/?package=full-hybrid&artist=Test%20Artist&email=a%40b.com#order");
+    await open(page, "/portal?package=full-hybrid&artist=Test%20Artist&email=a%40b.com#order");
 
     const copied = await copyLink(page, "full-label");
     const url = new URL(copied);

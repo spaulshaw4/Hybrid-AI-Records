@@ -124,6 +124,8 @@ export type ExecutePipelineInput = {
   durationSeconds?: number;
   language?: string;
   customLanguage?: string;
+  /** Ledger key for Hybrid Token burn (must match authorize-at-queue). */
+  tokenIdempotencyKey?: string;
 };
 
 export type ExecutePipelineSuccess = LandingSuccessResponse & {
@@ -966,6 +968,8 @@ export async function executePipeline(
       const structuralMarkers = markersFromGate3(cwaloOutput);
 
       // Post-binary settlement — only when every gate bit is set (63).
+      // Token burn is idempotent with authorize-at-queue (alreadyApplied).
+      const { generationTokenIdempotencyKey } = await import("@/lib/generation-tokens.server");
       const settlement = await executePostBinarySettlement({
         gateMask,
         trackId,
@@ -977,7 +981,9 @@ export async function executePipeline(
         structuralMarkers,
         duration,
         title: input.title,
-        idempotencyKey: `pipeline:${trackId}`,
+        idempotencyKey:
+          input.tokenIdempotencyKey ?? generationTokenIdempotencyKey(trackId),
+        tokenAmount: 1,
         chargeLedger,
         residue,
         tmpPaths: tmpFiles,

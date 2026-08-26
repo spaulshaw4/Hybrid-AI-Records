@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { CoverImage } from "@/components/CoverImage";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
+import { downloadTrack, proxiedAudioDownloadUrl } from "@/lib/download-track";
 import { STREAM_TRACKS, type StreamTrack } from "@/lib/radio-tracks";
 import { absoluteUrl, DEFAULT_OG_IMAGE, pageHead, SITE_ORIGIN } from "@/lib/social-meta";
 import { hybridTrackDownloadFileName, hybridTrackDownloadTitle } from "@/lib/track-download-name";
@@ -39,14 +40,8 @@ export const Route = createFileRoute("/track/$trackId")({
 
 function handleDownload(track: StreamTrack) {
   const fileName = hybridTrackDownloadFileName(track.title);
-  const link = document.createElement("a");
-  link.href = track.src;
-  link.download = fileName;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  // Same-origin proxy so the blob fetch is CORS-safe and gets attachment headers.
+  void downloadTrack(proxiedAudioDownloadUrl(track.src, fileName), fileName);
 }
 
 async function handleShare(track: StreamTrack) {

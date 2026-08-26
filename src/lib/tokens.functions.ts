@@ -70,6 +70,23 @@ export const spendTokens = createServerFn({ method: "POST" })
     return { ok: true, balance: row.balance ?? 0, alreadyApplied: row.already_applied ?? false };
   });
 
+/** Admin / env token policy for the engine Test Mode toggle. */
+export const getGenerationTokenPolicyFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { getGenerationTokenPolicy } = await import("@/lib/generation-tokens.server");
+    return getGenerationTokenPolicy(context.userId, context.supabase);
+  });
+
+/** Admins only — when Test Mode is ON, generates burn tokens like end users. */
+export const setAdminTokenTestModeFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data: { enabled?: boolean }) => ({ enabled: Boolean(data?.enabled) }))
+  .handler(async ({ data, context }) => {
+    const { setAdminTokenTestMode } = await import("@/lib/generation-tokens.server");
+    return setAdminTokenTestMode(context.userId, context.supabase, data.enabled);
+  });
+
 
 /** Starts an embedded Stripe Checkout for one token bundle. */
 export const createTokenCheckoutSession = createServerFn({ method: "POST" })

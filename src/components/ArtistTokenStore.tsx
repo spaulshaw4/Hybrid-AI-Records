@@ -147,22 +147,17 @@ export function useArtistTokens() {
         }
         setBalance(result.balance);
         setUnlocked((prev) => new Set(prev).add(trackId));
-        const a = document.createElement("a");
-        a.href = result.url;
-        a.download = result.fileName;
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        const { downloadTrack } = await import("@/lib/download-track");
+        await downloadTrack(result.url, result.fileName);
         const unlockMessage = result.alreadyOwned
           ? "Already unlocked — downloading again is free."
           : "Track unlocked. Your download is starting.";
         setNotice(unlockMessage);
-        toast.success(result.alreadyOwned ? "Download started" : "Track unlocked", {
-          description: result.alreadyOwned
-            ? unlockMessage
-            : `1 Artist Token used · ${result.balance} left. A confirmation email is on its way.`,
-        });
+        if (!result.alreadyOwned) {
+          toast.success("Track unlocked", {
+            description: `1 Artist Token used · ${result.balance} left. A confirmation email is on its way.`,
+          });
+        }
       } catch {
         setNotice("We couldn't start that download. Try again.");
         toast.error("We couldn't start that download. Try again.");

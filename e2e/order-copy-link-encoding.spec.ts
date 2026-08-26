@@ -31,7 +31,7 @@ const TIERS: Array<{ name: string; entry: string; slug: string }> = [
 const copyButton = (page: Page) => page.getByRole("button", { name: /copy share link/i }).first();
 
 async function open(page: Page, entry: string) {
-  await page.goto(`/?package=${entry}#order`, { waitUntil: "domcontentloaded" });
+  await page.goto(`/portal?package=${entry}#order`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(PACKAGE_SELECT)).toBeEnabled();
   // The copy button only renders/interacts after hydration.
   await expect(copyButton(page)).toBeVisible();

@@ -74,7 +74,7 @@ test.describe("copy live region announces the outcome detail", () => {
   test("success: the announcement contains the exact URL that was copied", async ({ page }) => {
     test.slow();
     await stubWorkingClipboard(page);
-    await open(page, "/?package=visual-push#order");
+    await open(page, "/portal?package=visual-push#order");
 
     await clickUntilAnnounced(page);
     await expect(copyButton(page)).toContainText(/link copied/i);
@@ -102,7 +102,7 @@ test.describe("copy live region announces the outcome detail", () => {
   test("success: the announcement follows the URL after the package changes", async ({ page }) => {
     test.slow();
     await stubWorkingClipboard(page);
-    await open(page, "/?package=visual-push#order");
+    await open(page, "/portal?package=visual-push#order");
 
     await clickUntilAnnounced(page);
     await expect(copyStatus(page)).toContainText("package=visual-push");
@@ -122,7 +122,7 @@ test.describe("copy live region announces the outcome detail", () => {
   test("failure: the announcement gives clipboard-blocked guidance", async ({ page }) => {
     test.slow();
     await stubBlockedClipboard(page);
-    await open(page, "/?package=distribution-release#order");
+    await open(page, "/portal?package=distribution-release#order");
 
     await clickUntilAnnounced(page);
 
@@ -144,7 +144,7 @@ test.describe("copy live region announces the outcome detail", () => {
   }) => {
     test.slow();
     await stubBlockedClipboard(page);
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     await clickUntilAnnounced(page);
 

@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * "Copy Share Link" must always put the canonical order URL on the clipboard:
- *   - `/#order` — the plain shape used when no package is preselected
- *   - `/?package=<slug>#order` — with the canonical slug for the chosen tier,
+ *   - `/portal#order` — the plain shape used when no package is preselected
+ *   - `/portal?package=<slug>#order` — with the canonical slug for the chosen tier,
  *     even when the visitor arrived on an alias like `?package=full-hybrid`
  */
 
@@ -55,7 +55,7 @@ test.describe("Copy Share Link", () => {
   });
 
   test("copies the plain /#order link when no package is preselected", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
 
     // Entry points that carry no tier link to the bare canonical shape.
     const plainEntry = await page.evaluate(() => {
@@ -64,40 +64,40 @@ test.describe("Copy Share Link", () => {
       );
       return hrefs.find((h) => !h.includes("package=")) ?? null;
     });
-    expect(plainEntry).toBe("/#order");
+    expect(plainEntry).toBe("/portal#order");
 
     // Following the plain link keeps the hash route intact; once the form
     // hydrates it stamps the visitor's active tier, so the copied link is the
-    // canonical `/?package=<slug>#order` for that tier.
-    await open(page, "/#order");
+    // canonical `/portal?package=<slug>#order` for that tier.
+    await open(page, "/portal#order");
     expect(new URL(page.url()).hash).toBe("#order");
-    expect(await copyLink(page)).toBe("/?package=distribution-release#order");
+    expect(await copyLink(page)).toBe("/portal?package=distribution-release#order");
   });
 
-  test("copies /?package=<slug>#order for the selected package", async ({ page }) => {
-    await open(page, "/");
+  test("copies /portal?package=<slug>#order for the selected package", async ({ page }) => {
+    await open(page, "/portal");
 
     // Default tier.
-    expect(await copyLink(page)).toBe("/?package=distribution-release#order");
+    expect(await copyLink(page)).toBe("/portal?package=distribution-release#order");
 
     await page.locator(PACKAGE_SELECT).selectOption("Production & Visual Push");
-    expect(await copyLink(page)).toBe("/?package=visual-push#order");
+    expect(await copyLink(page)).toBe("/portal?package=visual-push#order");
 
     await page.locator(PACKAGE_SELECT).selectOption("Full Label Release");
-    expect(await copyLink(page)).toBe("/?package=full-label#order");
+    expect(await copyLink(page)).toBe("/portal?package=full-label#order");
 
     await page.locator(PACKAGE_SELECT).selectOption("Distribution & Release");
-    expect(await copyLink(page)).toBe("/?package=distribution-release#order");
+    expect(await copyLink(page)).toBe("/portal?package=distribution-release#order");
   });
 
   test("copies the canonical slug when arriving on an alias link", async ({ page }) => {
-    await open(page, "/?package=full-hybrid#order");
+    await open(page, "/portal?package=full-hybrid#order");
     await expect(page.locator(PACKAGE_SELECT)).toHaveValue("Full Label Release");
-    expect(await copyLink(page)).toBe("/?package=full-label#order");
+    expect(await copyLink(page)).toBe("/portal?package=full-label#order");
   });
 
   test("carries entered details in the copied link", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
     await page.fill("#qo-artist", "Test Artist");
     await page.fill("#qo-email", "artist@example.com");
     await page.locator(PACKAGE_SELECT).selectOption("Production & Visual Push");

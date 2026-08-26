@@ -11,6 +11,9 @@ import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
  *
  * SSE generate with keepalives so long Demucs / CWALO / Gate 1 waits do not
  * surface as browser "Failed to fetch" on idle HTTP connections.
+ *
+ * Token burns happen server-side before the AI pipeline. Insufficient balance
+ * returns HTTP 402 before the event-stream opens.
  */
 export const Route = createFileRoute("/api/studio/generate-stream")({
   server: {
@@ -66,11 +69,52 @@ async function handleGenerateStream({ request }: { request: Request }): Promise<
     authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
   const supabase = tryGetSupabaseAdmin() ?? createSupabaseUserClient(token);
 
+  // Eager token burn so clients on every platform get a real HTTP 402 before
+  // the SSE body starts. The same idempotent key is reused inside the run.
+  try {
+    const { buildGenerationIdempotencyKey } = await import("@/lib/pipeline-idempotency.server");
+    const {
+      authorizeAndSpendGenerationToken,
+      generationTokenIdempotencyKey,
+    } = await import("@/lib/generation-tokens.server");
+    const lyricContent = data.instrumental ? "" : data.lyrics;
+    const genre = (data.genre || data.style || data.prompt).trim();
+    const runKey =
+      data.idempotencyKey?.trim() ||
+      buildGenerationIdempotencyKey({
+        userId,
+        prompt: lyricContent || genre,
+        style: genre,
+        lyrics: lyricContent,
+        instrumental: data.instrumental,
+      });
+    await authorizeAndSpendGenerationToken({
+      userId,
+      supabase,
+      idempotencyKey: generationTokenIdempotencyKey(runKey),
+      amount: 1,
+      note: data.title || "Studio master generation",
+    });
+  } catch (error) {
+    const { InsufficientTokensError } = await import("@/lib/generation-tokens.server");
+    if (error instanceof InsufficientTokensError) {
+      return Response.json(
+        { error: error.message, balance: error.balance, statusCode: 402 },
+        { status: 402 },
+      );
+    }
+    throw error;
+  }
+
   return createGenerateSseResponse({
     run: async () => {
       try {
         return await runGenerateEngineTrack(data, { userId: userId!, supabase });
       } catch (error) {
+        const { InsufficientTokensError } = await import("@/lib/generation-tokens.server");
+        if (error instanceof InsufficientTokensError) {
+          throw error;
+        }
         const message =
           error instanceof Error ? error.message : String(error ?? "Generation failed");
         if (/Gate\s*6|mastering|Matchering|FFmpeg|Resemble|playable master/i.test(message)) {

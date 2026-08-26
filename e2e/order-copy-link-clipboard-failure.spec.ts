@@ -91,7 +91,7 @@ test.describe("clipboard failure falls back to the textarea copy", () => {
     test(`navigator.clipboard ${mode}: textarea copy still confirms success`, async ({ page }) => {
       test.slow();
       await stubClipboard(page, mode);
-      await open(page, "/?package=visual-push#order");
+      await open(page, "/portal?package=visual-push#order");
 
       await clickUntilCopied(page);
 
@@ -127,7 +127,7 @@ test.describe("clipboard failure falls back to the textarea copy", () => {
   }) => {
     test.slow();
     await stubClipboard(page, "reject");
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     await clickUntilCopied(page);
 
@@ -144,7 +144,7 @@ test.describe("clipboard failure falls back to the textarea copy", () => {
   }) => {
     test.slow();
     await stubClipboard(page, "reject");
-    await open(page, "/?package=full-label#order");
+    await open(page, "/portal?package=full-label#order");
 
     await clickUntilCopied(page);
 

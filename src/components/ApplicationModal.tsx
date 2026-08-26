@@ -2093,7 +2093,7 @@ export function ApplicationModal({
       className={
         inline
           ? "w-full outline-none"
-          : "fixed inset-0 z-[110] flex h-[100dvh] items-stretch justify-center overflow-y-auto overscroll-contain overlay-scrim bg-foreground/40 outline-none backdrop-blur-md ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)] sm:items-start sm:p-8"
+          : "fixed inset-0 z-[110] flex h-[100dvh] items-stretch justify-center overflow-y-auto overscroll-contain overlay-scrim bg-foreground/40 outline-none backdrop-blur-md p-4 ps-[max(1rem,env(safe-area-inset-left))] pe-[max(1rem,env(safe-area-inset-right))] sm:items-center sm:p-8 lg:ps-[var(--site-sidebar-width)]"
       }
       onClick={inline ? undefined : resetAndClose}
     >

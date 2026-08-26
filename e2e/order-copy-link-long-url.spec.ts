@@ -91,7 +91,7 @@ test.describe("Copy Share Link — very long URLs", () => {
   }) => {
     test.slow();
     await blockClipboard(page);
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     const values = await fillLongValues(page);
     const origin = await page.evaluate(() => window.location.origin);
@@ -146,7 +146,7 @@ test.describe("Copy Share Link — very long URLs", () => {
   test("working clipboard: the same long URL is copied in full", async ({ page, context }) => {
     test.slow();
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     const values = await fillLongValues(page);
     const origin = await page.evaluate(() => window.location.origin);
@@ -170,7 +170,7 @@ test.describe("Copy Share Link — very long URLs", () => {
   test("long values restore from the copied link in a fresh context", async ({ browser, page }) => {
     test.slow();
     await blockClipboard(page);
-    await open(page, "/#order");
+    await open(page, "/portal#order");
     const values = await fillLongValues(page);
 
     await clickCopy(page, async () => {

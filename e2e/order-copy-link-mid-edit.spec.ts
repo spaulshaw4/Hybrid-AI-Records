@@ -65,7 +65,7 @@ test.describe("copy share link mid-edit", () => {
 
   test("copy immediately after switching tier uses the new tier, not the previous one", async ({ page }) => {
     test.slow();
-    await open(page, "/?package=distribution-release#order");
+    await open(page, "/portal?package=distribution-release#order");
 
     // Switch tier and copy right away — no settle time, no blur.
     await chooseTier(page, "full-label");
@@ -79,7 +79,7 @@ test.describe("copy share link mid-edit", () => {
 
   test("rapid tier switches settle on the last selection", async ({ page }) => {
     test.slow();
-    await open(page, "/?package=distribution-release#order");
+    await open(page, "/portal?package=distribution-release#order");
 
     const order: Slug[] = ["visual-push", "full-label", "visual-push", "distribution-release", "full-label"];
     for (const slug of order) await chooseTier(page, slug);
@@ -92,7 +92,7 @@ test.describe("copy share link mid-edit", () => {
 
   test("copy mid-typing carries the characters entered so far", async ({ page }) => {
     test.slow();
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     // Type without blurring: the field is still focused when we copy. Retried
     // as a unit because a late restore effect can clear a field typed too early.
@@ -129,7 +129,7 @@ test.describe("copy share link mid-edit", () => {
 
   test("tier changed after a first copy produces an updated link", async ({ page }) => {
     test.slow();
-    await open(page, "/?package=visual-push#order");
+    await open(page, "/portal?package=visual-push#order");
 
     const first = await copyUntil(page, (c) => expect(slugOf(c)).toBe("visual-push"));
 

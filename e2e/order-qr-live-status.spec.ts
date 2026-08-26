@@ -20,7 +20,7 @@ const toggle = (page: Page) =>
   page.getByRole("button", { name: /qr code for this order link/i }).first();
 
 async function open(page: Page) {
-  await page.goto("/?package=visual-push#order", { waitUntil: "domcontentloaded" });
+  await page.goto("/portal?package=visual-push#order", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#qo-package")).toBeEnabled();
   await expect(toggle(page)).toBeVisible();
   // Let late draft restoration settle so the panel can't remount mid-test.

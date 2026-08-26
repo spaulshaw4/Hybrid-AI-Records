@@ -141,8 +141,8 @@ class QrRenderBoundary extends Component<
 
 
 /**
- * Copies the canonical shareable order-form URL — `/#order`, or
- * `/?package=<slug>#order` when a package is selected. On devices with the
+ * Copies the canonical shareable order-form URL — `/portal#order`, or
+ * `/portal?package=<slug>#order` when a package is selected. On devices with the
  * Web Share API (phones/tablets) it also offers the native share sheet.
  */
 export function CopyOrderLinkButton({

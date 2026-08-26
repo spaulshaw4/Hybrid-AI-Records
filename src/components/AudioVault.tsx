@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronDown, Download, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +39,7 @@ import {
   fetchVaultTracks,
   isPersistedVaultId,
   VAULT_NEW_GENERATION_EVENT,
+  VAULT_POLL_MAX_MS,
   VAULT_POLL_MS,
   type VaultTrackPayload,
 } from "@/lib/vault-client";
@@ -47,6 +48,7 @@ import {
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
 } from "@/lib/vault-tracks";
+import { safeReleaseMediaElement } from "@/lib/safe-media";
 
 type Props = {
   /** Bump after Generate starts or finishes so the list refreshes immediately. */
@@ -143,13 +145,9 @@ function upsertProcessing(previous: UserVaultRow[], incoming: UserVaultRow): Use
 }
 
 function triggerBlobDownload(url: string, fileName: string) {
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  void import("@/lib/download-track").then(({ downloadTrack }) => {
+    void downloadTrack(url, fileName);
+  });
 }
 
 export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
@@ -211,13 +209,65 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }, [refresh]);
 
   const processing = rows.some((row) => row.status === "processing");
+  const pollStartedAtRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!processing || !signedIn) return;
-    const timer = window.setInterval(() => void refresh(), VAULT_POLL_MS);
-    return () => window.clearInterval(timer);
+    if (!processing || !signedIn) {
+      pollStartedAtRef.current = null;
+      return;
+    }
+    if (pollStartedAtRef.current == null) pollStartedAtRef.current = Date.now();
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const tick = () => {
+      if (cancelled) return;
+      if (document.visibilityState === "hidden") return;
+      const started = pollStartedAtRef.current ?? Date.now();
+      if (Date.now() - started > VAULT_POLL_MAX_MS) {
+        // Stop hammering WebKit after the max window — mark stale processing rows failed locally.
+        setRows((prev) =>
+          prev.map((row) =>
+            row.status === "processing"
+              ? { ...row, status: "failed" as const }
+              : row,
+          ),
+        );
+        pollStartedAtRef.current = null;
+        if (timer) window.clearInterval(timer);
+        return;
+      }
+      void refresh();
+    };
+
+    timer = window.setInterval(tick, VAULT_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [processing, signedIn, refresh]);
 
+  // Release any in-list <audio> elements on unmount so WebKit drops buffers.
+  useEffect(() => {
+    return () => {
+      try {
+        const nodes = document.querySelectorAll<HTMLAudioElement>("#vault-track-list audio");
+        nodes.forEach((node) => safeReleaseMediaElement(node));
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
+
   const [openAlbums, setOpenAlbums] = useState<string[]>([]);
+  const deleteLockRef = useRef(false);
 
   const grouped = useMemo(
     () =>
@@ -266,15 +316,24 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }
 
   async function confirmDelete() {
+    if (deleteLockRef.current) return;
     const target = pendingDelete;
     if (!target) return;
+    deleteLockRef.current = true;
     setPendingDelete(null);
+
+    // Optimistic removal — restore on failure so the UI never feels stuck on iOS.
+    const snapshot = rows;
+    setRows((prev) => prev.filter((row) => row.id !== target.id));
+    setDeletingId(target.id);
+
     if (target.id.startsWith("temp-")) {
-      setRows((prev) => prev.filter((row) => row.id !== target.id));
+      setDeletingId(null);
+      deleteLockRef.current = false;
       toast.success("Track deleted.");
       return;
     }
-    setDeletingId(target.id);
+
     try {
       if (isPersistedVaultId(target.id)) {
         try {
@@ -285,13 +344,18 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       } else {
         await removeVault({ data: { id: target.id } });
       }
-      setRows((prev) => prev.filter((row) => row.id !== target.id));
       toast.success("Track deleted.");
     } catch {
+      setRows(snapshot);
       toast.error("Could not delete that track. Please try again.");
     } finally {
       setDeletingId(null);
+      deleteLockRef.current = false;
     }
+  }
+
+  function requestDelete(row: UserVaultRow) {
+    setPendingDelete(row);
   }
 
   return (
@@ -388,9 +452,17 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                       <>
                                         <audio
                                           controls
+                                          playsInline
+                                          preload="none"
                                           className="h-8 max-w-[200px]"
                                           src={row.masterUrl}
-                                          preload="none"
+                                          onError={(event) => {
+                                            try {
+                                              safeReleaseMediaElement(event.currentTarget);
+                                            } catch {
+                                              /* ignore */
+                                            }
+                                          }}
                                         >
                                           <track kind="captions" />
                                         </audio>
@@ -457,9 +529,19 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                         type="button"
                                         size="sm"
                                         variant="ghost"
-                                        className="h-8 px-3 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive"
+                                        className="relative z-20 h-11 min-w-[5.5rem] touch-manipulation px-3 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive pointer-events-auto"
                                         disabled={deletingId === row.id}
-                                        onClick={() => setPendingDelete(row)}
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          requestDelete(row);
+                                        }}
+                                        onTouchEnd={(event) => {
+                                          // Prevent 300ms ghost-click + Accordion steal on iOS.
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          requestDelete(row);
+                                        }}
                                       >
                                         {deletingId === row.id ? (
                                           <Loader2 className="size-3.5 animate-spin" aria-hidden />
@@ -501,7 +583,15 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep track</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmDelete()}>Delete</AlertDialogAction>
+            <AlertDialogAction
+              className="min-h-11 touch-manipulation"
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

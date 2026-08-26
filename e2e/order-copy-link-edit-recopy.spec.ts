@@ -25,7 +25,7 @@ const copyButton = (page: Page) => page.getByRole("button", { name: /copy share 
 
 function prefilledLink(slug: Slug, artist: string, email: string) {
   return (
-    `/?package=${slug}` +
+    `/portal?package=${slug}` +
     `&artist=${encodeURIComponent(artist)}` +
     `&email=${encodeURIComponent(email)}#order`
   );

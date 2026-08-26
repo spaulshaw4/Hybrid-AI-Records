@@ -35,7 +35,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("deep link to /#order scrolls and focuses the first field", async ({ page }) => {
-    await page.goto("/#order");
+    await page.goto("/portal#order");
     const field = page.locator(FIRST_FIELD);
     await expect(field).toBeFocused();
 
@@ -46,7 +46,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("deep link with a package slug prefills and still focuses", async ({ page }) => {
-    await page.goto("/?package=foundation#order");
+    await page.goto("/portal?package=foundation#order");
     await expect(page.locator(FIRST_FIELD)).toBeFocused();
     // The alias is canonicalized to the real package slug.
     expect(page.url()).toContain("package=distribution-release");
@@ -54,7 +54,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("CTA click focuses the field and Escape restores focus", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/portal");
     const cta = page.locator(CTA).first();
     await cta.click();
 
@@ -67,7 +67,7 @@ test.describe("Reduced motion — order deep link and focus", () => {
   });
 
   test("back/forward restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/portal");
     const cta = page.locator(CTA).first();
     await cta.click();
     await expect(page.locator(FIRST_FIELD)).toBeFocused();

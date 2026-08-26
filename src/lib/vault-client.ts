@@ -4,7 +4,10 @@ import { sanitizeVaultTracks, type SanitizedVaultTrack } from "@/lib/vault-track
 
 export const VAULT_API_URL = "/api/studio/vault";
 export const VAULT_NEW_GENERATION_EVENT = "hybrid:vault-new-generation";
-export const VAULT_POLL_MS = 2_000;
+/** Visible-tab poll cadence while any vault row is still processing. */
+export const VAULT_POLL_MS = 5_000;
+/** Hard stop for processing polls — prevents forever timers on stuck rows. */
+export const VAULT_POLL_MAX_MS = 30 * 60 * 1000;
 
 export type VaultTrackPayload = SanitizedVaultTrack;
 

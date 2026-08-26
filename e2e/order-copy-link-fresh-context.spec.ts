@@ -85,7 +85,7 @@ test.describe("share link opened in a fresh browser context", () => {
       test.slow();
 
       // 1. Author the link in the current session.
-      await open(page, "/#order");
+      await open(page, "/portal#order");
       await chooseTier(page, slug);
       // Refill inside the copy retry: under parallel load a late draft-restore
       // can wipe fields after they were typed, so the fill+copy must be one unit.
@@ -129,12 +129,12 @@ test.describe("share link opened in a fresh browser context", () => {
 
     // Author a session with details, but copy a link from a page without them:
     // the recipient must not inherit the sender's draft.
-    await open(page, "/#order");
+    await open(page, "/portal#order");
     await typeInto(page, ARTIST, ARTIST_NAME);
 
     const fresh = await browser.newContext();
     const recipient = await fresh.newPage();
-    await recipient.goto("/#order", { waitUntil: "domcontentloaded" });
+    await recipient.goto("/portal#order", { waitUntil: "domcontentloaded" });
     await assertFreshStorage(recipient);
 
     await expect(recipient.locator(PACKAGE_SELECT)).toBeEnabled();
@@ -150,7 +150,7 @@ test.describe("share link opened in a fresh browser context", () => {
 
     const fresh = await browser.newContext();
     const recipient = await fresh.newPage();
-    await recipient.goto("/?package=full-hybrid#order", { waitUntil: "domcontentloaded" });
+    await recipient.goto("/portal?package=full-hybrid#order", { waitUntil: "domcontentloaded" });
     await assertFreshStorage(recipient);
 
     await expect(recipient.locator(PACKAGE_SELECT)).toBeEnabled();

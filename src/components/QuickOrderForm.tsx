@@ -84,7 +84,7 @@ export function QuickOrderForm() {
   const languageLabel = LANGUAGES.find((l) => l.code === language)?.label ?? "English";
   const divisionLabel = divisionNames[activeDivision];
 
-  // Prefill from a shared /?package=<slug>&artist=…&email=…&demo=…#order link,
+  // Prefill from a shared /portal?package=<slug>&artist=…&email=…&demo=…#order link,
   // falling back to this device's last saved entry. Also keeps up with
   // back/forward navigation. SSR-safe: reads on mount.
   const hydrated = useRef(false);

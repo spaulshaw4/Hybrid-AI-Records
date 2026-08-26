@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * The copied share link has to work as a real link: opening it in a fresh tab
  * must land on the order form with the same tier (and details) preselected —
- * both for the plain `/#order` shape and `/?package=<slug>#order`.
+ * both for the plain `/portal#order` shape and `/portal?package=<slug>#order`.
  */
 
 const PACKAGE_SELECT = "#qo-package";
@@ -63,12 +63,12 @@ test.describe("Copied share link opens in a new tab", () => {
     { label: "Full Label Release", slug: "full-label" },
   ]) {
     test(`restores the ${tier.slug} tier from the copied link`, async ({ page }) => {
-      await open(page, "/");
+      await open(page, "/portal");
       await page.locator(PACKAGE_SELECT).selectOption(tier.label);
 
       const copied = await copyLink(page);
       const url = new URL(copied);
-      expect(`${url.pathname}${url.search}${url.hash}`).toBe(`/?package=${tier.slug}#order`);
+      expect(`${url.pathname}${url.search}${url.hash}`).toBe(`/portal?package=${tier.slug}#order`);
 
       const tab = await openInNewTab(page, copied);
 
@@ -91,7 +91,7 @@ test.describe("Copied share link opens in a new tab", () => {
   test("plain /#order link opens on the form with the default tier", async ({ page }) => {
     // The bare hash shape is what the homepage entry points hand out.
     const base = test.info().project.use.baseURL ?? "http://localhost:8080";
-    const tab = await openInNewTab(page, new URL("/#order", base).toString());
+    const tab = await openInNewTab(page, new URL("/portal#order", base).toString());
 
     await expect(tab.locator(PACKAGE_SELECT)).toHaveValue("Distribution & Release");
     expect(new URL(tab.url()).hash).toBe("#order");
@@ -101,7 +101,7 @@ test.describe("Copied share link opens in a new tab", () => {
   });
 
   test("carries prefilled details along with the tier into the new tab", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
     await page.fill("#qo-artist", "Relay Artist");
     await page.fill("#qo-email", "relay@example.com");
     await page.locator(PACKAGE_SELECT).selectOption("Production & Visual Push");
@@ -116,7 +116,7 @@ test.describe("Copied share link opens in a new tab", () => {
   });
 
   test("alias links copied by a visitor open on the canonical tier", async ({ page }) => {
-    await open(page, "/?package=full-hybrid#order");
+    await open(page, "/portal?package=full-hybrid#order");
 
     const copied = await copyLink(page);
     expect(new URL(copied).searchParams.get("package")).toBe("full-label");

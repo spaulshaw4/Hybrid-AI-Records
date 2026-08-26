@@ -66,17 +66,22 @@ test.describe("Homepage keyboard navigation", () => {
     const first = await focusInfo(page);
     expect(first?.tag).toBe("a");
 
-    // "Submit Your Music" is reachable purely by tabbing.
+    // Hero CTAs are reachable purely by tabbing.
+    const makeTrack = await tabUntil(page, (i) => /make your track/i.test(i.label));
+    expect(makeTrack, "Make Your Track CTA should be reachable by Tab").not.toBeNull();
+
     const submit = await tabUntil(page, (i) => /submit your music/i.test(i.label));
     expect(submit, "Submit Your Music CTA should be reachable by Tab").not.toBeNull();
 
-    // The order-form CTA is reachable and activates with Enter.
-    const orderCta = page.locator('a[aria-controls="quick-order-form"]').first();
-    await orderCta.scrollIntoViewIfNeeded();
-    await orderCta.focus();
-    await expect(orderCta).toBeFocused();
+    const listen = await tabUntil(page, (i) => /listen & download/i.test(i.label));
+    expect(listen, "Listen & Download CTA should be reachable by Tab").not.toBeNull();
+
+    // Submit Your Music navigates to the isolated distribution intake.
+    await page.getByRole("link", { name: "Submit Your Music" }).first().focus();
     await page.keyboard.press("Enter");
-    await expect(page.locator("#qo-artist")).toBeFocused();
+    await page.waitForURL(/\/portal/);
+    await expect(page.locator("#order")).toBeVisible();
+    await expect(page.locator("#quick-order-form")).toBeVisible();
   });
 
   test("release play preview opens with Enter and closes with Escape", async ({ page }) => {

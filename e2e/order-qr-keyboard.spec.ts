@@ -15,7 +15,7 @@ const DL_SVG = '[data-testid="share-link-qr-download-svg"]';
 
 const toggle = (page: Page) => page.getByRole("button", { name: /qr code for this order link/i }).first();
 
-async function open(page: Page, entry = "/?package=visual-push#order") {
+async function open(page: Page, entry = "/portal?package=visual-push#order") {
   await page.goto(entry, { waitUntil: "domcontentloaded" });
   await expect(page.locator("#qo-package")).toBeEnabled();
   await expect(page.locator("#qo-package")).toHaveValue("Production & Visual Push", {

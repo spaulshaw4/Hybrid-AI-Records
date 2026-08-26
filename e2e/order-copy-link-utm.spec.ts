@@ -112,7 +112,7 @@ test.describe("share link preserves UTM parameters", () => {
   }) => {
     test.slow();
 
-    await open(page, `/?package=full-label&${utmQuery}#order`);
+    await open(page, `/portal?package=full-label&${utmQuery}#order`);
 
     let copied = "";
     await expect(async () => {
@@ -146,7 +146,7 @@ test.describe("share link preserves UTM parameters", () => {
   test("a visit with no UTM params copies a clean link (no empty utm keys)", async ({ page }) => {
     test.slow();
 
-    await open(page, "/#order");
+    await open(page, "/portal#order");
     await chooseTier(page, "distribution-release");
 
     const copied = await copyUntil(page, (c) => {

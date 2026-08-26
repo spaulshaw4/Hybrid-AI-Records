@@ -21,7 +21,7 @@ const closeBtn = (page: Page) =>
   page.getByRole("button", { name: /close the qr code/i }).first();
 
 async function open(page: Page) {
-  await page.goto("/?package=visual-push#order", { waitUntil: "domcontentloaded" });
+  await page.goto("/portal?package=visual-push#order", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#qo-package")).toBeEnabled();
   // Wait for the draft-restore effect to settle on its final package value,
   // otherwise a late re-render remounts the panel and drops focus mid-test.

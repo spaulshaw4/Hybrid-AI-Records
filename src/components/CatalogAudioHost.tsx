@@ -19,7 +19,7 @@ export function CatalogAudioHost() {
     <audio
       ref={ref}
       id="hybrid-catalog-audio"
-      preload="auto"
+      preload="metadata"
       playsInline
       className="pointer-events-none fixed h-0 w-0 opacity-0"
       aria-hidden

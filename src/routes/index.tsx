@@ -7,13 +7,7 @@ import keliasCover from "@/assets/kelias-i-save-cover.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { trackHowItWorksCtaClick } from "@/lib/cta-analytics";
-
-
-import { Play, ArrowUpRight, ArrowDown, Youtube, Instagram, Link as LinkIcon, ShoppingBag, Facebook, ShieldCheck, Check, Minus, Search, X } from "lucide-react";
-import { useStripeCheckout } from "@/hooks/useStripeCheckout";
-import { ApplicationModal } from "@/components/ApplicationModal";
-import { InstallAppButton } from "@/components/InstallAppButton";
+import { Play, ArrowUpRight, Youtube, Instagram, Link as LinkIcon, ShoppingBag, Facebook, ShieldCheck, Check, Minus, Search, X } from "lucide-react";
 import { AboutModal } from "@/components/AboutModal";
 import { TermsModal } from "@/components/TermsModal";
 
@@ -24,16 +18,7 @@ import { crestPreloadLink, resolveDivision, type Division } from "@/lib/division
 import { buildCatalogJsonLd, buildOrganizationPodcastJsonLd } from "@/lib/release-schema";
 import { JESTER_DIVISION_NAME, JESTER_DIVISION_SHORT_NAME } from "@/lib/division-settings";
 import { ContactModal } from "@/components/ContactModal";
-import { QuickOrderForm } from "@/components/QuickOrderForm";
-import { PACKAGE_SLUGS, type OrderPackage } from "@/lib/order-link";
-import { ArtistFileDrop } from "@/components/ArtistFileDrop";
 import { HowItWorksModal } from "@/components/HowItWorksModal";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 
 /** Rows for the $25 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
 const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
@@ -150,10 +135,6 @@ const PRICING_FAQ: { q: string; a: string }[] = [
 ];
 
 
-import { useCurrency } from "@/lib/currency";
-import { useMoneyFormat } from "@/lib/money-format";
-import { SERVICES, type ServicePackage } from "@/lib/services";
-import { PayNowModal } from "@/components/PayNowModal";
 import { LocaleCluster } from "@/components/SiteNav";
 
 import { TikTokIcon } from "@/components/TikTokIcon";
@@ -405,10 +386,6 @@ function Home() {
   const openVideo = (item: VideoItem) =>
     navigate({ search: { v: item.id } });
   const closeVideo = () => navigate({ search: {}, replace: true });
-  const { openCheckout, closeCheckout, isOpen: checkoutOpen, checkoutElement } = useStripeCheckout();
-  const currency = useCurrency();
-  const { label: priceLabel } = useMoneyFormat();
-  const [applyPackage, setApplyPackage] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   
@@ -430,30 +407,26 @@ function Home() {
     setHowItWorksOpen(true);
   };
 
-  const buyNow = (priceId: string) => {
-    openCheckout({
-      priceId,
-      currency,
-      returnUrl: `${window.location.origin}/checkout/return?session_id={CHECKOUT_SESSION_ID}`,
-    });
-  };
-
-  const [payNow, setPayNow] = useState<ServicePackage | null>(null);
-
-  const startPaidOrder = (pkg: ServicePackage, reference: string, email: string) => {
-    setPayNow(null);
-    openCheckout({
-      priceId: pkg.priceIdSingle,
-      currency,
-      customerEmail: email,
-      trackReference: reference,
-      returnUrl: `${window.location.origin}/checkout/return?session_id={CHECKOUT_SESSION_ID}`,
-    });
-  };
-
   const [highlightCatalog, setHighlightCatalog] = useState(false);
   // Polite live region text so screen readers hear where a smooth scroll landed.
   const [scrollAnnouncement, setScrollAnnouncement] = useState("");
+
+  // Legacy home order / resume deep links → dedicated distribution intake on /portal.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const handoff =
+      url.hash === "#order" ||
+      ["package", "resume", "artist", "email", "demo"].some((k) => url.searchParams.has(k));
+    if (!handoff) return;
+    const hash =
+      url.hash === "#order" ||
+      url.searchParams.has("package") ||
+      url.searchParams.has("artist") ||
+      url.searchParams.has("demo")
+        ? "#order"
+        : url.hash;
+    window.location.replace(`/portal${url.search}${hash}`);
+  }, []);
 
 
   /**
@@ -496,201 +469,6 @@ function Home() {
     setHighlightCatalog(true);
     window.setTimeout(() => setHighlightCatalog(false), 2600);
   };
-
-  /** The "Connect & Order" button, so focus can be returned to it. */
-  const orderCtaRef = useRef<HTMLAnchorElement>(null);
-  /** Whatever was focused right before we jumped into the order form. */
-  const orderReturnFocusRef = useRef<HTMLElement | null>(null);
-  /** True once *this* page pushed the `#order` entry (so Back can undo it). */
-  const orderPushedRef = useRef(false);
-
-
-  /** Live sticky-header height (it grows when the mobile menu is open). */
-  const headerOffset = () => {
-    const header = document.querySelector("header");
-    return (header instanceof HTMLElement ? header.offsetHeight : 64) + 12;
-  };
-
-  /** Desired document scrollTop that puts the form just below the header. */
-  const orderScrollTarget = (form: HTMLElement) =>
-    Math.max(0, Math.round(form.getBoundingClientRect().top + window.scrollY - headerOffset()));
-
-  /**
-   * Scrolls the order form under the sticky header and keeps correcting for
-   * ~1.2s: reveal animations, lazy images and font swaps shift the section
-   * after the first scroll, which used to leave deep links a few hundred
-   * pixels off (or hidden behind the header). Aborts as soon as the visitor
-   * scrolls themselves.
-   */
-  const scrollOrderIntoView = (form: HTMLElement, behavior: ScrollBehavior) => {
-    window.scrollTo({ top: orderScrollTarget(form), behavior });
-
-    let cancelled = false;
-    const cancel = () => {
-      cancelled = true;
-      for (const ev of ["wheel", "touchstart", "keydown"] as const) {
-        window.removeEventListener(ev, cancel);
-      }
-    };
-    for (const ev of ["wheel", "touchstart", "keydown"] as const) {
-      window.addEventListener(ev, cancel, { once: true, passive: true });
-    }
-
-    const started = performance.now();
-    const correct = () => {
-      if (cancelled || !form.isConnected) return cancel();
-      const want = orderScrollTarget(form);
-      // Only nudge once the smooth scroll has effectively settled, otherwise
-      // we would fight the in-flight animation.
-      const drift = Math.abs(window.scrollY - want);
-      if (drift > 2) window.scrollTo({ top: want, behavior: "auto" });
-      if (performance.now() - started < 2600) window.requestAnimationFrame(correct);
-      else cancel();
-    };
-    // Give the smooth scroll a beat before the first correction pass.
-    window.setTimeout(() => window.requestAnimationFrame(correct), behavior === "smooth" ? 450 : 0);
-  };
-
-  /**
-   * Keyboard-safe jump into the order form: scrolls (respecting reduced motion),
-   * moves focus to the first field without a fragile timeout, and announces it.
-   */
-  const jumpToOrderForm = (updateHash = true, pkg?: OrderPackage, instant = false) => {
-    const form = document.getElementById("quick-order-form");
-    if (!form) return;
-    // Remember where focus came from so Back can restore it exactly.
-    const active = document.activeElement as HTMLElement | null;
-    if (active && active !== document.body && !form.contains(active)) {
-      orderReturnFocusRef.current = active;
-    }
-    if (updateHash) {
-      // One canonical shape for every entry point: /?package=<slug>#order.
-      const url = new URL(window.location.href);
-      if (pkg) url.searchParams.set("package", PACKAGE_SLUGS[pkg]);
-      const next = `${url.pathname}${url.search}#order`;
-      if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
-        // pushState (not replaceState) so Back leaves the form again.
-        window.history.pushState(null, "", next);
-        orderPushedRef.current = true;
-      }
-
-    }
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    scrollOrderIntoView(form, reduced || instant ? "auto" : "smooth");
-    const first = form.querySelector<HTMLElement>(
-      "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled])",
-    );
-    // Reveal animations around the section can drop focus mid-scroll, so keep
-    // re-focusing across a few frames until it actually sticks (~1s max).
-    if (first) {
-      let attempts = 0;
-      const settle = () => {
-        if (document.activeElement === first) return;
-        first.focus({ preventScroll: true });
-        if (++attempts < 60) window.requestAnimationFrame(settle);
-      };
-      window.requestAnimationFrame(settle);
-    }
-
-    setScrollAnnouncement("");
-    window.requestAnimationFrame(() =>
-      setScrollAnnouncement("Order form. Press Escape to return to the Connect and Order button."),
-    );
-  };
-
-
-  /** Sends focus back to whatever opened the form (falling back to the CTA). */
-  const restoreOrderFocus = (announce = false) => {
-    const form = document.getElementById("quick-order-form");
-    const active = document.activeElement as HTMLElement | null;
-    // Only steal focus if it is still inside the form (or nowhere).
-    if (active && active !== document.body && form && !form.contains(active)) return;
-    const target = orderReturnFocusRef.current ?? orderCtaRef.current;
-    if (!target || !target.isConnected) return;
-    target.focus({ preventScroll: true });
-    if (announce) {
-      setScrollAnnouncement("");
-      window.requestAnimationFrame(() =>
-        setScrollAnnouncement("Left the order form. Focus returned to the Connect and Order button."),
-      );
-    }
-  };
-
-  /**
-   * Deep link + history: /#order scrolls to and focuses the order form, and
-   * navigating back/forward off the hash restores the previous focus.
-   */
-  useEffect(() => {
-    // The very first pass is a cold deep link: jump instantly (the browser has
-    // already made its own imprecise hash jump) and let the correction loop
-    // absorb any late layout shift.
-    let first = true;
-    const handle = () => {
-      if (window.location.hash === "#order") {
-        const instant = first;
-        first = false;
-        // Wait a frame so the form is mounted before scrolling/focusing.
-        window.requestAnimationFrame(() => jumpToOrderForm(false, undefined, instant));
-      } else {
-        first = false;
-        restoreOrderFocus(true);
-      }
-    };
-    handle();
-    // Late-loading images/fonts move the section, so re-align once on load.
-    const onLoad = () => {
-      if (window.location.hash !== "#order") return;
-      const form = document.getElementById("quick-order-form");
-      if (form) scrollOrderIntoView(form, "auto");
-    };
-    if (document.readyState !== "complete") window.addEventListener("load", onLoad, { once: true });
-    window.addEventListener("hashchange", handle);
-    window.addEventListener("popstate", handle);
-    return () => {
-      window.removeEventListener("load", onLoad);
-      window.removeEventListener("hashchange", handle);
-      window.removeEventListener("popstate", handle);
-    };
-
-    return () => {
-      window.removeEventListener("hashchange", handle);
-      window.removeEventListener("popstate", handle);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-
-  /** Escape inside the order form sends focus back — and out of the #order entry. */
-  const onOrderFormKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
-    if (window.location.hash === "#order" && orderPushedRef.current) {
-      // Pop the pushed entry so Forward can return to the form.
-      orderPushedRef.current = false;
-      window.history.back();
-      return;
-    }
-    if (window.location.hash === "#order") {
-      // Cold deep link (a shared /#order URL): there is no entry to pop, so
-      // drop the hash in place and hand focus back to the CTA ourselves.
-      const url = new URL(window.location.href);
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}`);
-    }
-    restoreOrderFocus(true);
-  };
-
-
-
-
-
-  // A secure resume link (?resume=<token>) reopens the application form so the
-  // modal can restore the artist's saved draft on this device. Stored drafts no
-  // longer auto-open the form — that banner cluttered the landing view.
-  useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get("resume");
-    if (token) setApplyPackage("foundation_single");
-  }, []);
-
 
   return (
     <div className="min-h-dvh text-foreground">
@@ -740,12 +518,10 @@ function Home() {
               Every royalty, every master, forever.
             </p>
 
-
-            {/* Primary visitor pathways: make music, or get distribution/video services. */}
-            <div className="mt-10 grid max-w-3xl gap-4 sm:grid-cols-2">
+            <div className="mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
               <Link
                 to="/engine"
-                className="group flex flex-col gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-md backdrop-blur-md transition-all hover:border-blue-500 hover:bg-zinc-800"
+                className="group flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 transition-colors hover:border-zinc-600"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
                   Make Your Own Song
@@ -754,14 +530,13 @@ function Home() {
                   Write it, describe it, hear it in minutes. No studio, no engineer.
                 </span>
                 <span className="mt-2 inline-flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#2563eb]">
-                  Start creating <ArrowUpRight size={15} />
+                  Start creating <ArrowUpRight size={15} aria-hidden />
                 </span>
               </Link>
 
               <Link
                 to="/portal"
-                search={{ view: "services" }}
-                className="group flex flex-col gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-md backdrop-blur-md transition-all hover:border-blue-500 hover:bg-zinc-800"
+                className="group flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 transition-colors hover:border-zinc-600"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
                   Distribution & Video
@@ -770,68 +545,32 @@ function Home() {
                   Get your release on streaming platforms and add a professional video.
                 </span>
                 <span className="mt-2 inline-flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#2563eb]">
-                  See packages <ArrowUpRight size={15} />
+                  See packages <ArrowUpRight size={15} aria-hidden />
                 </span>
               </Link>
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <a
-                ref={orderCtaRef}
-                href="#order"
-                aria-controls="quick-order-form"
+              <Link
+                to="/engine"
                 className="btn-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                onClick={(e) => {
-                  e.preventDefault();
-                  jumpToOrderForm();
-                }}
               >
-                Connect & Order
-              </a>
-              <a
-                href="#order"
+                Make Your Track
+              </Link>
+              <Link
+                to="/portal"
                 className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                onClick={(e) => {
-                  e.preventDefault();
-                  jumpToOrderForm();
-                }}
               >
                 Submit Your Music
-              </a>
-              <Link to="/artists" className="btn-ghost">
-                Listen & Download Music
               </Link>
-              <InstallAppButton />
+              <Link
+                to="/artists"
+                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Listen & Download
+              </Link>
             </div>
 
-
-
-
-          </div>
-        </div>
-      </section>
-
-      {/* ORDER — deep-link + keyboard focus target for /#order */}
-      <section
-        id="order"
-        aria-labelledby="order-title"
-        className="relative scroll-mt-20 border-t border-border py-20 md:py-28"
-        onKeyDown={onOrderFormKeyDown}
-      >
-        <div className="mx-auto max-w-3xl px-6">
-          <h2
-            id="order-title"
-            tabIndex={-1}
-            className="rwb-flame rwb-flame-deep font-display text-[clamp(1.75rem,5vw,3rem)] font-extrabold tracking-tight outline-none"
-          >
-            Connect & Order
-          </h2>
-          <p className="mt-3 max-w-2xl text-base text-slate-300">
-            Share your demo link and package choice. We&apos;ll confirm by email with a reference
-            code you can track anytime.
-          </p>
-          <div className="mt-10">
-            <QuickOrderForm />
           </div>
         </div>
       </section>
@@ -1243,47 +982,6 @@ function Home() {
       <TermsModal open={termsOpen} onClose={() => setTermsOpen(false)} />
       
       <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
-
-      {payNow && (
-        <PayNowModal
-          open
-          packageLabel={payNow.title}
-          priceLabel={priceLabel(payNow.priceIdSingle, currency) ?? payNow.priceSingle}
-          onClose={() => setPayNow(null)}
-          onSubmitted={({ reference, email }) => startPaidOrder(payNow, reference, email)}
-        />
-      )}
-
-      <ApplicationModal
-        open={applyPackage !== null}
-        onClose={() => setApplyPackage(null)}
-        defaultPackage={applyPackage ?? "foundation_single"}
-      />
-
-      {checkoutOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Checkout"
-          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto overlay-scrim bg-foreground/40 p-4 backdrop-blur-md sm:p-8"
-          onClick={closeCheckout}
-        >
-          <div
-            className="relative my-auto w-full max-w-3xl bg-white text-black shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={closeCheckout}
-              className="absolute end-3 top-3 z-10 rounded-full studio-glass p-2 text-foreground transition hover:bg-white"
-              aria-label="Close checkout"
-            >
-              <X size={18} />
-            </button>
-            {checkoutElement}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

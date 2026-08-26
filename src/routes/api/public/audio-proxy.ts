@@ -195,8 +195,18 @@ async function handle(request: Request, method: "GET" | "HEAD"): Promise<Respons
   headers.set("x-content-type-options", "nosniff");
   headers.set("timing-allow-origin", "*");
   if (downloadName) {
+    const { attachmentContentDisposition, audioContentTypeForFileName } = await import(
+      "@/lib/download-headers"
+    );
     const safe = downloadName.replace(/[^\w.\- ]+/g, "_").slice(0, 120) || "track";
-    headers.set("content-disposition", `attachment; filename="${safe}"`);
+    headers.set(
+      "content-type",
+      audioContentTypeForFileName(
+        safe,
+        contentTypeFor(target, upstreamType.startsWith("audio/") ? upstreamType : null),
+      ),
+    );
+    headers.set("content-disposition", attachmentContentDisposition(safe));
   } else {
     headers.set("content-disposition", "inline");
   }

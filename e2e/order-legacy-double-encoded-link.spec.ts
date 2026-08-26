@@ -48,7 +48,7 @@ test.describe("Legacy double-encoded share links", () => {
       const artist = "Cold Iron Choir & Sons";
       const email = "booking+legacy@cold-iron.example";
       const url =
-        `/?package=${doubleEncode(slug)}` +
+        `/portal?package=${doubleEncode(slug)}` +
         `&artist=${doubleEncode(artist)}` +
         `&email=${doubleEncode(email)}#order`;
 
@@ -63,7 +63,7 @@ test.describe("Legacy double-encoded share links", () => {
     const email = "sol@vega.example";
     await paste(
       page,
-      `/?package=${doubleEncode("the-visual-push")}&artist=${doubleEncode(artist)}&email=${doubleEncode(email)}#order`,
+      `/portal?package=${doubleEncode("the-visual-push")}&artist=${doubleEncode(artist)}&email=${doubleEncode(email)}#order`,
     );
     await expectRestored(page, "visual-push", artist, email);
     // The address bar is rewritten to the canonical slug.
@@ -77,7 +77,7 @@ test.describe("Legacy double-encoded share links", () => {
     const email = "ámbar+tour@ñoise.example";
     await paste(
       page,
-      `/?package=${doubleEncode("full-label")}&artist=${doubleEncode(artist)}&email=${doubleEncode(email)}#order`,
+      `/portal?package=${doubleEncode("full-label")}&artist=${doubleEncode(artist)}&email=${doubleEncode(email)}#order`,
     );
     await expectRestored(page, "full-label", artist, email);
   });
@@ -87,7 +87,7 @@ test.describe("Legacy double-encoded share links", () => {
     const email = "hi@modern-signal.example";
     await paste(
       page,
-      `/?package=visual-push&artist=${encodeURIComponent(artist)}&email=${encodeURIComponent(email)}#order`,
+      `/portal?package=visual-push&artist=${encodeURIComponent(artist)}&email=${encodeURIComponent(email)}#order`,
     );
     await expectRestored(page, "visual-push", artist, email);
   });

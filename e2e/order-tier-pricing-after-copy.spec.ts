@@ -154,7 +154,7 @@ test.describe("tier-dependent pricing and derived UI after a mid-edit copy", () 
     test(`derived values match the copied tier — ${slug}`, async ({ page }) => {
       test.slow();
 
-      await open(page, "/#order");
+      await open(page, "/portal#order");
       await chooseTier(page, slug);
 
       // Copy while the artist is still filling the form.
@@ -193,7 +193,7 @@ test.describe("tier-dependent pricing and derived UI after a mid-edit copy", () 
   }) => {
     test.slow();
 
-    await open(page, "/#order");
+    await open(page, "/portal#order");
     await chooseTier(page, "distribution-release");
 
     await expect(async () => {
@@ -235,7 +235,7 @@ test.describe("tier-dependent pricing and derived UI after a mid-edit copy", () 
   test("all three tiers keep distinct prices while a link is copied", async ({ page }) => {
     test.slow();
 
-    await open(page, "/?package=visual-push#order");
+    await open(page, "/portal?package=visual-push#order");
     await copyUntil(page, (c) => {
       expect(new URL(c).searchParams.get("package")).toBe("visual-push");
     });

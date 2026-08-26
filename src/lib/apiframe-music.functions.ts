@@ -196,23 +196,6 @@ export async function runGenerateEngineTrack(
     getMusicApiKey();
     limitBy("generateEngineTrack", context.userId, RATE_LIMITS.generation, "track generations");
     const { DEV_TEST_VOICE_ID, isDevAuthBypass } = await import("@/lib/dev-auth");
-    const allowTokenless =
-      isDevAuthBypass() ||
-      process.env.HYBRID_ALLOW_TOKENLESS_GENERATE === "1" ||
-      process.env.HYBRID_ALLOW_TOKENLESS_GENERATE === "true";
-    if (!allowTokenless) {
-    // Entitlement gate. Tokens are charged only after a successful render, but
-    // the render itself costs real money, so the server refuses to start one
-    // for an account with no balance instead of trusting the browser's check.
-    const { data: balanceRow } = await context.supabase
-      .from("token_balances")
-      .select("balance")
-      .eq("user_id", context.userId)
-      .maybeSingle();
-    if ((balanceRow?.balance ?? 0) < 1) {
-      throw new Error("You need at least 1 Hybrid Token to generate a track.");
-    }
-    }
 
     const { newCorrelationId } = await import("@/lib/apiframe.server");
     const { logApiPayload } = await import("@/lib/generation-style-prompt");
@@ -314,6 +297,10 @@ export async function runGenerateEngineTrack(
       reserveGenerationTokenIntent,
       clearGenerationTokenIntent,
     } = await import("@/lib/pipeline-idempotency.server");
+    const {
+      authorizeAndSpendGenerationToken,
+      generationTokenIdempotencyKey,
+    } = await import("@/lib/generation-tokens.server");
 
     const idempotencyKey =
       payload.idempotencyKey?.trim() ||
@@ -324,6 +311,16 @@ export async function runGenerateEngineTrack(
         lyrics: lyricContent,
         instrumental: payload.instrumental,
       });
+
+    // Universal atomic burn — before any AI vendor call. Disconnect / refresh
+    // after this point does not reverse the ledger row.
+    const tokenAuth = await authorizeAndSpendGenerationToken({
+      userId: context.userId,
+      supabase: context.supabase,
+      idempotencyKey: generationTokenIdempotencyKey(idempotencyKey),
+      amount: 1,
+      note: payload.title || "Studio master generation",
+    });
 
     reserveGenerationTokenIntent(idempotencyKey);
 
@@ -407,6 +404,7 @@ export async function runGenerateEngineTrack(
           durationSeconds,
           language: payload.language,
           customLanguage: payload.customLanguage,
+          tokenIdempotencyKey: generationTokenIdempotencyKey(idempotencyKey),
         }),
     });
 
@@ -529,7 +527,10 @@ export async function runGenerateEngineTrack(
         pipelineState: pipeline.pipelineState,
       },
       gateMask: pipeline.pipelineState,
-      tokenSettled: Boolean(pipeline.tokenSettled),
+      // Prefer the pre-pipeline burn; settlement uses the same idempotency key.
+      tokenSettled: true,
+      tokenBypassed: tokenAuth.bypassed,
+      balance: tokenAuth.balance,
       settlement: pipeline.settlement ?? null,
       chargeLedger: pipeline.chargeLedger ?? pipeline.settlement?.chargeLedger ?? [],
       totalCharged: pipeline.totalCharged ?? pipeline.settlement?.totalCharged ?? 0,

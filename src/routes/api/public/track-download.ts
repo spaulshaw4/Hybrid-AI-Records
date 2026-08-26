@@ -43,13 +43,19 @@ async function handle(request: Request, method: "GET" | "HEAD"): Promise<Respons
   }
 
   const safeName = (payload.f || `${track.title}.mp3`).replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+  const { attachmentContentDisposition, audioContentTypeForFileName } = await import(
+    "@/lib/download-headers"
+  );
   const headers = new Headers();
   for (const key of ["content-length", "content-range", "accept-ranges"]) {
     const value = upstream.headers.get(key);
     if (value) headers.set(key, value);
   }
-  headers.set("content-type", upstream.headers.get("content-type") ?? "audio/mpeg");
-  headers.set("content-disposition", `attachment; filename="${safeName}"`);
+  headers.set(
+    "content-type",
+    audioContentTypeForFileName(safeName, upstream.headers.get("content-type")),
+  );
+  headers.set("content-disposition", attachmentContentDisposition(safeName));
   // Signed, per-user link: never cacheable by shared caches.
   headers.set("cache-control", "private, no-store");
   headers.set("x-content-type-options", "nosniff");

@@ -51,7 +51,7 @@ test.describe("Copy Share Link — confirmation feedback", () => {
   });
 
   test("shows a toast with the copied URL that auto-dismisses", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
     await clickCopy(page);
 
     const t = toast(page);
@@ -70,7 +70,7 @@ test.describe("Copy Share Link — confirmation feedback", () => {
   });
 
   test("button confirms then reverts to its idle label", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
 
     const btn = copyButton(page);
     await expect(btn).toContainText(/copy share link/i);
@@ -92,7 +92,7 @@ test.describe("Copy Share Link — confirmation feedback", () => {
   });
 
   test("copying again re-triggers the confirmation", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
 
     await clickCopy(page);
     // Let the first confirmation expire completely.

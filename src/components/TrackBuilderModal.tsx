@@ -183,7 +183,7 @@ export function TrackBuilderModal({ open, pkg, priceLabel, onClose, onReady }: P
       role="dialog"
       aria-modal="true"
       aria-label={`Build a track — ${pkg.title}`}
-      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto overlay-scrim bg-foreground/40 p-4 backdrop-blur-md sm:p-8"
+      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto overlay-scrim bg-foreground/40 p-4 backdrop-blur-md sm:p-8 lg:ps-[var(--site-sidebar-width)]"
       onClick={onClose}
     >
       <div

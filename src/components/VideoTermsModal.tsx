@@ -69,7 +69,7 @@ export function VideoTermsModal({ open, onClose, packageTitle }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Video package terms"
-      className="fixed inset-0 z-[110] flex flex-col studio-glass"
+      className="fixed inset-0 z-[110] flex flex-col studio-glass lg:ps-[var(--site-sidebar-width)]"
       onClick={onClose}
     >
       <div

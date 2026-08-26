@@ -89,7 +89,7 @@ test.describe("fresh session restores the latest tier and every prefilled value"
   }) => {
     test.slow();
 
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     // Walk through every tier so a stale value would be easy to catch.
     await chooseTier(page, "distribution-release");
@@ -140,7 +140,7 @@ test.describe("fresh session restores the latest tier and every prefilled value"
   }) => {
     test.slow();
 
-    await open(page, "/?package=full-label#order");
+    await open(page, "/portal?package=full-label#order");
 
     let copied = "";
     await expect(async () => {
@@ -178,7 +178,7 @@ test.describe("fresh session restores the latest tier and every prefilled value"
   }) => {
     test.slow();
 
-    await open(page, "/#order");
+    await open(page, "/portal#order");
     await chooseTier(page, "distribution-release");
 
     let copied = "";

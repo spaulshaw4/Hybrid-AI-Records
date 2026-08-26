@@ -50,7 +50,7 @@ test.describe("rapid Copy Link clicks", () => {
     page,
   }) => {
     test.slow();
-    await open(page, "/?package=visual-push#order");
+    await open(page, "/portal?package=visual-push#order");
 
     const baselineRegions = await politeRegions(page).count();
 
@@ -86,7 +86,7 @@ test.describe("rapid Copy Link clicks", () => {
 
   test("the confirmation still clears itself after the burst", async ({ page }) => {
     test.slow();
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     await expect(async () => {
       await rapidClicks(page, 4, 60);
@@ -107,7 +107,7 @@ test.describe("rapid Copy Link clicks", () => {
 
   test("keyboard repeat (Enter held) behaves like a single confirmed copy", async ({ page }) => {
     test.slow();
-    await open(page, "/?package=full-label#order");
+    await open(page, "/portal?package=full-label#order");
     await ensureTier(page, "Full Label Release");
 
     await expect(async () => {
@@ -133,7 +133,7 @@ test.describe("rapid Copy Link clicks", () => {
     page,
   }) => {
     test.slow();
-    await open(page, "/#order");
+    await open(page, "/portal#order");
 
     await expect(async () => {
       await page.locator("#qo-artist").fill("");

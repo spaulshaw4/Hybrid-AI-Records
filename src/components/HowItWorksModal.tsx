@@ -53,7 +53,7 @@ export function HowItWorksModal({ open, onClose, onSubmit }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="How It Works"
-      className="fixed inset-0 z-[110] flex flex-col studio-glass"
+      className="fixed inset-0 z-[110] flex flex-col studio-glass lg:ps-[var(--site-sidebar-width)]"
       onClick={onClose}
     >
       <div

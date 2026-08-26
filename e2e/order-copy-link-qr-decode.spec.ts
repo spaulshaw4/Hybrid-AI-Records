@@ -173,7 +173,7 @@ test.describe("QR payload matches the share URL", () => {
   test("the QR payload re-encodes live as the tier and details change", async ({ page }) => {
     test.slow();
 
-    await open(page, `/?package=distribution-release&${utmQuery}#order`);
+    await open(page, `/portal?package=distribution-release&${utmQuery}#order`);
     await showQr(page);
 
     await expect(async () => {

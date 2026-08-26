@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { CatalogPlayable } from "@/lib/artist-catalog";
+import { safePlay, safeReleaseMediaElement } from "@/lib/safe-media";
 
 /**
  * One shared HTMLAudioElement for catalog playback so Artist page, album
@@ -47,7 +48,15 @@ function setState(patch: Partial<CatalogPlaybackState>) {
 }
 
 function playbackUrl(track: CatalogPlayable): string {
-  return (track.audio_url ?? track.src ?? "").trim();
+  const raw = (track.audio_url ?? track.src ?? "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, typeof window !== "undefined" ? window.location.origin : "https://localhost");
+    if (!["http:", "https:", "blob:"].includes(parsed.protocol)) return "";
+    return parsed.href;
+  } catch {
+    return "";
+  }
 }
 
 function bindElementListeners(el: HTMLAudioElement) {
@@ -58,33 +67,28 @@ function bindElementListeners(el: HTMLAudioElement) {
   });
   el.addEventListener("loadedmetadata", () => {
     setState({ duration: el.duration ?? 0 });
-    console.log("[catalog-player] loadedmetadata", {
-      duration: el.duration,
-      src: el.currentSrc,
-    });
   });
   el.addEventListener("durationchange", () => {
     setState({ duration: el.duration ?? 0 });
   });
   el.addEventListener("play", () => {
-    console.log("[catalog-player] state: play", { src: el.currentSrc });
     setState({ playing: true });
   });
   el.addEventListener("pause", () => {
-    console.log("[catalog-player] state: pause", { src: el.currentSrc });
     setState({ playing: false });
   });
   el.addEventListener("ended", () => {
-    console.log("[catalog-player] state: ended");
     setState({ playing: false, currentTime: 0 });
   });
   el.addEventListener("error", () => {
     const err = el.error;
-    console.error("[catalog-player] media error", {
+    console.warn("[catalog-player] media error", {
       code: err?.code,
       message: err?.message,
       src: el.currentSrc || el.src,
     });
+    // Detach the broken source so WebKit stops retrying / heating the device.
+    safeReleaseMediaElement(el);
     setState({ playing: false });
   });
 }
@@ -92,7 +96,9 @@ function bindElementListeners(el: HTMLAudioElement) {
 /** Bind the root-mounted <audio> from CatalogAudioHost. */
 export function bindCatalogAudioElement(el: HTMLAudioElement) {
   audio = el;
-  el.preload = "auto";
+  el.preload = "metadata";
+  el.setAttribute("playsinline", "");
+  el.playsInline = true;
   bindElementListeners(el);
 }
 
@@ -102,14 +108,14 @@ function ensureAudio(): HTMLAudioElement | null {
     bindElementListeners(audio);
     return audio;
   }
-  // Fallback if host not mounted yet (still works for same-gesture clicks).
   const existing = document.getElementById("hybrid-catalog-audio");
   if (existing instanceof HTMLAudioElement) {
     bindCatalogAudioElement(existing);
     return existing;
   }
   audio = new Audio();
-  audio.preload = "auto";
+  audio.preload = "metadata";
+  audio.playsInline = true;
   bindElementListeners(audio);
   return audio;
 }
@@ -138,18 +144,13 @@ export async function playCatalogTrack(
 ): Promise<void> {
   const el = ensureAudio();
   const url = playbackUrl(track);
-  console.log("Playing audio URL:", track.audio_url ?? track.src, {
-    id: track.id,
-    owner,
-    title: track.title,
-  });
 
   if (!el) {
-    console.error("[catalog-player] no Audio element available");
+    console.warn("[catalog-player] no Audio element available");
     return;
   }
   if (!url) {
-    console.error("[catalog-player] missing audio_url/src for track", track.id, track.title);
+    console.warn("[catalog-player] missing/invalid audio_url for track", track.id);
     return;
   }
 
@@ -158,16 +159,15 @@ export async function playCatalogTrack(
   const sameTrack = state.currentTrack?.id === track.id || state.track?.id === track.id;
   if (sameTrack && (el.currentSrc || el.src)) {
     if (el.paused) {
-      try {
-        const p = el.play();
-        setState({ playing: true, currentTrack: track, track });
-        await p;
-      } catch (error) {
-        console.error("[catalog-player] play() failed (resume):", error);
-        setState({ playing: false });
-      }
+      setState({ playing: true, currentTrack: track, track });
+      await safePlay(el);
+      if (el.paused) setState({ playing: false });
     } else {
-      el.pause();
+      try {
+        el.pause();
+      } catch {
+        /* ignore */
+      }
       setState({ playing: false });
     }
     return;
@@ -183,35 +183,47 @@ export async function playCatalogTrack(
   });
 
   try {
-    el.pause();
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
     el.src = url;
-    el.load();
-    console.log("[catalog-player] assigned src → play()", {
-      src: el.src,
-      readyState: el.readyState,
-    });
-    // Call play() in the same user-gesture turn; await after state update.
-    const playPromise = el.play();
+    try {
+      el.load();
+    } catch {
+      /* ignore */
+    }
     setState({ playing: true, currentTrack: track, track });
-    await playPromise;
+    await safePlay(el);
+    if (el.paused) setState({ playing: false });
   } catch (error) {
-    console.error("[catalog-player] play() failed:", error, { url });
+    console.warn("[catalog-player] play() failed:", error, { url });
+    safeReleaseMediaElement(el);
     setState({ playing: false });
   }
 }
 
 export function pauseCatalogPlayback() {
   const el = ensureAudio();
-  el?.pause();
+  try {
+    el?.pause();
+  } catch {
+    /* ignore */
+  }
   setState({ playing: false });
 }
 
 export function seekCatalogPlayback(time: number) {
   const el = ensureAudio();
   if (!el) return;
-  const next = Math.max(0, Math.min(time, state.duration || time));
-  el.currentTime = next;
-  setState({ currentTime: next });
+  try {
+    const next = Math.max(0, Math.min(time, state.duration || time));
+    el.currentTime = next;
+    setState({ currentTime: next });
+  } catch {
+    /* ignore */
+  }
 }
 
 export function useCatalogPlayback(): CatalogPlaybackState {

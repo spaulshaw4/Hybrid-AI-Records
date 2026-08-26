@@ -65,7 +65,7 @@ test.describe("Copy Share Link — clipboard unavailable", () => {
   });
 
   test("shows an announced error and a selectable link field", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
     await clickCopy(page);
 
     const panel = fallback(page);
@@ -108,7 +108,7 @@ test.describe("Copy Share Link — clipboard unavailable", () => {
   });
 
   test("falls back with the preselected package still in the link", async ({ page }) => {
-    await open(page, "/?package=full-hybrid#order");
+    await open(page, "/portal?package=full-hybrid#order");
     await clickCopy(page);
 
     // The link must carry the tier that is actually selected in the form.
@@ -126,7 +126,7 @@ test.describe("Copy Share Link — clipboard unavailable", () => {
   });
 
   test("recovers silently once the clipboard works again", async ({ page }) => {
-    await open(page, "/");
+    await open(page, "/portal");
     await clickCopy(page);
 
     // Clipboard becomes available (e.g. permission granted on retry).

@@ -106,12 +106,7 @@ function NavItem({
 
   if (item.to === "/portal") {
     return (
-      <Link
-        to="/portal"
-        search={item.search}
-        className={className}
-        aria-current={active ? "page" : undefined}
-      >
+      <Link to="/portal" className={className} aria-current={active ? "page" : undefined}>
         {label}
       </Link>
     );
@@ -206,8 +201,8 @@ function SiteHeader() {
  */
 function DesktopLocaleStrip() {
   const { pathname } = useActiveNav();
-  // Home + catalog place LocaleCluster on the page header row instead.
-  if (pathname === "/" || pathname === "/artists") return null;
+  // Home, catalog, and packages place LocaleCluster on the page header row instead.
+  if (pathname === "/" || pathname === "/artists" || pathname === "/portal") return null;
 
   return (
     <div

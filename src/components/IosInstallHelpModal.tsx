@@ -26,7 +26,7 @@ export function IosInstallHelpModal({ onClose }: { browser?: "safari" | "other";
       role="dialog"
       aria-modal="true"
       aria-labelledby="ios-help-title"
-      className="fixed inset-0 z-[130] flex items-end justify-center overlay-scrim bg-foreground/40 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[130] flex items-end justify-center overlay-scrim bg-foreground/40 p-4 backdrop-blur-sm sm:items-center lg:ps-[var(--site-sidebar-width)]"
       onClick={onClose}
     >
       <div
