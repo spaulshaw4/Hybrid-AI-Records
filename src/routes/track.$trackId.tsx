@@ -83,7 +83,7 @@ function TrackSharePage() {
         </Link>
       </p>
 
-      <div className="flex flex-col gap-6 rounded-xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-2xl sm:flex-row">
+      <div className="flex flex-col gap-6 rounded-xl border border-white/[0.08] bg-zinc-900/70 p-6 shadow-2xl backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 sm:flex-row">
         <CoverImage
           src={track.cover || DEFAULT_OG_IMAGE}
           alt={`${trackTitle} cover`}

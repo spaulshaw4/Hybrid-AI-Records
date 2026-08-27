@@ -748,8 +748,8 @@ export function QuickVocalRecorder({
                 variant="outline"
                 size="sm"
                 onClick={previewSelection}
-                className="vocal-preview-btn h-10 border border-zinc-500 bg-zinc-950 px-4 font-bold text-zinc-50 hover:bg-zinc-800 hover:text-white"
-                style={{ backgroundColor: "#09090b", color: "#fafafa", WebkitTextFillColor: "#fafafa" }}
+                className="vocal-preview-btn h-10 border border-zinc-700/80 bg-zinc-950/60 px-4 font-bold text-zinc-50 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-white"
+                style={{ backgroundColor: "rgb(9 9 11 / 0.6)", color: "#fafafa", WebkitTextFillColor: "#fafafa" }}
               >
                 Play this clip
               </Button>

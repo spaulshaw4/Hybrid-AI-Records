@@ -76,7 +76,7 @@ export function VideoTermsModal({ open, onClose, packageTitle }: Props) {
         className="relative mx-auto flex h-full w-full max-w-3xl flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/60 bg-white/70 px-6 py-4 backdrop-blur-md sm:px-10">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/[0.08] bg-zinc-900/80 px-6 py-4 backdrop-blur-xl sm:px-10">
           <div className="min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
               <span className="text-[#e11d2e]">/</span> <span className="text-white">Video</span>{" "}

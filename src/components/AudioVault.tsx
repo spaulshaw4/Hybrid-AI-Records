@@ -379,7 +379,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }
 
   return (
-    <div className="vault-container bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50 p-6">
+    <div className="vault-container bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 p-6 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55">
       <div className="mb-1 flex items-center justify-between gap-3 pb-4">
         <h3 className="text-lg font-bold text-zinc-100">Your Audio Vault</h3>
         <span className="text-xs text-zinc-400">Manage, stream, and export stems</span>

@@ -52,15 +52,17 @@
 }
 
 :root {
-  /* Lifted slate studio — richer zinc base over brighter crimson/cobalt mesh. */
+  /* Dark-glass studio — frosted zinc panels over crimson/cobalt mesh. */
   --background: #121316;
   --foreground: #f8fafc;
 
-  --surface: rgb(39 39 42 / 0.6);
-  --surface-elevated: #18181b;
+  /* zinc-900/70 + white/8 rim — shared card/panel/modal surface. */
+  --surface: rgb(24 24 27 / 0.7);
+  --surface-elevated: rgb(24 24 27 / 0.85);
 
-  --card: rgb(39 39 42 / 0.6);
+  --card: rgb(24 24 27 / 0.7);
   --card-foreground: #f8fafc;
+  /* Menus stay denser so portalled lists don't show form bleed-through. */
   --popover: #18181b;
   --popover-foreground: #f8fafc;
 
@@ -74,7 +76,7 @@
   --glow-white: #ffffff;
   --glow-blue: #60a5fa;
 
-  --secondary: rgb(39 39 42 / 0.75);
+  --secondary: rgb(24 24 27 / 0.8);
   --secondary-foreground: #f8fafc;
   --muted: #27272a;
   --muted-foreground: #a1a1aa;
@@ -83,9 +85,10 @@
   --destructive: #e11d48;
   --destructive-foreground: #ffffff;
 
-  --border: rgb(255 255 255 / 0.1);
-  --border-strong: rgb(255 255 255 / 0.16);
-  --input: rgb(39 39 42 / 0.85);
+  --border: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.15);
+  /* zinc-950/60 form wells */
+  --input: rgb(9 9 11 / 0.6);
   --ring: #e11d48;
 
   --status-accent: #be123c;
@@ -99,12 +102,16 @@
   --veteran-gold: #fbbf24;
   --veteran-gold-dim: #f59e0b;
 
-  --charcoal: rgb(39 39 42 / 0.6);
+  --charcoal: rgb(24 24 27 / 0.7);
   --charcoal-soft: #121316;
   --overlay: rgb(0 0 0 / 0.8);
-  --glass: rgb(39 39 42 / 0.6);
-  --glass-border: rgb(255 255 255 / 0.1);
-  --glass-blur: 16px;
+  --glass: rgb(24 24 27 / 0.7);
+  --glass-hover: rgb(24 24 27 / 0.8);
+  --glass-border: rgb(255 255 255 / 0.08);
+  --glass-border-hover: rgb(255 255 255 / 0.15);
+  --glass-blur: 24px;
+  --field-border: rgb(63 63 70 / 0.8);
+  --field-placeholder: #71717a;
   /* Radials sit above the linear so the glows are visible. */
   --rwb-studio:
     radial-gradient(circle at 18% 22%, rgba(220, 38, 38, 0.5), transparent 58%),
@@ -164,6 +171,14 @@
 
   --veteran-gold: #a16207;
   --veteran-gold-dim: #854d0e;
+
+  --glass: rgb(255 255 255 / 0.8);
+  --glass-hover: rgb(255 255 255 / 0.9);
+  --glass-border: #e2e8f0;
+  --glass-border-hover: #cbd5e1;
+  --glass-blur: 24px;
+  --field-border: #e2e8f0;
+  --field-placeholder: #64748b;
 }
 
 /* Brand lockup emphasis: a tight coloured halo behind the HYBRID / RECORDS
@@ -352,12 +367,19 @@
   border-bottom-color: rgb(255 255 255 / 0.1);
 }
 
+html[data-page="home"] .site-topbar {
+  border-bottom-color: transparent;
+}
+
 /* Engine wizard: Step 1 card sits above decorative overlays and the mobile dock. */
 #engine-workspace {
   position: relative;
   z-index: 40;
   pointer-events: auto;
   overflow: visible;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
 }
 
 #engine-workspace .engine-wizard-card {
@@ -405,10 +427,10 @@
 
 .engine-wizard-card .vocal-preview-btn,
 #engine-workspace .vocal-preview-btn {
-  background: #09090b !important;
+  background: rgb(9 9 11 / 0.6) !important;
   color: #fafafa !important;
   -webkit-text-fill-color: #fafafa !important;
-  border: 1px solid #71717a !important;
+  border: 1px solid rgb(63 63 70 / 0.8) !important;
 }
 
 .engine-wizard-card .vocal-use-btn,
@@ -419,12 +441,11 @@
   border-color: #e11d48 !important;
 }
 
-/* Saved-voice select sits on the dark wizard card — never use the default
-   white SelectTrigger (light inherited type washes out labels like "My voice"). */
+/* Saved-voice select sits on the dark wizard card — never use a light fill. */
 #engine-workspace [aria-label="Saved custom voice"],
 .engine-wizard-card [aria-label="Saved custom voice"] {
-  background: rgb(39 39 42 / 0.55) !important;
-  background-color: rgb(39 39 42 / 0.55) !important;
+  background: var(--input) !important;
+  background-color: var(--input) !important;
   color: #fafafa !important;
   -webkit-text-fill-color: #fafafa !important;
   border: 2px solid var(--primary, #e11d48) !important;
@@ -437,26 +458,26 @@
 }
 
 /* Portalled outside #engine-workspace — must not depend on that ancestor.
-   --card / --glass are 72% opaque and would show the form through the menu. */
+   Stay near-opaque so genre/voice menus don't show the form through the panel. */
 .engine-opaque-menu,
 .engine-opaque-menu[data-radix-popover-content],
 html[data-safe-mode="on"] .engine-opaque-menu,
 html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
-  background: #09090b !important;
-  background-color: #09090b !important;
+  background: rgb(9 9 11 / 0.96) !important;
+  background-color: rgb(9 9 11 / 0.96) !important;
   background-image: none !important;
   opacity: 1 !important;
   color: #f4f4f5 !important;
   -webkit-text-fill-color: #f4f4f5 !important;
-  border: 1px solid #27272a !important;
+  border: 1px solid rgb(255 255 255 / 0.08) !important;
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.85) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
   filter: none !important;
 }
 
 .engine-opaque-menu .engine-genre-scroll {
-  background: #09090b;
+  background: rgb(9 9 11 / 0.96);
 }
 
 .engine-step-container {
@@ -469,7 +490,7 @@ html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
 
 .engine-genre-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 #09090b;
+  scrollbar-color: #3f3f46 rgb(9 9 11 / 0.96);
 }
 
 .engine-genre-scroll::-webkit-scrollbar {
@@ -477,14 +498,14 @@ html[data-safe-mode="on"] [data-radix-popover-content].engine-opaque-menu {
 }
 
 .engine-genre-scroll::-webkit-scrollbar-track {
-  background: #09090b;
+  background: rgb(9 9 11 / 0.96);
   border-radius: 999px;
 }
 
 .engine-genre-scroll::-webkit-scrollbar-thumb {
   background: #3f3f46;
   border-radius: 999px;
-  border: 2px solid #09090b;
+  border: 2px solid rgb(9 9 11 / 0.96);
 }
 
 .engine-genre-scroll::-webkit-scrollbar-thumb:hover {
@@ -1119,9 +1140,11 @@ main button:active {
   /* Opacity-only fade on purpose: any transform/translate (even a 0 value held
      by animation-fill-mode) turns this wrapper into the containing block for
      every `position: fixed` overlay inside a page, which pushed modals such as
-     the video player off-screen. Never add transform/translate here. */
+     the video player off-screen. Never add transform/translate here.
+     Also never leave will-change: opacity on — it creates an isolated stacking
+     context, so mix-blend-mode on crest lockups cannot knock out against the
+     LivingBackground behind the route tree. */
   animation: route-fade-in 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
-  will-change: opacity;
 }
 
 @keyframes route-fade-in {
@@ -1447,7 +1470,7 @@ main button:active {
   background-image: linear-gradient(105deg, #22c55e 0%, #22c55e 42%, #ffffff 58%, #ffffff 100%);
 }
 
-/* White disc + halo so footer lockups stay sharp and readable on the mesh. */
+/* Deprecated white disc — never use on footer emblems (reads as a white plate). */
 .logo-pop {
   background: #ffffff;
   border-radius: 9999px;
@@ -1457,10 +1480,21 @@ main button:active {
     0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
-/* Square division emblems: lift gold/color off the baked-in dark field so they sit on obsidian. */
+/* Square division emblems / Hybrid lockups: lighten knocks baked-in black
+   fields out against the LivingBackground. Do not wrap in .logo-pop (white plate). */
 .division-emblem {
   mix-blend-mode: lighten;
   background: transparent;
+}
+
+/* Footer Hybrid + all four division crests: identical knockout.
+   Use screen (not lighten): mid-tone brown/navy leather plates survive
+   lighten against the blue mesh and still read as black tiles. Screen
+   punches those plates while gold/flag color stays. No sharpening filters. */
+footer .division-emblem {
+  mix-blend-mode: screen;
+  background: transparent;
+  filter: none;
 }
 
 .radio-label-blue {
@@ -1546,7 +1580,34 @@ footer .text-muted-foreground {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+/* Shared dark-glass form controls (inputs / selects / textareas). */
+@utility studio-field {
+  background-color: var(--input);
+  border: 1px solid var(--field-border);
+  border-radius: 0.5rem;
+  color: #f4f4f5;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease;
+
+  &::placeholder {
+    color: var(--field-placeholder);
+  }
+
+  &:focus,
+  &:focus-visible {
+    border-color: rgb(239 68 68 / 0.8);
+    outline: none;
+    box-shadow: 0 0 0 1px rgb(239 68 68 / 0.5);
+  }
 }
 
 /* Copy sits on the mesh without per-line boxes. Opt out still works. */
@@ -2720,7 +2781,11 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   .site-sidebar,
   .site-topbar,
   .site-dock,
-  .living-bg-veil {
+  .living-bg-veil,
+  .modal-panel-solid,
+  .engine-wizard-card,
+  .engine-result-card,
+  .vault-container {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -2729,12 +2794,19 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   .bg-card,
   .bg-surface,
   .site-sidebar,
-  .site-dock {
-    background-color: rgb(24 24 27 / 0.96) !important;
+  .site-dock,
+  .modal-panel-solid,
+  .engine-wizard-card,
+  .engine-result-card,
+  .vault-container {
+    background-color: rgb(24 24 27 / 0.85) !important;
   }
 
-  .site-topbar {
-    background-color: rgb(24 24 27 / 0.96) !important;
+  .site-topbar,
+  .modal-panel-solid {
+    background-color: rgb(24 24 27 / 0.98) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   /* Long-lived `will-change` promotions are pure GPU-memory cost once the
@@ -3133,20 +3205,34 @@ footer .text-muted-foreground {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   color: var(--foreground);
 }
 
-/* Engine wizard, player, and vault: lifted zinc glass with white highlight rim. */
+/* Engine wizard, player, and vault: light zinc glass so living bg shows through. */
 .engine-wizard-card,
 .engine-result-card,
 .vault-container {
-  background-color: rgb(39 39 42 / 0.6) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgb(255 255 255 / 0.1) !important;
+  background-color: rgb(24 24 27 / 0.4) !important;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border) !important;
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   color: #fafafa;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .engine-wizard-card:hover,
+  .engine-result-card:hover,
+  .vault-container:hover,
+  .studio-glass.studio-glass-interactive:hover {
+    background-color: rgb(24 24 27 / 0.55) !important;
+    border-color: var(--glass-border-hover) !important;
+  }
 }
 
 .engine-wizard-card :is(h2, h3, dt, dd),
@@ -3156,11 +3242,36 @@ footer .text-muted-foreground {
 }
 
 .site-topbar {
-  background-color: rgb(18 19 22 / 0.82) !important;
-  backdrop-filter: blur(16px) !important;
-  -webkit-backdrop-filter: blur(16px) !important;
-  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  background-color: rgb(24 24 27 / 0.85) !important;
+  backdrop-filter: blur(var(--glass-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+  border-bottom: 1px solid var(--glass-border);
   box-shadow: none;
+}
+
+/* Homepage: kill chrome / sidebar hairlines without touching other routes. */
+html[data-page="home"] :is(.site-sidebar, .site-dock, .site-topbar) {
+  border-color: transparent !important;
+}
+
+/* Catalog release cards: no top/side hairline above the video well
+   (was `border border-white/10` on `#release-*`). Hover uses ring, not border. */
+html[data-page="home"] #catalog [id^="release-"] {
+  border-width: 0 !important;
+  border-color: transparent !important;
+}
+
+html[data-page="home"] #catalog [id^="release-"] > button.aspect-video {
+  border-width: 0 !important;
+  border-color: transparent !important;
+}
+
+html[data-page="home"] .site-sidebar > div {
+  border-color: transparent !important;
+}
+
+html[data-page="home"] .site-topbar {
+  border-bottom-color: transparent !important;
 }
 
 footer a,
@@ -3199,12 +3310,14 @@ footer a.vetcert-badge .vetcert-badge-icon {
   -webkit-backdrop-filter: blur(10px);
 }
 
-/* Opaque modal content — blocks mesh/page bleed on mobile scroll. */
+/* Modal content — frosted zinc glass (opaque enough to keep mesh bleed readable). */
 .modal-panel-solid {
-  background-color: #09090b !important;
+  background-color: var(--glass) !important;
   background-image: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  backdrop-filter: blur(var(--glass-blur)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+  border-color: var(--glass-border);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   opacity: 1 !important;
 }
 

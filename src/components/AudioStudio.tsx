@@ -212,7 +212,7 @@ const STUDIO_STEPS = [
 ] as const;
 
 const ENGINE_DROPDOWN_CLASS =
-  "engine-opaque-menu z-50 flex max-h-80 w-[min(22rem,calc(100vw-2rem))] flex-col overflow-hidden border border-zinc-800 bg-zinc-950 p-2 text-zinc-100 shadow-2xl";
+  "engine-opaque-menu z-50 flex max-h-80 w-[min(22rem,calc(100vw-2rem))] flex-col overflow-hidden border border-white/[0.08] bg-zinc-950 p-2 text-zinc-100 shadow-2xl";
 
 const STEP1_INCOMPLETE_MESSAGE = "Add a title and lyrics to continue.";
 
@@ -232,7 +232,7 @@ function StudioLanguageSelect({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       aria-label="Language"
-      className="h-12 w-full cursor-pointer rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 shadow-sm outline-none transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="h-12 w-full cursor-pointer rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-3 text-sm text-zinc-100 shadow-sm outline-none transition-colors hover:border-red-500/60 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
     >
       {LYRIC_LANGUAGES.map((l) => (
         <option key={l.value} value={l.value} className="bg-zinc-950 text-zinc-100">
@@ -3672,7 +3672,7 @@ export function AudioStudio() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <Card
-        className="engine-wizard-card bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50"
+        className="engine-wizard-card bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 divide-y divide-white/[0.06] transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55"
         style={{ position: "relative", zIndex: 50 }}
       >
         <CardContent className="space-y-5 p-4 sm:p-6">
@@ -3714,7 +3714,7 @@ export function AudioStudio() {
             ref={stepTopRef}
             id="studio-step-progress"
             tabIndex={-1}
-            className="relative z-0 space-y-2 border-b border-zinc-800 pb-3 outline-none"
+            className="relative z-0 space-y-2 pb-3 outline-none"
           >
             <div className="flex items-center justify-between gap-3 text-xs">
               <p className="font-semibold text-foreground">
@@ -3825,7 +3825,7 @@ export function AudioStudio() {
               aria-describedby="studio-title-help"
               autoComplete="off"
               enterKeyHint="done"
-              className="h-12 select-text pointer-events-auto border border-border bg-input text-foreground placeholder:text-muted-foreground placeholder-dim transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="h-12 select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-zinc-100 placeholder:text-zinc-500 transition-colors hover:border-red-500/60 focus-visible:border-red-500/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500/50"
             />
             <p id="studio-title-help" className="text-xs text-muted-foreground">
               Name your track — up to 120 characters. Used as the file name and display title.
@@ -3888,7 +3888,7 @@ export function AudioStudio() {
                 setLyrics(e.target.value);
                 if (lyricWarnings.length > 0) setLyricWarnings([]);
               }}
-              className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
+              className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 font-mono text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
             />
             {lyricWarnings.length > 0 ? (
               <div
@@ -3919,7 +3919,7 @@ export function AudioStudio() {
 
           {/* Settings: one step at a time */}
           {studioStep === 2 && showAiVocalStyling ? (
-          <section id="ai-vocal-prompt-panel" className="relative overflow-visible rounded-xl border border-zinc-800 bg-zinc-950 px-3 sm:px-4">
+          <section id="ai-vocal-prompt-panel" className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
               Vocal prompt
             </h3>
@@ -3948,7 +3948,7 @@ export function AudioStudio() {
               maxLength={400}
               placeholder="describe the vocal and delivery, eg rasp, male baritone, half sung, half rap, half reverb."
               onChange={(e) => setVocalPrompt(e.target.value.slice(0, 400))}
-              className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 text-base text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary"
+              className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
             />
             <p className="text-xs text-muted-foreground">
               Shapes how the vocal is performed. Ignored on instrumental renders.
@@ -3958,7 +3958,7 @@ export function AudioStudio() {
           ) : null}
 
           {studioStep === 1 ? (
-          <section className="relative overflow-visible rounded-xl border border-zinc-800 bg-zinc-950 px-3 sm:px-4">
+          <section className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
               1. General Style
             </h3>
@@ -4013,7 +4013,7 @@ export function AudioStudio() {
                       variant="outline"
                       role="combobox"
                       aria-expanded={genrePopover.open}
-                      className="w-full justify-between border border-zinc-800 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-zinc-100"
+                      className="w-full justify-between rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-zinc-100 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100"
                     >
                       <span className="truncate text-left">
                         {styles.length
@@ -4033,7 +4033,7 @@ export function AudioStudio() {
                       if (e.key === "Escape") genrePopover.closeAndReturnFocus();
                     }}
                     className={ENGINE_DROPDOWN_CLASS}
-                    style={{ backgroundColor: "#09090b" }}
+                    style={{ backgroundColor: "rgb(24 24 27 / 0.95)" }}
                   >
 
                     <div className="relative mb-2">
@@ -4044,7 +4044,7 @@ export function AudioStudio() {
                         value={genreSearch}
                         onChange={(e) => setGenreSearch(e.target.value)}
                         autoFocus
-                        className="border border-zinc-800 bg-zinc-900 pl-9 text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary"
+                        className="rounded-lg border border-zinc-700/80 bg-zinc-950/60 pl-9 text-zinc-100 placeholder:text-zinc-500 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
                       />
                     </div>
                     <div className="engine-genre-scroll flex-1 overflow-y-auto bg-zinc-950">
@@ -4089,7 +4089,7 @@ export function AudioStudio() {
                     <button
                       type="button"
                       onClick={() => genrePopover.closeAndReturnFocus()}
-                      className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800"
+                      className="mt-2 w-full rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-3 py-2 text-sm font-semibold text-zinc-100 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80"
                     >
                       Done
                     </button>
@@ -4142,14 +4142,14 @@ export function AudioStudio() {
                   onChange={(event) => setStylePrompt(event.target.value)}
                   rows={4}
                   placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
-                  className="resize-y select-text pointer-events-auto border border-zinc-800 bg-zinc-950 text-sm text-zinc-100 placeholder:text-muted-foreground placeholder-dim shadow-none focus-visible:border-primary focus-visible:ring-primary"
+                  className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-sm text-zinc-100 placeholder:text-zinc-500 shadow-none focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
                 />
                 <Button
                   type="button"
                   variant="outline"
                   disabled={aiBusy !== null}
                   onClick={() => void handleOptimizeStyle()}
-                  className="w-full justify-center gap-2 border-zinc-800 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-zinc-100"
+                  className="w-full justify-center gap-2 border-zinc-700/80 bg-zinc-950/60 text-zinc-100 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100"
                 >
                   {aiBusy === "style" ? (
                     <>
@@ -4230,7 +4230,7 @@ export function AudioStudio() {
           ) : null}
 
           {studioStep === 3 ? (
-          <section className="relative overflow-visible rounded-xl border border-zinc-800 bg-zinc-950 px-3 sm:px-4">
+          <section className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
               Advanced
             </h3>
@@ -4421,7 +4421,7 @@ export function AudioStudio() {
           ) : null}
 
           {studioStep === 2 ? (
-          <section className="relative overflow-visible rounded-xl border border-zinc-800 bg-zinc-950 px-3 sm:px-4">
+          <section className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
               Vocals
             </h3>
@@ -4546,7 +4546,7 @@ export function AudioStudio() {
                         id="vocal-sound-trigger"
                         aria-haspopup="dialog"
                         aria-expanded={vocalOpen}
-                        className="h-12 w-full justify-between border border-zinc-800 bg-zinc-950 text-base text-zinc-100 hover:bg-zinc-900 hover:text-zinc-100"
+                        className="h-12 w-full justify-between rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-base text-zinc-100 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100"
                       >
                         <span className="truncate text-left">
                           {(() => {
@@ -4569,7 +4569,7 @@ export function AudioStudio() {
                       aria-label="Vocal sound options"
                       {...vocalPopover.contentProps}
                       className={ENGINE_DROPDOWN_CLASS}
-                      style={{ backgroundColor: "#09090b" }}
+                      style={{ backgroundColor: "rgb(24 24 27 / 0.95)" }}
                     >
 
                       <div className="relative mb-2">
@@ -4588,7 +4588,7 @@ export function AudioStudio() {
                           onChange={(e) => setVocalSearch(e.target.value)}
                           onKeyDown={onVocalSearchKeyDown}
                           autoFocus
-                          className="border border-zinc-800 bg-zinc-900 pl-9 text-foreground placeholder:text-muted-foreground placeholder-dim focus-visible:border-primary focus-visible:ring-primary"
+                          className="rounded-lg border border-zinc-700/80 bg-zinc-950/60 pl-9 text-zinc-100 placeholder:text-zinc-500 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
                         />
                       </div>
                       <p id="vocal-sound-keyboard-help" className="sr-only">
@@ -4697,7 +4697,7 @@ export function AudioStudio() {
                         setVocalOpen(false);
                         vocalPopover.closeAndReturnFocus();
                       }}
-                      className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800"
+                      className="mt-2 w-full rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-3 py-2 text-sm font-semibold text-zinc-100 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80"
                     >
                       Done
                     </button>
@@ -4848,10 +4848,10 @@ export function AudioStudio() {
 
           <div
             id="studio-generate-dock"
-            className="relative mt-6 space-y-3 border-t border-zinc-800 pt-4"
+            className="relative mt-6 space-y-3 pt-4"
           >
             {studioStep === STUDIO_STEPS.length - 1 ? (
-              <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+              <div className="space-y-3 rounded-lg border border-white/[0.08] bg-zinc-900/40 p-4">
                 <h3 className="text-sm font-semibold text-foreground">Review before generate</h3>
                 <dl className="grid gap-2 text-sm">
                   <div className="flex justify-between gap-3">
@@ -4892,7 +4892,7 @@ export function AudioStudio() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="min-h-12 border-border bg-zinc-900 text-white hover:border-primary hover:bg-zinc-800 hover:text-white sm:w-36"
+                  className="min-h-12 border-white/[0.08] bg-zinc-900/70 text-white hover:border-red-500/80 hover:bg-zinc-900/80 hover:text-white sm:w-36"
                   onClick={() => setStudioStep((step) => Math.max(0, step - 1))}
                 >
                   Back
@@ -4939,7 +4939,7 @@ export function AudioStudio() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-auto min-h-12 border-border bg-zinc-900 text-white hover:border-destructive hover:text-destructive sm:w-44"
+                      className="h-auto min-h-12 border-white/[0.08] bg-zinc-900/70 text-white hover:border-destructive hover:bg-zinc-900/80 hover:text-destructive sm:w-44"
                       onClick={cancelGeneration}
                     >
                       Cancel Generation
@@ -5045,7 +5045,7 @@ export function AudioStudio() {
       </Card>
 
       {result ? (
-        <Card className="engine-result-card bg-zinc-900/80 backdrop-blur-md border border-zinc-800 shadow-2xl rounded-xl text-zinc-100 divide-y divide-zinc-800/50">
+        <Card className="engine-result-card bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 divide-y divide-white/[0.06] transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55">
           <CardContent className="space-y-4 p-6">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="space-y-1">

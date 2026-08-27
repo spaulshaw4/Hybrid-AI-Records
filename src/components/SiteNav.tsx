@@ -58,13 +58,13 @@ function NavItem({
   const Icon = ICONS[item.icon];
   const className = compact
     ? cn(
-        "flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-none border border-zinc-700 bg-zinc-900 px-1 py-1.5 outline-none transition-colors hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-red-500",
+        "flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-none border border-white/[0.08] bg-zinc-900/70 px-1 py-1.5 outline-none transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 focus-visible:ring-2 focus-visible:ring-red-500",
         isCreate && "nav-create-glow border-red-500",
         active && !isCreate && "border-white/70 bg-zinc-800",
         active && isCreate && "bg-zinc-800",
       )
     : cn(
-        "flex min-h-11 items-center gap-3 rounded-none border border-zinc-700 bg-zinc-900 px-3 py-2 outline-none transition-colors hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-red-500",
+        "flex min-h-11 items-center gap-3 rounded-none border border-white/[0.08] bg-zinc-900/70 px-3 py-2 outline-none transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 focus-visible:ring-2 focus-visible:ring-red-500",
         isCreate && "nav-create-glow border-red-500",
         active && "bg-zinc-800",
       );
@@ -181,7 +181,7 @@ function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-white/10 bg-zinc-900/90 px-3 py-2.5 backdrop-blur-lg lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-white/[0.08] bg-zinc-900/85 px-3 py-2.5 backdrop-blur-xl lg:hidden"
     >
       <Link
         to="/"
@@ -221,7 +221,7 @@ function SiteDock() {
     <nav
       data-site-nav="dock"
       aria-label="Primary"
-      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-30 rounded-none border-t border-white/10 bg-black/80 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] lg:hidden"
+      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-30 rounded-none border-t border-white/[0.08] bg-zinc-900/70 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden"
     >
       <div className="grid grid-cols-5 items-stretch gap-1">
         {SITE_NAV.map((item) => (
@@ -238,7 +238,7 @@ function SiteDock() {
 }
 
 export function SiteChrome({ children }: { children: ReactNode }) {
-  const { visible } = useActiveNav();
+  const { visible, pathname } = useActiveNav();
 
   useEffect(() => {
     const html = document.documentElement;
@@ -246,6 +246,14 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     else html.removeAttribute("data-site-nav");
     return () => html.removeAttribute("data-site-nav");
   }, [visible]);
+
+  // Homepage-only: hide chrome hairlines without changing glass borders on other routes.
+  useEffect(() => {
+    const html = document.documentElement;
+    if (pathname === "/") html.setAttribute("data-page", "home");
+    else html.removeAttribute("data-page");
+    return () => html.removeAttribute("data-page");
+  }, [pathname]);
 
   if (!visible) return <>{children}</>;
 

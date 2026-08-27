@@ -50,7 +50,7 @@ export class StudioErrorBoundary extends Component<Props, State> {
     return (
       <div
         role="alert"
-        className="mx-auto my-8 flex max-w-lg flex-col items-center gap-3 rounded-xl border border-white/10 bg-zinc-900/90 px-6 py-8 text-center text-white"
+        className="mx-auto my-8 flex max-w-lg flex-col items-center gap-3 rounded-xl border border-white/[0.08] bg-zinc-900/70 px-6 py-8 text-center text-white shadow-2xl backdrop-blur-xl"
       >
         <h2 className="text-lg font-semibold">This panel hit a snag</h2>
         <p className="text-sm text-zinc-300">

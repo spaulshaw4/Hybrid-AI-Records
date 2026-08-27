@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { pageHead } from "@/lib/social-meta";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
-
 import keliasCover from "@/assets/kelias-i-save-cover.png.asset.json";
+import podcastCover from "@/assets/hybrid-podcast-logo-v2.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,12 +13,22 @@ import { TermsModal } from "@/components/TermsModal";
 
 import { DivisionCrest } from "@/components/DivisionCrest";
 import { DivisionFooterBadge } from "@/components/LivingBackground";
+import { WORDMARK_LINK } from "@/components/Wordmark";
+import { BrandEagle } from "@/components/BrandEagle";
+import { VerifiedBadges } from "@/components/VerifiedBadges";
+import { WhatsAppSupportCta } from "@/components/WhatsAppSupportCta";
+import { SupportRequestProvider } from "@/lib/support-request";
 
 import { crestPreloadLink, resolveDivision, type Division } from "@/lib/divisions";
 import { buildCatalogJsonLd, buildOrganizationPodcastJsonLd } from "@/lib/release-schema";
 import { JESTER_DIVISION_NAME, JESTER_DIVISION_SHORT_NAME } from "@/lib/division-settings";
 import { ContactModal } from "@/components/ContactModal";
 import { HowItWorksModal } from "@/components/HowItWorksModal";
+import { LocaleCluster } from "@/components/SiteNav";
+import { TikTokIcon } from "@/components/TikTokIcon";
+import { ThreadsIcon } from "@/components/ThreadsIcon";
+import { AudiomackIcon } from "@/components/AudiomackIcon";
+import { RadioPlayer } from "@/components/RadioPlayer";
 
 /** Rows for the $25 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
 const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
@@ -135,13 +145,6 @@ const PRICING_FAQ: { q: string; a: string }[] = [
 ];
 
 
-import { LocaleCluster } from "@/components/SiteNav";
-
-import { TikTokIcon } from "@/components/TikTokIcon";
-import { ThreadsIcon } from "@/components/ThreadsIcon";
-import { AudiomackIcon } from "@/components/AudiomackIcon";
-import { RadioPlayer } from "@/components/RadioPlayer";
-
 type VideoItem = { id: string; title: string; subtitle?: string };
 
 
@@ -253,19 +256,6 @@ function VideoModal({ video, onClose }: { video: VideoItem | null; onClose: () =
     </div>
   );
 }
-
-import { WORDMARK_LINK } from "@/components/Wordmark";
-import { BrandEagle } from "@/components/BrandEagle";
-import usaEmblem from "@/assets/divisions/usa.png";
-import { VerifiedBadges } from "@/components/VerifiedBadges";
-import { WhatsAppSupportCta } from "@/components/WhatsAppSupportCta";
-import { SupportRequestProvider } from "@/lib/support-request";
-
-
-
-import podcastCover from "@/assets/hybrid-podcast-logo-v2.png.asset.json";
-
-
 
 export const Route = createFileRoute("/")({
   head: () => {
@@ -521,7 +511,7 @@ function Home() {
             <div className="mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
               <Link
                 to="/engine"
-                className="group flex flex-col gap-2 rounded-xl border border-white/10 bg-zinc-800/60 p-6 transition-colors hover:border-white/20"
+                className="group flex flex-col gap-2 rounded-xl border border-transparent bg-zinc-800/60 p-6 transition-colors hover:border-amber-500/40"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
                   Create Your Track
@@ -536,7 +526,7 @@ function Home() {
 
               <Link
                 to="/portal"
-                className="group flex flex-col gap-2 rounded-xl border border-white/10 bg-zinc-800/60 p-6 transition-colors hover:border-white/20"
+                className="group flex flex-col gap-2 rounded-xl border border-transparent bg-zinc-800/60 p-6 transition-colors hover:border-amber-500/40"
               >
                 <span className="rwb-flame rwb-flame-deep font-display text-xl font-extrabold sm:text-2xl">
                   Distribution & Video
@@ -576,7 +566,7 @@ function Home() {
       </section>
 
       {/* CATALOG */}
-      <section id="catalog" aria-labelledby="catalog-title" className="relative scroll-mt-20 border-t border-border py-20 md:py-28">
+      <section id="catalog" aria-labelledby="catalog-title" className="relative scroll-mt-20 py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6">
           <div className="mb-16 flex flex-col justify-between gap-6 md:flex-row md:items-end">
             <div>
@@ -594,16 +584,16 @@ function Home() {
               <div
                 key={r.id}
                 id={`release-${r.id}`}
-                className={`group relative flex w-full flex-col overflow-hidden rounded-xl border bg-zinc-800/60 text-start shadow-lg shadow-black/40 transition-colors ${
+                className={`group relative flex w-full flex-col overflow-hidden rounded-xl border-0 bg-zinc-800/60 text-start shadow-lg shadow-black/40 ring-1 ring-transparent transition-[box-shadow,ring-color] ${
                   highlightCatalog
-                    ? "animate-pulse border-primary shadow-[0_0_36px_-6px_rgba(225,29,46,0.75)]"
-                    : "border-white/10 hover:border-amber-500/40"
+                    ? "animate-pulse ring-primary shadow-[0_0_36px_-6px_rgba(225,29,46,0.75)]"
+                    : "hover:ring-amber-500/40"
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
-                  className="relative aspect-video w-full overflow-hidden rounded-t-xl bg-zinc-950"
+                  className="relative aspect-video w-full overflow-hidden rounded-t-xl border-0 bg-zinc-950"
                   aria-label={`Play video: ${r.title} by ${r.artist}`}
                 >
                   <CoverImage
@@ -626,7 +616,7 @@ function Home() {
                     <Youtube size={10} className="text-primary" /> Video
                   </span>
                 </button>
-                <div className="border-t border-zinc-800/60 p-3">
+                <div className="p-3">
                   <button
                     type="button"
                     onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
@@ -654,7 +644,7 @@ function Home() {
       </section>
 
       {/* PODCAST */}
-      <section id="podcast" aria-labelledby="podcast-title" className="relative scroll-mt-20 border-t border-border py-20 md:py-28">
+      <section id="podcast" aria-labelledby="podcast-title" className="relative scroll-mt-20 border-t border-transparent py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-6">
             
             <h2 id="podcast-title" tabIndex={-1} className="rwb-flame rwb-flame-deep min-w-0 font-display text-4xl font-extrabold leading-[1.02] tracking-tight outline-none sm:text-5xl">
@@ -676,7 +666,7 @@ function Home() {
               </div>
 
 
-              <ul id="episodes" className="mt-12 scroll-mt-24 divide-y divide-border border-t border-border">
+              <ul id="episodes" className="mt-12 scroll-mt-24 divide-y divide-transparent border-t border-transparent">
                 {PODCAST_EPISODES.map((ep, i) => (
                   <li key={ep.id}>
                     <button
@@ -687,7 +677,7 @@ function Home() {
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {String(i + 1).padStart(2, "0")}
                       </span>
-                      <div className="relative h-14 w-24 shrink-0 overflow-hidden border border-border bg-surface">
+                      <div className="relative h-14 w-24 shrink-0 overflow-hidden border border-transparent bg-surface">
                         <CoverImage
                           src={videoPosterSrc(ep.id)}
                           fallbackSrc={videoPosterFallbacks(ep.id)}
@@ -724,7 +714,7 @@ function Home() {
 
 
       {/* HYBRID AI RADIO — SPOTIFY */}
-      <section id="radio" className="relative scroll-mt-20 border-t border-border py-20 md:py-28">
+      <section id="radio" className="relative scroll-mt-20 border-t border-transparent py-20 md:py-28">
         <div className="relative mx-auto max-w-5xl px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -793,17 +783,17 @@ function Home() {
 
 
       {/* FOOTER */}
-      <footer id="about" className="relative border-t border-white/10 bg-[#05070a] pb-36 text-slate-400 lg:pb-16">
+      <footer id="about" className="relative border-t border-transparent bg-transparent pb-36 text-slate-400 lg:pb-16">
         <div className="mx-auto max-w-7xl px-6 py-16 lg:py-20">
           {/* Brand + navigation */}
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.5fr_1fr_1fr]">
             {/* Brand */}
-            <div>
+            <div className="bg-transparent">
               <a href="#top" aria-label="Hybrid AI Records — back to top" className={WORDMARK_LINK}>
                 <BrandEagle
-                  src={usaEmblem}
-                  className="division-emblem h-28 w-auto sm:h-36"
+                  className="division-emblem h-28 w-auto sm:h-36 bg-transparent"
                   decorative
+                  priority
                 />
               </a>
               <p className="mt-5 max-w-sm text-sm leading-relaxed text-muted-foreground">
@@ -826,7 +816,7 @@ function Home() {
                     target={href.startsWith("http") ? "_blank" : undefined}
                     rel={href.startsWith("http") ? "noreferrer" : undefined}
                     aria-label={label}
-                    className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-slate-900/80 text-slate-200 transition-colors hover:border-blue-500/50 hover:text-white"
+                    className="grid h-10 w-10 place-items-center rounded-full border border-transparent bg-zinc-900/40 text-slate-200 backdrop-blur transition-colors hover:border-blue-500/50 hover:bg-zinc-900/60 hover:text-white"
                   >
                     <Icon size={16} />
                   </a>
@@ -921,16 +911,15 @@ function Home() {
 
           <VerifiedBadges />
 
-          <div className="mt-8 flex flex-col items-center gap-4">
+          <div className="mt-8 flex flex-col items-center gap-4 bg-transparent">
             <BrandEagle
-              src={usaEmblem}
-              className="division-emblem h-24 w-auto sm:h-28"
+              className="division-emblem h-24 w-auto sm:h-28 bg-transparent"
               alt="Hybrid AI Records LLC"
             />
             <a
               href="/veteran-certification"
               aria-label="Officially Certified Veteran-Owned Small Business (SBA VetCert) — view the affidavit of veteran ownership (view-only page)"
-              className="vetcert-badge inline-flex min-h-11 items-center justify-center gap-2.5 rounded-full bg-slate-900/90 px-6 py-3 text-center font-mono text-[11px] font-semibold uppercase tracking-wider text-amber-200 transition-all hover:border-amber-400 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#05070a]"
+              className="vetcert-badge inline-flex min-h-11 items-center justify-center gap-2.5 rounded-full bg-zinc-900/40 px-6 py-3 text-center font-mono text-[11px] font-semibold uppercase tracking-wider text-amber-200 backdrop-blur transition-all hover:border-amber-400 hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
             >
               <ShieldCheck size={16} strokeWidth={2} aria-hidden className="vetcert-badge-icon shrink-0" />
               Officially Certified Veteran-Owned Small Business (SBA VetCert)
@@ -939,7 +928,7 @@ function Home() {
           </div>
 
 
-          <div className="mt-12 flex flex-col gap-4 border-t border-white/10 pt-8 text-xs text-slate-100 md:flex-row md:items-center md:justify-between">
+          <div className="mt-12 flex flex-col gap-4 border-t border-transparent pt-8 text-xs text-slate-100 md:flex-row md:items-center md:justify-between">
             <div className="font-mono uppercase tracking-[0.18em]">
               © 2026 Hybrid AI Records LLC · SBA Veteran-Certified · Knoxville, TN
             </div>
@@ -1017,7 +1006,7 @@ function HelpSearchInput({
           value={value}
           placeholder={label}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full border border-border bg-white py-2 ps-9 pe-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+          className="w-full rounded-lg border border-zinc-700/80 bg-zinc-950/60 py-2 ps-9 pe-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-red-500/80 focus:ring-1 focus:ring-red-500/50"
         />
       </div>
       <p aria-live="polite" className="mt-1 text-[11px] text-muted-foreground">

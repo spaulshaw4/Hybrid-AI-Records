@@ -2166,7 +2166,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
       </div>
 
       {/* One row of panel toggles keeps the console calm by default */}
-      <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-3">
+      <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-transparent pt-3">
         {PANELS.map((p) => {
           const active = openPanel === p.value;
           return (
@@ -2214,7 +2214,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
 
       {/* Display settings — choose which metadata shows while playing */}
       {openPanel === "display" && (
-        <div className="mt-4 border-t border-white/5 pt-4" data-testid="radio-display-panel">
+        <div className="mt-4 border-t border-transparent pt-4" data-testid="radio-display-panel">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="radio-label-blue min-w-0 font-mono text-[10px] uppercase tracking-[0.24em]">
               Now Playing Metadata
@@ -2285,7 +2285,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
       {openPanel === "mix" && (
       <>
       {/* Secondary mix actions */}
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/5 pt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-transparent pt-4">
 
         <button
           type="button"
@@ -2897,7 +2897,7 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
 
       {/* Track list */}
       {openPanel === "tracks" && (
-      <div className="mt-5 border-t border-border-strong pt-4">
+      <div className="mt-5 border-t border-transparent pt-4">
 
         <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <div className="radio-label-blue min-w-0 font-mono text-[10px] uppercase tracking-[0.24em]">Tracklist</div>

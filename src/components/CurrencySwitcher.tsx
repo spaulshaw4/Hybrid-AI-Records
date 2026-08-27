@@ -226,8 +226,8 @@ function CurrencyDropdown({
         onKeyDown={onTriggerKeyDown}
         className={
           compact
-            ? "inline-flex h-9 items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-200 transition-colors hover:border-zinc-700 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e]"
-            : "flex min-h-11 w-full items-center gap-2 border border-border bg-background/40 px-3 py-2 text-start backdrop-blur-sm transition-colors hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b8bff]"
+            ? "inline-flex h-9 items-center gap-1.5 rounded-full border border-white/[0.08] bg-zinc-900/70 px-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-200 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e]"
+            : "flex min-h-11 w-full items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-3 py-2 text-start backdrop-blur-sm transition-all duration-200 hover:border-white/[0.15] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b8bff]"
         }
       >
         <Globe className={compact ? "size-3.5 shrink-0 text-[#e11d2e]" : "size-4 shrink-0 text-[#e11d2e]"} aria-hidden="true" />

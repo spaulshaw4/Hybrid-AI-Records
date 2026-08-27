@@ -1,10 +1,11 @@
-export const BRAND_EAGLE_PUBLIC = "/brand/lockup-usa-512.png";
-export const BRAND_EAGLE_SRC = "/brand/lockup-usa-256.png";
+const LOCKUP_V = "k3";
+export const BRAND_EAGLE_PUBLIC = `/brand/lockup-usa-512.png?v=${LOCKUP_V}`;
+export const BRAND_EAGLE_SRC = `/brand/lockup-usa-256.png?v=${LOCKUP_V}`;
 export const BRAND_EAGLE_WIDTH = 256;
 export const BRAND_EAGLE_HEIGHT = 256;
 
 const BRAND_EAGLE_SRCSET =
-  "/brand/lockup-usa-96.png 96w, /brand/lockup-usa-144.png 144w, /brand/lockup-usa-192.png 192w, /brand/lockup-usa-256.png 256w, /brand/lockup-usa-384.png 384w, /brand/lockup-usa-512.png 512w";
+  `/brand/lockup-usa-96.png?v=${LOCKUP_V} 96w, /brand/lockup-usa-144.png?v=${LOCKUP_V} 144w, /brand/lockup-usa-192.png?v=${LOCKUP_V} 192w, /brand/lockup-usa-256.png?v=${LOCKUP_V} 256w, /brand/lockup-usa-384.png?v=${LOCKUP_V} 384w, /brand/lockup-usa-512.png?v=${LOCKUP_V} 512w`;
 
 /**
  * Full Hybrid AI Records LLC lockup. Transparent PNGs so the paper field

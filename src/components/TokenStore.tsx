@@ -220,7 +220,7 @@ export function TokenStore({
           </DialogHeader>
 
           {!signedIn ? (
-            <p className="rounded-lg border border-white/10 bg-zinc-900 p-4 text-sm text-zinc-300">
+            <p className="rounded-lg border border-white/[0.08] bg-zinc-900/70 p-4 text-sm text-zinc-300">
               Sign in to buy Hybrid Tokens so we can credit them to your account.
             </p>
           ) : phase.kind === "checkout" ? (
@@ -244,10 +244,10 @@ export function TokenStore({
                 {TOKEN_BUNDLES.map((bundle) => (
                   <div
                     key={bundle.priceId}
-                    className={`flex flex-col rounded-xl border p-4 ${
+                    className={`flex flex-col rounded-xl border p-4 transition-all duration-200 ${
                       bundle.highlight
-                        ? "border-primary/60 bg-zinc-900 shadow-[0_0_24px_hsl(var(--primary)/0.25)]"
-                        : "border-white/10 bg-zinc-900"
+                        ? "border-primary/60 bg-zinc-900/80 shadow-[0_0_24px_hsl(var(--primary)/0.25)] backdrop-blur-xl"
+                        : "border-white/[0.08] bg-zinc-900/70 backdrop-blur-xl hover:border-white/[0.15] hover:bg-zinc-900/80"
                     }`}
                   >
                     <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-50">

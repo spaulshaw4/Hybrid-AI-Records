@@ -34,7 +34,7 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[calc(var(--site-sidebar-width)+((100vw-var(--site-sidebar-width))/2))] top-[50%] z-50 grid max-h-[85dvh] w-[calc(100%-2rem-env(safe-area-inset-left)-env(safe-area-inset-right))] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:w-full",
+        "fixed left-[calc(var(--site-sidebar-width)+((100vw-var(--site-sidebar-width))/2))] top-[50%] z-50 grid max-h-[85dvh] w-[calc(100%-2rem-env(safe-area-inset-left)-env(safe-area-inset-right))] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-lg border border-white/[0.08] studio-glass p-6 shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:w-full",
         className,
       )}
       {...props}

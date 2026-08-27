@@ -272,7 +272,7 @@ export function QuickOrderForm() {
   ];
 
   const SummaryList = () => (
-    <dl className="divide-y divide-border border border-border bg-background/50 text-start">
+    <dl className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.08] bg-zinc-900/70 text-start shadow-2xl backdrop-blur-xl">
       {summaryRows.map((row) => (
         <div key={row.label} className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-3">
           <dt className="min-w-28 font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
@@ -290,7 +290,7 @@ export function QuickOrderForm() {
         id="quick-order-form"
         role="status"
         aria-live="polite"
-        className="scroll-mt-24 border border-primary/50 bg-background/40 p-6 text-center backdrop-blur-sm sm:p-8"
+        className="scroll-mt-24 rounded-xl border border-primary/50 bg-zinc-900/70 p-6 text-center shadow-2xl backdrop-blur-xl sm:p-8"
       >
         <CheckCircle2 className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
         <h3 className="mt-4 font-display text-2xl font-semibold text-white">Track Submitted</h3>
@@ -344,7 +344,7 @@ export function QuickOrderForm() {
       <section
         id="quick-order-form"
         aria-labelledby="qo-review-title"
-        className="scroll-mt-24 border border-border bg-background/40 p-6 backdrop-blur-sm sm:p-8"
+        className="scroll-mt-24 rounded-xl border border-white/[0.08] bg-zinc-900/70 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
       >
         <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
           Step 2 of 2 — Confirm
@@ -390,7 +390,7 @@ export function QuickOrderForm() {
 
 
   const field =
-    "mt-2 w-full border border-border bg-background/50 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-primary";
+    "mt-2 w-full rounded-lg border border-zinc-700/80 bg-zinc-950/60 px-4 py-3 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-red-500/80 focus:ring-1 focus:ring-red-500/50";
   const fieldState = (invalid: boolean) =>
     invalid ? `${field} border-primary focus:border-primary` : field;
   const labelCls = "font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground";
@@ -410,7 +410,7 @@ export function QuickOrderForm() {
       onSubmit={onSubmit}
       noValidate
       aria-describedby="qo-required-note"
-      className="scroll-mt-24 space-y-5 border border-border bg-background/40 p-6 backdrop-blur-sm sm:p-8"
+      className="scroll-mt-24 space-y-5 rounded-xl border border-white/[0.08] bg-zinc-900/70 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
         Step 1 of 2 — Your details

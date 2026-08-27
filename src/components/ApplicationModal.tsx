@@ -2109,7 +2109,7 @@ export function ApplicationModal({
           <button
             type="button"
             onClick={resetAndClose}
-            className="absolute end-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center border border-white/10 !bg-zinc-900 text-foreground transition-colors hover:border-primary hover:text-primary sm:top-3 sm:h-10 sm:w-10"
+            className="absolute end-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center border border-white/[0.08] !bg-zinc-900/70 text-foreground backdrop-blur-xl transition-all duration-200 hover:border-primary hover:bg-zinc-900/80 hover:text-primary sm:top-3 sm:h-10 sm:w-10"
             aria-label="Close application"
           >
             <X size={18} />
@@ -3555,8 +3555,8 @@ export function ApplicationModal({
 }
 
 const inputClass = (invalid?: boolean) =>
-  `w-full border bg-background/40 px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary ${
-    invalid ? "border-[#e11d2e]" : "border-border"
+  `w-full rounded-lg border bg-zinc-950/60 px-4 py-3 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-red-500/80 focus:ring-1 focus:ring-red-500/50 ${
+    invalid ? "border-[#e11d2e]" : "border-zinc-700/80"
   }`;
 
 function Field({

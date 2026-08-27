@@ -60,7 +60,7 @@ export function HowItWorksModal({ open, onClose, onSubmit }: Props) {
         className="relative mx-auto flex h-full w-full max-w-3xl flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/60 bg-white/70 px-6 py-4 backdrop-blur-md sm:px-10">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/[0.08] bg-zinc-900/80 px-6 py-4 backdrop-blur-xl sm:px-10">
           <div className="min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
               <span className="text-[#e11d2e]">/</span>{" "}
@@ -107,7 +107,7 @@ export function HowItWorksModal({ open, onClose, onSubmit }: Props) {
                   >
                     {s.n}
                   </span>
-                  <div className="border border-border bg-white/[0.02] p-6 transition-colors hover:border-[#e11d2e]/60 sm:p-8">
+                  <div className="border border-white/[0.08] bg-zinc-900/70 p-6 backdrop-blur-xl transition-all duration-200 hover:border-[#e11d2e]/60 hover:bg-zinc-900/80 sm:p-8">
                     <div className="flex items-start gap-4">
                       <div className="grid h-11 w-11 shrink-0 place-items-center border border-border bg-ink text-[#e11d2e]">
                         <Icon size={18} />

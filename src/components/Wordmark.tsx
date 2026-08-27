@@ -1,21 +1,22 @@
-import { BRAND_EAGLE_PUBLIC } from "@/components/BrandEagle";
-import usaEmblem from "@/assets/divisions/usa.png";
+import { BRAND_EAGLE_PUBLIC, BRAND_EAGLE_SRC } from "@/components/BrandEagle";
 
 type WordmarkSize = "sm" | "md";
 
-const MARK_SRCSET = `${usaEmblem} 512w`;
+/** Transparent RGBA lockups — not @/assets/divisions (those are JPEGs with baked black). */
+const MARK_SRCSET =
+  `${BRAND_EAGLE_SRC.replace("256", "96")} 96w, ${BRAND_EAGLE_SRC.replace("256", "144")} 144w, ${BRAND_EAGLE_SRC.replace("256", "192")} 192w, ${BRAND_EAGLE_SRC} 256w, ${BRAND_EAGLE_SRC.replace("256", "384")} 384w, ${BRAND_EAGLE_PUBLIC} 512w`;
 
 const MARK_SIZE: Record<WordmarkSize, { cls: string; px: number; src: string; sizes: string }> = {
   sm: {
     cls: "division-emblem h-8 w-8 sm:h-10 sm:w-10",
     px: 40,
-    src: usaEmblem,
+    src: BRAND_EAGLE_SRC,
     sizes: "(min-width: 640px) 40px, 32px",
   },
   md: {
     cls: "division-emblem h-10 w-10 sm:h-11 sm:w-11",
     px: 44,
-    src: usaEmblem,
+    src: BRAND_EAGLE_SRC,
     sizes: "(min-width: 640px) 44px, 40px",
   },
 };

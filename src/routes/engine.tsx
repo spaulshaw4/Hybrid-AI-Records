@@ -82,7 +82,7 @@ function EnginePage() {
   return (
     <main
       id="engine-workspace"
-      className="relative z-40 bg-[#0d0d11] py-3 text-white"
+      className="relative z-40 bg-transparent py-3 text-white"
     >
       <div className="mx-auto mb-3 w-full max-w-7xl px-4 sm:px-6">
         <h1 className="sr-only">Create Your Track</h1>
