@@ -24,6 +24,7 @@ import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner";
 import { supabase } from "@/integrations/supabase/client";
 import { ensureUserProfile, takeOAuthNext } from "@/lib/ensure-user-profile";
+import { installStaticChargeMonitor } from "@/lib/static-charge";
 
 import { useRouteRetry } from "@/lib/use-route-retry";
 import { installOverlayCompositingGuard } from "@/lib/overlay-compositing";
@@ -261,6 +262,8 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
+    const stopChargeMonitor = installStaticChargeMonitor();
+
     const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
         void ensureUserProfile(session.user).then(() => {
@@ -272,9 +275,16 @@ function RootComponent() {
       }
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       void router.invalidate();
-      if (event !== "SIGNED_OUT") void queryClient.invalidateQueries();
+      if (event === "SIGNED_OUT") {
+        queryClient.clear();
+      } else {
+        void queryClient.invalidateQueries();
+      }
     });
-    return () => subscription.subscription.unsubscribe();
+    return () => {
+      stopChargeMonitor();
+      subscription.subscription.unsubscribe();
+    };
   }, [queryClient, router]);
 
   useEffect(() => {

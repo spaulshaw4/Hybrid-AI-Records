@@ -138,7 +138,9 @@ export default defineConfig({
     : {
         command: "bun run dev",
         url: "http://localhost:8080",
-        reuseExistingServer: true,
-        timeout: 120_000,
+        // Never reuse a stray local server in CI — it masks cold-start failures
+        // and can point at a stale build that flakes focus/deep-link assertions.
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
       },
 });

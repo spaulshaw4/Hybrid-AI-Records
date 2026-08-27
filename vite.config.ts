@@ -15,6 +15,17 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: 8080,
       host: true,
+      // FMA / large data trees are often locked or huge on Windows; watching them
+      // crashes the watcher with EBUSY and is never useful for HMR.
+      watch: {
+        ignored: [
+          "**/data/**",
+          "**/node_modules/**",
+          "**/.git/**",
+          "**/test-results/**",
+          "**/playwright-report/**",
+        ],
+      },
     },
     resolve: {
       dedupe: ["react", "react-dom", "@tanstack/react-router", "@tanstack/react-query"],

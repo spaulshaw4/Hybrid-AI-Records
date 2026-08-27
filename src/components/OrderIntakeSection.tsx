@@ -66,11 +66,12 @@ export function OrderIntakeSection() {
     window.setTimeout(() => window.requestAnimationFrame(correct), behavior === "smooth" ? 450 : 0);
   };
 
-  const jumpToOrderForm = (updateHash = true, pkg?: OrderPackage, instant = false, waitFrames = 45) => {
+  const jumpToOrderForm = (updateHash = true, pkg?: OrderPackage, instant = false, waitFrames = 180) => {
     const form = document.getElementById("quick-order-form");
     const field = firstOrderField();
     if (!form || !field) {
-      // Portal content can paint a few frames late on cold CI loads.
+      // Portal content can paint late on cold CI / Vite first-compile loads
+      // (~3s at 60fps). Keep retrying until Escape/back leaves #order.
       if (waitFrames <= 0) return;
       window.requestAnimationFrame(() => {
         // Abort if Escape/back already left #order while we were waiting to mount.
@@ -99,16 +100,18 @@ export function OrderIntakeSection() {
 
     const gen = ++focusGenRef.current;
     let attempts = 0;
+    // ~3s of rAF retries so throttled CI CPUs still win against late layout.
+    const maxFocusAttempts = 180;
     const settle = () => {
       if (gen !== focusGenRef.current) return;
       const el = firstOrderField();
       if (!el) {
-        if (++attempts < 90) window.requestAnimationFrame(settle);
+        if (++attempts < maxFocusAttempts) window.requestAnimationFrame(settle);
         return;
       }
       if (document.activeElement === el) return;
       el.focus({ preventScroll: true });
-      if (++attempts < 90) window.requestAnimationFrame(settle);
+      if (++attempts < maxFocusAttempts) window.requestAnimationFrame(settle);
     };
     window.requestAnimationFrame(settle);
 

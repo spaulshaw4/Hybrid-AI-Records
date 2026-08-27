@@ -19,6 +19,7 @@ import { VerifiedBadges } from "@/components/VerifiedBadges";
 import { WhatsAppSupportCta } from "@/components/WhatsAppSupportCta";
 import { SupportRequestProvider } from "@/lib/support-request";
 
+import hybridFooterBlue from "@/assets/hybrid-footer-blue.jpg";
 import { crestPreloadLink, resolveDivision, type Division } from "@/lib/divisions";
 import { buildCatalogJsonLd, buildOrganizationPodcastJsonLd } from "@/lib/release-schema";
 import { JESTER_DIVISION_NAME, JESTER_DIVISION_SHORT_NAME } from "@/lib/division-settings";
@@ -791,7 +792,8 @@ function Home() {
             <div className="bg-transparent">
               <a href="#top" aria-label="Hybrid AI Records — back to top" className={WORDMARK_LINK}>
                 <BrandEagle
-                  className="division-emblem h-28 w-auto sm:h-36 bg-transparent"
+                  src={hybridFooterBlue}
+                  className="h-28 w-auto bg-transparent sm:h-36"
                   decorative
                   priority
                 />
@@ -913,7 +915,8 @@ function Home() {
 
           <div className="mt-8 flex flex-col items-center gap-4 bg-transparent">
             <BrandEagle
-              className="division-emblem h-24 w-auto sm:h-28 bg-transparent"
+              src={hybridFooterBlue}
+              className="h-24 w-auto bg-transparent sm:h-28"
               alt="Hybrid AI Records LLC"
             />
             <a

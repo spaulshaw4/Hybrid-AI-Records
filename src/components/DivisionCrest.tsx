@@ -11,14 +11,14 @@ const COPY: Record<Division, { org: string; division: string }> = {
   usa: { org: "HYBRID AI RECORDS", division: "USA DIVISION" },
   lithuania: { org: "HYBRID AI RECORDS", division: "LITHUANIA DIVISION" },
   nigeria: { org: "HYBRID AI RECORDS", division: "NIGERIA DIVISION" },
-  jester: { org: "", division: "THE JESTER AI LEGACY RECORDS" },
+  jester: { org: "THE JESTER AI", division: "LEGACY RECORDS" },
 };
 
 const DIVISION_LABEL_CLASS: Record<Division, string> = {
-  usa: "rwb-flame rwb-flame-deep",
-  jester: "rwb-flame rwb-flame-deep",
-  lithuania: "lt-flame",
-  nigeria: "ng-flame",
+  usa: "text-red-500",
+  jester: "text-blue-400",
+  lithuania: "text-emerald-400",
+  nigeria: "text-green-500",
 };
 
 const SIZE_CLASS: Record<CrestSize, string> = {
@@ -27,7 +27,7 @@ const SIZE_CLASS: Record<CrestSize, string> = {
   lg: "max-w-[7.5rem]",
 };
 
-/** Unframed square emblem — dark field blends into the page, no circular shield. */
+/** Classic square emblem + org/division labels (no CSS blend knockout). */
 export function DivisionCrest({
   release,
   size = "md",
@@ -87,10 +87,10 @@ export function DivisionCrest({
         data-testid="division-label-mobile"
         className="text-center font-mono uppercase tracking-widest"
       >
-        {copy.org ? (
-          <span className="block text-[10px] uppercase tracking-widest text-gray-400">{copy.org}</span>
-        ) : null}
-        <span className={`block text-xs font-black tracking-wider ${DIVISION_LABEL_CLASS[division]}`}>{copy.division}</span>
+        <span className="block text-[10px] uppercase tracking-widest text-gray-400">{copy.org}</span>
+        <span className={`block text-xs font-black tracking-wider ${DIVISION_LABEL_CLASS[division]}`}>
+          {copy.division}
+        </span>
       </div>
     </div>
   );

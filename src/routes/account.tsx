@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, Circle, KeyRound, LogOut, Mail, ShieldOff } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
+import { LogoutButton } from "@/components/LogoutButton";
 import { supabase } from "@/integrations/supabase/client";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import { Button } from "@/components/ui/button";
@@ -35,8 +34,6 @@ type ProviderRow = {
 };
 
 function AccountPage() {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
   const [identities, setIdentities] = useState<
@@ -85,19 +82,6 @@ function AccountPage() {
     setBusy(false);
     if (profileError) setError("Could not save your profile. Try again.");
     else setMessage("Profile saved.");
-  };
-
-  const signOutAndReset = async () => {
-    setBusy(true);
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    await supabase.auth.signOut({ scope: "local" });
-    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith("sb-") && key.endsWith("-auth-token")) window.localStorage.removeItem(key);
-    }
-    window.sessionStorage.removeItem("hybrid-ai:reauth-return");
-    navigate({ to: "/auth", replace: true });
   };
 
   useEffect(() => {
@@ -427,11 +411,12 @@ function AccountPage() {
               Session controls
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Clears protected caches and stale local sign-in tokens on this device.
+              Runs the static discharger: terminates auth, clears studio/vault residue on this
+              device, and hard-redirects so nothing bleeds into the next session.
             </p>
-            <Button className="mt-4" variant="destructive" onClick={() => void signOutAndReset()} disabled={busy}>
+            <LogoutButton className="mt-4" redirectTo="/auth">
               Sign Out &amp; Reset Session
-            </Button>
+            </LogoutButton>
           </div>
         </>
       )}

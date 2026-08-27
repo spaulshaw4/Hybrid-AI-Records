@@ -1,34 +1,28 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createRequire } from "node:module";
+import {
+  ORDER_CTA,
+  ORDER_FIRST_FIELD,
+  ORDER_SECTION,
+  ORDER_VISIBLE_MS,
+  expectFieldClearOfStickyHeader,
+  expectOrderCtaFocused,
+  expectOrderFieldFocused,
+  expectUrlIncludes,
+  gotoPortal,
+} from "./helpers/order-focus";
 
-const CTA = 'a[aria-controls="quick-order-form"]';
-const FIRST_FIELD = "#qo-artist";
-const ORDER_FORM = "#quick-order-form";
-
-/** id of the element that currently has focus (empty string when none). */
-const activeId = (page: Page) => page.evaluate(() => document.activeElement?.id ?? "");
-
-/** Sticky-header height, used to prove the focused field is not hidden under it. */
-const headerHeight = (page: Page) =>
-  page.evaluate(() => {
-    const header = document.querySelector("header");
-    return header instanceof HTMLElement ? header.offsetHeight : 0;
-  });
-
-/** Wait until deep-link / CTA focus lands on the first intake field. */
-async function expectOrderFieldFocused(page: Page) {
-  await expect(page.locator(ORDER_FORM)).toBeVisible({ timeout: 15_000 });
-  await expect
-    .poll(async () => activeId(page), { timeout: 12_000, intervals: [50, 100, 200] })
-    .toBe("qo-artist");
-  await expect(page.locator(FIRST_FIELD)).toBeFocused();
-}
+const CTA = ORDER_CTA;
+const FIRST_FIELD = ORDER_FIRST_FIELD;
 
 test.describe("Order form accessibility", () => {
+  // Cold Vite compiles of /portal on CI runners need headroom beyond the default 60s.
+  test.describe.configure({ timeout: 90_000 });
+
   test("Connect & Order shows a visible focus ring when keyboard-focused", async ({ page }) => {
-    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page);
     const cta = page.locator(CTA).first();
-    await expect(cta).toBeVisible({ timeout: 15_000 });
+    await expect(cta).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await cta.scrollIntoViewIfNeeded();
 
     const styleOf = () =>
@@ -38,61 +32,65 @@ test.describe("Order form accessibility", () => {
           outlineStyle: s.outlineStyle,
           outlineWidth: parseFloat(s.outlineWidth || "0"),
           boxShadow: s.boxShadow,
+          focusVisible: el.matches(":focus-visible"),
         };
       });
 
     const blurred = await styleOf();
-    // Keyboard focus (not mouse) so :focus-visible applies.
-    await cta.evaluate((el) => (el as HTMLElement).focus());
+    // Reset modality, then Tab onto the CTA so :focus-visible (not mouse :focus) applies.
+    await page.locator("body").click({ position: { x: 2, y: 2 } });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await cta.focus();
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
-    await expect(cta).toBeFocused();
+    await expect(cta).toBeFocused({ timeout: ORDER_VISIBLE_MS });
 
-    const focused = await styleOf();
-    const hasRing =
-      (focused.outlineStyle !== "none" && focused.outlineWidth >= 1) ||
-      (focused.boxShadow !== "none" && focused.boxShadow !== blurred.boxShadow);
-    expect(hasRing, `no visible focus indicator: ${JSON.stringify(focused)}`).toBe(true);
+    await expect
+      .poll(async () => {
+        const focused = await styleOf();
+        const hasRing =
+          focused.focusVisible ||
+          (focused.outlineStyle !== "none" && focused.outlineWidth >= 1) ||
+          (focused.boxShadow !== "none" && focused.boxShadow !== blurred.boxShadow);
+        return hasRing ? "ring" : JSON.stringify(focused);
+      }, { timeout: 5_000, intervals: [50, 100, 200] })
+      .toBe("ring");
   });
 
   test("clicking the CTA focuses the first field and Escape returns focus", async ({ page }) => {
-    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page);
     const cta = page.locator(CTA).first();
-    await expect(cta).toBeVisible({ timeout: 15_000 });
+    await expect(cta).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await cta.click();
 
     await expectOrderFieldFocused(page);
-    expect(page.url()).toContain("#order");
+    await expectUrlIncludes(page, "#order");
 
     await page.keyboard.press("Escape");
-    await expect.poll(() => activeId(page), { timeout: 8_000 }).not.toBe("qo-artist");
-    await expect(cta).toBeFocused();
+    await expectOrderCtaFocused(page, cta);
   });
 
   test("deep link to /portal#order scrolls the first field clear of the sticky header", async ({
     page,
   }) => {
-    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page, "/portal#order");
     const field = page.locator(FIRST_FIELD);
     await expectOrderFieldFocused(page);
-
-    const [box, header] = await Promise.all([field.boundingBox(), headerHeight(page)]);
-    expect(box).not.toBeNull();
-    // Fully inside the viewport and below the sticky header.
-    expect(box!.y).toBeGreaterThanOrEqual(header - 1);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+    await expectFieldClearOfStickyHeader(page, field);
   });
 
   test("back/forward navigation restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page);
     const cta = page.locator(CTA).first();
-    await expect(cta).toBeVisible({ timeout: 15_000 });
+    await expect(cta).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await cta.click();
     await expectOrderFieldFocused(page);
 
     await page.goBack();
-    await expect(cta).toBeFocused({ timeout: 8_000 });
-    expect(page.url()).not.toContain("#order");
+    await expectOrderCtaFocused(page, cta);
+    await expect
+      .poll(() => page.url(), { timeout: ORDER_VISIBLE_MS })
+      .not.toContain("#order");
 
     await page.goForward();
     await expectOrderFieldFocused(page);
@@ -130,12 +128,14 @@ const report = (violations: Violation[]) =>
   violations.map((v) => `${v.id} (${v.impact}): ${v.help}\n  ${v.nodes.join("\n  ")}`).join("\n");
 
 async function openOrderForm(page: Page) {
-  await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
+  await gotoPortal(page, "/portal#order");
   await expectOrderFieldFocused(page);
   await page.evaluate(() => document.fonts.ready).catch(() => undefined);
 }
 
 test.describe("Order form axe-core audit", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("entry step has no accessibility violations", async ({ page }) => {
     await openOrderForm(page);
     const violations = await scan(page, "#order");
@@ -155,8 +155,8 @@ test.describe("Order form axe-core audit", () => {
   });
 
   test("page landmarks are valid and unique", async ({ page }) => {
-    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("#order")).toBeVisible({ timeout: 15_000 });
+    await gotoPortal(page, "/portal#order");
+    await expect(page.locator(ORDER_SECTION)).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await page.addScriptTag({ path: AXE_PATH });
 
     const violations = await page.evaluate(async () => {

@@ -1,4 +1,14 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import {
+  ORDER_CTA,
+  ORDER_FIRST_FIELD,
+  ORDER_VISIBLE_MS,
+  expectFieldClearOfStickyHeader,
+  expectOrderCtaFocused,
+  expectOrderFieldFocused,
+  expectUrlIncludes,
+  gotoPortal,
+} from "./helpers/order-focus";
 
 /**
  * prefers-reduced-motion coverage: with animations minimized the reveal/scroll
@@ -6,29 +16,14 @@ import { expect, test, type Page } from "@playwright/test";
  * focus restoration must all still work.
  */
 
-const CTA = 'a[aria-controls="quick-order-form"]';
-const FIRST_FIELD = "#qo-artist";
-const ORDER_FORM = "#quick-order-form";
-
-const activeId = (page: Page) => page.evaluate(() => document.activeElement?.id ?? "");
-
-const headerHeight = (page: Page) =>
-  page.evaluate(() => {
-    const header = document.querySelector("header");
-    return header instanceof HTMLElement ? header.offsetHeight : 0;
-  });
-
-async function expectOrderFieldFocused(page: Page) {
-  await expect(page.locator(ORDER_FORM)).toBeVisible({ timeout: 15_000 });
-  await expect
-    .poll(async () => activeId(page), { timeout: 12_000, intervals: [50, 100, 200] })
-    .toBe("qo-artist");
-  await expect(page.locator(FIRST_FIELD)).toBeFocused();
-}
+const CTA = ORDER_CTA;
+const FIRST_FIELD = ORDER_FIRST_FIELD;
 
 test.use({ reducedMotion: "reduce" });
 
 test.describe("Reduced motion — order deep link and focus", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   // Belt and braces: some sandbox Chromium builds ignore the context-level
   // preference, so emulate it on the page too before any navigation.
   test.beforeEach(async ({ page }) => {
@@ -37,55 +32,55 @@ test.describe("Reduced motion — order deep link and focus", () => {
 
   test("the reduced-motion preference is actually applied", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    const reduced = await page.evaluate(
-      () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    );
-    expect(reduced).toBe(true);
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches),
+        { timeout: 5_000 },
+      )
+      .toBe(true);
   });
 
   test("deep link to /#order scrolls and focuses the first field", async ({ page }) => {
-    await page.goto("/portal#order", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page, "/portal#order");
     const field = page.locator(FIRST_FIELD);
     await expectOrderFieldFocused(page);
-
-    const [box, header] = await Promise.all([field.boundingBox(), headerHeight(page)]);
-    expect(box).not.toBeNull();
-    expect(box!.y).toBeGreaterThanOrEqual(header - 1);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+    await expectFieldClearOfStickyHeader(page, field);
   });
 
   test("deep link with a package slug prefills and still focuses", async ({ page }) => {
-    await page.goto("/portal?package=foundation#order", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page, "/portal?package=foundation#order");
     await expectOrderFieldFocused(page);
-    // The alias is canonicalized to the real package slug.
-    expect(page.url()).toContain("package=distribution-release");
-    expect(page.url()).toContain("#order");
+    // The alias is canonicalized to the real package slug (async on mount).
+    await expectUrlIncludes(page, "package=distribution-release");
+    await expectUrlIncludes(page, "#order");
   });
 
   test("CTA click focuses the field and Escape restores focus", async ({ page }) => {
-    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page);
     const cta = page.locator(CTA).first();
-    await expect(cta).toBeVisible({ timeout: 15_000 });
+    await expect(cta).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await cta.click();
 
     await expectOrderFieldFocused(page);
-    expect(page.url()).toContain("#order");
+    await expectUrlIncludes(page, "#order");
 
     await page.keyboard.press("Escape");
-    await expect.poll(() => activeId(page), { timeout: 8_000 }).not.toBe("qo-artist");
-    await expect(cta).toBeFocused();
+    await expectOrderCtaFocused(page, cta);
   });
 
   test("back/forward restores focus on both sides of #order", async ({ page }) => {
-    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await gotoPortal(page);
     const cta = page.locator(CTA).first();
-    await expect(cta).toBeVisible({ timeout: 15_000 });
+    await expect(cta).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await cta.click();
     await expectOrderFieldFocused(page);
 
     await page.goBack();
-    await expect(cta).toBeFocused({ timeout: 8_000 });
-    expect(page.url()).not.toContain("#order");
+    await expectOrderCtaFocused(page, cta);
+    await expect
+      .poll(() => page.url(), { timeout: ORDER_VISIBLE_MS })
+      .not.toContain("#order");
 
     await page.goForward();
     await expectOrderFieldFocused(page);
@@ -93,22 +88,30 @@ test.describe("Reduced motion — order deep link and focus", () => {
 
   test("release play preview opens and closes without animation stalls", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.locator("main#main-content, main").first().waitFor({ state: "visible", timeout: 15_000 });
-    await page.waitForTimeout(300);
+    await page.locator("main#main-content, main").first().waitFor({
+      state: "visible",
+      timeout: ORDER_VISIBLE_MS,
+    });
 
     const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
       has: page.getByRole("button", { name: "Close video" }),
     });
     const play = page.locator('button[aria-label^="Play video:"]').first();
-    await expect(play).toBeVisible({ timeout: 15_000 });
+    await expect(play).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await play.scrollIntoViewIfNeeded();
-    await play.press("Enter").catch(() => undefined);
-    await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
-    if (!(await dialog.isVisible().catch(() => false))) {
+
+    // Retry: home catalog cards can remount once hydration finishes.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await play.press("Enter").catch(() => undefined);
+      await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
+      if (await dialog.isVisible().catch(() => false)) break;
       await play.click({ force: true });
-      await page.waitForURL(/\?v=/, { timeout: 8_000 });
+      await page.waitForURL(/\?v=/, { timeout: 5_000 }).catch(() => undefined);
+      if (await dialog.isVisible().catch(() => false)) break;
+      await page.waitForTimeout(250);
     }
-    await expect(dialog).toBeVisible({ timeout: 8_000 });
+
+    await expect(dialog).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await expect(dialog.locator(".modal-panel-solid").first()).toBeVisible();
 
     await page.keyboard.press("Escape");

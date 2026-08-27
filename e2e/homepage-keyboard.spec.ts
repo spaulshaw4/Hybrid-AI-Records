@@ -10,13 +10,14 @@ const MAX_TABS = 48;
 
 /** Focus a play button and open its preview, retrying if hydration re-renders it. */
 async function openPreview(page: Page) {
+  const readyMs = process.env.CI ? 30_000 : 15_000;
   const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
     has: page.getByRole("button", { name: "Close video" }),
   });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const play = page.locator('button[aria-label^="Play video:"]').first();
-    await expect(play).toBeVisible({ timeout: 15_000 });
+    await expect(play).toBeVisible({ timeout: readyMs });
     await play.scrollIntoViewIfNeeded();
     // Prefer locator.press / click — bare keyboard Enter is flaky before handlers attach.
     await play.press("Enter").catch(() => undefined);
@@ -27,7 +28,7 @@ async function openPreview(page: Page) {
     if (await dialog.isVisible().catch(() => false)) return;
     await page.waitForTimeout(300);
   }
-  await expect(dialog).toBeVisible({ timeout: 8_000 });
+  await expect(dialog).toBeVisible({ timeout: readyMs });
 }
 
 /** Describe the focused element in a stable, assertable way. */
@@ -57,15 +58,22 @@ async function tabUntil(
 }
 
 test.describe("Homepage keyboard navigation", () => {
+  // Cold Vite compiles of `/` + catalog cards need headroom on CI runners.
+  test.describe.configure({ timeout: 90_000 });
+
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     // Desktop uses the sidebar nav; the <header> topbar is `lg:hidden` and stays hidden at 1280px.
-    await page.locator("main#main-content, main").first().waitFor({ state: "visible", timeout: 15_000 });
+    const readyMs = process.env.CI ? 30_000 : 15_000;
+    await page.locator("main#main-content, main").first().waitFor({ state: "visible", timeout: readyMs });
     await expect(page.getByRole("link", { name: "Create Your Track" }).first()).toBeVisible({
-      timeout: 15_000,
+      timeout: readyMs,
     });
-    // Avoid networkidle — catalog / analytics keep the network busy and hang CI.
-    await page.waitForTimeout(300);
+    // Prefer a concrete catalog signal over networkidle (analytics keeps the
+    // network busy and hangs CI) or a fixed sleep (flakes on cold compiles).
+    await expect(page.locator('button[aria-label^="Play video:"]').first()).toBeVisible({
+      timeout: readyMs,
+    });
   });
 
   test("primary CTAs are reachable and activatable by keyboard", async ({ page }) => {
@@ -112,9 +120,10 @@ test.describe("Homepage keyboard navigation", () => {
     // Submit Your Music navigates to the isolated distribution intake.
     await submitLink.focus();
     await page.keyboard.press("Enter");
-    await page.waitForURL(/\/portal/, { timeout: 15_000 });
-    await expect(page.locator("#order")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator("#quick-order-form")).toBeVisible({ timeout: 15_000 });
+    const readyMs = process.env.CI ? 30_000 : 15_000;
+    await page.waitForURL(/\/portal/, { timeout: readyMs });
+    await expect(page.locator("#order")).toBeVisible({ timeout: readyMs });
+    await expect(page.locator("#quick-order-form")).toBeVisible({ timeout: readyMs });
   });
 
   test("release play preview opens with Enter and closes with Escape", async ({ page }) => {
@@ -162,8 +171,9 @@ test.describe("Homepage keyboard navigation", () => {
   });
 
   test("every release card play button exposes an accessible name", async ({ page }) => {
+    const readyMs = process.env.CI ? 30_000 : 15_000;
     const buttons = page.locator('button[aria-label^="Play video:"]');
-    await expect(buttons.first()).toBeVisible({ timeout: 15_000 });
+    await expect(buttons.first()).toBeVisible({ timeout: readyMs });
     const count = await buttons.count();
     expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i += 1) {

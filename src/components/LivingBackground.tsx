@@ -9,6 +9,10 @@ import usaCrest from "@/assets/hybrid-ai-records-eagle.jpg";
 import lithuaniaCrest from "@/assets/hybrid-ai-records-lithuania.jpg";
 import nigeriaCrest from "@/assets/hybrid-ai-records-nigeria.jpg";
 import jesterCrest from "@/assets/hybrid-ai-records-jester.jpg";
+import usaEmblem from "@/assets/divisions/usa.png";
+import jesterEmblem from "@/assets/divisions/jester.png";
+import lithuaniaEmblem from "@/assets/divisions/lithuania.png";
+import nigeriaEmblem from "@/assets/divisions/nigeria.png";
 
 type Tier = LivingBackgroundTier;
 
@@ -20,34 +24,29 @@ export const DIVISION_WATERMARKS: Array<{ name: CrestName; src: string; label: s
   { name: "nigeria", src: crestUrl("nigeria", 1024), label: "Nigeria" },
 ];
 
-/**
- * Footer emblems: RGBA lockups from /public/brand (field knocked out to alpha).
- * Do NOT use @/assets/divisions/*.png — those are JPEGs with opaque black tiles.
- * Cache-bust query updated when brand lockups are re-knocked.
- */
-const LOCKUP_V = "k3";
+/** Footer emblems: original black-backed division masters + classic labels. */
 export const DIVISION_FOOTER_CRESTS = [
   {
     name: "usa" as const,
-    src: `/brand/lockup-usa-512.png?v=${LOCKUP_V}`,
+    src: usaEmblem,
     label: "Hybrid AI Records",
     title: "USA DIVISION",
   },
   {
     name: "jester" as const,
-    src: `/brand/lockup-jester-512.png?v=${LOCKUP_V}`,
+    src: jesterEmblem,
     label: "The Jester AI",
-    title: "THE JESTER AI LEGACY RECORDS",
+    title: "LEGACY RECORDS",
   },
   {
     name: "lithuania" as const,
-    src: `/brand/lockup-lithuania-512.png?v=${LOCKUP_V}`,
+    src: lithuaniaEmblem,
     label: "Lithuania",
     title: "LITHUANIA DIVISION",
   },
   {
     name: "nigeria" as const,
-    src: `/brand/lockup-nigeria-512.png?v=${LOCKUP_V}`,
+    src: nigeriaEmblem,
     label: "Nigeria",
     title: "NIGERIA DIVISION",
   },
@@ -194,38 +193,36 @@ export function LivingBackground() {
 }
 
 const DIVISION_TITLE_CLASS = {
-  usa: "rwb-flame rwb-flame-deep",
-  jester: "rwb-flame rwb-flame-deep",
-  lithuania: "lt-flame",
-  nigeria: "ng-flame",
+  usa: "text-red-500",
+  jester: "text-blue-400",
+  lithuania: "text-emerald-400",
+  nigeria: "text-green-500",
 } as const;
 
-/** Four division crests as a single footer lockup — not a full-screen grid. */
+/** Four division crests — original artwork + Official Label captions. */
 export function DivisionFooterBadge({ className = "" }: { className?: string }) {
   return (
     <div
-      className={`mt-12 w-full border-0 border-transparent bg-transparent py-8 ${className}`}
+      className={`mt-12 w-full border-t border-white/10 bg-black/40 py-8 ${className}`}
       role="group"
       aria-label="Hybrid AI Records divisions"
     >
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-8 bg-transparent px-4 text-center">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-8 px-4 text-center">
         {DIVISION_FOOTER_CRESTS.map((crest) => (
-          <figure
-            key={crest.name}
-            className="m-0 flex min-w-[140px] flex-col items-center gap-1 border-0 bg-transparent p-0 shadow-none"
-          >
+          <figure key={crest.name} className="m-0 flex min-w-[140px] flex-col items-center gap-1">
             <img
               src={crest.src}
               alt={`${crest.title} emblem`}
               title={crest.label}
               width={512}
               height={512}
-              className="division-emblem mb-1 h-auto w-full max-w-[6.5rem] select-none bg-transparent object-contain [image-rendering:auto]"
+              className="division-emblem mb-1 h-auto w-full max-w-[6.5rem] select-none bg-transparent object-contain [image-rendering:-webkit-optimize-contrast]"
               loading="lazy"
               decoding="async"
               draggable={false}
             />
-            <figcaption className="bg-transparent text-center">
+            <figcaption className="flex flex-col items-center gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-gray-400">Official Label</span>
               <span className={`text-xs font-black tracking-wider ${DIVISION_TITLE_CLASS[crest.name]}`}>
                 {crest.title}
               </span>

@@ -1480,19 +1480,15 @@ main button:active {
     0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
-/* Square division emblems / Hybrid lockups: lighten knocks baked-in black
-   fields out against the LivingBackground. Do not wrap in .logo-pop (white plate). */
+/* Division / Hybrid lockups: keep baked black fields solid — no screen/lighten
+   knockout (that layered blend looked wrong on the front page). */
 .division-emblem {
-  mix-blend-mode: lighten;
+  mix-blend-mode: normal;
   background: transparent;
 }
 
-/* Footer Hybrid + all four division crests: identical knockout.
-   Use screen (not lighten): mid-tone brown/navy leather plates survive
-   lighten against the blue mesh and still read as black tiles. Screen
-   punches those plates while gold/flag color stays. No sharpening filters. */
 footer .division-emblem {
-  mix-blend-mode: screen;
+  mix-blend-mode: normal;
   background: transparent;
   filter: none;
 }
@@ -3266,8 +3262,11 @@ html[data-page="home"] #catalog [id^="release-"] > button.aspect-video {
   border-color: transparent !important;
 }
 
-html[data-page="home"] .site-sidebar > div {
+html[data-page="home"] .site-sidebar > div,
+.site-sidebar > div {
+  border-width: 0 !important;
   border-color: transparent !important;
+  border-bottom: none !important;
 }
 
 html[data-page="home"] .site-topbar {

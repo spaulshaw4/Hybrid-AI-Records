@@ -158,12 +158,12 @@ function SiteSidebar() {
       className="site-sidebar studio-glass pointer-events-auto fixed inset-y-0 start-0 z-40 hidden w-[var(--site-sidebar-width)] flex-col border-e lg:flex"
       aria-label="Primary"
     >
-      <div className="flex h-[var(--site-header-height)] items-center border-b border-border/80 px-4">
+      <div className="flex h-[var(--site-header-height)] items-center border-0 border-transparent px-4">
         <Link to="/" aria-label="Hybrid AI Records — home" className={WORDMARK_LINK}>
           <Wordmark size="sm" interactive />
         </Link>
       </div>
-      <nav className="flex flex-1 flex-col gap-2 p-3">
+      <nav className="flex flex-1 flex-col gap-2 border-t-0 p-3">
         {SITE_NAV.map((item) => (
           <NavItem
             key={item.id}
