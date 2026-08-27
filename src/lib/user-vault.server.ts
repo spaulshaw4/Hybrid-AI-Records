@@ -225,8 +225,9 @@ function buildPatch(
 }
 
 /**
- * Opens or finishes a vault row via service-role upsert (bypasses RLS).
- * Throws on hard DB failures so callers/SSE surfaces the real error.
+ * Opens or finishes a vault row via service-role upsert (bypasses RLS for write).
+ * `userId` MUST be the verified session caller's UUID — never admin/shared/DEV defaults.
+ * Throws on hard DB failures so callers/SSE surfaces the real error (and refunds tokens).
  * Returns the confirmed `user_vault.id`.
  */
 export async function persistUserVault(
@@ -445,8 +446,14 @@ export async function listUserVaultApiTracks(userId: string): Promise<UserVaultA
       error instanceof Error ? error.message : error,
     );
   }
+  // Local filesystem vault is shared per machine — only merge for the local-dev
+  // test identity so authenticated profiles never see another user's local rows.
   try {
-    const { listLocalVaultTracks } = await import("@/lib/local-vault.server");
+    const { listLocalVaultTracks, localVaultEnabled } = await import("@/lib/local-vault.server");
+    const { DEV_TEST_USER_UUID } = await import("@/lib/dev-auth");
+    if (!localVaultEnabled() || userId !== DEV_TEST_USER_UUID) {
+      return remote;
+    }
     const local = await listLocalVaultTracks();
     const ids = new Set(remote.map((row) => row.id));
     return sanitizeVaultTracks([...local.filter((row) => !ids.has(row.id)), ...remote]);

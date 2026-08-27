@@ -1,80 +1,39 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import {
+  resolveStudioSession,
+  UnauthorizedSessionError,
+} from "@/lib/studio-request-auth.server";
 
+/**
+ * Zero-trust server-fn gate (TanStack equivalent of `@supabase/ssr` + getUser).
+ * Instantiates a fresh request-scoped user client from Bearer/cookies.
+ * Never injects DEV UUIDs, admin clients, or shared identity fallbacks.
+ */
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
-    const { DEV_TEST_USER, DEV_TEST_USER_UUID, isDevAuthBypass } = await import("@/lib/dev-auth");
-    // Both branches must agree on the claims shape or the inferred middleware
-    // context collapses to `undefined` in every consuming server function.
-    // Supabase's real claims declare `email` as optional, so the dev bypass
-    // has to keep it optional too — not `string | undefined`.
     type AuthClaims = { sub: string; email?: string };
 
-    if (isDevAuthBypass()) {
-      const { tryGetSupabaseAdmin, createSupabaseUserClient } = await import(
-        "@/integrations/supabase/client.server"
-      );
-      let supabase = tryGetSupabaseAdmin();
-      if (!supabase) {
-        try {
-          supabase = createSupabaseUserClient("");
-        } catch (error) {
-          console.warn(
-            "[supabase] user client unavailable in development",
-            error instanceof Error ? error.message : error,
-          );
-          throw error;
-        }
-      }
-      const devClaims: AuthClaims = {
-        sub: DEV_TEST_USER_UUID,
-        email: DEV_TEST_USER.email,
-      };
-      return next({
-        context: { supabase, userId: DEV_TEST_USER_UUID, claims: devClaims },
-      });
-    }
-
-    const { createSupabaseUserClient } = await import("@/integrations/supabase/client.server");
     const request = getRequest();
-
     if (!request?.headers) {
-      throw new Error("Unauthorized: No request headers available");
+      throw new UnauthorizedSessionError("Unauthorized session");
     }
 
-    const authHeader = request.headers.get("authorization");
-
-    if (!authHeader) {
-      throw new Error("Unauthorized: No authorization header provided");
+    let session;
+    try {
+      session = await resolveStudioSession(request);
+    } catch (error) {
+      if (error instanceof UnauthorizedSessionError) throw error;
+      throw new UnauthorizedSessionError("Unauthorized session");
     }
 
-    if (!authHeader.startsWith("Bearer ")) {
-      throw new Error("Unauthorized: Only Bearer tokens are supported");
-    }
-
-    const token = authHeader.replace("Bearer ", "");
-    if (!token) {
-      throw new Error("Unauthorized: No token provided");
-    }
-
-    if (token.split(".").length !== 3) {
-      throw new Error("Unauthorized: Invalid token");
-    }
-
-    const supabase = createSupabaseUserClient(token);
-
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims) {
-      throw new Error("Unauthorized: Invalid token");
-    }
-
-    if (!data.claims.sub) {
-      throw new Error("Unauthorized: No user ID found in token");
-    }
-
-    const claims: AuthClaims = data.claims;
+    const claims: AuthClaims = { sub: session.userId };
     return next({
-      context: { supabase, userId: data.claims.sub, claims },
+      context: {
+        supabase: session.supabase,
+        userId: session.userId,
+        claims,
+      },
     });
   },
 );

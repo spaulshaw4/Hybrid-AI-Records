@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { newCorrelationId } from "@/lib/apiframe.server";
 import { RATE_LIMITS, limitBy } from "@/lib/rate-limit";
-import { studioUserIdFromRequest } from "@/lib/studio-request-auth.server";
+import {
+  resolveStudioSession,
+  unauthorizedSessionResponse,
+} from "@/lib/studio-request-auth.server";
 
 const LYRICS_MAX = 6000;
 /** Minimum abort window for studio vocal dispatch HTTP calls. */
@@ -37,12 +40,13 @@ function fail(status: number, message: string): Response {
 }
 
 async function handleVocalClone({ request }: { request: Request }): Promise<Response> {
-  let userId: string;
+  let session;
   try {
-    userId = await studioUserIdFromRequest(request);
+    session = await resolveStudioSession(request);
   } catch {
-    return fail(401, "Sign in to clone vocals.");
+    return unauthorizedSessionResponse();
   }
+  const userId = session.userId;
 
   try {
     limitBy("studioVocalClone", userId, RATE_LIMITS.generation, "vocal clones");

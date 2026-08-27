@@ -194,15 +194,17 @@ export function getMusicApiKey(): string {
     trimProcessEnv("MUSICAPI_KEY") ||
     trimProcessEnv("MUSIC_API_KEY") ||
     trimProcessEnv("AI_MUSIC_API_KEY") ||
+    trimProcessEnv("SHARED_API_KEY") ||
     readEnv("AIMUSICAPI_KEY") ||
     readEnv("MUSICAPI_KEY") ||
     readEnv("MUSIC_API_KEY") ||
     readEnv("AI_MUSIC_API_KEY") ||
     readEnv("AIMUSIC_API_KEY") ||
+    readEnv("SHARED_API_KEY") ||
     trimProcessEnv("ENGINE_API_KEY");
   if (!apiKey) {
     console.error(
-      "[MUSICAPI] AIMUSICAPI_KEY / MUSICAPI_KEY / MUSIC_API_KEY is undefined — add it to .env.local (server), not only a VITE_ client key",
+      "[MUSICAPI] AIMUSICAPI_KEY / MUSICAPI_KEY / MUSIC_API_KEY / SHARED_API_KEY is undefined — add it to .env.local (server), not only a VITE_ client key",
     );
     return requireStageKey("MUSIC_API_KEY", MUSIC_STAGE);
   }

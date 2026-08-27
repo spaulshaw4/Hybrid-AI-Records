@@ -434,17 +434,26 @@ describe("Hybrid Engine diagnostic — vault persistence & downloads", () => {
 });
 
 describe("Hybrid Engine diagnostic — spend-before-API contract", () => {
-  it("documents generate-stream burns tokens before SSE run starts", () => {
+  it("documents generate-stream ingress uses cortex (burn+enqueue, no inline run)", () => {
     const source = readFileSync(
       join(process.cwd(), "src/routes/api/studio/generate-stream.ts"),
       "utf8",
     );
-    // Prefer call sites over import/destructure mentions.
-    const spendIdx = source.indexOf("await authorizeAndSpendGenerationToken");
-    const runIdx = source.indexOf("await runGenerateEngineTrack");
+    expect(source).toContain("executeGenerationCortex");
+    expect(source).toContain("status: 202");
+    expect(source).not.toContain("await runGenerateEngineTrack");
+  });
+
+  it("documents cortex burns tokens before queue insert", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/lib/cortex-dispatcher.server.ts"),
+      "utf8",
+    );
+    const spendIdx = source.indexOf("authorizeAndSpendGenerationToken");
+    const insertIdx = source.indexOf('.from("generation_queue")');
     expect(spendIdx).toBeGreaterThan(-1);
-    expect(runIdx).toBeGreaterThan(spendIdx);
-    expect(source).toContain("await refundGenerationToken");
+    expect(insertIdx).toBeGreaterThan(spendIdx);
+    expect(source).toContain("refundGenerationToken");
   });
 
   it("documents apiframe refunds on outer failure after burn", () => {

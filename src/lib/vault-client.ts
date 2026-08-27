@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { isDevAuthBypass } from "@/lib/dev-auth";
 import { sanitizeVaultTracks, type SanitizedVaultTrack } from "@/lib/vault-tracks";
 
 export const VAULT_API_URL = "/api/studio/vault";
@@ -28,34 +27,69 @@ function isTransientHttpStatus(status: number): boolean {
 
 async function vaultAuthHeaders(): Promise<Headers> {
   const headers = new Headers({ Accept: "application/json" });
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  // Prefer getUser() so we never attach a stale anonymous/cached session JWT.
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) return headers;
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  let token = sessionData.session?.access_token;
+  if (!token || sessionData.session?.user?.id !== userData.user.id) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    token = refreshed.session?.access_token;
+  }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   return headers;
 }
 
-/** GET /api/studio/vault/tracks with ok / transientFailure metadata. Never throws. */
+/**
+ * Preferred catalog path: authenticated browser Supabase client + RLS
+ * (`auth.uid() = user_id`). No manual user_id filter in the UI.
+ */
+async function fetchVaultTracksViaRls(): Promise<VaultTracksFetchResult | null> {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) return null;
+
+  const { data, error } = await supabase
+    .from("user_vault")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.warn("[vault] RLS catalog failed", error.message);
+    return null;
+  }
+  return { tracks: sanitizeVaultTracks(data ?? []), ok: true, transientFailure: false };
+}
+
+/** Server catalog (signed-URL refresh). Still scoped to the Bearer session user. */
+async function fetchVaultTracksViaApi(): Promise<VaultTracksFetchResult> {
+  const response = await fetch(`${VAULT_API_URL}/tracks`, {
+    headers: await vaultAuthHeaders(),
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      console.warn("[vault] catalog unavailable", response.status);
+      return { tracks: [], ok: false, transientFailure: false, status: response.status };
+    }
+    console.warn("[vault] catalog request failed", response.status);
+    return {
+      tracks: [],
+      ok: false,
+      transientFailure: isTransientHttpStatus(response.status),
+      status: response.status,
+      message: `Vault catalog ${response.status}`,
+    };
+  }
+  const body: unknown = await response.json().catch(() => []);
+  return { tracks: sanitizeVaultTracks(body), ok: true, transientFailure: false };
+}
+
+/** GET vault catalog with ok / transientFailure metadata. Never throws. */
 export async function fetchVaultTracksResult(): Promise<VaultTracksFetchResult> {
   try {
-    const response = await fetch(`${VAULT_API_URL}/tracks`, {
-      headers: await vaultAuthHeaders(),
-    });
-    if (!response.ok) {
-      if (isDevAuthBypass() || response.status === 401) {
-        console.warn("[vault] catalog unavailable", response.status);
-        return { tracks: [], ok: false, transientFailure: false, status: response.status };
-      }
-      console.warn("[vault] catalog request failed", response.status);
-      return {
-        tracks: [],
-        ok: false,
-        transientFailure: isTransientHttpStatus(response.status),
-        status: response.status,
-        message: `Vault catalog ${response.status}`,
-      };
-    }
-    const body: unknown = await response.json().catch(() => []);
-    return { tracks: sanitizeVaultTracks(body), ok: true, transientFailure: false };
+    const rls = await fetchVaultTracksViaRls();
+    if (rls) return rls;
+    return await fetchVaultTracksViaApi();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[vault] catalog fetch failed", message);

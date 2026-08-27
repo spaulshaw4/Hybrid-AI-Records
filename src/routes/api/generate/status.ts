@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { pollEngineTrackTask } from "@/lib/apiframe-music.functions";
-import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
+import {
+  resolveStudioSession,
+  unauthorizedSessionResponse,
+} from "@/lib/studio-request-auth.server";
 
 /**
  * GET /api/generate/status?taskId=…
@@ -27,14 +30,11 @@ function methodNotAllowed(): Response {
 }
 
 async function handleStatus({ request }: { request: Request }): Promise<Response> {
-  let userId: string | null;
+  let session;
   try {
-    userId = await studioUserIdFromRequestOrDev(request);
+    session = await resolveStudioSession(request);
   } catch {
-    return Response.json({ error: "Sign in to check generation status." }, { status: 401 });
-  }
-  if (!userId) {
-    return Response.json({ error: "Sign in to check generation status." }, { status: 401 });
+    return unauthorizedSessionResponse();
   }
 
   const taskId = new URL(request.url).searchParams.get("taskId")?.trim() ?? "";
@@ -43,7 +43,7 @@ async function handleStatus({ request }: { request: Request }): Promise<Response
   }
 
   try {
-    const upstreamData = await pollEngineTrackTask(taskId, userId);
+    const upstreamData = await pollEngineTrackTask(taskId, session.userId);
     console.log("[Poll Status Proxy]:", JSON.stringify(upstreamData));
     return Response.json(upstreamData);
   } catch (error) {

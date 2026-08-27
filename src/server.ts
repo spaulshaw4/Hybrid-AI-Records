@@ -11,6 +11,11 @@ void import("./lib/pipeline-worker.server")
   .then((m) => m.ensurePipelineWorkerInstalled())
   .catch(() => undefined);
 
+// Drain generation_queue sequentially (shared upstream API key shock absorber).
+void import("./lib/generation-queue-worker.server")
+  .then((m) => m.ensureGenerationQueueWorkerInstalled())
+  .catch(() => undefined);
+
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { logServerError, newErrorReference } from "./lib/server-error-log";

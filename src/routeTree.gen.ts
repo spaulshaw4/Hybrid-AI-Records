@@ -47,13 +47,16 @@ import { Route as AccountDownloadsRouteImport } from './routes/account.downloads
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRouteImport } from './routes/[.well-known]/assetlinks[.]json'
 import { Route as Char91DotmcpChar93ListToolsRouteImport } from './routes/[.mcp]/list-tools'
+import { Route as ApiSystemActuatorRouteImport } from './routes/api/system/actuator'
 import { Route as ApiStudioVocalCloneRouteImport } from './routes/api/studio/vocal-clone'
 import { Route as ApiStudioGenerateStreamRouteImport } from './routes/api/studio/generate-stream'
+import { Route as ApiStudioGenerateQueueRouteImport } from './routes/api/studio/generate-queue'
 import { Route as ApiPublicTrackDownloadRouteImport } from './routes/api/public/track-download'
 import { Route as ApiPublicSupportReportsRouteImport } from './routes/api/public/support-reports'
 import { Route as ApiPublicMetricsRouteImport } from './routes/api/public/metrics'
 import { Route as ApiPublicClientErrorsRouteImport } from './routes/api/public/client-errors'
 import { Route as ApiPublicAudioProxyRouteImport } from './routes/api/public/audio-proxy'
+import { Route as ApiPipelineMasterRouteImport } from './routes/api/pipeline/master'
 import { Route as ApiLocalVaultFileNameRouteImport } from './routes/api/local-vault.$fileName'
 import { Route as ApiGenerateStatusRouteImport } from './routes/api/generate/status'
 import { Route as AuthenticatedAdminUploadsRouteImport } from './routes/_authenticated/admin.uploads'
@@ -70,6 +73,7 @@ import { Route as AuthenticatedAdminApplicationsRouteImport } from './routes/_au
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as ApiStudioVaultTracksRouteImport } from './routes/api/studio/vault/tracks'
+import { Route as ApiStudioGenerateQueueJobIdRouteImport } from './routes/api/studio/generate-queue.$jobId'
 import { Route as ApiPublicHooksRefreshFxRouteImport } from './routes/api/public/hooks/refresh-fx'
 import { Route as ApiStudioVaultTracksTrackIdRouteImport } from './routes/api/studio/vault/tracks.$trackId'
 
@@ -265,6 +269,11 @@ const Char91DotmcpChar93ListToolsRoute =
     path: '/.mcp/list-tools',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiSystemActuatorRoute = ApiSystemActuatorRouteImport.update({
+  id: '/api/system/actuator',
+  path: '/api/system/actuator',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiStudioVocalCloneRoute = ApiStudioVocalCloneRouteImport.update({
   id: '/api/studio/vocal-clone',
   path: '/api/studio/vocal-clone',
@@ -273,6 +282,11 @@ const ApiStudioVocalCloneRoute = ApiStudioVocalCloneRouteImport.update({
 const ApiStudioGenerateStreamRoute = ApiStudioGenerateStreamRouteImport.update({
   id: '/api/studio/generate-stream',
   path: '/api/studio/generate-stream',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStudioGenerateQueueRoute = ApiStudioGenerateQueueRouteImport.update({
+  id: '/api/studio/generate-queue',
+  path: '/api/studio/generate-queue',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicTrackDownloadRoute = ApiPublicTrackDownloadRouteImport.update({
@@ -298,6 +312,11 @@ const ApiPublicClientErrorsRoute = ApiPublicClientErrorsRouteImport.update({
 const ApiPublicAudioProxyRoute = ApiPublicAudioProxyRouteImport.update({
   id: '/api/public/audio-proxy',
   path: '/api/public/audio-proxy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPipelineMasterRoute = ApiPipelineMasterRouteImport.update({
+  id: '/api/pipeline/master',
+  path: '/api/pipeline/master',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiLocalVaultFileNameRoute = ApiLocalVaultFileNameRouteImport.update({
@@ -392,6 +411,12 @@ const ApiStudioVaultTracksRoute = ApiStudioVaultTracksRouteImport.update({
   path: '/api/studio/vault/tracks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStudioGenerateQueueJobIdRoute =
+  ApiStudioGenerateQueueJobIdRouteImport.update({
+    id: '/$jobId',
+    path: '/$jobId',
+    getParentRoute: () => ApiStudioGenerateQueueRoute,
+  } as any)
 const ApiPublicHooksRefreshFxRoute = ApiPublicHooksRefreshFxRouteImport.update({
   id: '/api/public/hooks/refresh-fx',
   path: '/api/public/hooks/refresh-fx',
@@ -457,14 +482,18 @@ export interface FileRoutesByFullPath {
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
+  '/api/pipeline/master': typeof ApiPipelineMasterRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
+  '/api/system/actuator': typeof ApiSystemActuatorRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
+  '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
@@ -521,14 +550,18 @@ export interface FileRoutesByTo {
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
+  '/api/pipeline/master': typeof ApiPipelineMasterRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
+  '/api/system/actuator': typeof ApiSystemActuatorRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
+  '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
@@ -587,14 +620,18 @@ export interface FileRoutesById {
   '/_authenticated/admin/uploads': typeof AuthenticatedAdminUploadsRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
+  '/api/pipeline/master': typeof ApiPipelineMasterRoute
   '/api/public/audio-proxy': typeof ApiPublicAudioProxyRoute
   '/api/public/client-errors': typeof ApiPublicClientErrorsRoute
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
+  '/api/system/actuator': typeof ApiSystemActuatorRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
+  '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
@@ -653,14 +690,18 @@ export interface FileRouteTypes {
     | '/admin/uploads'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
+    | '/api/pipeline/master'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
+    | '/api/system/actuator'
     | '/api/public/hooks/refresh-fx'
+    | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
     | '/api/studio/vault/tracks/$trackId'
   fileRoutesByTo: FileRoutesByTo
@@ -717,14 +758,18 @@ export interface FileRouteTypes {
     | '/admin/uploads'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
+    | '/api/pipeline/master'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
+    | '/api/system/actuator'
     | '/api/public/hooks/refresh-fx'
+    | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
     | '/api/studio/vault/tracks/$trackId'
   id:
@@ -782,14 +827,18 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/uploads'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
+    | '/api/pipeline/master'
     | '/api/public/audio-proxy'
     | '/api/public/client-errors'
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
+    | '/api/system/actuator'
     | '/api/public/hooks/refresh-fx'
+    | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
     | '/api/studio/vault/tracks/$trackId'
   fileRoutesById: FileRoutesById
@@ -829,13 +878,16 @@ export interface RootRouteChildren {
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
   ApiGenerateStatusRoute: typeof ApiGenerateStatusRoute
   ApiLocalVaultFileNameRoute: typeof ApiLocalVaultFileNameRoute
+  ApiPipelineMasterRoute: typeof ApiPipelineMasterRoute
   ApiPublicAudioProxyRoute: typeof ApiPublicAudioProxyRoute
   ApiPublicClientErrorsRoute: typeof ApiPublicClientErrorsRoute
   ApiPublicMetricsRoute: typeof ApiPublicMetricsRoute
   ApiPublicSupportReportsRoute: typeof ApiPublicSupportReportsRoute
   ApiPublicTrackDownloadRoute: typeof ApiPublicTrackDownloadRoute
+  ApiStudioGenerateQueueRoute: typeof ApiStudioGenerateQueueRouteWithChildren
   ApiStudioGenerateStreamRoute: typeof ApiStudioGenerateStreamRoute
   ApiStudioVocalCloneRoute: typeof ApiStudioVocalCloneRoute
+  ApiSystemActuatorRoute: typeof ApiSystemActuatorRoute
   ApiPublicHooksRefreshFxRoute: typeof ApiPublicHooksRefreshFxRoute
   ApiStudioVaultTracksRoute: typeof ApiStudioVaultTracksRouteWithChildren
 }
@@ -1108,6 +1160,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char91DotmcpChar93ListToolsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/system/actuator': {
+      id: '/api/system/actuator'
+      path: '/api/system/actuator'
+      fullPath: '/api/system/actuator'
+      preLoaderRoute: typeof ApiSystemActuatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/studio/vocal-clone': {
       id: '/api/studio/vocal-clone'
       path: '/api/studio/vocal-clone'
@@ -1120,6 +1179,13 @@ declare module '@tanstack/react-router' {
       path: '/api/studio/generate-stream'
       fullPath: '/api/studio/generate-stream'
       preLoaderRoute: typeof ApiStudioGenerateStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/studio/generate-queue': {
+      id: '/api/studio/generate-queue'
+      path: '/api/studio/generate-queue'
+      fullPath: '/api/studio/generate-queue'
+      preLoaderRoute: typeof ApiStudioGenerateQueueRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/track-download': {
@@ -1155,6 +1221,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/audio-proxy'
       fullPath: '/api/public/audio-proxy'
       preLoaderRoute: typeof ApiPublicAudioProxyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/pipeline/master': {
+      id: '/api/pipeline/master'
+      path: '/api/pipeline/master'
+      fullPath: '/api/pipeline/master'
+      preLoaderRoute: typeof ApiPipelineMasterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/local-vault/$fileName': {
@@ -1269,6 +1342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiStudioVaultTracksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/studio/generate-queue/$jobId': {
+      id: '/api/studio/generate-queue/$jobId'
+      path: '/$jobId'
+      fullPath: '/api/studio/generate-queue/$jobId'
+      preLoaderRoute: typeof ApiStudioGenerateQueueJobIdRouteImport
+      parentRoute: typeof ApiStudioGenerateQueueRoute
+    }
     '/api/public/hooks/refresh-fx': {
       id: '/api/public/hooks/refresh-fx'
       path: '/api/public/hooks/refresh-fx'
@@ -1358,6 +1438,20 @@ const DevRouteChildren: DevRouteChildren = {
 
 const DevRouteWithChildren = DevRoute._addFileChildren(DevRouteChildren)
 
+interface ApiStudioGenerateQueueRouteChildren {
+  ApiStudioGenerateQueueJobIdRoute: typeof ApiStudioGenerateQueueJobIdRoute
+}
+
+const ApiStudioGenerateQueueRouteChildren: ApiStudioGenerateQueueRouteChildren =
+  {
+    ApiStudioGenerateQueueJobIdRoute: ApiStudioGenerateQueueJobIdRoute,
+  }
+
+const ApiStudioGenerateQueueRouteWithChildren =
+  ApiStudioGenerateQueueRoute._addFileChildren(
+    ApiStudioGenerateQueueRouteChildren,
+  )
+
 interface ApiStudioVaultTracksRouteChildren {
   ApiStudioVaultTracksTrackIdRoute: typeof ApiStudioVaultTracksTrackIdRoute
 }
@@ -1406,13 +1500,16 @@ const rootRouteChildren: RootRouteChildren = {
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
   ApiGenerateStatusRoute: ApiGenerateStatusRoute,
   ApiLocalVaultFileNameRoute: ApiLocalVaultFileNameRoute,
+  ApiPipelineMasterRoute: ApiPipelineMasterRoute,
   ApiPublicAudioProxyRoute: ApiPublicAudioProxyRoute,
   ApiPublicClientErrorsRoute: ApiPublicClientErrorsRoute,
   ApiPublicMetricsRoute: ApiPublicMetricsRoute,
   ApiPublicSupportReportsRoute: ApiPublicSupportReportsRoute,
   ApiPublicTrackDownloadRoute: ApiPublicTrackDownloadRoute,
+  ApiStudioGenerateQueueRoute: ApiStudioGenerateQueueRouteWithChildren,
   ApiStudioGenerateStreamRoute: ApiStudioGenerateStreamRoute,
   ApiStudioVocalCloneRoute: ApiStudioVocalCloneRoute,
+  ApiSystemActuatorRoute: ApiSystemActuatorRoute,
   ApiPublicHooksRefreshFxRoute: ApiPublicHooksRefreshFxRoute,
   ApiStudioVaultTracksRoute: ApiStudioVaultTracksRouteWithChildren,
 }

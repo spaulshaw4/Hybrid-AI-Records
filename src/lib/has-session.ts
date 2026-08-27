@@ -1,12 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
-import { isDevAuthBypass } from "@/lib/dev-auth";
 
-/** True when a Supabase session exists; used to skip auth-only server fns. */
+/** True when a verified Supabase user exists (`getUser()` — not a DEV fake). */
 export async function hasSupabaseSession(): Promise<boolean> {
-  if (isDevAuthBypass()) return true;
   try {
-    const { data } = await supabase.auth.getSession();
-    return Boolean(data.session);
+    const { data, error } = await supabase.auth.getUser();
+    return Boolean(!error && data.user?.id);
   } catch {
     return false;
   }

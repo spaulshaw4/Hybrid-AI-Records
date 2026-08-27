@@ -1,10 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
+import {
+  resolveStudioSession,
+  unauthorizedSessionResponse,
+} from "@/lib/studio-request-auth.server";
 
 /**
  * GET  /api/studio/vault/tracks/:trackId — one row for status polling.
  * DELETE /api/studio/vault/tracks/:trackId — database row + storage objects
- * (master, vocal, and instrumental). Equivalent of FastAPI delete + bucket purge.
+ * (master, vocal, and instrumental). Always scoped to session user.id.
  */
 export const Route = createFileRoute("/api/studio/vault/tracks/$trackId")({
   server: {
@@ -33,9 +36,11 @@ async function handleGetOne({
   request: Request;
   params: { trackId: string };
 }): Promise<Response> {
-  const userId = await studioUserIdFromRequestOrDev(request);
-  if (!userId) {
-    return Response.json({ status: "error", message: "Sign in to load your vault." }, { status: 401 });
+  let session;
+  try {
+    session = await resolveStudioSession(request);
+  } catch {
+    return unauthorizedSessionResponse();
   }
 
   const trackId = params.trackId?.trim() ?? "";
@@ -45,7 +50,7 @@ async function handleGetOne({
 
   try {
     const { getUserVaultApiTrack } = await import("@/lib/user-vault.server");
-    const track = await getUserVaultApiTrack(userId, trackId);
+    const track = await getUserVaultApiTrack(session.userId, trackId);
     if (!track) {
       return Response.json({ status: "error", message: "Track not found." }, { status: 404 });
     }
@@ -63,9 +68,11 @@ async function handleDelete({
   request: Request;
   params: { trackId: string };
 }): Promise<Response> {
-  const userId = await studioUserIdFromRequestOrDev(request);
-  if (!userId) {
-    return Response.json({ status: "error", message: "Sign in to delete vault tracks." }, { status: 401 });
+  let session;
+  try {
+    session = await resolveStudioSession(request);
+  } catch {
+    return unauthorizedSessionResponse();
   }
 
   const trackId = params.trackId?.trim() ?? "";
@@ -75,7 +82,7 @@ async function handleDelete({
 
   try {
     const { deleteUserVaultApiTrack } = await import("@/lib/user-vault.server");
-    const deleted = await deleteUserVaultApiTrack(userId, trackId);
+    const deleted = await deleteUserVaultApiTrack(session.userId, trackId);
     if (!deleted) {
       return Response.json({ status: "error", message: "Track not found." }, { status: 404 });
     }

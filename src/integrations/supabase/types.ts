@@ -356,6 +356,102 @@ export type Database = {
         }
         Relationships: []
       }
+      generation_queue: {
+        Row: {
+          id: string
+          user_id: string
+          vault_id: string | null
+          prompt_payload: Json
+          status: string
+          spend_idempotency_key: string | null
+          error_message: string | null
+          result: Json | null
+          created_at: string
+          updated_at: string
+          started_at: string | null
+          completed_at: string | null
+          assigned_node: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          vault_id?: string | null
+          prompt_payload?: Json
+          status?: string
+          spend_idempotency_key?: string | null
+          error_message?: string | null
+          result?: Json | null
+          created_at?: string
+          updated_at?: string
+          started_at?: string | null
+          completed_at?: string | null
+          assigned_node?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          vault_id?: string | null
+          prompt_payload?: Json
+          status?: string
+          spend_idempotency_key?: string | null
+          error_message?: string | null
+          result?: Json | null
+          created_at?: string
+          updated_at?: string
+          started_at?: string | null
+          completed_at?: string | null
+          assigned_node?: string | null
+        }
+        Relationships: []
+      }
+      pipeline_telemetry_logs: {
+        Row: {
+          id: string
+          event_type: string
+          job_id: string | null
+          user_id: string | null
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          event_type: string
+          job_id?: string | null
+          user_id?: string | null
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          event_type?: string
+          job_id?: string | null
+          user_id?: string | null
+          metadata?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      system_config: {
+        Row: {
+          key: string
+          value: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          key: string
+          value: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          key?: string
+          value?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       generation_tasks: {
         Row: {
           audio_url: string | null
@@ -1658,6 +1754,23 @@ export type Database = {
           already_applied: boolean
           balance: number
           user_id: string
+        }[]
+      }
+      claim_generation_queue_job: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          user_id: string
+          vault_id: string | null
+          prompt_payload: Json
+          status: string
+          spend_idempotency_key: string | null
+          error_message: string | null
+          result: Json | null
+          created_at: string
+          updated_at: string
+          started_at: string | null
+          completed_at: string | null
         }[]
       }
       spend_hybrid_tokens: {

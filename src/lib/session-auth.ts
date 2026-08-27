@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { dischargeSessionState } from "@/lib/static-charge";
 
 export const SESSION_EXPIRED_EVENT = "hybrid-ai:session-expired";
 
@@ -27,16 +28,17 @@ export function currentReturnPath(): string {
   return path.startsWith("/") && !path.startsWith("//") ? path : "/";
 }
 
+/**
+ * Discharge static session charge and force re-authentication.
+ * Uses the Static Discharger so studio/vault residue cannot bleed across users.
+ */
 export async function clearSessionAndReauthenticate(): Promise<void> {
   if (typeof window === "undefined") return;
   const next = currentReturnPath();
-  window.sessionStorage.setItem("hybrid-ai:reauth-return", next);
-  await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
-  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-    const key = window.localStorage.key(index);
-    if (key?.startsWith("sb-") && key.endsWith("-auth-token")) {
-      window.localStorage.removeItem(key);
-    }
-  }
-  window.location.assign(`/auth?next=${encodeURIComponent(next)}`);
+  await dischargeSessionState({
+    signOut: true,
+    aggressive: false,
+    preserveReturnPath: true,
+    redirectTo: `/auth?next=${encodeURIComponent(next)}`,
+  });
 }

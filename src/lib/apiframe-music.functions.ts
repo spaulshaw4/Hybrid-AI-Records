@@ -96,7 +96,8 @@ const controlsSchema = z.object({
   styleInfluence: z.number().int().min(MIN_STYLE_INFLUENCE).max(MAX_STYLE_INFLUENCE),
 });
 
-const generateSchema = z.object({
+/** Studio generate payload — also the In-Gate flux shield surface. */
+export const generateSchema = z.object({
   prompt: z.string().trim().min(3).max(6000),
   title: z.string().trim().max(120).default(""),
   style: z.string().trim().max(6000).default(""),
@@ -161,6 +162,8 @@ const generateSchema = z.object({
   }, z.string().uuid().optional()),
   /** Same key the studio uses to charge on Generate, so a retry cannot double-spend. */
   idempotencyKey: z.string().trim().max(120).optional(),
+  /** Correlation id stamped by the cortex dispatcher (worker / logs). */
+  cortexCorrelationId: z.string().trim().max(80).optional(),
 });
 
 export type GenerateEngineTrackInput = z.infer<typeof generateSchema>;
@@ -522,9 +525,12 @@ export async function runGenerateEngineTrack(
     });
 
     const { persistUserVault } = await import("@/lib/user-vault.server");
-    console.log("Writing track to vault:", payload.vaultId ?? taskId);
+    console.log("Writing track to vault:", payload.vaultId ?? taskId, {
+      userId: context.userId,
+    });
     let vaultId: string | null = null;
     try {
+      // Always bind the row to HER session user.id — never an admin/static UUID.
       vaultId = await persistUserVault(db, context.userId, {
         id: payload.vaultId,
         title: payload.title || "Untitled Track",
@@ -539,9 +545,35 @@ export async function runGenerateEngineTrack(
       });
     } catch (error) {
       console.error(
-        "[Vault Save Error]: final persist threw",
+        "[Vault Save Error]: final persist threw for user:",
+        context.userId,
         error instanceof Error ? error.message : error,
       );
+      // Local-dev catalog only — real profiles must not lose tokens on a silent miss.
+      const { DEV_TEST_USER_UUID } = await import("@/lib/dev-auth");
+      if (masterUrl && context.userId === DEV_TEST_USER_UUID) {
+        try {
+          const { persistLocalVaultTrack } = await import("@/lib/local-vault.server");
+          vaultId = await persistLocalVaultTrack(context.userId, {
+            id: payload.vaultId,
+            title: payload.title || "Untitled Track",
+            style: genre,
+            status: "completed",
+            masterUrl,
+            instrumentalUrl,
+            vocalUrl,
+            rawAudioUrl,
+          });
+        } catch {
+          /* fall through to rethrow */
+        }
+      }
+      if (!vaultId) {
+        // Rethrow so outer catch refunds the burned Hybrid Token.
+        throw error instanceof Error
+          ? error
+          : new Error(`Vault insert failed for user: ${context.userId}`);
+      }
     }
     if (masterUrl) {
       const { completeGenerationTask } = await import("@/lib/engine-pipeline.server");
@@ -558,17 +590,22 @@ export async function runGenerateEngineTrack(
       });
     }
     if (!vaultId && masterUrl) {
-      const { persistLocalVaultTrack } = await import("@/lib/local-vault.server");
-      await persistLocalVaultTrack(context.userId, {
-        id: payload.vaultId,
-        title: payload.title || "Untitled Track",
-        style: genre,
-        status: "completed",
-        masterUrl,
-        instrumentalUrl,
-        vocalUrl,
-        rawAudioUrl,
-      });
+      const { DEV_TEST_USER_UUID } = await import("@/lib/dev-auth");
+      if (context.userId === DEV_TEST_USER_UUID) {
+        const { persistLocalVaultTrack } = await import("@/lib/local-vault.server");
+        vaultId = await persistLocalVaultTrack(context.userId, {
+          id: payload.vaultId,
+          title: payload.title || "Untitled Track",
+          style: genre,
+          status: "completed",
+          masterUrl,
+          instrumentalUrl,
+          vocalUrl,
+          rawAudioUrl,
+        });
+      } else {
+        throw new Error(`Vault insert failed for user: ${context.userId}`);
+      }
     }
 
     const playableTracks = [
@@ -720,7 +757,15 @@ export async function runGenerateEngineTrack(
 export const generateEngineTrack = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) => parseGenerateEngineTrackInput(data))
-  .handler(async ({ data, context }) => runGenerateEngineTrack(data, context));
+  .handler(async ({ data, context }) => {
+    // All server-fn generates enter the cortex (Gate 1–2); worker finishes Gate 3.
+    const { executeGenerationCortex } = await import("@/lib/cortex-dispatcher.server");
+    return executeGenerationCortex({
+      userId: context.userId,
+      supabase: context.supabase,
+      promptPayload: data,
+    });
+  });
 
 
 

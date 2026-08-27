@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { studioUserIdFromRequestOrDev } from "@/lib/studio-request-auth.server";
+import {
+  resolveStudioSession,
+  unauthorizedSessionResponse,
+} from "@/lib/studio-request-auth.server";
 
 /**
  * GET /api/studio/vault/tracks
- * Equivalent of FastAPI `GET /api/studio/vault/tracks` scoped to the Bearer user.
- * Local-dev bypass uses the public test user id and never 500s an empty vault.
+ * Catalog scoped to the verified session user only (RLS / explicit user_id).
  */
 export const Route = createFileRoute("/api/studio/vault/tracks")({
   server: {
@@ -25,14 +27,16 @@ function methodNotAllowed(allow: string): Response {
 }
 
 async function handleList({ request }: { request: Request }): Promise<Response> {
-  const userId = await studioUserIdFromRequestOrDev(request);
-  if (!userId) {
-    return Response.json({ status: "error", message: "Sign in to load your vault." }, { status: 401 });
+  let session;
+  try {
+    session = await resolveStudioSession(request);
+  } catch {
+    return unauthorizedSessionResponse();
   }
 
   try {
     const { listUserVaultApiTracks } = await import("@/lib/user-vault.server");
-    const tracks = await listUserVaultApiTracks(userId);
+    const tracks = await listUserVaultApiTracks(session.userId);
     return Response.json(tracks);
   } catch (error) {
     console.warn("[vault] list failed", error instanceof Error ? error.message : error);

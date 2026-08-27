@@ -2,16 +2,26 @@ import { createMiddleware } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { notifySessionExpired, refreshAccessToken } from "@/lib/session-auth";
 
-/** Adds the active app session to RPCs and retries one 401 after a silent refresh. */
+/**
+ * Client RPC middleware: attaches the verified session Bearer and retries one
+ * 401 after refresh. Never skips auth headers via DEV bypass — multi-tenant
+ * server handlers require a real JWT.
+ */
 export const authenticatedFunctionMiddleware = createMiddleware({ type: "function" }).client(
   async ({ next }) => {
-    const { isDevAuthBypass } = await import("@/lib/dev-auth");
-    if (isDevAuthBypass()) {
-      return next({ headers: {}, fetch });
+    // Prefer getUser() so we never attach a stale anonymous/cached session JWT.
+    const { data: userData } = await supabase.auth.getUser();
+    const { data: sessionData } = await supabase.auth.getSession();
+    let initialToken =
+      userData.user && sessionData.session?.user?.id === userData.user.id
+        ? sessionData.session.access_token
+        : sessionData.session?.access_token;
+
+    if (userData.user && (!initialToken || sessionData.session?.user?.id !== userData.user.id)) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      initialToken = refreshed.session?.access_token ?? initialToken;
     }
 
-    const { data } = await supabase.auth.getSession();
-    const initialToken = data.session?.access_token;
     const authFetch: typeof fetch = async (input, init) => {
       const request = new Request(input, init);
       const firstHeaders = new Headers(request.headers);
