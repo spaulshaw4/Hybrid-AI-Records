@@ -1,0 +1,21 @@
+# GPU music engine (Runpod / Jupyter). Install on the pod:
+#   pip install -r requirements-engine.txt
+#
+# Native extras: rubberband-cli (apt), pedalboard, pyrubberband.
+fastapi
+uvicorn
+celery
+redis
+numpy
+scipy
+soundfile
+pyloudnorm
+pedalboard
+pyrubberband
+librosa
+boto3
+mutagen
+requests
+python-multipart
+supabase
+replicate

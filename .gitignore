@@ -50,3 +50,17 @@ dist-ssr
 .data/
 
 /src/generated/prisma
+
+# Local Firecrawl scrape output
+scraped-output.md
+
+# Private background audio staging
+.ingest_vault/
+.audio_scratch/
+
+# Free Music Archive metadata dump (local only)
+data/fma/
+
+# EP batch output (may contain R2 presigned URLs)
+generated_ep_manifest.json
+hybrid_studio.db
