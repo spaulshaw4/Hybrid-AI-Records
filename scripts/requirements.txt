@@ -1,0 +1,7 @@
+# requirements.txt (Python Engine Dependencies)
+numpy==1.26.4
+scipy==1.12.0
+librosa==0.10.1
+soundfile==0.12.1
+supabase==2.3.0
+requests==2.31.0
