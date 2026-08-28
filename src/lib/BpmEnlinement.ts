@@ -1,81 +1,36 @@
-/**
- * BPM Enlinement — master tempo → millisecond timing grid for mixing tools.
- *
- * After genre entitlement validates BPM bounds, converts tempo into bar/beat/
- * sixteenth grids plus tempo-synced delay and sidechain release times used by
- * structure inlining, lyric cadence, and dynamics downstream.
- */
+// src/lib/BpmEnlinement.ts
+import { createHash } from "node:crypto";
 
-import type { ExecutionContext } from "@/lib/ExecutionContext";
-
-export type BpmEnlinementInput = {
+export interface BpmEnlinementInput {
   masterBpm: number;
-  /** default 4 */
-  timeSignatureNumerator?: number;
-  /** default 4 */
-  timeSignatureDenominator?: number;
-};
+  timeSignatureNumerator: number;
+  timeSignatureDenominator: number;
+}
 
-export type BpmTimingBlueprint = {
+export interface BpmBlueprint {
   bpmBlueprintId: string;
   masterBpm: number;
   timeSignatureNumerator: number;
   timeSignatureDenominator: number;
-  barDurationMs: number;
-  beatDurationMs: number;
-  sixteenthNoteMs: number;
-  syncedDelayTimes: {
-    quarterNoteMs: number;
-    dottedEighthMs: number;
-    halfNoteMs: number;
-  };
-  sidechainReleaseMs: number;
-};
-
-export class BpmEnlinement {
-  /**
-   * Calculates precise millisecond timing grids, subdivision values, and
-   * tempo-synced audio parameters based on the master BPM.
-   */
-  static enlineBpmGrid(ctx: ExecutionContext, input: BpmEnlinementInput): BpmTimingBlueprint {
-    const bpmBlueprintId = `bpm_enline_${ctx.sessionNonce}_${Date.now()}`;
-    const bpm = clampBpm(input.masterBpm);
-    const numerator = Math.max(1, Math.trunc(input.timeSignatureNumerator || 4));
-    const denominator = Math.max(1, Math.trunc(input.timeSignatureDenominator || 4));
-
-    // Core timing (ms per beat / bar). Denominator scales beat length vs quarter-note.
-    const quarterNoteMs = Number((60_000 / bpm).toFixed(2));
-    const beatDurationMs = Number((quarterNoteMs * (4 / denominator)).toFixed(2));
-    const barDurationMs = Number((beatDurationMs * numerator).toFixed(2));
-    const sixteenthNoteMs = Number((quarterNoteMs / 4).toFixed(2));
-
-    // Tempo-synced effects (rhythm / pumping).
-    const dottedEighthMs = Number((quarterNoteMs * 0.75).toFixed(2));
-    const halfNoteMs = Number((quarterNoteMs * 2).toFixed(2));
-
-    // Optimal sidechain release — half-beat pump with the kick.
-    const sidechainReleaseMs = Number(((60_000 / bpm) * 0.5).toFixed(2));
-
-    return {
-      bpmBlueprintId,
-      masterBpm: bpm,
-      timeSignatureNumerator: numerator,
-      timeSignatureDenominator: denominator,
-      barDurationMs,
-      beatDurationMs,
-      sixteenthNoteMs,
-      syncedDelayTimes: {
-        quarterNoteMs,
-        dottedEighthMs,
-        halfNoteMs,
-      },
-      sidechainReleaseMs,
-    };
-  }
+  gridResolution: string;
 }
 
-function clampBpm(raw: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 120;
-  return Math.min(240, Math.max(40, Number(n.toFixed(2))));
+export class BpmEnlinement {
+  public static enlineBpmGrid(ctx: any, input: BpmEnlinementInput): BpmBlueprint {
+    const nonce = ctx?.sessionNonce || "default_nonce";
+    const blueprintId = `bpm_enline_${nonce}_${input.masterBpm}`;
+
+    return {
+      bpmBlueprintId: blueprintId,
+      masterBpm: input.masterBpm,
+      timeSignatureNumerator: input.timeSignatureNumerator,
+      timeSignatureDenominator: input.timeSignatureDenominator,
+      gridResolution: "1/16",
+    };
+  }
+
+  public static algorithmicHash32(str: string): number {
+    const hash = createHash("sha256").update(str).digest("hex");
+    return parseInt(hash.slice(0, 8), 16);
+  }
 }
