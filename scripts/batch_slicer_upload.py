@@ -2,6 +2,7 @@ import os
 import hashlib
 import shutil
 import time
+import zipfile
 import concurrent.futures
 from pydub import AudioSegment
 from pydub.utils import make_chunks
@@ -15,19 +16,18 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Directory configurations on D: Drive
+# Directory configurations on D: Drive matching your workspace
 DATA_DIR = r"D:\MusicDatasets"
-RAW_AUDIO_DIR = os.path.join(DATA_DIR, "raw_audio")
 SPLICED_STAGING_DIR = os.path.join(DATA_DIR, "spliced_staging")
 ARCHIVE_RAW_DIR = os.path.join(DATA_DIR, "completed_raw")
 ARCHIVE_SLICES_DIR = os.path.join(DATA_DIR, "uploaded_slices")
 
 BUCKET_NAME = "vault-storage"
 
-# Engine parameters optimized for 546 GB dataset
+# Engine parameters
 CHUNK_LENGTH_MS = 1000
 DB_BATCH_SIZE = 50
-UPLOAD_WORKERS = 10  # Throttled to protect local sockets and API limits
+UPLOAD_WORKERS = 10
 UPLOAD_RETRIES = 3
 RETRY_DELAY = 5
 ARCHIVE_RETENTION_DAYS = 30
@@ -42,38 +42,84 @@ def compute_sha256(filepath):
     return sha256.hexdigest()
 
 
+def extract_incoming_archives():
+    print("\n================================================================")
+    print("ARCHIVE EXTRACTION - UNPACKING INCOMING BUNDLES")
+    print("================================================================")
+
+    unpacked_count = 0
+    for root, _, files in os.walk(DATA_DIR):
+        # Skip staging and archive directories
+        if "spliced_staging" in root or "completed_raw" in root or "uploaded_slices" in root:
+            continue
+
+        for filename in files:
+            if not filename.endswith(".zip"):
+                continue
+
+            zip_path = os.path.join(root, filename)
+            folder_name = os.path.splitext(filename)[0].lower().replace(" ", "_")
+            extract_dest = os.path.join(root, folder_name)
+
+            os.makedirs(extract_dest, exist_ok=True)
+            print(f"[UNZIP] Extracting {filename} into: {folder_name}")
+
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dest)
+                os.remove(zip_path)
+                unpacked_count += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to extract {filename}: {e}")
+
+    print(f"[EXTRACTION COMPLETE] {unpacked_count} zip archives unpacked.")
+
+
 def phase_1_local_splicing():
     print("\n================================================================")
-    print("PHASE 1: LOCAL D: DRIVE SPLICING (1000ms RESOLUTION)")
+    print("PHASE 1: RECURSIVE D: DRIVE SPLICING (1000ms RESOLUTION)")
     print("================================================================")
 
     spliced_count = 0
-    for root, _, files in os.walk(RAW_AUDIO_DIR):
+
+    # Walk through all folders inside D:\MusicDatasets
+    for root, _, files in os.walk(DATA_DIR):
+        # Skip system working folders
+        if any(sub in root for sub in ["spliced_staging", "completed_raw", "uploaded_slices", "renders"]):
+            continue
+
         for filename in files:
-            if not filename.endswith(".wav"):
+            if not filename.lower().endswith((".wav", ".mp3", ".flac")):
                 continue
 
             filepath = os.path.join(root, filename)
-            relative_path = os.path.relpath(root, RAW_AUDIO_DIR)
-            genre = relative_path if relative_path != "." else "unknown"
 
-            print(f"[SPLICER] Cutting: {filepath} | Genre: {genre}")
+            # Derive genre tag from the immediate parent folder name
+            relative_path = os.path.relpath(root, DATA_DIR)
+            genre = relative_path.split(os.sep)[0].lower().replace(" ", "_")
+            if genre == "." or not genre:
+                genre = "unknown"
 
-            audio = AudioSegment.from_file(filepath, format="wav")
-            chunks = make_chunks(audio, CHUNK_LENGTH_MS)
+            print(f"[SPLICER] Cutting: {filename} | Genre Tag: {genre}")
 
-            genre_staging_dir = os.path.join(SPLICED_STAGING_DIR, genre)
-            os.makedirs(genre_staging_dir, exist_ok=True)
+            try:
+                audio = AudioSegment.from_file(filepath)
+                chunks = make_chunks(audio, CHUNK_LENGTH_MS)
 
-            for i, chunk in enumerate(chunks):
-                chunk_name = f"{filename.replace('.wav', '')}_slice_{i}.wav"
-                chunk_path = os.path.join(genre_staging_dir, chunk_name)
-                chunk.export(chunk_path, format="wav")
-                spliced_count += 1
+                genre_staging_dir = os.path.join(SPLICED_STAGING_DIR, genre)
+                os.makedirs(genre_staging_dir, exist_ok=True)
 
-            archive_dest = os.path.join(ARCHIVE_RAW_DIR, genre)
-            os.makedirs(archive_dest, exist_ok=True)
-            shutil.move(filepath, os.path.join(archive_dest, filename))
+                for i, chunk in enumerate(chunks):
+                    chunk_name = f"{os.path.splitext(filename)[0]}_slice_{i}.wav"
+                    chunk_path = os.path.join(genre_staging_dir, chunk_name)
+                    chunk.export(chunk_path, format="wav")
+                    spliced_count += 1
+
+                archive_dest = os.path.join(ARCHIVE_RAW_DIR, genre)
+                os.makedirs(archive_dest, exist_ok=True)
+                shutil.move(filepath, os.path.join(archive_dest, filename))
+            except Exception as e:
+                print(f"[ERROR] Could not process {filename}: {e}")
 
     print(f"[PHASE 1 COMPLETE] {spliced_count} total segments staged locally.")
 
@@ -92,15 +138,13 @@ def upload_worker(filepath, filename, genre):
         except Exception as e:
             attempt += 1
             if attempt >= UPLOAD_RETRIES:
-                print(f"[ERROR] Fatal network failure on {filename} after {UPLOAD_RETRIES} attempts.")
                 raise e
-            print(f"[WARNING] Upload failed for {filename}. Retrying in {RETRY_DELAY}s... ({attempt}/{UPLOAD_RETRIES})")
             time.sleep(RETRY_DELAY)
 
 
 def phase_2_supabase_transfer():
     print("\n================================================================")
-    print("PHASE 2: SUPABASE CLOUD TRANSFER (THROTTLED BATCHING)")
+    print("PHASE 2: SUPABASE CLOUD TRANSFER (GENRE-SORTED BUCKETS)")
     print("================================================================")
 
     staged_files = []
@@ -114,7 +158,7 @@ def phase_2_supabase_transfer():
         print("[TRANSFER] No files in staging directory.")
         return
 
-    print(f"[TRANSFER] Initiating push for {total_files} local slices...")
+    print(f"[TRANSFER] Pushing {total_files} slices to Supabase...")
 
     db_batch = []
     upload_tasks = []
@@ -157,13 +201,13 @@ def phase_2_supabase_transfer():
         supabase.table('audio_slices').insert(db_batch).execute()
         print(f"  -> [LEDGER] Inserted final batch of {len(db_batch)} records.")
 
-    print("[PHASE 2 COMPLETE] All files transferred to Supabase successfully.")
+    print("[PHASE 2 COMPLETE] Transfer finished.")
 
 
 def phase_3_cleanup(dry_run=True):
     print("\n================================================================")
     mode_text = "DRY RUN - NO DELETIONS" if dry_run else "ACTIVE DELETION"
-    print(f"PHASE 3: LOCAL ARCHIVE CLEANUP ({ARCHIVE_RETENTION_DAYS} DAYS) - [{mode_text}]")
+    print(f"PHASE 3: CLEANUP ({ARCHIVE_RETENTION_DAYS} DAYS) - [{mode_text}]")
     print("================================================================")
 
     now = time.time()
@@ -174,26 +218,21 @@ def phase_3_cleanup(dry_run=True):
         for root, _, files in os.walk(archive_dir):
             for filename in files:
                 filepath = os.path.join(root, filename)
-                file_mtime = os.path.getmtime(filepath)
-
-                if file_mtime < cutoff_time:
+                if os.path.getmtime(filepath) < cutoff_time:
                     flagged_count += 1
                     if dry_run:
                         print(f"[CLEANUP DRY RUN] Would delete: {filename}")
                     else:
                         os.remove(filepath)
-                        print(f"[CLEANUP ACTIVE] Deleted old archive: {filename}")
 
-    if dry_run:
-        print(f"[PHASE 3 COMPLETE] {flagged_count} stale files flagged. Change DRY_RUN_CLEANUP = False to delete.")
-    else:
-        print(f"[PHASE 3 COMPLETE] {flagged_count} stale files purged.")
+    print(f"[PHASE 3 COMPLETE] {flagged_count} stale files processed.")
 
 
 if __name__ == "__main__":
-    for dir_path in [RAW_AUDIO_DIR, SPLICED_STAGING_DIR, ARCHIVE_RAW_DIR, ARCHIVE_SLICES_DIR]:
+    for dir_path in [SPLICED_STAGING_DIR, ARCHIVE_RAW_DIR, ARCHIVE_SLICES_DIR]:
         os.makedirs(dir_path, exist_ok=True)
 
+    extract_incoming_archives()
     phase_1_local_splicing()
     phase_2_supabase_transfer()
     phase_3_cleanup(dry_run=DRY_RUN_CLEANUP)

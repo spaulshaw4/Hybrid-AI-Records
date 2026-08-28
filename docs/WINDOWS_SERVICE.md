@@ -1,113 +1,119 @@
-# Hybrid 1.0 — Windows Service Setup
+# Hybrid 1.0 Windows Service Setup
 
-## 1. Create Startup Batch Runner
-
-The launcher script `start_daemon.bat` initializes the Python virtual environment and runs the daemon:
-
-```bat
-@echo off
-cd /d D:\MusicDatasets
-call venv\Scripts\activate
-python scripts\worker_daemon.py
-pause
-```
-
-Location: `D:\MusicDatasets\scripts\start_daemon.bat`
+Run the daemon poller 24/7 in the background without needing an active PowerShell or command prompt window open using NSSM (Non-Sucking Service Manager).
 
 ---
 
-## 2. Register as Windows Service with NSSM
+## Prerequisites
 
-To ensure the worker daemon runs persistently (even across reboots and logouts), use **NSSM (Non-Sucking Service Manager)**.
-
-### Download NSSM
-
-1. Download from [nssm.cc](https://nssm.cc/)
-2. Place `nssm.exe` in a utility folder (e.g., `C:\tools\`)
-
-### Install the Service
-
-Open **Command Prompt as Administrator** and run:
-
-```cmd
-C:\tools\nssm.exe install HybridWorkerDaemon
-```
-
-### Configure the Service GUI
-
-A configuration window will appear. Set:
-
-| Field | Value |
-|-------|-------|
-| **Path** | `C:\Windows\System32\cmd.exe` |
-| **Startup directory** | `D:\MusicDatasets` |
-| **Arguments** | `/c call venv\Scripts\activate && python scripts\worker_daemon.py` |
-
-Click **"Install service"**.
+- Python installed and added to PATH
+- NSSM installed (download from https://nssm.cc or `choco install nssm`)
+- Supabase credentials configured in environment variables
 
 ---
 
-## 3. Verify Service Operation
+## Step 1: Install NSSM
 
-### Start the Service
-
-```cmd
-net start HybridWorkerDaemon
+**Option A: Chocolatey**
+```powershell
+choco install nssm
 ```
 
-### Stop the Service
+**Option B: Manual Download**
+1. Download from https://nssm.cc/download
+2. Extract and place `nssm.exe` in your system PATH or `D:\MusicDatasets\scripts\`
 
-```cmd
-net stop HybridWorkerDaemon
+---
+
+## Step 2: Register the Service
+
+Open an **Administrator PowerShell** prompt:
+
+```powershell
+nssm install HybridDaemon "C:\Python311\python.exe" "D:\MusicDatasets\scripts\daemon_poller.py"
 ```
 
-### Check Service Status
+> **Note:** Adjust your Python path if installed elsewhere. Find it with: `where python`
 
-```cmd
-sc query HybridWorkerDaemon
+---
+
+## Step 3: Configure Working Directory and Auto-Start
+
+```powershell
+nssm set HybridDaemon AppDirectory "D:\MusicDatasets\scripts"
+nssm set HybridDaemon Description "Hybrid 1.0 Autonomous Supabase Audio Pipeline Daemon"
+nssm set HybridDaemon Start SERVICE_AUTO_START
+```
+
+### Configure Environment Variables
+
+```powershell
+nssm set HybridDaemon AppEnvironmentExtra "SUPABASE_URL=your_project_url" "SUPABASE_SERVICE_ROLE_KEY=your_service_key"
+```
+
+### Configure Logging (Optional)
+
+```powershell
+nssm set HybridDaemon AppStdout "D:\MusicDatasets\logs\daemon_stdout.log"
+nssm set HybridDaemon AppStderr "D:\MusicDatasets\logs\daemon_stderr.log"
+nssm set HybridDaemon AppRotateFiles 1
+nssm set HybridDaemon AppRotateBytes 10485760
 ```
 
 ---
 
-## 4. Configure Automatic Recovery
+## Step 4: Launch the Service
 
-1. Open **Services** (`services.msc`)
-2. Locate **HybridWorkerDaemon**
-3. Right-click → **Properties** → **Recovery** tab
-4. Set all failure actions to **"Restart the Service"**:
-   - First failure: Restart the Service
-   - Second failure: Restart the Service
-   - Subsequent failures: Restart the Service
-
----
-
-## 5. Monitor Logs
-
-If output logging is configured in the daemon, check:
-
+```powershell
+nssm start HybridDaemon
 ```
-D:\MusicDatasets\logs\
-```
-
-To verify the daemon is actively polling the payload directory and executing jobs.
 
 ---
 
 ## Service Management Commands
 
-```cmd
-# Install
-C:\tools\nssm.exe install HybridWorkerDaemon
+| Command | Description |
+|---------|-------------|
+| `nssm start HybridDaemon` | Start the service |
+| `nssm stop HybridDaemon` | Stop the service |
+| `nssm restart HybridDaemon` | Restart the service |
+| `nssm status HybridDaemon` | Check service status |
+| `nssm edit HybridDaemon` | Open GUI configuration |
+| `nssm remove HybridDaemon` | Uninstall the service |
 
-# Start
-net start HybridWorkerDaemon
+---
 
-# Stop
-net stop HybridWorkerDaemon
+## How It Works
 
-# Remove
-C:\tools\nssm.exe remove HybridWorkerDaemon confirm
+Once running, the system is fully automated:
 
-# Edit configuration
-C:\tools\nssm.exe edit HybridWorkerDaemon
+1. **Frontend** triggers a generation session → inserts `pending` record in Supabase `user_vaults`
+2. **Daemon Poller** detects the pending status (polls every 15 seconds)
+3. **PowerShell Pipeline** fires:
+   - Cylinder Orchestrator pulls 420 stems to D: drive
+   - Bus Summation renders 7-minute master track
+   - Hex Hook generates SHA-256 signature and locks vault
+   - Egress Protection purges temporary stems
+4. **Vault status** updates to `completed`
+
+All completely hands-free.
+
+---
+
+## Troubleshooting
+
+### Check Service Logs
+```powershell
+Get-Content "D:\MusicDatasets\logs\daemon_stdout.log" -Tail 50
+Get-Content "D:\MusicDatasets\logs\daemon_stderr.log" -Tail 50
+```
+
+### View Windows Event Logs
+```powershell
+Get-EventLog -LogName Application -Source nssm -Newest 20
+```
+
+### Verify Service is Running
+```powershell
+Get-Service HybridDaemon
 ```

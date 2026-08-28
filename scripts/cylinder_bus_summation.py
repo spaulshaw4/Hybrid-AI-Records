@@ -3,47 +3,43 @@ import argparse
 from pydub import AudioSegment
 
 
-def sum_buses(session_id, work_dir):
+def sum_stems_to_master(session_id, work_dir):
     print("\n================================================================")
-    print(f"BUS SUMMATION - MASTERING 7-MINUTE TRACK: {session_id}")
+    print(f"BUS SUMMATION ENGINE - RENDERING MASTER TRACK FOR: {session_id}")
     print("================================================================")
 
-    raw_dir = os.path.join(work_dir, "raw_stems")
-    master_out = os.path.join(work_dir, f"{session_id}_master.wav")
+    raw_stems_dir = os.path.join(work_dir, "raw_stems")
+    if not os.path.exists(raw_stems_dir):
+        raise FileNotFoundError(f"Raw stems directory not found: {raw_stems_dir}")
 
-    if not os.path.exists(raw_dir):
-        raise FileNotFoundError(f"Missing stems directory: {raw_dir}")
+    stem_files = sorted([f for f in os.listdir(raw_stems_dir) if f.startswith("stem_") and f.endswith(".wav")])
 
-    stem_files = sorted([f for f in os.listdir(raw_dir) if f.endswith(".wav")])
-    total_stems = len(stem_files)
+    if not stem_files:
+        raise ValueError(f"No valid stems found in {raw_stems_dir}")
 
-    print(f"[SUMMATION] Found {total_stems} stems to process.")
+    print(f"[SUMMATION] Found {len(stem_files)} stems. Stitching 7-minute master track...")
 
-    if total_stems == 0:
-        print("[ERROR] No valid .wav files found to sum.")
-        return
+    master_audio = AudioSegment.empty()
+    for idx, filename in enumerate(stem_files):
+        stem_path = os.path.join(raw_stems_dir, filename)
+        chunk = AudioSegment.from_file(stem_path, format="wav")
+        master_audio += chunk
 
-    # Initialize master track with the first stem
-    master_path = os.path.join(raw_dir, stem_files[0])
-    master_track = AudioSegment.from_file(master_path, format="wav")
+        if (idx + 1) % 50 == 0:
+            print(f"  -> Merged {idx + 1}/{len(stem_files)} segments...")
 
-    # Overlay remaining stems in sequential batches
-    for i in range(1, total_stems):
-        filepath = os.path.join(raw_dir, stem_files[i])
-        stem = AudioSegment.from_file(filepath, format="wav")
-        master_track = master_track.overlay(stem)
+    master_output_path = os.path.join(work_dir, "master_output.wav")
+    master_audio.export(master_output_path, format="wav")
 
-        if i % 50 == 0 or i == total_stems - 1:
-            print(f"  -> [SUMMATION] Processed {i + 1}/{total_stems} stems...")
-
-    master_track.export(master_out, format="wav")
-    print(f"[SUCCESS] Full 7-minute master track rendered: {master_out}")
+    print(f"[SUCCESS] Master track successfully rendered to: {master_output_path}")
+    print(f"Total Duration: {len(master_audio) / 1000.0:.2f} seconds")
+    return master_output_path
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--session", required=True)
-    parser.add_argument("--dir", required=True)
+    parser = argparse.ArgumentParser(description="Bus Summation Engine")
+    parser.add_argument("--session", required=True, help="Session ID")
+    parser.add_argument("--dir", required=True, help="Working directory path")
     args = parser.parse_args()
 
-    sum_buses(args.session, args.dir)
+    sum_stems_to_master(args.session, args.dir)
