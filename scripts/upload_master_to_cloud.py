@@ -14,6 +14,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "vault-storage"
 
 
+# Supabase free tier caps a single upload at 50 MB. Uncompressed stereo 44.1 kHz
+# reaches that at 4:57 for 16-bit and 3:18 for 24-bit, both inside the pipeline's
+# 2:30-7:00 duration range, so a long render silently fails partway through the
+# transfer without this check. Override via HYBRID_MAX_UPLOAD_MB on a paid plan
+# (Pro allows 5 GB).
+DEFAULT_MAX_UPLOAD_MB = 50.0
+
+
+def check_upload_size(master_path):
+    """Returns (ok, size_mb, limit_mb). Verifies the file fits the plan's cap."""
+    limit_mb = float(os.environ.get("HYBRID_MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB))
+    size_mb = os.path.getsize(master_path) / (1024.0 * 1024.0)
+    return size_mb <= limit_mb, size_mb, limit_mb
+
+
 def collect_slice_provenance(work_dir):
     """
     Summarise the slices that fed this render.
@@ -62,6 +77,18 @@ def upload_master_to_cloud(session_id, work_dir):
         raise FileNotFoundError(f"Master output not found at: {master_path}")
 
     storage_path = f"{session_id}/master_output.wav"
+
+    fits, size_mb, limit_mb = check_upload_size(master_path)
+    print(f"[CLOUD UPLOADER] Master size: {size_mb:.1f} MB (limit {limit_mb:.0f} MB)")
+
+    if not fits:
+        raise ValueError(
+            f"Master is {size_mb:.1f} MB, over the {limit_mb:.0f} MB upload limit.\n"
+            f"  Uncompressed stereo 44.1 kHz crosses 50 MB at 4:57 (16-bit) or "
+            f"3:18 (24-bit).\n"
+            f"  Options: shorten the render, drop to 16-bit, raise "
+            f"HYBRID_MAX_UPLOAD_MB on a paid plan, or store masters in R2/S3."
+        )
 
     print(f"[CLOUD UPLOADER] Reading master file from {master_path}...")
     with open(master_path, "rb") as f:

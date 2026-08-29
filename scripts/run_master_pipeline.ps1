@@ -41,7 +41,12 @@ param(
     # foundation, Q2 harmonic mid-body, Q3 top-end) instead of a flat overlay.
     # Genre selects the quadrant profile; unlisted genres fall back by family.
     [Parameter(Mandatory=$false)]
-    [switch]$UseQuadrant = $false
+    [switch]$UseQuadrant = $false,
+
+    # Bypass the QC compliance gate. A failing master then uploads anyway, which
+    # is occasionally wanted when iterating on DSP settings.
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipQcGate = $false
 )
 
 # Invariant culture so a comma decimal separator never reaches argparse
@@ -216,6 +221,39 @@ try {
     python $SummationScript --session $SessionId --dir $WorkDir
     $StepTimer.Stop()
     Send-Telemetry -EventType "summation_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+
+    # 4b. QC Compliance Gate
+    #     A master that fails true-peak, phase, or DC must not reach the Vault,
+    #     and its scratch is deliberately NOT purged so the failure can be
+    #     inspected. Loudness is measured but excluded from the gate: a quiet
+    #     master is a mix outcome, whereas an overshoot or a phase-cancelling
+    #     mix is a defect.
+    $QcScript = Join-Path $ScriptsDir "audio_qc_analyzer.py"
+    $MasterWav = Join-Path $WorkDir "master_output.wav"
+
+    if ((Test-Path $QcScript) -and (Test-Path $MasterWav)) {
+        $StepTimer.Restart()
+        Write-Host "[PIPELINE] Running QC compliance audit..."
+
+        python $QcScript --wav-path $MasterWav
+        $QcExit = $LASTEXITCODE
+        $StepTimer.Stop()
+
+        if ($QcExit -ne 0 -and -not $SkipQcGate) {
+            Send-Telemetry -EventType "qc_failed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"session_id`":`"$SessionId`",`"quarantined`":true}"
+            Write-Host "  -> [QC FAIL] Master did not meet acceptance standards." -ForegroundColor Red
+            Write-Host "  -> Scratch retained for inspection at $WorkDir" -ForegroundColor Yellow
+            throw "QC compliance gate failed for session $SessionId. Upload aborted; scratch quarantined."
+        }
+
+        if ($QcExit -ne 0) {
+            Write-Host "  -> [QC WARN] Gate bypassed via -SkipQcGate; proceeding despite failure." -ForegroundColor Yellow
+        }
+
+        Send-Telemetry -EventType "qc_passed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    } elseif (Test-Path $QcScript) {
+        Write-Host "  -> [INFO] No master_output.wav to audit; skipping QC gate." -ForegroundColor Yellow
+    }
 
     # 5. Execute Cryptographic Hex Hashing & Vault Lock
     $StepTimer.Restart()
