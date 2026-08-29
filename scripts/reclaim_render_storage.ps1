@@ -124,5 +124,15 @@ Write-Host "================================================================" -F
 # 4. Telemetry Logging
 if (-not $DryRun -and (Test-Path $TelemetryScript) -and $PurgedCount -gt 0) {
     $metaJson = "{`"purged_directories`":$PurgedCount,`"reclaimed_mb`":$TotalReclaimedMb,`"reclaimed_gb`":$TotalReclaimedGb}"
-    python $TelemetryScript --event "storage_reclaimed" --user "00000000-0000-0000-0000-000000000001" --duration 0 --metadata $metaJson
+
+    # Resolved, not bare: `python` here hits the WindowsApps alias stub, which
+    # exits 0 without running anything, so the telemetry would silently vanish.
+    . "$PSScriptRoot\resolve_python.ps1"
+    $reclaimPython = Get-HybridPython -Quiet
+
+    if ($reclaimPython) {
+        & $reclaimPython $TelemetryScript --event "storage_reclaimed" --user "00000000-0000-0000-0000-000000000001" --duration 0 --metadata $metaJson
+    } else {
+        Write-Host "  [WARN] No usable Python interpreter; storage telemetry not logged." -ForegroundColor Yellow
+    }
 }

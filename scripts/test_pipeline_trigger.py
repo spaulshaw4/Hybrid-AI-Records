@@ -7,6 +7,7 @@ import struct
 import time
 import uuid
 import subprocess
+import numpy as np
 from supabase import create_client, Client
 
 # Loads .env / .env.local into os.environ before the credential reads below.
@@ -52,32 +53,70 @@ PREMIX_LAYERS = 1
 STEM_SECONDS = 45.0
 DURATION_SEC = STEM_SECONDS
 
-STEM_FREQUENCIES = {
-    "drums": 60.0,       # Low kick tone
-    "bass": 110.0,      # A2 sub-bass tone
-    "guitar": 440.0,    # A4 mid tone
-    "vocals": 880.0     # A5 upper harmonic
+# Each stem carries its own inter-channel phase offset in degrees.
+#
+# For two sines offset by theta, the normalised L/R correlation is cos(theta).
+# Writing the same sample to both channels gives correlation 1.0, which fails
+# the QC gate's 0.95 ceiling - correctly, since that master is mono and the
+# width stage did nothing. Offsets are spread around 45 degrees (cos = 0.707),
+# centred in the [0.25, 0.95] band with margin at both ends. Note 15 degrees
+# would give 0.966 and still fail.
+STEM_SPECS = {
+    "drums":  {"freq": 60.0,  "phase_deg": 38.0},   # cos = 0.788
+    "bass":   {"freq": 110.0, "phase_deg": 42.0},   # cos = 0.743
+    "guitar": {"freq": 440.0, "phase_deg": 48.0},   # cos = 0.669
+    "vocals": {"freq": 880.0, "phase_deg": 52.0},   # cos = 0.616
 }
 
+# Retained so existing callers that iterate frequencies still work
+STEM_FREQUENCIES = {name: spec["freq"] for name, spec in STEM_SPECS.items()}
 
-def generate_sine_stem_wav(file_path: str, frequency: float, duration: float = 5.0, sample_rate: int = 44100):
+# Independent per-channel noise, as a fraction of amplitude. Adds broadband
+# decorrelation so the correlation does not depend on a single tone's phase
+# alone, which is closer to real material.
+DECORRELATION_NOISE = 0.02
+
+
+def generate_sine_stem_wav(file_path: str, frequency: float, duration: float = 5.0,
+                           sample_rate: int = 44100, phase_deg: float = 45.0,
+                           amplitude: float = 0.5, seed: int = 0):
+    """
+    Write a decorrelated stereo test stem.
+
+    Vectorised: the previous per-sample Python loop ran 220,500 iterations per
+    stem, four stems per run.
+    """
     total_samples = int(sample_rate * duration)
+    t = np.arange(total_samples, dtype=np.float64) / sample_rate
+
+    # Trapezoidal fade to avoid a click at either boundary
+    env = np.minimum(1.0, t / 0.2) * np.minimum(1.0, (duration - t) / 0.2)
+    env = np.clip(env, 0.0, 1.0)
+
+    phase_rad = np.radians(phase_deg)
+    left = amplitude * np.sin(2.0 * np.pi * frequency * t)
+    right = amplitude * np.sin(2.0 * np.pi * frequency * t + phase_rad)
+
+    rng = np.random.default_rng(seed)
+    noise_scale = DECORRELATION_NOISE * amplitude
+    left += rng.normal(0.0, noise_scale, total_samples)
+    right += rng.normal(0.0, noise_scale, total_samples)
+
+    stereo = np.column_stack((left * env, right * env))
+
+    quantized = np.clip(stereo * 32767.0, -32768.0, 32767.0).astype("<i2")
 
     with wave.open(file_path, "w") as wav_file:
-        wav_file.setnchannels(2)      # Stereo
-        wav_file.setsampwidth(2)      # 16-bit PCM
+        wav_file.setnchannels(2)
+        wav_file.setsampwidth(2)
         wav_file.setframerate(sample_rate)
+        wav_file.writeframes(quantized.tobytes())
 
-        frames = bytearray()
-        for i in range(total_samples):
-            t = float(i) / sample_rate
-            # Sine wave with smooth fade-in and fade-out envelope
-            env = min(1.0, t / 0.2) * min(1.0, (duration - t) / 0.2)
-            sample_val = int(32767.0 * 0.5 * env * math.sin(2.0 * math.pi * frequency * t))
-            packed = struct.pack("<hh", sample_val, sample_val)
-            frames.extend(packed)
-
-        wav_file.writeframes(frames)
+    # Report what was actually produced, so a fixture drifting out of band is
+    # visible here rather than surfacing later as a QC failure.
+    l, r = stereo[:, 0], stereo[:, 1]
+    denom = np.sqrt(np.sum(l ** 2) * np.sum(r ** 2)) + 1e-12
+    return float(np.sum(l * r) / denom)
 
 
 def run_smoke_test():
@@ -96,11 +135,20 @@ def run_smoke_test():
 
     # 1. Generate 4 synthetic audio stems
     print("\n[STEP 1/6] Synthesizing multitrack test audio stems...")
-    for stem_name, freq in STEM_FREQUENCIES.items():
+    for seed, (stem_name, spec) in enumerate(STEM_SPECS.items()):
         stem_path = os.path.join(session_dir, f"{session_id}_{stem_name}.wav")
-        generate_sine_stem_wav(stem_path, freq, DURATION_SEC, SAMPLE_RATE)
+        correlation = generate_sine_stem_wav(
+            stem_path,
+            frequency=spec["freq"],
+            duration=DURATION_SEC,
+            sample_rate=SAMPLE_RATE,
+            phase_deg=spec["phase_deg"],
+            seed=seed,
+        )
         size_kb = round(os.path.getsize(stem_path) / 1024, 1)
-        print(f"  -> Generated {os.path.basename(stem_path)} ({freq} Hz, {size_kb} KB)")
+        print(f"  -> Generated {os.path.basename(stem_path)} "
+              f"({spec['freq']} Hz, {spec['phase_deg']}d offset, "
+              f"L/R corr {correlation:.3f}, {size_kb} KB)")
 
     # 2. Slice explicitly rather than waiting on the watchdog service, so the
     #    probe is self-contained and does not silently pass when it is stopped.

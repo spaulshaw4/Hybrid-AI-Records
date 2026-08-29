@@ -81,6 +81,25 @@ $ScriptsDir = Join-Path $BaseDir "scripts"
 $SlicesDir = Join-Path "$BaseDir\uploaded_slices" $GenreLock
 $TelemetryScript = Join-Path $ScriptsDir "log_telemetry.py"
 
+# Resolve a real interpreter once, at script scope, before anything invokes it.
+#
+# Bare `python` on this machine resolves to the WindowsApps App Execution Alias,
+# which prints "Python was not found" to stderr and exits 0. Every Python stage
+# therefore appeared to succeed while doing nothing: no premix, no summation, no
+# master, no upload - and the pipeline still reported success because the stub
+# returns a zero exit code.
+. "$ScriptsDir\resolve_python.ps1"
+$script:Python = Get-HybridPython -Quiet
+
+if (-not $script:Python) {
+    Write-Host "[FATAL] No usable Python interpreter found." -ForegroundColor Red
+    Write-Host "        resolve_python.ps1 rejects the WindowsApps alias stub; install" -ForegroundColor Yellow
+    Write-Host "        Python from python.org or fix PATH before running the pipeline." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host "[PIPELINE] Interpreter: $script:Python"
+
 function Send-Telemetry {
     param(
         [string]$EventType,
@@ -88,7 +107,7 @@ function Send-Telemetry {
         [string]$MetadataJson = "{}"
     )
     if (Test-Path $TelemetryScript) {
-        python $TelemetryScript --event $EventType --user $UserId --session $SessionId --duration $Duration --metadata $MetadataJson
+        & $script:Python $TelemetryScript --event $EventType --user $UserId --session $SessionId --duration $Duration --metadata $MetadataJson
     }
 }
 
@@ -115,11 +134,9 @@ try {
     $ResolvedGenre = $GenreLock
 
     if ((Test-Path $ResolverScript) -and -not (Test-Path (Join-Path "$BaseDir\uploaded_slices" $GenreLock))) {
-        . "$ScriptsDir\resolve_python.ps1"
-        $python = Get-HybridPython -Quiet
-
-        if ($python) {
-            $candidate = (& $python $ResolverScript --requested $GenreLock --slices-dir "$BaseDir\uploaded_slices" 2>$null | Select-Object -First 1)
+        # Interpreter already resolved at script scope above
+        if ($script:Python) {
+            $candidate = (& $script:Python $ResolverScript --requested $GenreLock --slices-dir "$BaseDir\uploaded_slices" 2>$null | Select-Object -First 1)
 
             if ($candidate -and $candidate.Trim() -and $candidate.Trim() -ne $GenreLock) {
                 $ResolvedGenre = $candidate.Trim()
@@ -173,7 +190,7 @@ try {
     $InferenceScript = Join-Path $ScriptsDir "ai_inference_engine.py"
 
     if (Test-Path $InferenceScript) {
-        python $InferenceScript --session $SessionId --dir $WorkDir --genre $ResolvedGenre
+        & $script:Python $InferenceScript --session $SessionId --dir $WorkDir --genre $ResolvedGenre
         $StepTimer.Stop()
         Send-Telemetry -EventType "inference_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"genre`":`"$GenreLock`"}"
     } else {
@@ -203,7 +220,7 @@ try {
             if ($NoDither) { $premixArgs += "--no-dither" }
             if ($UseQuadrant) { $premixArgs += @("--quadrant", "--genre", $ResolvedGenre) }
 
-            python @premixArgs
+            & $script:Python @premixArgs
             if ($LASTEXITCODE -ne 0) { throw "Cylinder premix failed." }
             $StepTimer.Stop()
             Send-Telemetry -EventType "premix_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"layers`":$PremixLayers,`"positions`":$DurationSeconds,`"quadrant`":$($UseQuadrant.ToString().ToLower())}"
@@ -218,7 +235,7 @@ try {
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Executing Cylinder Bus Summation..."
     $SummationScript = Join-Path $ScriptsDir "cylinder_bus_summation.py"
-    python $SummationScript --session $SessionId --dir $WorkDir
+    & $script:Python $SummationScript --session $SessionId --dir $WorkDir
     $StepTimer.Stop()
     Send-Telemetry -EventType "summation_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
 
@@ -235,7 +252,10 @@ try {
         $StepTimer.Restart()
         Write-Host "[PIPELINE] Running QC compliance audit..."
 
-        python $QcScript --wav-path $MasterWav
+        # --apply-dc-block runs the spec's enforcement action before the verdict:
+        # the master bus concatenates slices without a DC blocker, so accumulated
+        # offset should be corrected rather than merely reported as a failure.
+        & $script:Python $QcScript --wav-path $MasterWav --genre $ResolvedGenre --apply-dc-block
         $QcExit = $LASTEXITCODE
         $StepTimer.Stop()
 
@@ -259,7 +279,7 @@ try {
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Executing Cryptographic Hex Hashing & Vault Lock..."
     $HexScript = Join-Path $ScriptsDir "hybrid_hex_pipeline_hook.py"
-    python $HexScript --session $SessionId --dir $WorkDir
+    & $script:Python $HexScript --session $SessionId --dir $WorkDir
     $StepTimer.Stop()
     Send-Telemetry -EventType "hashing_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
 
@@ -267,7 +287,7 @@ try {
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Uploading master render to Supabase cloud storage..."
     $UploadScript = Join-Path $ScriptsDir "upload_master_to_cloud.py"
-    python $UploadScript --session $SessionId --dir $WorkDir
+    & $script:Python $UploadScript --session $SessionId --dir $WorkDir
     $StepTimer.Stop()
     Send-Telemetry -EventType "upload_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
 
@@ -279,7 +299,7 @@ try {
     $EgressScript = Join-Path $ScriptsDir "egress_protection.py"
 
     if (Test-Path $EgressScript) {
-        python $EgressScript --session $SessionId --dir (Join-Path $BaseDir "renders")
+        & $script:Python $EgressScript --session $SessionId --dir (Join-Path $BaseDir "renders")
         $StepTimer.Stop()
         Send-Telemetry -EventType "stems_purged" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
     } elseif (Test-Path $RawStemsDir) {

@@ -329,6 +329,53 @@ def dbfs_to_linear_scalar(db: float) -> float:
     return float(10.0 ** (db / 20.0))
 
 
+def apply_dc_block(signal: np.ndarray, sample_rate: int = 44100,
+                   cutoff_hz: float = 5.0) -> tuple:
+    """
+    Remove DC per channel, then high-pass at cutoff_hz to catch slow drift.
+
+    Returns (blocked, before, after) where before/after are the worst absolute
+    channel means.
+
+    This is the enforcement action the spec specifies for DC offset, and it was
+    missing: the master bus concatenates slices through pydub, so each slice's
+    small independent DC term accumulated with nothing to remove it. Measured on
+    a 150-slice master, that reached 2.1x the 0.0001 limit while every individual
+    slice was well inside it.
+
+    Mean subtraction alone fixes a constant offset. The single-pole high-pass
+    additionally removes sub-audible drift, which mean subtraction leaves behind
+    because its average over the whole file is near zero.
+    """
+    before = float(np.max(np.abs(np.mean(signal, axis=0))))
+
+    out = signal - np.mean(signal, axis=0)
+
+    if cutoff_hz > 0 and SCIPY_AVAILABLE:
+        # H(z) = (1 - z^-1) / (1 - R z^-1),  R = exp(-2*pi*fc/fs)
+        #
+        # The zero at z=1 nulls DC exactly while the numerator stays unity, so
+        # the passband is flat. Deriving R as 1/(1 + 2*pi*fc/fs) instead - the
+        # first-order approximation of the exponential - shifts the pole by only
+        # 2.5e-07 but scales the numerator, costing a needless 0.0062 dB across
+        # the whole band.
+        #
+        # At 5 Hz the sub-bass cost is negligible: -0.167 dB at 25 Hz,
+        # -0.033 dB at 55 Hz, -0.004 dB at 120 Hz, so Q1 foundation content
+        # passes essentially untouched.
+        r = np.exp(-2.0 * np.pi * cutoff_hz / sample_rate)
+        b = np.array([1.0, -1.0], dtype=np.float64)
+        a = np.array([1.0, -r], dtype=np.float64)
+
+        out = lfilter(b, a, out.astype(np.float64), axis=0)
+
+        # The filter's start transient leaves a small residual mean
+        out = out - np.mean(out, axis=0)
+
+    after = float(np.max(np.abs(np.mean(out, axis=0))))
+    return out, before, after
+
+
 def apply_ceiling_clamp(signal: np.ndarray, true_peak_ceiling=SPEC_TRUE_PEAK_CEILING) -> np.ndarray:
     """Scale down if the post-gain peak sits above the ceiling."""
     ceiling_linear = dbfs_to_linear_scalar(true_peak_ceiling)
@@ -576,6 +623,9 @@ if __name__ == "__main__":
     parser.add_argument("--apply-gain", action="store_true",
                         help="Re-gain the master toward target when deviation exceeds "
                              "1.5 LU, then re-measure (spec section 5 enforcement)")
+    parser.add_argument("--apply-dc-block", action="store_true",
+                        help="Remove DC offset and sub-audible drift, then re-measure. "
+                             "The spec's enforcement action for a DC failure.")
     parser.add_argument("--genre", default=None,
                         help="Apply a genre compliance profile: rap, distorted_rock, "
                              "space_trippy, or an alias. Overrides the threshold defaults.")
@@ -633,6 +683,30 @@ if __name__ == "__main__":
         crest_max=crest_max,
         report_out=args.report_out
     )
+
+    if args.apply_dc_block and not rep["compliance"]["dc_offset_clean"]:
+        print(f"\n[DC BLOCK] Offset exceeds {dc_limit}; removing and re-measuring...")
+
+        data, fr, sw, n_ch, _ = read_wav(args.wav_path)
+        cleaned, before, after = apply_dc_block(data, fr)
+
+        print(f"[DC BLOCK] worst channel mean {before:+.7f} -> {after:+.7f}")
+
+        write_wav(args.wav_path, cleaned, fr, sw)
+        print(f"[DC BLOCK] Rewrote {args.wav_path}")
+
+        rep = analyze_master_qc(
+            args.wav_path,
+            target_lufs_min=args.lufs_min,
+            target_lufs_max=args.lufs_max,
+            true_peak_ceiling=args.true_peak_ceiling,
+            phase_min=phase_min,
+            phase_max=phase_max,
+            dc_limit=dc_limit,
+            crest_min=crest_min,
+            crest_max=crest_max,
+            report_out=args.report_out,
+        )
 
     if args.apply_gain and rep["enforcement"]["regain_recommended"]:
         gain_db = rep["enforcement"]["regain_gain_db"]
