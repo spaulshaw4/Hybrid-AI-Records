@@ -361,12 +361,40 @@ if ($orphans.Count -gt 0) {
 Write-Host "`nENVIRONMENT READINESS:" -ForegroundColor Yellow
 
 $envOk = $true
+
+# Checks the process environment AND the .env files hybrid_env.py reads, because
+# reporting only the former was a false negative: credentials in
+# D:\MusicDatasets\.env resolve fine for the daemons while being absent from the
+# shell, so this said MISSING for variables that were actually available.
+$repoRoot = Split-Path $SourceDir -Parent
+$envFileCandidates = @(
+    (Join-Path $BaseDir ".env"),
+    (Join-Path $BaseDir ".env.local"),
+    (Join-Path $TargetDir ".env"),
+    (Join-Path $repoRoot ".env"),
+    (Join-Path $repoRoot ".env.local")
+) | Where-Object { $_ -and (Test-Path $_) }
+
 foreach ($varName in @("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")) {
     $value = [Environment]::GetEnvironmentVariable($varName)
+
     if ($value) {
-        Write-Host "  [OK]      $varName is set" -ForegroundColor Green
+        Write-Host "  [OK]      $varName is set (environment)" -ForegroundColor Green
+        continue
+    }
+
+    $foundIn = $null
+    foreach ($envFile in $envFileCandidates) {
+        if (Select-String -Path $envFile -Pattern "^\s*(?:export\s+)?$varName\s*=\s*\S" -Quiet) {
+            $foundIn = $envFile
+            break
+        }
+    }
+
+    if ($foundIn) {
+        Write-Host "  [OK]      $varName resolves from $foundIn" -ForegroundColor Green
     } else {
-        Write-Host "  [MISSING] $varName" -ForegroundColor Red
+        Write-Host "  [MISSING] $varName - not in environment or any .env" -ForegroundColor Red
         $envOk = $false
     }
 }

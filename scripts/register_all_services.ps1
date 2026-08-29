@@ -88,6 +88,16 @@ $ServiceDefinitions = @(
         Stderr = "$LogDir\alert_bridge_stderr.log"
     },
     @{
+        # Was present in manage_all_services and the health check but missing
+        # here, so it appeared in every status report as "not installed".
+        Name   = "HybridHardwareMacroDaemon"
+        Exe    = $PythonPath
+        Args   = "`"$ScriptsDir\hardware_macro_server.py`""
+        Desc   = "Hybrid 1.0 Hardware Macro & Stream Deck API (127.0.0.1:8765)"
+        Stdout = "$LogDir\macro_server_stdout.log"
+        Stderr = "$LogDir\macro_server_stderr.log"
+    },
+    @{
         Name   = "HybridStorageGuardDaemon"
         Exe    = $PythonPath
         Args   = "`"$ScriptsDir\storage_guard_daemon.py`""
