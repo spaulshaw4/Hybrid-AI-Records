@@ -114,6 +114,10 @@ $Manifest = @(
     "telemetry_monitor.py",
     "tail_logs.ps1",
 
+    # Self-healing
+    "pipeline_stagnation_healer.py",
+    "register_stagnation_healer_service.ps1",
+
     # Storage management
     "storage_guard_daemon.py",
     "reclaim_render_storage.ps1",
@@ -141,8 +145,12 @@ $Manifest = @(
     # Operator UI
     "hybrid_control_center.bat",
     "setup_desktop_shortcuts.ps1",
+    "setup_grafana_provisioning.ps1",
+    "reload_prometheus_config.ps1",
+    "test_stagnation_healer.py",
     "hybrid_tray_app.py",
     "install_tray_startup.ps1",
+    "restart_tray_app.ps1",
 
     # Diagnostics and test harnesses
     "verify_pipeline_health.ps1",
@@ -245,6 +253,51 @@ if (Test-Path $MonitoringDir) {
     }
 } else {
     Write-Host "`n[WARN] Monitoring directory not found at $MonitoringDir - skipping config sync." -ForegroundColor Yellow
+}
+
+# -------------------------------------------------------------------------
+# 3b. Grafana tree sync
+#     hybrid_dashboards.yml declares options.path as
+#     D:\MusicDatasets\monitoring\grafana\dashboards, so the JSON must land
+#     there specifically - the config sync above only handles *.yml into config\.
+# -------------------------------------------------------------------------
+$GrafanaSrc = Join-Path $MonitoringDir "grafana"
+
+if (Test-Path $GrafanaSrc) {
+    $grafanaTargets = @{
+        (Join-Path $GrafanaSrc "*.json")                        = (Join-Path $BaseDir "monitoring\grafana\dashboards")
+        (Join-Path $GrafanaSrc "provisioning\dashboards\*.yml") = (Join-Path $BaseDir "monitoring\grafana\provisioning\dashboards")
+        (Join-Path $GrafanaSrc "provisioning\datasources\*.yml")= (Join-Path $BaseDir "monitoring\grafana\provisioning\datasources")
+    }
+
+    Write-Host "`nGRAFANA SYNC:" -ForegroundColor Yellow
+
+    foreach ($pattern in $grafanaTargets.Keys) {
+        $dest = $grafanaTargets[$pattern]
+        $files = @(Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue)
+
+        if ($files.Count -eq 0) { continue }
+
+        if (-not $DryRun -and -not (Test-Path $dest)) {
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        }
+
+        foreach ($file in $files) {
+            $destPath = Join-Path $dest $file.Name
+            $label = "UPDATED"
+
+            if (-not (Test-Path $destPath)) {
+                $label = "NEW"
+            } elseif ((Get-FileHash $file.FullName).Hash -eq (Get-FileHash $destPath).Hash) {
+                continue
+            }
+
+            Write-Host "  [$label] $($file.Name) -> $dest" -ForegroundColor Cyan
+            if (-not $DryRun) { Copy-Item -Path $file.FullName -Destination $destPath -Force }
+        }
+    }
+} else {
+    Write-Host "`n[WARN] No grafana directory under $MonitoringDir - skipping dashboard sync." -ForegroundColor Yellow
 }
 
 # -------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # D:\MusicDatasets\scripts\tail_logs.ps1
 param(
-    [ValidateSet("all", "watchdog", "audio", "storage", "exporter", "prometheus", "alertmanager")]
+    [ValidateSet("all", "watchdog", "audio", "storage", "healer", "exporter", "prometheus", "alertmanager")]
     [string]$Service = "all",
     [int]$Lines = 30,
     [switch]$NoWait = $false
@@ -17,6 +17,7 @@ $LogMappings = @{
     "watchdog"     = @("watchdog_stdout.log", "watchdog_stderr.log")
     "audio"        = @("audio_daemon_stdout.log", "audio_daemon_stderr.log")
     "storage"      = @("storage_guard_stdout.log", "storage_guard_stderr.log")
+    "healer"       = @("stagnation_healer_stdout.log", "stagnation_healer_stderr.log")
     "exporter"     = @("prometheus_exporter_stdout.log", "prometheus_exporter_stderr.log")
     "prometheus"   = @("prometheus_stdout.log", "prometheus_stderr.log")
     "alertmanager" = @("alertmanager_stdout.log", "alertmanager_stderr.log")

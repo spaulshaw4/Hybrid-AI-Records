@@ -1,0 +1,17 @@
+# D:\MusicDatasets\monitoring\grafana\provisioning\dashboards\hybrid_dashboards.yml
+apiVersion: 1
+
+providers:
+  - name: 'Hybrid 1.0 System Observability'
+    orgId: 1
+    folder: 'Hybrid 1.0 Operations'
+    folderUid: 'hybrid10-ops-folder'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      # deploy_to_workstation.ps1 syncs monitoring/grafana/*.json here.
+      path: D:\MusicDatasets\monitoring\grafana\dashboards
+      foldersFromFilesStructure: false

@@ -15,6 +15,7 @@ SERVICES = [
     "HybridPrometheusDaemon",
     "HybridAlertmanagerDaemon",
     "HybridStorageGuardDaemon",
+    "HybridStagnationHealerDaemon",
     "HybridWatchdogDaemon",
     "HybridAudioDaemon"
 ]
@@ -24,6 +25,12 @@ APP_RUNNING = True
 
 BASE_DIR = r"D:\MusicDatasets"
 SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
+BACKUP_DIR = os.path.join(BASE_DIR, "archive", "backups")
+
+# The tray app is itself launched by a real interpreter (install_tray_startup.ps1
+# resolves one via resolve_python.ps1), so sys.executable is a reliable handle.
+# A bare "python" would hit the Microsoft Store alias stub on this machine.
+PYTHON_EXE = sys.executable
 
 
 def check_service_status(service_name: str) -> str:
@@ -47,14 +54,13 @@ def check_service_status(service_name: str) -> str:
 
 
 def create_tray_icon(status_mode: str) -> Image.Image:
-    # 64x64 high-DPI icon with color-coded status badge
     img = Image.new("RGBA", (64, 64), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     # Background plate
     draw.rounded_rectangle([2, 2, 62, 62], radius=14, fill=(24, 24, 27, 255), outline=(63, 63, 70, 255), width=2)
 
-    # Status color
+    # Status indicator color
     if status_mode == "OK":
         color = (34, 197, 94, 255)    # Emerald Green
     elif status_mode == "WARN":
@@ -62,7 +68,6 @@ def create_tray_icon(status_mode: str) -> Image.Image:
     else:
         color = (239, 68, 68, 255)    # Rose Red
 
-    # Central status glow & indicator
     draw.ellipse([20, 20, 44, 44], fill=color)
     draw.ellipse([26, 26, 38, 38], fill=(255, 255, 255, 200))
 
@@ -81,6 +86,35 @@ def launch_tool(cmd_list: list[str]):
 
 def open_url(url: str):
     webbrowser.open(url)
+
+
+def launch_db_replay(dry_run: bool = False, specific_table: str = None):
+    replay_script = os.path.join(SCRIPTS_DIR, "replay_database_snapshots.py")
+    backup_dir_escaped = BACKUP_DIR.replace("\\", "\\\\")
+
+    replay_cmd = f"& '{PYTHON_EXE}' '{replay_script}' --source $latest.FullName"
+    if dry_run:
+        replay_cmd += " --dry-run"
+    if specific_table:
+        replay_cmd += f" --table {specific_table}"
+
+    ps_commands = [
+        "$ErrorActionPreference = 'Continue'",
+        f"$latest = Get-ChildItem -Path '{BACKUP_DIR}' -Filter 'hybrid10_backup_*.zip' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1",
+        f"if (-not $latest) {{ Write-Host '[ERROR] No backup archive found in {backup_dir_escaped}' -ForegroundColor Red; return }}",
+        "Write-Host '[REPLAY TARGET]' $latest.FullName -ForegroundColor Cyan",
+        replay_cmd
+    ]
+
+    combined_cmd = "; ".join(ps_commands)
+    ps_args = f"Start-Process powershell -Verb RunAs -ArgumentList '-NoExit -ExecutionPolicy Bypass -Command \"{combined_cmd}\"'"
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", ps_args])
+
+
+def run_backup_snapshot():
+    backup_script = os.path.join(SCRIPTS_DIR, "backup_disaster_recovery.ps1")
+    ps_cmd = f"Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -NoExit -File \"{backup_script}\" -RetentionDays 14'"
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", ps_cmd])
 
 
 def update_loop(icon: pystray.Icon):
@@ -132,6 +166,13 @@ def build_menu():
         item(get_service_item_label(s), lambda: None, enabled=False) for s in SERVICES
     ]
 
+    replay_submenu = Menu(
+        item("Dry Run (Preview Latest Archive)", lambda: launch_db_replay(dry_run=True)),
+        item("Live Replay: All Tables", lambda: launch_db_replay(dry_run=False)),
+        item("Live Replay: user_vaults Only", lambda: launch_db_replay(dry_run=False, specific_table="user_vaults")),
+        item("Live Replay: telemetry_logs Only", lambda: launch_db_replay(dry_run=False, specific_table="pipeline_telemetry_logs"))
+    )
+
     return Menu(
         item(get_status_header, lambda: None, enabled=False),
         Menu.SEPARATOR,
@@ -141,10 +182,14 @@ def build_menu():
         item("Start All Daemons", lambda: run_elevated_service_action("start")),
         item("Stop All Daemons", lambda: run_elevated_service_action("stop")),
         Menu.SEPARATOR,
+        item("Create DR Backup Snapshot", lambda: run_backup_snapshot()),
+        item("Replay Database Snapshots", replay_submenu),
+        Menu.SEPARATOR,
         item("Open Telemetry Dashboard", lambda: open_url("http://localhost:3000/telemetry")),
         item("Open Prometheus (9090)", lambda: open_url("http://localhost:9090")),
         item("Open Alertmanager (9093)", lambda: open_url("http://localhost:9093")),
         Menu.SEPARATOR,
+        item("Control Center Shell", lambda: launch_tool(["start", os.path.join(SCRIPTS_DIR, "hybrid_control_center.bat")])),
         item("Stream Live Logs", lambda: launch_tool(["start", "powershell", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", os.path.join(SCRIPTS_DIR, "tail_logs.ps1"), "-Service", "all"])),
         item("Run Health Diagnostics", lambda: launch_tool(["start", "powershell", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", os.path.join(SCRIPTS_DIR, "verify_pipeline_health.ps1")])),
         Menu.SEPARATOR,

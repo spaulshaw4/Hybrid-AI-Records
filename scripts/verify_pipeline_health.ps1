@@ -61,6 +61,8 @@ if ($sbUrl) {
 }
 
 if ($sbKey) {
+    # $(...) not ${...}: the latter treats its contents as a variable NAME, so
+    # ${sbKey.Substring(...)} resolves to nothing and prints an empty prefix.
     Record-Check "Environment" "SUPABASE_SERVICE_ROLE_KEY" "PASS" "Key present ($($sbKey.Substring(0, [Math]::Min(12, $sbKey.Length)))...)"
 } else {
     Record-Check "Environment" "SUPABASE_SERVICE_ROLE_KEY" "FAIL" "Variable missing from system/user environment."
@@ -74,10 +76,14 @@ $RequiredDirs = @(
     "$BaseDir\uploaded_slices",
     "$BaseDir\renders",
     "$BaseDir\archive",
+    "$BaseDir\archive\backups",
     "$BaseDir\logs",
     "$BaseDir\scripts",
     "$BaseDir\config",
-    "$BaseDir\monitoring\data"
+    "$BaseDir\monitoring\data",
+    "$BaseDir\monitoring\grafana\dashboards",
+    "$BaseDir\monitoring\grafana\provisioning\dashboards",
+    "$BaseDir\monitoring\grafana\provisioning\datasources"
 )
 
 foreach ($dir in $RequiredDirs) {
@@ -93,13 +99,15 @@ foreach ($dir in $RequiredDirs) {
 # -------------------------------------------------------------------------
 . "$PSScriptRoot\resolve_python.ps1"
 
-# Python needs its own check: Get-Command finds the Microsoft Store alias stub
-# under \WindowsApps\, which is not an interpreter and would report a false pass.
+# Python needs the resolver, not Get-Command: PATH resolves to the WindowsApps
+# App Execution Alias stub on this machine, which is not an interpreter and
+# would report a false PASS while every daemon dies on start.
 $resolvedPython = Get-HybridPython -Quiet
 
 if ($resolvedPython) {
     $pyVersion = (& $resolvedPython --version 2>&1)
     $pathStub = (Get-Command python -ErrorAction SilentlyContinue).Source
+
     if ($pathStub -like "*\WindowsApps\*") {
         Record-Check "Dependencies" "python" "WARN" "$pyVersion at $resolvedPython, but PATH resolves to the Store stub ($pathStub). Scripts using bare 'python' will fail."
     } else {
@@ -118,9 +126,9 @@ foreach ($dep in @("ffmpeg", "nssm")) {
     }
 }
 
-# Python packages the pipeline imports at module scope
+# Packages every daemon imports at module scope
 if ($resolvedPython) {
-    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy")) {
+    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy", "prometheus_client")) {
         & $resolvedPython -c "import $pkg" 2>$null
         if ($LASTEXITCODE -eq 0) {
             Record-Check "Python Packages" $pkg "PASS" "Importable."
@@ -142,9 +150,17 @@ $Scripts = @(
     "upload_master_to_cloud.py",
     "log_telemetry.py",
     "storage_guard_daemon.py",
+    "pipeline_stagnation_healer.py",
     "prometheus_exporter.py",
+    "replay_database_snapshots.py",
+    "build_genre_corpus.py",
+    "genre_resolver.py",
+    "resolve_python.ps1",
     "run_master_pipeline.ps1",
+    "manage_all_services.ps1",
     "tail_logs.ps1",
+    "backup_disaster_recovery.ps1",
+    "restore_disaster_recovery.ps1",
     "manage_alert_silences.ps1",
     "test_fire_alert.ps1"
 )
@@ -159,15 +175,55 @@ foreach ($script in $Scripts) {
 }
 
 # -------------------------------------------------------------------------
-# 5. WINDOWS NSSM DAEMON SERVICES
+# 5. GRAFANA PROVISIONING & DASHBOARD ASSETS
+# -------------------------------------------------------------------------
+$ProvisioningFiles = @(
+    @{ Name = "Dashboard Provider YAML";   Path = "$BaseDir\monitoring\grafana\provisioning\dashboards\hybrid_dashboards.yml" },
+    @{ Name = "Data Source Provider YAML"; Path = "$BaseDir\monitoring\grafana\provisioning\datasources\hybrid_datasources.yml" }
+)
+
+foreach ($prov in $ProvisioningFiles) {
+    if (Test-Path $prov.Path) {
+        $fileSizeKb = [math]::Round((Get-Item $prov.Path).Length / 1KB, 1)
+        Record-Check "Grafana Assets" $prov.Name "PASS" "Present (${fileSizeKb} KB)"
+    } else {
+        Record-Check "Grafana Assets" $prov.Name "FAIL" "File missing at $($prov.Path)"
+    }
+}
+
+# Checked by pattern rather than a fixed filename: the repo ships
+# hybrid_workstation_dashboard.json and hybrid_observability_dashboard.json.
+$dashDir = "$BaseDir\monitoring\grafana\dashboards"
+$dashFiles = @(Get-ChildItem -Path $dashDir -Filter "*.json" -File -ErrorAction SilentlyContinue)
+
+if ($dashFiles.Count -gt 0) {
+    $validCount = 0
+    foreach ($f in $dashFiles) {
+        try {
+            Get-Content $f.FullName -Raw | ConvertFrom-Json | Out-Null
+            $validCount++
+        } catch { }
+    }
+    if ($validCount -eq $dashFiles.Count) {
+        Record-Check "Grafana Assets" "Dashboard JSON" "PASS" "$validCount valid dashboard(s) in $dashDir"
+    } else {
+        Record-Check "Grafana Assets" "Dashboard JSON" "WARN" "$validCount of $($dashFiles.Count) parse as valid JSON"
+    }
+} else {
+    Record-Check "Grafana Assets" "Dashboard JSON" "FAIL" "No dashboard JSON in $dashDir"
+}
+
+# -------------------------------------------------------------------------
+# 6. WINDOWS NSSM DAEMON SERVICES (7 CORE SERVICES)
 # -------------------------------------------------------------------------
 $Services = @(
-    "HybridWatchdogDaemon",
-    "HybridAudioDaemon",
-    "HybridStorageGuardDaemon",
     "HybridPrometheusExporterDaemon",
     "HybridPrometheusDaemon",
-    "HybridAlertmanagerDaemon"
+    "HybridAlertmanagerDaemon",
+    "HybridStorageGuardDaemon",
+    "HybridStagnationHealerDaemon",
+    "HybridWatchdogDaemon",
+    "HybridAudioDaemon"
 )
 
 foreach ($svcName in $Services) {
@@ -183,13 +239,28 @@ foreach ($svcName in $Services) {
     }
 }
 
+# Grafana may run as a service or as a standalone binary; absence is not a fault.
+$grafanaSvc = Get-Service -Name "grafana" -ErrorAction SilentlyContinue
+if (-not $grafanaSvc) { $grafanaSvc = Get-Service -Name "Grafana" -ErrorAction SilentlyContinue }
+
+if ($grafanaSvc) {
+    if ($grafanaSvc.Status -eq "Running") {
+        Record-Check "Windows Services" "GrafanaService" "PASS" "Status: Running"
+    } else {
+        Record-Check "Windows Services" "GrafanaService" "WARN" "Installed but status is: $($grafanaSvc.Status)"
+    }
+} else {
+    Record-Check "Windows Services" "GrafanaService" "INFO" "Not registered as Windows service (standalone binary mode)"
+}
+
 # -------------------------------------------------------------------------
-# 6. ACTIVE NETWORK PORTS & ENDPOINTS
+# 7. ACTIVE NETWORK PORTS & ENDPOINTS
 # -------------------------------------------------------------------------
 $PortChecks = @(
     @{ Name = "Prometheus UI / Engine"; Port = 9090 },
     @{ Name = "Alertmanager Gateway";   Port = 9093 },
-    @{ Name = "Hybrid Metrics Exporter"; Port = 9191 }
+    @{ Name = "Hybrid Metrics Exporter"; Port = 9191 },
+    @{ Name = "Grafana Observability UI"; Port = 3000 }
 )
 
 foreach ($endpoint in $PortChecks) {
@@ -222,7 +293,26 @@ if ($drive) {
 }
 
 # -------------------------------------------------------------------------
-# 8. SUPABASE CLOUD CONNECTIVITY
+# 8. GENRE CORPUS READINESS
+# -------------------------------------------------------------------------
+$genreResolver = Join-Path "$BaseDir\scripts" "genre_resolver.py"
+$slicesRoot = Join-Path $BaseDir "uploaded_slices"
+
+if ($resolvedPython -and (Test-Path $genreResolver) -and (Test-Path $slicesRoot)) {
+    $listing = & $resolvedPython $genreResolver --list-available --slices-dir $slicesRoot 2>$null
+    $summary = $listing | Select-String -Pattern "genres present" | Select-Object -First 1
+
+    if ($summary) {
+        Record-Check "Genre Corpus" "Staged genres" "PASS" ($summary.Line.Trim())
+    } else {
+        Record-Check "Genre Corpus" "Staged genres" "WARN" "No genres staged in uploaded_slices yet."
+    }
+} else {
+    Record-Check "Genre Corpus" "Staged genres" "WARN" "Cannot evaluate: resolver or uploaded_slices not present."
+}
+
+# -------------------------------------------------------------------------
+# 9. SUPABASE CLOUD CONNECTIVITY
 # -------------------------------------------------------------------------
 if ($sbUrl -and $sbKey) {
     try {
@@ -235,6 +325,14 @@ if ($sbUrl -and $sbKey) {
         Record-Check "Cloud Ledger" "Supabase Database" "PASS" "REST connection verified. 'user_vaults' accessible."
     } catch {
         Record-Check "Cloud Ledger" "Supabase Database" "FAIL" "Query failed: $($_.Exception.Message)"
+    }
+
+    try {
+        $slicesEndpoint = "$sbUrl/rest/v1/audio_slices?select=filename&limit=1"
+        $slicesRes = Invoke-RestMethod -Uri $slicesEndpoint -Headers $headers -Method Get -TimeoutSec 10
+        Record-Check "Cloud Ledger" "audio_slices table" "PASS" "Slice ledger accessible."
+    } catch {
+        Record-Check "Cloud Ledger" "audio_slices table" "FAIL" "Query failed: $($_.Exception.Message)"
     }
 
     try {
@@ -256,6 +354,7 @@ foreach ($item in $Results) {
         "PASS" { [ConsoleColor]::Green }
         "WARN" { [ConsoleColor]::Yellow }
         "FAIL" { [ConsoleColor]::Red }
+        "INFO" { [ConsoleColor]::DarkGray }
         Default { [ConsoleColor]::White }
     }
 
@@ -275,7 +374,7 @@ Write-Host "`n================================================================" 
 Write-Host "SUMMARY: $passCount/$totalCount Passed | $warnCount Warnings | $failCount Failures" -ForegroundColor $(if ($failCount -eq 0) { [ConsoleColor]::Green } else { [ConsoleColor]::Red })
 
 if ($failCount -eq 0 -and $warnCount -eq 0) {
-    Write-Host "OVERALL VERDICT: [READY] All workstation daemons, monitoring ports, and cloud subsystems are operational." -ForegroundColor Green
+    Write-Host "OVERALL VERDICT: [READY] All 7 workstation daemons, monitoring ports, and cloud subsystems are operational." -ForegroundColor Green
 } elseif ($failCount -eq 0) {
     Write-Host "OVERALL VERDICT: [OPERATIONAL WITH WARNINGS] Review non-critical warnings above." -ForegroundColor Yellow
 } else {

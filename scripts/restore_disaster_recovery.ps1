@@ -4,6 +4,7 @@ param(
     [string]$BackupDir = "D:\MusicDatasets\archive\backups",
     [string]$BackupArchive = "",
     [switch]$RestoreConfigs = $true,
+    [switch]$RestoreGrafana = $true,
     [switch]$RestoreScripts = $true,
     [switch]$RestoreLogs = $false,
     [switch]$AutoRestartServices = $true,
@@ -58,7 +59,7 @@ $TempExtractDir = Join-Path $env:TEMP "hybrid_restore_stage_$(Get-Date -Format '
 New-Item -ItemType Directory -Force -Path $TempExtractDir | Out-Null
 
 try {
-    Write-Host "[1/5] Extracting archive bundle into temporary sandbox..."
+    Write-Host "[1/6] Extracting archive bundle into temporary sandbox..."
     Expand-Archive -Path $TargetPath -DestinationPath $TempExtractDir -Force
     Write-Host "  -> Archive extracted successfully." -ForegroundColor Green
 
@@ -66,15 +67,24 @@ try {
     $ManageScript = Join-Path "$BaseDir\scripts" "manage_all_services.ps1"
 
     if ($AutoRestartServices -and (-not $DryRun) -and (Test-Path $ManageScript)) {
-        Write-Host "`n[2/5] Halting active services to release file locks..."
+        Write-Host "`n[2/6] Halting active services to release file locks..."
         & powershell.exe -ExecutionPolicy Bypass -File $ManageScript -Action stop
+
+        # Grafana holds provisioning files open; stop it before overwriting them
+        $grafanaSvc = Get-Service -Name "grafana" -ErrorAction SilentlyContinue
+        if (-not $grafanaSvc) { $grafanaSvc = Get-Service -Name "Grafana" -ErrorAction SilentlyContinue }
+
+        if ($grafanaSvc -and $grafanaSvc.Status -eq "Running") {
+            Write-Host "  -> Stopping $($grafanaSvc.Name) service..." -ForegroundColor Yellow
+            Stop-Service -Name $grafanaSvc.Name -Force
+        }
     } else {
-        Write-Host "`n[2/5] Skipping daemon shutdown (DryRun or service manager not found)." -ForegroundColor Gray
+        Write-Host "`n[2/6] Skipping daemon shutdown (DryRun or service manager not found)." -ForegroundColor Gray
     }
 
     # 4. Restore Configurations
     if ($RestoreConfigs) {
-        Write-Host "`n[3/5] Restoring configuration files..."
+        Write-Host "`n[3/6] Restoring configuration files..."
         $SourceConfig = Join-Path $TempExtractDir "config"
         $DestConfig = Join-Path $BaseDir "config"
 
@@ -99,9 +109,36 @@ try {
         }
     }
 
+    # 4b. Restore Grafana Provisioning & Dashboards
+    if ($RestoreGrafana) {
+        Write-Host "`n[4/6] Restoring Grafana provisioning configs and dashboards..."
+        $SourceGrafana = Join-Path $TempExtractDir "monitoring\grafana"
+        $DestGrafana = Join-Path $BaseDir "monitoring\grafana"
+
+        if (Test-Path $SourceGrafana) {
+            if (-not (Test-Path $DestGrafana)) { New-Item -ItemType Directory -Force -Path $DestGrafana | Out-Null }
+
+            $GrafanaFiles = Get-ChildItem -Path $SourceGrafana -File -Recurse
+            foreach ($file in $GrafanaFiles) {
+                $relative = $file.FullName.Substring($SourceGrafana.Length).TrimStart("\")
+                $targetFile = Join-Path $DestGrafana $relative
+                $targetDir = Split-Path $targetFile -Parent
+
+                if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Force -Path $targetDir | Out-Null }
+
+                Write-Host "  -> [RESTORE GRAFANA] $relative" -ForegroundColor Yellow
+                if (-not $DryRun) {
+                    Copy-Item -Path $file.FullName -Destination $targetFile -Force
+                }
+            }
+        } else {
+            Write-Host "  -> [SKIP] No Grafana provisioning tree found inside backup archive." -ForegroundColor Gray
+        }
+    }
+
     # 5. Restore Pipeline & Daemon Scripts
     if ($RestoreScripts) {
-        Write-Host "`n[4/5] Restoring pipeline scripts and orchestration utilities..."
+        Write-Host "`n[5/6] Restoring pipeline scripts and orchestration utilities..."
         $SourceScripts = Join-Path $TempExtractDir "scripts"
         $DestScripts = Join-Path $BaseDir "scripts"
 
@@ -162,8 +199,16 @@ try {
 
     # 6. Restart All Services & Run Diagnostics
     if ($AutoRestartServices -and (-not $DryRun) -and (Test-Path $ManageScript)) {
-        Write-Host "`n[5/5] Re-initializing daemon services and running system checks..."
+        Write-Host "`n[6/6] Re-initializing daemon services and running system checks..."
         & powershell.exe -ExecutionPolicy Bypass -File $ManageScript -Action start
+
+        $grafanaSvc = Get-Service -Name "grafana" -ErrorAction SilentlyContinue
+        if (-not $grafanaSvc) { $grafanaSvc = Get-Service -Name "Grafana" -ErrorAction SilentlyContinue }
+
+        if ($grafanaSvc) {
+            Write-Host "  -> Starting $($grafanaSvc.Name) service..." -ForegroundColor Yellow
+            Start-Service -Name $grafanaSvc.Name -ErrorAction SilentlyContinue
+        }
 
         $VerifyScript = Join-Path "$BaseDir\scripts" "verify_pipeline_health.ps1"
         if (Test-Path $VerifyScript) {

@@ -38,6 +38,7 @@ New-Item -ItemType Directory -Force -Path $TempStageDir | Out-Null
 
 $StageConfig = New-Item -ItemType Directory -Force -Path (Join-Path $TempStageDir "config")
 $StageScripts = New-Item -ItemType Directory -Force -Path (Join-Path $TempStageDir "scripts")
+$StageGrafana = New-Item -ItemType Directory -Force -Path (Join-Path $TempStageDir "monitoring\grafana")
 $StageLogs = New-Item -ItemType Directory -Force -Path (Join-Path $TempStageDir "logs")
 $StageDatabase = New-Item -ItemType Directory -Force -Path (Join-Path $TempStageDir "database_snapshots")
 
@@ -45,7 +46,7 @@ try {
     # -------------------------------------------------------------------------
     # 2. STAGE CONFIGURATIONS & ALERTS
     # -------------------------------------------------------------------------
-    Write-Host "`n[1/5] Backing up configuration files..."
+    Write-Host "`n[1/6] Backing up configuration files..."
     $ConfigDir = Join-Path $BaseDir "config"
 
     if (Test-Path $ConfigDir) {
@@ -56,9 +57,22 @@ try {
     }
 
     # -------------------------------------------------------------------------
+    # 2b. STAGE GRAFANA PROVISIONING & DASHBOARDS
+    # -------------------------------------------------------------------------
+    Write-Host "`n[2/6] Backing up Grafana provisioning configs and dashboard templates..."
+    $GrafanaBase = Join-Path $BaseDir "monitoring\grafana"
+
+    if (Test-Path $GrafanaBase) {
+        Copy-Item -Path "$GrafanaBase\*" -Destination $StageGrafana.FullName -Recurse -Force
+        Write-Host "  -> Bundled provisioning providers and dashboard JSON models." -ForegroundColor Green
+    } else {
+        Write-Host "  -> [WARN] Grafana monitoring tree not found at $GrafanaBase" -ForegroundColor Yellow
+    }
+
+    # -------------------------------------------------------------------------
     # 3. STAGE ORCHESTRATION & DAEMON SCRIPTS
     # -------------------------------------------------------------------------
-    Write-Host "`n[2/5] Backing up pipeline scripts & orchestration binaries..."
+    Write-Host "`n[3/6] Backing up pipeline scripts & orchestration binaries..."
     $ScriptsDir = Join-Path $BaseDir "scripts"
 
     if (Test-Path $ScriptsDir) {
@@ -79,7 +93,7 @@ try {
     # -------------------------------------------------------------------------
     # 4. EXPORT SUPABASE LEDGER & TELEMETRY TABLES
     # -------------------------------------------------------------------------
-    Write-Host "`n[3/5] Generating cloud ledger database snapshots..."
+    Write-Host "`n[4/6] Generating cloud ledger database snapshots..."
 
     if ($sbUrl -and $sbKey) {
         $Headers = @{
@@ -108,7 +122,7 @@ try {
     # -------------------------------------------------------------------------
     # 5. STAGE SYSTEM LOGS
     # -------------------------------------------------------------------------
-    Write-Host "`n[4/5] Capturing system daemon log snapshots..."
+    Write-Host "`n[5/6] Capturing system daemon log snapshots..."
     $LogsDir = Join-Path $BaseDir "logs"
 
     if (Test-Path $LogsDir) {
@@ -127,7 +141,7 @@ try {
     # -------------------------------------------------------------------------
     # 6. COMPRESS ARCHIVE
     # -------------------------------------------------------------------------
-    Write-Host "`n[5/5] Compressing disaster recovery bundle into ZIP..."
+    Write-Host "`n[6/6] Compressing disaster recovery bundle into ZIP..."
     Compress-Archive -Path "$TempStageDir\*" -DestinationPath $FinalZipPath -CompressionLevel Optimal -Force
 
     $ArchiveSizeMb = [math]::Round((Get-Item $FinalZipPath).Length / 1MB, 2)

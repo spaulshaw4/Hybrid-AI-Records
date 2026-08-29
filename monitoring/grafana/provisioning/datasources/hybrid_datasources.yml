@@ -1,0 +1,18 @@
+# D:\MusicDatasets\monitoring\grafana\provisioning\datasources\hybrid_datasources.yml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    orgId: 1
+    # Loopback: register_monitoring_services.ps1 binds Prometheus to 127.0.0.1
+    # by default, since it ships without authentication.
+    url: http://127.0.0.1:9090
+    isDefault: true
+    # Every panel in both dashboards references this uid explicitly.
+    uid: prometheus
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s

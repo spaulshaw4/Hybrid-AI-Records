@@ -17,14 +17,17 @@ if (-not $IsAdmin) {
     exit 1
 }
 
-# The 6 core Hybrid 1.0 daemon services in dependency-safe startup order
+# The core Hybrid 1.0 daemon services in dependency-safe startup order.
+# The healer starts after the audio daemon: it re-queues sessions the pipeline
+# abandoned, so the worker that consumes them should already be up.
 $Services = @(
     "HybridPrometheusExporterDaemon",
     "HybridPrometheusDaemon",
     "HybridAlertmanagerDaemon",
     "HybridStorageGuardDaemon",
     "HybridWatchdogDaemon",
-    "HybridAudioDaemon"
+    "HybridAudioDaemon",
+    "HybridStagnationHealerDaemon"
 )
 
 Write-Host "================================================================" -ForegroundColor Cyan

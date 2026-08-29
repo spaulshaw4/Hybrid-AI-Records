@@ -132,6 +132,44 @@ groups:
           summary: "Session stuck in processing for over 30 minutes"
           description: "A render has held `processing` for 30+ minutes. run_master_pipeline.ps1 likely died without reaching its catch block, leaving the vault row orphaned."
 
+  - name: hybrid_healer_alerts
+    rules:
+      # Expressions below deliberately avoid node_exporter metrics
+      # (node_filesystem_*) - node_exporter is not installed on this
+      # workstation. Disk coverage lives in hybrid_workstation_storage above.
+      - alert: PipelineFrequentAutoHealRequeues
+        expr: increase(hybrid_pipeline_autoheal_total{action="requeued"}[15m]) >= 3
+        for: 1m
+        labels:
+          severity: warning
+          target: pipeline_healer
+          component: healer
+        annotations:
+          summary: "Frequent pipeline job stalls detected"
+          description: "The stagnation healer re-queued {{ printf \"%.0f\" $value }} stalled sessions in 15 minutes. Renders are dying before their catch block - check daemon_stderr.log and audio_daemon_stderr.log."
+
+      - alert: PipelineDeadLetterJobFailure
+        expr: increase(hybrid_pipeline_autoheal_total{action="failed"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          target: pipeline_healer
+          component: healer
+        annotations:
+          summary: "Pipeline session moved to dead-letter failed state"
+          description: "A session exceeded the healer's retry limit and was marked permanently failed in user_vaults. The underlying fault recurs across retries and needs manual diagnosis."
+
+      - alert: StagnantJobsPendingHeal
+        expr: hybrid_stagnant_sessions_count > 0
+        for: 5m
+        labels:
+          severity: warning
+          target: pipeline_healer
+          component: healer
+        annotations:
+          summary: "Stagnant pipeline sessions awaiting recovery"
+          description: "{{ printf \"%.0f\" $value }} session(s) have been in 'processing' beyond the 20-minute stall threshold for over 5 minutes. If this persists, HybridStagnationHealerDaemon is not running."
+
   - name: hybrid_pipeline_latency
     rules:
       - alert: HybridPipelineSlow
