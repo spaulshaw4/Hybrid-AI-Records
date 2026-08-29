@@ -110,6 +110,8 @@ $Manifest = @(
 
     # Render chain
     "ai_inference_engine.py",
+    "hybrid_dsp.py",
+    "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",
     "upload_master_to_cloud.py",
@@ -148,6 +150,10 @@ $Manifest = @(
     "verify_and_run_alertmanager.ps1",
     "configure_nssm_logging.ps1",
     "manage_all_services.ps1",
+
+    # Orchestration entry points
+    "register_all_services.ps1",
+    "bootstrap_master_suite.ps1",
 
     # Operator UI
     "hybrid_control_center.bat",

@@ -33,7 +33,16 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 SAMPLE_RATE = 44100
-DURATION_SEC = 5.0
+
+# run_master_pipeline enforces a 150-second (2:30) floor and stages
+# DurationSeconds x PremixLayers slices. The probe runs at the floor with premix
+# disabled, so it needs at least 150 one-second slices of source audio.
+TARGET_DURATION_SEC = 150
+PREMIX_LAYERS = 1
+
+# Four stems long enough to clear the floor with margin: 4 x 45s = 180 slices.
+STEM_SECONDS = 45.0
+DURATION_SEC = STEM_SECONDS
 
 STEM_FREQUENCIES = {
     "drums": 60.0,       # Low kick tone
@@ -105,8 +114,16 @@ def run_smoke_test():
     slice_count = len([f for f in os.listdir(genre_slice_dir) if f.endswith(".wav")]) if os.path.isdir(genre_slice_dir) else 0
     print(f"  -> {slice_count} slice(s) available in {genre_slice_dir}")
 
+    required = TARGET_DURATION_SEC * PREMIX_LAYERS
+
     if slice_count == 0:
         print("\n[FATAL] No slices produced. run_master_pipeline will abort on an empty genre pool.")
+        sys.exit(1)
+
+    if slice_count < required:
+        print(f"\n[FATAL] {slice_count} slices available but {required} needed for a "
+              f"{TARGET_DURATION_SEC}s render at {PREMIX_LAYERS} layer(s).")
+        print("        The pipeline enforces a 150-second minimum track length.")
         sys.exit(1)
 
     # 3. Register session in user_vaults ledger
@@ -140,7 +157,9 @@ def run_smoke_test():
         "-File", RUN_PIPELINE_SCRIPT,
         "-SessionId", session_id,
         "-GenreLock", GENRE_LOCK,
-        "-UserId", test_user_id
+        "-UserId", test_user_id,
+        "-DurationSeconds", str(TARGET_DURATION_SEC),
+        "-PremixLayers", str(PREMIX_LAYERS)
     ]
 
     proc = subprocess.run(cmd, capture_output=True, text=True)

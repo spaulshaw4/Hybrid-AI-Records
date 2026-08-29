@@ -38,9 +38,9 @@ MTG_GENRE_TSV = BASE_DIR / "mtg" / "data" / "autotagging_genre.tsv"
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
-# One render consumes 420 one-second slices. A genre below this cannot produce a
+# A 2:30 render consumes 150 one-second slices. A genre below this cannot produce a
 # single complete track, so offering it in the UI would be a dead end.
-SLICES_PER_RENDER = 420
+SLICES_PER_RENDER = 150
 
 
 def slugify_genre(name: str) -> str:

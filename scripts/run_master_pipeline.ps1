@@ -7,8 +7,59 @@ param(
     [string]$GenreLock,
 
     [Parameter(Mandatory=$false)]
-    [string]$UserId = "00000000-0000-0000-0000-000000000001"
+    [string]$UserId = "00000000-0000-0000-0000-000000000001",
+
+    # Master length in seconds. One 1000ms slice per timeline position, so this
+    # equals the final track duration. Clamped to the supported range below.
+    [Parameter(Mandatory=$false)]
+    [int]$DurationSeconds = 420,
+
+    # Stems overlaid simultaneously at each position by cylinder_premix_overlay.
+    # 1 disables the premix stage and concatenates raw slices directly.
+    [Parameter(Mandatory=$false)]
+    [int]$PremixLayers = 4,
+
+    # DSP calibration, applied to both the premix overlay and the final master.
+    [Parameter(Mandatory=$false)]
+    [double]$ThresholdDbfs = -3.0,
+
+    [Parameter(Mandatory=$false)]
+    [double]$CeilingDbfs = -0.5,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("acoustic", "linear", "unity")]
+    [string]$GainMode = "acoustic",
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet(16, 24)]
+    [int]$BitDepth = 16,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NoDither = $false
 )
+
+# Invariant culture so a comma decimal separator never reaches argparse
+$inv = [System.Globalization.CultureInfo]::InvariantCulture
+$ThresholdArg = $ThresholdDbfs.ToString($inv)
+$CeilingArg = $CeilingDbfs.ToString($inv)
+
+# Supported track length: 2:30 minimum, 7:00 maximum.
+$MIN_DURATION_SEC = 150
+$MAX_DURATION_SEC = 420
+
+if ($DurationSeconds -lt $MIN_DURATION_SEC) {
+    Write-Host "[DURATION] $DurationSeconds s is below the $MIN_DURATION_SEC s minimum; clamping." -ForegroundColor Yellow
+    $DurationSeconds = $MIN_DURATION_SEC
+} elseif ($DurationSeconds -gt $MAX_DURATION_SEC) {
+    Write-Host "[DURATION] $DurationSeconds s exceeds the $MAX_DURATION_SEC s maximum; clamping." -ForegroundColor Yellow
+    $DurationSeconds = $MAX_DURATION_SEC
+}
+
+if ($PremixLayers -lt 1) { $PremixLayers = 1 }
+
+# Premix consumes layers x positions slices and emits `positions` composites,
+# so staging must cover the vertical dimension too.
+$RequiredSlices = $DurationSeconds * $PremixLayers
 
 $ErrorActionPreference = "Stop"
 
@@ -73,10 +124,24 @@ try {
     Write-Host "[PIPELINE] Staging 1000ms audio slices from $SlicesDir..."
 
     if (Test-Path $SlicesDir) {
-        $SliceFiles = Get-ChildItem -Path $SlicesDir -Filter "*.wav" | Select-Object -First 420
+        $SliceFiles = Get-ChildItem -Path $SlicesDir -Filter "*.wav" | Select-Object -First $RequiredSlices
 
         if ($SliceFiles.Count -eq 0) {
             throw "No audio slices found in $SlicesDir. Run ingestion first."
+        }
+
+        # Not enough material for the requested length: shorten rather than fail,
+        # but never below the 2:30 floor.
+        if ($SliceFiles.Count -lt $RequiredSlices) {
+            $achievable = [math]::Floor($SliceFiles.Count / $PremixLayers)
+
+            if ($achievable -lt $MIN_DURATION_SEC) {
+                throw "Only $($SliceFiles.Count) slices in $SlicesDir. At $PremixLayers layers that yields ${achievable}s, under the ${MIN_DURATION_SEC}s minimum."
+            }
+
+            Write-Host "[DURATION] Only $($SliceFiles.Count) slices available; reducing target from ${DurationSeconds}s to ${achievable}s." -ForegroundColor Yellow
+            $DurationSeconds = $achievable
+            $RequiredSlices = $DurationSeconds * $PremixLayers
         }
 
         foreach ($file in $SliceFiles) {
@@ -104,7 +169,40 @@ try {
         Write-Host "  -> [INFO] ai_inference_engine.py not found. Proceeding with staged raw stems."
     }
 
-    # 4. Execute Cylinder Bus Summation
+    # 3b. Cylinder Premix - VERTICAL overlay. Consumes $PremixLayers slices per
+    #     position and emits one composite per position, so the concatenated
+    #     length below stays at $DurationSeconds.
+    if ($PremixLayers -gt 1) {
+        $StepTimer.Restart()
+        Write-Host "[PIPELINE] Executing Cylinder Premix ($PremixLayers layers x $DurationSeconds positions)..."
+        $PremixScript = Join-Path $ScriptsDir "cylinder_premix_overlay.py"
+
+        if (Test-Path $PremixScript) {
+            $premixArgs = @(
+                $PremixScript,
+                "--session", $SessionId,
+                "--dir", $WorkDir,
+                "--layers", $PremixLayers,
+                "--positions", $DurationSeconds,
+                "--gain-mode", $GainMode,
+                "--threshold-dbfs", $ThresholdArg,
+                "--ceiling-dbfs", $CeilingArg,
+                "--bit-depth", $BitDepth
+            )
+            if ($NoDither) { $premixArgs += "--no-dither" }
+
+            python @premixArgs
+            if ($LASTEXITCODE -ne 0) { throw "Cylinder premix failed." }
+            $StepTimer.Stop()
+            Send-Telemetry -EventType "premix_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"layers`":$PremixLayers,`"positions`":$DurationSeconds}"
+        } else {
+            Write-Host "  -> [INFO] cylinder_premix_overlay.py not found; concatenating raw slices." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[PIPELINE] Premix disabled (PremixLayers=1); concatenating raw slices."
+    }
+
+    # 4. Execute Cylinder Bus Summation - HORIZONTAL concatenation
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Executing Cylinder Bus Summation..."
     $SummationScript = Join-Path $ScriptsDir "cylinder_bus_summation.py"

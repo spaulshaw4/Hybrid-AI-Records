@@ -8,16 +8,31 @@ def sum_bus_stems(session_id, work_dir):
     print(f"CYLINDER BUS SUMMATION - RENDERING MASTER FOR: {session_id}")
     print("================================================================")
 
+    # Prefer premixed composites when cylinder_premix_overlay.py has run.
+    # This stage is strictly HORIZONTAL: it concatenates positions in sequence to
+    # build duration. Vertical layering belongs to the premix step - summing
+    # slices on top of each other here would collapse a 7-minute track into 1s.
+    premix_dir = os.path.join(work_dir, "premixed_stems")
     raw_stems_dir = os.path.join(work_dir, "raw_stems")
-    if not os.path.exists(raw_stems_dir):
-        raise FileNotFoundError(f"Raw stems directory not found at: {raw_stems_dir}")
 
-    stem_files = sorted([f for f in os.listdir(raw_stems_dir) if f.endswith(".wav")])
+    if os.path.isdir(premix_dir) and any(f.lower().endswith(".wav") for f in os.listdir(premix_dir)):
+        source_dir = premix_dir
+        source_label = "premixed composites"
+    elif os.path.exists(raw_stems_dir):
+        source_dir = raw_stems_dir
+        source_label = "raw stems (no premix present)"
+    else:
+        raise FileNotFoundError(
+            f"Neither premixed_stems nor raw_stems found under {work_dir}"
+        )
+
+    stem_files = sorted([f for f in os.listdir(source_dir) if f.endswith(".wav")])
 
     if not stem_files:
-        raise ValueError(f"No stem files found in {raw_stems_dir}")
+        raise ValueError(f"No stem files found in {source_dir}")
 
-    print(f"[SUMMATION] Loading and summing {len(stem_files)} sequential stems...")
+    print(f"[SUMMATION] Source: {source_label}")
+    print(f"[SUMMATION] Concatenating {len(stem_files)} sequential positions...")
 
     # Initialize master mix container
     master_mix = AudioSegment.empty()

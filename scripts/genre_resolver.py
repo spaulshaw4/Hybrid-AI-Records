@@ -197,7 +197,7 @@ def family_of(genre_slug: str) -> str | None:
     return _GENRE_TO_FAMILY.get(genre_slug)
 
 
-def resolve_genre(requested: str, available: dict, min_slices: int = 420) -> dict:
+def resolve_genre(requested: str, available: dict, min_slices: int = 150) -> dict:
     """
     Resolve `requested` against `available` ({slug: count}).
 
@@ -267,8 +267,8 @@ def main():
     parser = argparse.ArgumentParser(description="Resolve a genre to one with real slices behind it")
     parser.add_argument("--requested", required=True, help="Genre the caller asked for")
     parser.add_argument("--slices-dir", default=str(SLICES_DIR), help="uploaded_slices root")
-    parser.add_argument("--min-slices", type=int, default=420,
-                        help="Slices needed for one full render (default 420)")
+    parser.add_argument("--min-slices", type=int, default=150,
+                        help="Slices needed for the 2:30 minimum render (default 150)")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of the bare slug")
     parser.add_argument("--list-available", action="store_true", help="List every genre with slice counts")
     args = parser.parse_args()
