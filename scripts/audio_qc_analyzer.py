@@ -68,6 +68,72 @@ SPEC_PHASE_WARN = 0.15
 SPEC_DC_LIMIT = 0.0001
 SPEC_REGAIN_DEVIATION_LU = 1.5
 
+# Genre-calibrated compliance. A single threshold set is wrong in both
+# directions: the default 0.25 phase floor fails a correctly made ambient
+# master, where 0.15 width is intentional, while passing a rap master that is
+# too wide for a genre wanting 0.65 or above. Loudness targets differ by 5 LU
+# across these profiles, and true-peak ceilings by 0.7 dB.
+#
+# Values follow the Cortex compliance matrix. "default" is the section 7
+# baseline, used when no genre is supplied.
+GENRE_COMPLIANCE = {
+    "default": {
+        "lufs_min": -15.0, "lufs_max": -13.0,
+        "true_peak_ceiling": -0.50,
+        "phase_min": 0.25, "phase_max": 0.95,
+        "crest_min": None, "crest_max": None,
+        "dc_limit": 0.0001,
+    },
+    "rap": {
+        "lufs_min": -11.0, "lufs_max": -9.0,
+        "true_peak_ceiling": -0.30,
+        "phase_min": 0.65, "phase_max": 1.00,
+        "crest_min": 6.0, "crest_max": 8.0,
+        "dc_limit": 0.0001,
+    },
+    "distorted_rock": {
+        "lufs_min": -10.5, "lufs_max": -8.5,
+        "true_peak_ceiling": -0.50,
+        "phase_min": 0.40, "phase_max": 0.95,
+        "crest_min": 5.5, "crest_max": 7.5,
+        "dc_limit": 0.0001,
+    },
+    "space_trippy": {
+        "lufs_min": -16.0, "lufs_max": -14.0,
+        "true_peak_ceiling": -1.00,
+        "phase_min": 0.15, "phase_max": 0.95,
+        "crest_min": 10.0, "crest_max": 14.0,
+        "dc_limit": 0.0001,
+    },
+}
+
+# Aliases onto the compliance profiles above
+GENRE_ALIASES = {
+    "trap": "rap", "modern_rap": "rap", "hiphop": "rap", "hip_hop": "rap",
+    "rap_rock": "rap",
+    "rock": "distorted_rock", "heavy_alternative_rock": "distorted_rock",
+    "nu_metal": "distorted_rock", "metal": "distorted_rock",
+    "ambient": "space_trippy", "psychedelic": "space_trippy",
+    "space": "space_trippy", "trippy": "space_trippy",
+}
+
+
+def resolve_compliance(genre: str = None):
+    """Returns (profile_dict, resolved_name)."""
+    if not genre:
+        return GENRE_COMPLIANCE["default"], "default"
+
+    key = str(genre).strip().lower().replace("-", "_").replace(" ", "_")
+
+    if key in GENRE_COMPLIANCE:
+        return GENRE_COMPLIANCE[key], key
+
+    if key in GENRE_ALIASES:
+        target = GENRE_ALIASES[key]
+        return GENRE_COMPLIANCE[target], f"{key} -> {target}"
+
+    return GENRE_COMPLIANCE["default"], f"{key} -> default (no profile)"
+
 
 def design_high_shelf(fs: float):
     """
@@ -489,13 +555,57 @@ if __name__ == "__main__":
     parser.add_argument("--apply-gain", action="store_true",
                         help="Re-gain the master toward target when deviation exceeds "
                              "1.5 LU, then re-measure (spec section 5 enforcement)")
+    parser.add_argument("--genre", default=None,
+                        help="Apply a genre compliance profile: rap, distorted_rock, "
+                             "space_trippy, or an alias. Overrides the threshold defaults.")
+    parser.add_argument("--list-profiles", action="store_true",
+                        help="Print the genre compliance matrix and exit")
     args = parser.parse_args()
+
+    if args.list_profiles:
+        header = (f"{'profile':<16}{'LUFS window':>18}{'true peak':>13}"
+                  f"{'phase band':>14}{'crest factor':>16}")
+        print(header)
+        print("-" * len(header))
+
+        for name, p in GENRE_COMPLIANCE.items():
+            lufs = f"{p['lufs_min']} to {p['lufs_max']}"
+            peak = f"{p['true_peak_ceiling']} dBTP"
+            phase = f"{p['phase_min']} to {p['phase_max']}"
+            crest = ("n/a" if p["crest_min"] is None
+                     else f"{p['crest_min']} to {p['crest_max']} dB")
+            print(f"{name:<16}{lufs:>18}{peak:>13}{phase:>14}{crest:>16}")
+
+        print()
+        print("aliases:")
+        for alias, target in sorted(GENRE_ALIASES.items()):
+            print(f"  {alias:<26} -> {target}")
+        sys.exit(0)
+
+    # A genre profile supplies every threshold, so it overrides the individual
+    # flags rather than being merged with them.
+    phase_min = SPEC_PHASE_MIN
+    phase_max = SPEC_PHASE_MAX
+    dc_limit = SPEC_DC_LIMIT
+
+    if args.genre:
+        profile, resolved = resolve_compliance(args.genre)
+        print(f"[QC] Compliance profile: {resolved}")
+        args.lufs_min = profile["lufs_min"]
+        args.lufs_max = profile["lufs_max"]
+        args.true_peak_ceiling = profile["true_peak_ceiling"]
+        phase_min = profile["phase_min"]
+        phase_max = profile["phase_max"]
+        dc_limit = profile["dc_limit"]
 
     rep = analyze_master_qc(
         args.wav_path,
         target_lufs_min=args.lufs_min,
         target_lufs_max=args.lufs_max,
         true_peak_ceiling=args.true_peak_ceiling,
+        phase_min=phase_min,
+        phase_max=phase_max,
+        dc_limit=dc_limit,
         report_out=args.report_out
     )
 
@@ -518,6 +628,9 @@ if __name__ == "__main__":
             target_lufs_min=args.lufs_min,
             target_lufs_max=args.lufs_max,
             true_peak_ceiling=args.true_peak_ceiling,
+            phase_min=phase_min,
+            phase_max=phase_max,
+            dc_limit=dc_limit,
             report_out=args.report_out
         )
 
