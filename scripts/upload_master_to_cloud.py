@@ -14,12 +14,15 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "vault-storage"
 
 
-# Supabase free tier caps a single upload at 50 MB. Uncompressed stereo 44.1 kHz
-# reaches that at 4:57 for 16-bit and 3:18 for 24-bit, both inside the pipeline's
-# 2:30-7:00 duration range, so a long render silently fails partway through the
-# transfer without this check. Override via HYBRID_MAX_UPLOAD_MB on a paid plan
-# (Pro allows 5 GB).
-DEFAULT_MAX_UPLOAD_MB = 50.0
+# Supabase Pro allows 5 GB per file, which clears the whole 2:30-7:00 range
+# with room to spare: a 7:00 master is 70.7 MB at 16-bit, 106 MB at 24-bit.
+#
+# Defaulting to the free tier's 50 MB instead would reject every render past
+# 4:57 (16-bit) or 3:18 (24-bit), so the guard exists to catch a genuinely
+# oversized file rather than to enforce the free-tier ceiling.
+#
+# On free tier, set HYBRID_MAX_UPLOAD_MB=50.
+DEFAULT_MAX_UPLOAD_MB = 5120.0
 
 
 def check_upload_size(master_path):

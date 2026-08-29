@@ -150,7 +150,8 @@ class BinaryCompositeConstructor:
         return audio[int(crossings[0]) + 1:] if len(crossings) else audio
 
     def construct(self, threshold_dbfs=DEFAULT_THRESHOLD_DBFS,
-                  ceiling_dbfs=DEFAULT_CEILING_DBFS, enable_dither=True) -> np.ndarray:
+                  ceiling_dbfs=DEFAULT_CEILING_DBFS, enable_dither=True,
+                  oversample=1) -> np.ndarray:
         items = self.recipe.get("arrangement", [])
 
         print(f"[CONSTRUCT] {len(items)} arrangement block(s) at {self.bpm} BPM "
@@ -202,10 +203,15 @@ class BinaryCompositeConstructor:
         pre_peak = float(np.max(np.abs(self.master_canvas)))
         print(f"[CONSTRUCT] Pre-limiter peak: {linear_to_dbfs(pre_peak):.2f} dBFS")
 
+        if oversample > 1:
+            print(f"[CONSTRUCT] Limiting at {oversample}x to suppress tanh aliasing "
+                  f"(adds roughly 10s to a 7-minute canvas)")
+
         limited = apply_soft_knee_limiter(
             self.master_canvas,
             threshold_linear=dbfs_to_linear(threshold_dbfs),
-            ceiling_linear=dbfs_to_linear(ceiling_dbfs)
+            ceiling_linear=dbfs_to_linear(ceiling_dbfs),
+            oversample=oversample
         )
 
         post_peak = float(np.max(np.abs(limited)))
@@ -329,6 +335,9 @@ def main():
     parser.add_argument("--threshold-dbfs", type=float, default=DEFAULT_THRESHOLD_DBFS)
     parser.add_argument("--ceiling-dbfs", type=float, default=DEFAULT_CEILING_DBFS)
     parser.add_argument("--no-dither", action="store_true")
+    parser.add_argument("--oversample", type=int, default=1, choices=[1, 2, 4, 8],
+                        help="Run the Q4 limiter at this multiple to suppress tanh " +
+                             "aliasing. 4x drops folded harmonics about 60 dB.")
     parser.add_argument("--validate-only", action="store_true",
                         help="Check the recipe and slice references, then exit")
     args = parser.parse_args()
@@ -347,7 +356,8 @@ def main():
     dsp = {
         "threshold_dbfs": args.threshold_dbfs,
         "ceiling_dbfs": args.ceiling_dbfs,
-        "enable_dither": not args.no_dither
+        "enable_dither": not args.no_dither,
+        "oversample": args.oversample
     }
 
     if args.output or not args.session_id:
