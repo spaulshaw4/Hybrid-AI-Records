@@ -46,6 +46,28 @@ try {
     if (!(Test-Path $WorkDir)) { New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null }
     if (!(Test-Path $RawStemsDir)) { New-Item -ItemType Directory -Force -Path $RawStemsDir | Out-Null }
 
+    # 1b. Resolve the requested genre to one that actually has slices.
+    #     heavy_alternative_rock, nu_metal, rap_rock and amapiano match no label
+    #     in either source dataset, so without this they abort every render.
+    $ResolverScript = Join-Path $ScriptsDir "genre_resolver.py"
+    $ResolvedGenre = $GenreLock
+
+    if ((Test-Path $ResolverScript) -and -not (Test-Path (Join-Path "$BaseDir\uploaded_slices" $GenreLock))) {
+        . "$ScriptsDir\resolve_python.ps1"
+        $python = Get-HybridPython -Quiet
+
+        if ($python) {
+            $candidate = (& $python $ResolverScript --requested $GenreLock --slices-dir "$BaseDir\uploaded_slices" 2>$null | Select-Object -First 1)
+
+            if ($candidate -and $candidate.Trim() -and $candidate.Trim() -ne $GenreLock) {
+                $ResolvedGenre = $candidate.Trim()
+                Write-Host "[GENRE] '$GenreLock' has no staged slices; substituting nearest profile '$ResolvedGenre'." -ForegroundColor Yellow
+                Send-Telemetry -EventType "genre_substituted" -Duration 0 -MetadataJson "{`"requested`":`"$GenreLock`",`"resolved`":`"$ResolvedGenre`"}"
+                $SlicesDir = Join-Path "$BaseDir\uploaded_slices" $ResolvedGenre
+            }
+        }
+    }
+
     # 2. Stage slices as raw stems for summation
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Staging 1000ms audio slices from $SlicesDir..."
@@ -75,7 +97,7 @@ try {
     $InferenceScript = Join-Path $ScriptsDir "ai_inference_engine.py"
 
     if (Test-Path $InferenceScript) {
-        python $InferenceScript --session $SessionId --dir $WorkDir --genre $GenreLock
+        python $InferenceScript --session $SessionId --dir $WorkDir --genre $ResolvedGenre
         $StepTimer.Stop()
         Send-Telemetry -EventType "inference_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"genre`":`"$GenreLock`"}"
     } else {

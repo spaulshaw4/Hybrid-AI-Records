@@ -87,6 +87,10 @@ $Manifest = @(
     "fetch_dataset_binary.ps1",
     "bulk_extract_datasets.ps1",
 
+    # Genre labelling and resolution
+    "build_genre_corpus.py",
+    "genre_resolver.py",
+
     # Ingestion
     "watchdog_slicing_daemon.py",
     "local_slicer.py",

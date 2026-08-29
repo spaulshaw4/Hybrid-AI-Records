@@ -3,6 +3,9 @@ import os
 import argparse
 from pydub import AudioSegment, effects
 
+# Per-genre overrides. Anything not listed here resolves through
+# FAMILY_PROFILES, so all 221 genres in the corpus get a sensible curve rather
+# than silently inheriting a rock profile.
 GENRE_PROFILES = {
     "heavy_alternative_rock": {
         "bass_boost_db": 3.0,
@@ -29,6 +32,43 @@ GENRE_PROFILES = {
         "fade_ms": 12
     }
 }
+
+# Family-level curves, keyed to the same families genre_resolver.py uses.
+FAMILY_PROFILES = {
+    "rock":         {"bass_boost_db": 3.0, "high_shelf_db": 2.0, "target_dbfs": -12.0, "fade_ms": 10},
+    "metal":        {"bass_boost_db": 4.5, "high_shelf_db": 1.5, "target_dbfs": -11.0, "fade_ms": 8},
+    "hiphop":       {"bass_boost_db": 4.0, "high_shelf_db": 2.5, "target_dbfs": -12.0, "fade_ms": 10},
+    "electronic":   {"bass_boost_db": 5.0, "high_shelf_db": 3.0, "target_dbfs": -13.0, "fade_ms": 12},
+    "ambient":      {"bass_boost_db": 1.0, "high_shelf_db": 1.0, "target_dbfs": -16.0, "fade_ms": 25},
+    "jazz":         {"bass_boost_db": 1.5, "high_shelf_db": 1.5, "target_dbfs": -14.0, "fade_ms": 15},
+    "acoustic":     {"bass_boost_db": 1.0, "high_shelf_db": 2.0, "target_dbfs": -14.0, "fade_ms": 15},
+    "classical":    {"bass_boost_db": 0.0, "high_shelf_db": 1.0, "target_dbfs": -16.0, "fade_ms": 25},
+    "world":        {"bass_boost_db": 2.5, "high_shelf_db": 2.0, "target_dbfs": -13.0, "fade_ms": 12},
+    "pop":          {"bass_boost_db": 3.0, "high_shelf_db": 2.5, "target_dbfs": -12.0, "fade_ms": 10},
+    "experimental": {"bass_boost_db": 1.0, "high_shelf_db": 1.0, "target_dbfs": -15.0, "fade_ms": 20},
+}
+
+# Neutral curve for genres with no override and no recognised family: gentle
+# normalisation and anti-click fades only, no tonal opinion.
+NEUTRAL_PROFILE = {"bass_boost_db": 0.0, "high_shelf_db": 0.0, "target_dbfs": -14.0, "fade_ms": 12}
+
+
+def select_profile(genre_lock: str) -> tuple:
+    """Returns (profile, description) for any genre in the 221-label vocabulary."""
+    if genre_lock in GENRE_PROFILES:
+        return GENRE_PROFILES[genre_lock], f"explicit override '{genre_lock}'"
+
+    family = None
+    try:
+        from genre_resolver import family_of, slugify
+        family = family_of(slugify(genre_lock))
+    except Exception:
+        pass
+
+    if family and family in FAMILY_PROFILES:
+        return FAMILY_PROFILES[family], f"'{family}' family curve"
+
+    return NEUTRAL_PROFILE, "neutral curve (no override or family match)"
 
 
 def apply_genre_eq(audio_segment: AudioSegment, profile: dict) -> AudioSegment:
@@ -74,9 +114,9 @@ def run_inference(session_id: str, work_dir: str, genre_lock: str):
     if not stem_files:
         raise ValueError(f"No stem slices available in {raw_stems_dir} for conditioning.")
 
-    profile = GENRE_PROFILES.get(genre_lock, GENRE_PROFILES["heavy_alternative_rock"])
+    profile, profile_desc = select_profile(genre_lock)
 
-    print(f"[INFERENCE] Processing {len(stem_files)} sequential stems using profile: {genre_lock}")
+    print(f"[INFERENCE] Processing {len(stem_files)} sequential stems using {profile_desc}")
 
     for idx, filename in enumerate(stem_files):
         stem_path = os.path.join(raw_stems_dir, filename)
