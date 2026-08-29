@@ -120,6 +120,8 @@ $Manifest = @(
     "hardware_macro_server.py",
     "hybrid_terminal_hud.py",
     "test_genre_quadrants_suite.py",
+    "track_constructor_engine.py",
+    "test_track_constructor.py",
     "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",

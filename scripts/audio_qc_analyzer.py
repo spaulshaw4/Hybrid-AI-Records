@@ -234,8 +234,24 @@ def read_wav(wav_path: str):
     return data.astype(np.float64), fr, sw, n_ch, nf
 
 
-def analyze_master_qc(wav_path: str, target_lufs_min=-16.0, target_lufs_max=-9.0,
-                      true_peak_ceiling=-0.1, report_out=None) -> dict:
+# Acceptance standards, per the Hybrid 1.0 architecture spec section 7.
+# The phase correlation band has an upper bound as well as a lower one: below
+# +0.25 the mix cancels on a mono speaker, while above +0.95 it is effectively
+# mono already and the Q2 width stage has done nothing.
+SPEC_LUFS_TARGET = -14.0
+SPEC_LUFS_TOLERANCE = 1.0
+SPEC_TRUE_PEAK_CEILING = -0.5
+SPEC_PHASE_MIN = 0.25
+SPEC_PHASE_MAX = 0.95
+SPEC_DC_LIMIT = 0.0001
+
+
+def analyze_master_qc(wav_path: str,
+                      target_lufs_min=SPEC_LUFS_TARGET - SPEC_LUFS_TOLERANCE,
+                      target_lufs_max=SPEC_LUFS_TARGET + SPEC_LUFS_TOLERANCE,
+                      true_peak_ceiling=SPEC_TRUE_PEAK_CEILING,
+                      phase_min=SPEC_PHASE_MIN, phase_max=SPEC_PHASE_MAX,
+                      dc_limit=SPEC_DC_LIMIT, report_out=None) -> dict:
     if not os.path.exists(wav_path):
         raise FileNotFoundError(f"Master file not found: {wav_path}")
 
@@ -263,8 +279,8 @@ def analyze_master_qc(wav_path: str, target_lufs_min=-16.0, target_lufs_max=-9.0
 
     streaming_lufs_pass = bool(target_lufs_min <= integrated_lufs <= target_lufs_max)
     true_peak_pass = bool(true_peak_dbtp <= true_peak_ceiling)
-    phase_pass = bool(phase_correlation > 0.15)
-    dc_pass = bool(abs(dc_offset_l) < 0.001 and abs(dc_offset_r) < 0.001)
+    phase_pass = bool(phase_min <= phase_correlation <= phase_max)
+    dc_pass = bool(abs(dc_offset_l) < dc_limit and abs(dc_offset_r) < dc_limit)
 
     report = {
         "master_file": os.path.basename(wav_path),
@@ -287,7 +303,9 @@ def analyze_master_qc(wav_path: str, target_lufs_min=-16.0, target_lufs_max=-9.0
         },
         "targets": {
             "lufs_window": [target_lufs_min, target_lufs_max],
-            "true_peak_ceiling_dbtp": true_peak_ceiling
+            "true_peak_ceiling_dbtp": true_peak_ceiling,
+            "phase_window": [phase_min, phase_max],
+            "dc_offset_limit": dc_limit
         },
         "compliance": {
             "streaming_target_met": streaming_lufs_pass,
@@ -322,10 +340,10 @@ def analyze_master_qc(wav_path: str, target_lufs_min=-16.0, target_lufs_max=-9.0
     print(f"Phase Coeff : {m['stereo_phase_correlation']}")
     print(f"DC Offset   : L {m['dc_offset']['left']}  R {m['dc_offset']['right']}")
     print("----------------------------------------------------------------")
-    print(f"  true peak <= {true_peak_ceiling} dBTP    : {'PASS' if c['true_peak_safety_met'] else 'FAIL'}")
-    print(f"  phase correlation > 0.15   : {'PASS' if c['phase_compatibility_met'] else 'FAIL'}")
-    print(f"  DC offset clean            : {'PASS' if c['dc_offset_clean'] else 'FAIL'}")
-    print(f"  loudness in [{target_lufs_min}, {target_lufs_max}] : "
+    print(f"  true peak <= {true_peak_ceiling} dBTP        : {'PASS' if c['true_peak_safety_met'] else 'FAIL'}")
+    print(f"  phase in [{phase_min}, {phase_max}]        : {'PASS' if c['phase_compatibility_met'] else 'FAIL'}")
+    print(f"  DC offset < {dc_limit}         : {'PASS' if c['dc_offset_clean'] else 'FAIL'}")
+    print(f"  loudness in [{target_lufs_min}, {target_lufs_max}]  : "
           f"{'PASS' if c['streaming_target_met'] else 'outside window (informational)'}")
     print("----------------------------------------------------------------")
     print(f"QC VERDICT  : {'[PASS]' if c['overall_qc_passed'] else '[FAIL]'}")

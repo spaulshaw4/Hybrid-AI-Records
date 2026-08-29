@@ -1,0 +1,46 @@
+{
+  "track_title": "Heavy Sky Arrival",
+  "bpm": 140.0,
+  "time_signature": [4, 4],
+  "total_bars": 64,
+  "total_duration_sec": 109.71,
+  "bit_depth": 16,
+  "arrangement": [
+    {
+      "section": "INTRO",
+      "bar": 1,
+      "beat": 1.0,
+      "stem_type": "foundation",
+      "slice_file": "kick_808_sub.wav",
+      "gain_linear": 0.90,
+      "pan": 0.0
+    },
+    {
+      "section": "INTRO",
+      "bar": 1,
+      "beat": 1.0,
+      "stem_type": "harmonics",
+      "slice_file": "rhythm_riff_a.wav",
+      "gain_linear": 0.75,
+      "pan": -0.80
+    },
+    {
+      "section": "VERSE",
+      "bar": 9,
+      "beat": 1.0,
+      "stem_type": "leads",
+      "slice_file": "verse_vocal_lead.wav",
+      "gain_linear": 1.00,
+      "pan": 0.0
+    },
+    {
+      "section": "CHORUS",
+      "bar": 25,
+      "beat": 1.0,
+      "stem_type": "harmonics",
+      "slice_file": "wall_guitars_stereo.wav",
+      "gain_linear": 0.85,
+      "pan": 0.0
+    }
+  ]
+}
