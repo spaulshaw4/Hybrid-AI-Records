@@ -220,6 +220,7 @@ $Services = @(
     "HybridPrometheusExporterDaemon",
     "HybridPrometheusDaemon",
     "HybridAlertmanagerDaemon",
+    "HybridAlertBridgeDaemon",
     "HybridStorageGuardDaemon",
     "HybridStagnationHealerDaemon",
     "HybridWatchdogDaemon",
@@ -260,6 +261,7 @@ $PortChecks = @(
     @{ Name = "Prometheus UI / Engine"; Port = 9090 },
     @{ Name = "Alertmanager Gateway";   Port = 9093 },
     @{ Name = "Hybrid Metrics Exporter"; Port = 9191 },
+    @{ Name = "Alert Notification Bridge"; Port = 5001 },
     @{ Name = "Grafana Observability UI"; Port = 3000 }
 )
 

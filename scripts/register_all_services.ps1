@@ -80,6 +80,14 @@ $ServiceDefinitions = @(
         Stderr = "$LogDir\prometheus_exporter_stderr.log"
     },
     @{
+        Name   = "HybridAlertBridgeDaemon"
+        Exe    = $PythonPath
+        Args   = "`"$ScriptsDir\alertmanager_bridge.py`""
+        Desc   = "Hybrid 1.0 Alertmanager Notification Bridge (127.0.0.1:5001)"
+        Stdout = "$LogDir\alert_bridge_stdout.log"
+        Stderr = "$LogDir\alert_bridge_stderr.log"
+    },
+    @{
         Name   = "HybridStorageGuardDaemon"
         Exe    = $PythonPath
         Args   = "`"$ScriptsDir\storage_guard_daemon.py`""

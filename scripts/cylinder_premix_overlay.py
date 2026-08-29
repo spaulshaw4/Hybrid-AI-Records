@@ -36,7 +36,7 @@ import numpy as np
 
 def build_premix(session_id, work_dir, layers, positions,
                  gain_mode="acoustic", threshold_dbfs=-3.0, ceiling_dbfs=-0.5,
-                 bit_depth=16, enable_dither=True):
+                 bit_depth=16, enable_dither=True, genre=None, use_quadrant=False):
     print("\n================================================================")
     print(f"CYLINDER PREMIX - VERTICAL STEM OVERLAY FOR: {session_id}")
     print("================================================================")
@@ -74,6 +74,40 @@ def build_premix(session_id, work_dir, layers, positions,
     print(f"[PREMIX] Export          : {bit_depth}-bit {'TPDF dithered' if enable_dither else 'no dither'}")
     print(f"[PREMIX] Output          : {premix_dir}")
 
+    # Quadrant mode routes each position through the 4-Quadrant matrix instead
+
+
+    # of a flat overlay. Profile comes from the genre, falling back by family.
+
+
+    quadrant_profile = None
+
+
+    q_totals = [0, 0, 0]
+
+
+    if use_quadrant:
+
+
+        from genre_quadrant_engine import resolve_profile, process_position_quadrants
+
+
+        quadrant_profile, prof_src = resolve_profile(genre or "heavy_alternative_rock")
+
+
+        globals()["process_position_quadrants"] = process_position_quadrants
+
+
+        print(f"[PREMIX] Quadrant matrix : enabled (profile: {prof_src})")
+
+
+    else:
+
+
+        print(f"[PREMIX] Quadrant matrix : disabled (flat overlay)")
+
+
+
     written = 0
     peak_overall = 0.0
 
@@ -92,12 +126,36 @@ def build_premix(session_id, work_dir, layers, positions,
         if not group:
             continue
 
-        composite, sample_rate = overlay_stems(
-            group,
-            gain_mode=gain_mode,
-            threshold_dbfs=threshold_dbfs,
-            ceiling_dbfs=ceiling_dbfs
-        )
+        if quadrant_profile is not None:
+            # Quadrant routing: split this position's stems into Q1/Q2/Q3 by role
+            # or spectral content, process each band, then sum through Q4.
+            from hybrid_dsp import read_wav_float32
+            arrays = []
+            names = []
+            sample_rate = 44100
+            for p in group:
+                arr, sr = read_wav_float32(p)
+                arrays.append(arr)
+                names.append(os.path.basename(p))
+                sample_rate = sr
+
+            composite, counts = process_position_quadrants(
+                arrays, names, quadrant_profile, sample_rate
+            )
+
+            if composite is None:
+                continue
+
+            q_totals[0] += counts[0]
+            q_totals[1] += counts[1]
+            q_totals[2] += counts[2]
+        else:
+            composite, sample_rate = overlay_stems(
+                group,
+                gain_mode=gain_mode,
+                threshold_dbfs=threshold_dbfs,
+                ceiling_dbfs=ceiling_dbfs
+            )
 
         peak_overall = max(peak_overall, float(np.max(np.abs(composite))))
 
@@ -108,6 +166,12 @@ def build_premix(session_id, work_dir, layers, positions,
 
         if written % 50 == 0 or written == positions:
             print(f"  -> Premixed {written}/{positions} positions...")
+
+    if use_quadrant:
+
+
+        print(f"          Quadrant routing totals: Q1={q_totals[0]} Q2={q_totals[1]} Q3={q_totals[2]}")
+
 
     print(f"[SUCCESS] Premix complete: {written} composite position(s) in {premix_dir}")
     print(f"          Peak across composites: {linear_to_dbfs(peak_overall):.2f} dBFS")
@@ -132,6 +196,10 @@ if __name__ == "__main__":
     parser.add_argument("--bit-depth", type=int, choices=[16, 24], default=16,
                         help="Composite export bit depth (default 16)")
     parser.add_argument("--no-dither", action="store_true", help="Disable TPDF dither")
+
+    parser.add_argument("--genre", default=None, help="Genre, used to select the quadrant profile")
+
+    parser.add_argument("--quadrant", action="store_true", help="Route each position through the 4-Quadrant matrix")
     args = parser.parse_args()
 
     build_premix(
@@ -140,5 +208,9 @@ if __name__ == "__main__":
         threshold_dbfs=args.threshold_dbfs,
         ceiling_dbfs=args.ceiling_dbfs,
         bit_depth=args.bit_depth,
-        enable_dither=not args.no_dither
+        enable_dither=not args.no_dither,
+
+        genre=args.genre,
+
+        use_quadrant=args.quadrant
     )

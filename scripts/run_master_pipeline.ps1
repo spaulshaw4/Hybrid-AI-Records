@@ -35,7 +35,13 @@ param(
     [int]$BitDepth = 16,
 
     [Parameter(Mandatory=$false)]
-    [switch]$NoDither = $false
+    [switch]$NoDither = $false,
+
+    # Route each premix position through the 4-Quadrant matrix (Q1 low-end
+    # foundation, Q2 harmonic mid-body, Q3 top-end) instead of a flat overlay.
+    # Genre selects the quadrant profile; unlisted genres fall back by family.
+    [Parameter(Mandatory=$false)]
+    [switch]$UseQuadrant = $false
 )
 
 # Invariant culture so a comma decimal separator never reaches argparse
@@ -190,11 +196,12 @@ try {
                 "--bit-depth", $BitDepth
             )
             if ($NoDither) { $premixArgs += "--no-dither" }
+            if ($UseQuadrant) { $premixArgs += @("--quadrant", "--genre", $ResolvedGenre) }
 
             python @premixArgs
             if ($LASTEXITCODE -ne 0) { throw "Cylinder premix failed." }
             $StepTimer.Stop()
-            Send-Telemetry -EventType "premix_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"layers`":$PremixLayers,`"positions`":$DurationSeconds}"
+            Send-Telemetry -EventType "premix_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"layers`":$PremixLayers,`"positions`":$DurationSeconds,`"quadrant`":$($UseQuadrant.ToString().ToLower())}"
         } else {
             Write-Host "  -> [INFO] cylinder_premix_overlay.py not found; concatenating raw slices." -ForegroundColor Yellow
         }

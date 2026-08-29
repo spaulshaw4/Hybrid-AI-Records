@@ -1,6 +1,6 @@
 # D:\MusicDatasets\scripts\tail_logs.ps1
 param(
-    [ValidateSet("all", "watchdog", "audio", "storage", "healer", "exporter", "prometheus", "alertmanager")]
+    [ValidateSet("all", "watchdog", "audio", "storage", "healer", "exporter", "prometheus", "alertmanager", "bridge")]
     [string]$Service = "all",
     [int]$Lines = 30,
     [switch]$NoWait = $false
@@ -21,6 +21,7 @@ $LogMappings = @{
     "exporter"     = @("prometheus_exporter_stdout.log", "prometheus_exporter_stderr.log")
     "prometheus"   = @("prometheus_stdout.log", "prometheus_stderr.log")
     "alertmanager" = @("alertmanager_stdout.log", "alertmanager_stderr.log")
+    "bridge"       = @("alert_bridge_stdout.log", "alert_bridge_stderr.log")
 }
 
 # Determine target log files

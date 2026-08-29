@@ -1,12 +1,19 @@
 # D:\MusicDatasets\config\alertmanager.yml
 global:
   resolve_timeout: 5m
-  # Set your primary Slack or Discord webhook endpoint:
-  # For Discord, append '/slack' to your Discord webhook URL to use Slack-compatible payloads:
-  # https://discord.com/api/webhooks/<WEBHOOK_ID>/<WEBHOOK_TOKEN>/slack
-  slack_api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
 
-# Inhibit warning alerts if a critical alert for the same target is already active
+# Delivery goes through the local bridge (scripts/alertmanager_bridge.py) rather
+# than a hardcoded third-party URL. The bridge reads DISCORD_WEBHOOK_URL from the
+# environment and logs alerts when it is unset, so nothing is silently dropped
+# and no secret lives in this file.
+#
+# To post directly to Slack or Discord instead, set global.slack_api_url and swap
+# the receivers below back to slack_configs. For Discord, append '/slack' to the
+# webhook URL to get Slack-compatible payloads.
+
+# Inhibit warning alerts when a critical alert for the same target is active.
+# Requires every rule in alerts.yml to carry a `target` label - a rule without
+# one groups under an empty string and is never inhibited.
 inhibit_rules:
   - source_matchers:
       - severity = "critical"
@@ -19,49 +26,27 @@ route:
   group_wait: 10s
   group_interval: 1m
   repeat_interval: 2h
-  receiver: "slack-warning-channel"
+  receiver: "bridge-warning"
   routes:
-    # Critical incidents route to priority receiver
+    # Critical incidents repeat more aggressively
     - matchers:
         - severity = "critical"
-      receiver: "slack-critical-channel"
+      receiver: "bridge-critical"
       repeat_interval: 30m
-    # Warning alerts route to standard telemetry receiver
     - matchers:
         - severity = "warning"
-      receiver: "slack-warning-channel"
+      receiver: "bridge-warning"
       repeat_interval: 2h
 
 receivers:
-  - name: "slack-warning-channel"
-    slack_configs:
-      - channel: "#hybrid-telemetry-alerts"
+  - name: "bridge-warning"
+    webhook_configs:
+      - url: "http://127.0.0.1:5001/webhook"
         send_resolved: true
-        color: '{{ if eq .Status "firing" }}#eab308{{ else }}#22c55e{{ end }}'
-        title: '[{{ .Status | toUpper }} - WARNING] {{ .GroupLabels.alertname }}'
-        title_link: 'http://localhost:9090'
-        text: >-
-          {{ range .Alerts }}
-            *Summary:* {{ .Annotations.summary }}
-            *Details:* {{ .Annotations.description }}
-            *Target Subsystem:* `{{ .Labels.target }}`
-            *Severity:* `{{ .Labels.severity }}`
-            *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
-          {{ end }}
+        max_alerts: 0
 
-  - name: "slack-critical-channel"
-    slack_configs:
-      - channel: "#hybrid-critical-ops"
+  - name: "bridge-critical"
+    webhook_configs:
+      - url: "http://127.0.0.1:5001/webhook"
         send_resolved: true
-        color: '{{ if eq .Status "firing" }}#ef4444{{ else }}#22c55e{{ end }}'
-        title: '[{{ .Status | toUpper }} - CRITICAL INCIDENT] {{ .GroupLabels.alertname }}'
-        title_link: 'http://localhost:9090'
-        text: >-
-          <!channel>
-          {{ range .Alerts }}
-            *CRITICAL FAILURE DETECTED*
-            *Summary:* {{ .Annotations.summary }}
-            *Details:* {{ .Annotations.description }}
-            *Target Subsystem:* `{{ .Labels.target }}`
-            *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
-          {{ end }}
+        max_alerts: 0

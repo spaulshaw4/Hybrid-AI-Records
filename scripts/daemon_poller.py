@@ -62,6 +62,10 @@ def extract_render_parameters(job_metadata: dict) -> dict:
 
     no_dither = bool(job_metadata.get("no_dither", False))
 
+    # Opt-in 4-Quadrant routing during premix. Off by default: it only separates
+    # meaningfully when stems carry role information, which full-mix slices do not.
+    use_quadrant = bool(job_metadata.get("use_quadrant", False))
+
     # Track length, clamped to the supported 2:30-7:00 window
     try:
         duration_seconds = int(job_metadata.get("duration_seconds", MAX_DURATION_SEC))
@@ -82,6 +86,7 @@ def extract_render_parameters(job_metadata: dict) -> dict:
         "gain_mode": gain_mode,
         "bit_depth": bit_depth,
         "no_dither": no_dither,
+        "use_quadrant": use_quadrant,
         "duration_seconds": duration_seconds,
         "premix_layers": premix_layers,
     }
@@ -166,6 +171,9 @@ def poll_and_execute():
 
         if cfg["no_dither"]:
             cmd.append("-NoDither")
+
+        if cfg["use_quadrant"]:
+            cmd.append("-UseQuadrant")
 
         proc = subprocess.run(cmd, capture_output=True, text=True)
         print(proc.stdout)

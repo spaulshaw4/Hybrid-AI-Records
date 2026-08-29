@@ -14,6 +14,7 @@ SERVICES = [
     "HybridPrometheusExporterDaemon",
     "HybridPrometheusDaemon",
     "HybridAlertmanagerDaemon",
+    "HybridAlertBridgeDaemon",
     "HybridStorageGuardDaemon",
     "HybridStagnationHealerDaemon",
     "HybridWatchdogDaemon",
