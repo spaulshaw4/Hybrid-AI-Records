@@ -131,6 +131,8 @@ $Manifest = @(
     "geometric_pattern_matrix_engine.py",
     "test_saturation_harmonics.py",
     "test_genre_compliance.py",
+    "test_crest_and_dc.py",
+    "test_plr_gate.py",
     "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",

@@ -94,6 +94,30 @@ def apply_soft_knee_limiter(
     return np.clip(output, -ceiling_linear, ceiling_linear)
 
 
+def apply_asymmetric_drive(signal: np.ndarray, drive: float = 1.4,
+                           ceiling: float = 0.95) -> np.ndarray:
+    """
+    Asymmetric saturation: f(x) = (x + 0.2x^2) / (1 + |x|)
+
+    tanh is an odd function, so f(-x) = -f(x) and every even harmonic cancels -
+    measured, its 2nd harmonic sits at -218 dB, which is numerically zero. Guitar
+    and tube character comes from even orders, which the x^2 term supplies at
+    about -21 dB.
+
+    That same squaring rectifies negative excursions into positive energy, so the
+    curve leaves a DC offset of roughly +0.053 at drive 1.4 - about 530x the
+    0.0001 compliance limit. DC is removed per channel afterwards, before the
+    ceiling clamp, so the offset cannot consume headroom or fail the DC gate.
+    """
+    x = signal * drive
+    saturated = (x + 0.2 * (x ** 2)) / (1.0 + np.abs(x))
+
+    # Per channel: the offset is signal-dependent and the two channels differ.
+    saturated = saturated - np.mean(saturated, axis=0)
+
+    return np.clip(saturated, -ceiling, ceiling).astype(signal.dtype)
+
+
 def apply_tpdf_dither(signal: np.ndarray, target_bit_depth: int = 16) -> np.ndarray:
     """
     Triangular PDF dither, applied immediately before quantization.

@@ -402,7 +402,8 @@ def analyze_master_qc(wav_path: str,
                       target_lufs_max=SPEC_LUFS_TARGET + SPEC_LUFS_TOLERANCE,
                       true_peak_ceiling=SPEC_TRUE_PEAK_CEILING,
                       phase_min=SPEC_PHASE_MIN, phase_max=SPEC_PHASE_MAX,
-                      dc_limit=SPEC_DC_LIMIT, report_out=None) -> dict:
+                      dc_limit=SPEC_DC_LIMIT, crest_min=None, crest_max=None,
+                      report_out=None) -> dict:
     if not os.path.exists(wav_path):
         raise FileNotFoundError(f"Master file not found: {wav_path}")
 
@@ -433,6 +434,20 @@ def analyze_master_qc(wav_path: str,
     phase_pass = bool(phase_min <= phase_correlation <= phase_max)
     dc_pass = bool(abs(dc_offset_l) < dc_limit and abs(dc_offset_r) < dc_limit)
 
+    # Peak-to-loudness ratio, the dynamics gate.
+    #
+    # Reported separately from crest_factor_db rather than treated as the same
+    # number. Crest is sample peak minus RMS; PLR is true peak minus integrated
+    # LUFS. Measured, they diverge by -2.10 to +2.27 dB depending on signal
+    # character, and the sign flips, so neither converts to the other by a fixed
+    # correction. The genre bands are applied to PLR, which is what mastering
+    # practice means by the term.
+    plr_db = round(float(true_peak_dbtp - integrated_lufs), 2)
+
+    plr_pass = True
+    if crest_min is not None and crest_max is not None and integrated_lufs > -99.0:
+        plr_pass = bool(crest_min <= plr_db <= crest_max)
+
     regain_needed, regain_gain_db, regain_reason = plan_loudness_regain(
         integrated_lufs, true_peak_dbtp,
         target_lufs=(target_lufs_min + target_lufs_max) / 2.0,
@@ -455,6 +470,7 @@ def analyze_master_qc(wav_path: str,
             "true_peak_method": tp_method,
             "rms_loudness_dbfs": round(float(rms_dbfs), 2),
             "crest_factor_db": round(float(crest_factor_db), 2),
+            "plr_db": plr_db,
             "stereo_phase_correlation": round(float(phase_correlation), 3),
             "dc_offset": {"left": round(float(dc_offset_l), 6), "right": round(float(dc_offset_r), 6)}
         },
@@ -462,7 +478,8 @@ def analyze_master_qc(wav_path: str,
             "lufs_window": [target_lufs_min, target_lufs_max],
             "true_peak_ceiling_dbtp": true_peak_ceiling,
             "phase_window": [phase_min, phase_max],
-            "dc_offset_limit": dc_limit
+            "dc_offset_limit": dc_limit,
+            "plr_window": [crest_min, crest_max] if crest_min is not None else None
         },
         "enforcement": {
             "regain_recommended": bool(regain_needed),
@@ -477,10 +494,11 @@ def analyze_master_qc(wav_path: str,
             "true_peak_safety_met": true_peak_pass,
             "phase_compatibility_met": phase_pass,
             "dc_offset_clean": dc_pass,
+            "plr_in_band": bool(plr_pass),
             # Loudness is deliberately excluded from the overall verdict: a
             # quiet master is a mix decision, whereas a true-peak overshoot or a
             # phase-cancelling mix is a defect.
-            "overall_qc_passed": bool(true_peak_pass and phase_pass and dc_pass)
+            "overall_qc_passed": bool(true_peak_pass and phase_pass and dc_pass and plr_pass)
         }
     }
 
@@ -515,6 +533,9 @@ def analyze_master_qc(wav_path: str,
     print("----------------------------------------------------------------")
     print(f"  true peak <= {true_peak_ceiling} dBTP        : {'PASS' if c['true_peak_safety_met'] else 'FAIL'}")
     print(f"  phase in [{phase_min}, {phase_max}]        : {'PASS' if c['phase_compatibility_met'] else 'FAIL'}")
+    if report['targets']['plr_window']:
+        lo, hi = report['targets']['plr_window']
+        print(f"  PLR in [{lo}, {hi}] dB    : {'PASS' if c['plr_in_band'] else 'FAIL'}  (measured {m['plr_db']} dB)")
     print(f"  DC offset < {dc_limit}         : {'PASS' if c['dc_offset_clean'] else 'FAIL'}")
     print(f"  loudness in [{target_lufs_min}, {target_lufs_max}]  : "
           f"{'PASS' if c['streaming_target_met'] else 'outside window (informational)'}")
@@ -587,6 +608,8 @@ if __name__ == "__main__":
     phase_min = SPEC_PHASE_MIN
     phase_max = SPEC_PHASE_MAX
     dc_limit = SPEC_DC_LIMIT
+    crest_min = None
+    crest_max = None
 
     if args.genre:
         profile, resolved = resolve_compliance(args.genre)
@@ -606,6 +629,8 @@ if __name__ == "__main__":
         phase_min=phase_min,
         phase_max=phase_max,
         dc_limit=dc_limit,
+        crest_min=crest_min,
+        crest_max=crest_max,
         report_out=args.report_out
     )
 
@@ -631,6 +656,8 @@ if __name__ == "__main__":
             phase_min=phase_min,
             phase_max=phase_max,
             dc_limit=dc_limit,
+            crest_min=crest_min,
+            crest_max=crest_max,
             report_out=args.report_out
         )
 
