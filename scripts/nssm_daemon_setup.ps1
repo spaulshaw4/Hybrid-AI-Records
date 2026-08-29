@@ -1,8 +1,10 @@
 # nssm_daemon_setup.ps1
 # Registers the Hybrid 1.0 Daemon Poller as a persistent Windows service
 
+. "$PSScriptRoot\resolve_python.ps1"
+
 $ServiceName = "HybridAudioDaemon"
-$PythonPath = (Get-Command python).Source
+$PythonPath = Assert-HybridPython
 $ScriptPath = "D:\MusicDatasets\scripts\daemon_poller.py"
 
 if (!(Get-Command nssm -ErrorAction SilentlyContinue)) {

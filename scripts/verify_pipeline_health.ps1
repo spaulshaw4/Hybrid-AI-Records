@@ -91,14 +91,42 @@ foreach ($dir in $RequiredDirs) {
 # -------------------------------------------------------------------------
 # 3. BINARIES & SYSTEM DEPENDENCIES
 # -------------------------------------------------------------------------
-$Dependencies = @("python", "ffmpeg", "nssm")
+. "$PSScriptRoot\resolve_python.ps1"
 
-foreach ($dep in $Dependencies) {
+# Python needs its own check: Get-Command finds the Microsoft Store alias stub
+# under \WindowsApps\, which is not an interpreter and would report a false pass.
+$resolvedPython = Get-HybridPython -Quiet
+
+if ($resolvedPython) {
+    $pyVersion = (& $resolvedPython --version 2>&1)
+    $pathStub = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($pathStub -like "*\WindowsApps\*") {
+        Record-Check "Dependencies" "python" "WARN" "$pyVersion at $resolvedPython, but PATH resolves to the Store stub ($pathStub). Scripts using bare 'python' will fail."
+    } else {
+        Record-Check "Dependencies" "python" "PASS" "$pyVersion at $resolvedPython"
+    }
+} else {
+    Record-Check "Dependencies" "python" "FAIL" "No real interpreter found. PATH may only contain the WindowsApps alias stub."
+}
+
+foreach ($dep in @("ffmpeg", "nssm")) {
     $cmd = Get-Command $dep -ErrorAction SilentlyContinue
     if ($cmd) {
         Record-Check "Dependencies" $dep "PASS" "Resolved at: $($cmd.Source)"
     } else {
         Record-Check "Dependencies" $dep "FAIL" "Binary not found in system PATH."
+    }
+}
+
+# Python packages the pipeline imports at module scope
+if ($resolvedPython) {
+    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy")) {
+        & $resolvedPython -c "import $pkg" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Record-Check "Python Packages" $pkg "PASS" "Importable."
+        } else {
+            Record-Check "Python Packages" $pkg "FAIL" "Not installed for $resolvedPython"
+        }
     }
 }
 

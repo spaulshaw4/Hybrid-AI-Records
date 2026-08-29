@@ -1,9 +1,11 @@
 # nssm_watchdog_setup.ps1
 # Registers the Hybrid 1.0 Watchdog Slicing Daemon as a persistent Windows service
 
+. "$PSScriptRoot\resolve_python.ps1"
+
 $ServiceName = "HybridWatchdogDaemon"
-$PythonPath = (Get-Command python).Source
-$ScriptPath = "D:\MusicDatasets\scripts\watchdog_slicer.py"
+$PythonPath = Assert-HybridPython
+$ScriptPath = "D:\MusicDatasets\scripts\watchdog_slicing_daemon.py"
 
 if (!(Get-Command nssm -ErrorAction SilentlyContinue)) {
     Write-Host "[ERROR] NSSM is not installed or not found in system PATH."

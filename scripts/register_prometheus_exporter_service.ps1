@@ -1,6 +1,8 @@
 # D:\MusicDatasets\scripts\register_prometheus_exporter_service.ps1
+. "$PSScriptRoot\resolve_python.ps1"
+
 $ServiceName = "HybridPrometheusExporterDaemon"
-$PythonPath = (Get-Command python).Source
+$PythonPath = Assert-HybridPython
 $ScriptPath = "D:\MusicDatasets\scripts\prometheus_exporter.py"
 $LogDir = "D:\MusicDatasets\logs"
 

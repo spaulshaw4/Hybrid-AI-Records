@@ -80,6 +80,13 @@ foreach ($dir in $RequiredDirs) {
 # unrelated legacy tooling, so a wildcard sync would copy ~75 files the
 # pipeline never calls. Add new pipeline scripts here deliberately.
 $Manifest = @(
+    # Shared helpers (dot-sourced by other scripts - must deploy first)
+    "resolve_python.ps1",
+
+    # Dataset acquisition and unpacking
+    "fetch_dataset_binary.ps1",
+    "bulk_extract_datasets.ps1",
+
     # Ingestion
     "watchdog_slicing_daemon.py",
     "local_slicer.py",
