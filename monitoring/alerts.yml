@@ -1,0 +1,145 @@
+# D:\MusicDatasets\config\alerts.yml
+#
+# Every rule sets both `severity` and `target` labels, because
+# alertmanager.yml groups on `target` and its inhibit_rule matches
+# critical -> warning pairs using `equal: ["target"]`. A rule missing
+# `target` would group under an empty label and never be inhibited.
+#
+# Thresholds mirror values already present elsewhere in the stack:
+#   - Grafana gauge threshold steps (hybrid_workstation_dashboard.json)
+#   - storage_guard_daemon.py THRESHOLD_PCT = 15.0 (free) == 85% used
+
+groups:
+  - name: hybrid_workstation_hardware
+    rules:
+      - alert: HybridCpuElevated
+        expr: hybrid_workstation_cpu_utilization_percent > 70
+        for: 5m
+        labels:
+          severity: warning
+          target: workstation_cpu
+        annotations:
+          summary: "Workstation CPU sustained above 70%"
+          description: "CPU has averaged {{ printf \"%.1f\" $value }}% for over 5 minutes. Render throughput may degrade."
+
+      - alert: HybridCpuSaturated
+        expr: hybrid_workstation_cpu_utilization_percent > 85
+        for: 5m
+        labels:
+          severity: critical
+          target: workstation_cpu
+        annotations:
+          summary: "Workstation CPU saturated above 85%"
+          description: "CPU has averaged {{ printf \"%.1f\" $value }}% for over 5 minutes. Pipeline stages will queue."
+
+      - alert: HybridMemoryElevated
+        expr: hybrid_workstation_ram_utilization_percent > 75
+        for: 5m
+        labels:
+          severity: warning
+          target: workstation_memory
+        annotations:
+          summary: "System RAM above 75%"
+          description: "RAM utilization is {{ printf \"%.1f\" $value }}%. Bus summation loads all 420 stems sequentially and is memory sensitive."
+
+      - alert: HybridMemoryCritical
+        expr: hybrid_workstation_ram_utilization_percent > 90
+        for: 3m
+        labels:
+          severity: critical
+          target: workstation_memory
+        annotations:
+          summary: "System RAM above 90%"
+          description: "RAM utilization is {{ printf \"%.1f\" $value }}%. cylinder_bus_summation.py risks an out-of-memory failure."
+
+  - name: hybrid_workstation_storage
+    rules:
+      - alert: HybridDiskFillingUp
+        expr: hybrid_workstation_disk_utilization_percent{drive="D:"} > 80
+        for: 10m
+        labels:
+          severity: warning
+          target: workstation_storage
+        annotations:
+          summary: "D: volume above 80% used"
+          description: "D: is {{ printf \"%.1f\" $value }}% full. reclaim_render_storage.ps1 has not freed enough space."
+
+      - alert: HybridDiskCritical
+        expr: hybrid_workstation_disk_utilization_percent{drive="D:"} > 85
+        for: 5m
+        labels:
+          severity: critical
+          target: workstation_storage
+        annotations:
+          summary: "D: volume above 85% used - storage guard threshold breached"
+          description: "D: is {{ printf \"%.1f\" $value }}% full, past the 15% free floor storage_guard_daemon.py enforces. Emergency reclamation should be running; if this persists the guard is not working."
+
+  - name: hybrid_pipeline_health
+    rules:
+      # up == 0 means Prometheus cannot scrape the exporter at all, which
+      # blinds every other rule in this file.
+      - alert: HybridExporterDown
+        expr: up{job="hybrid_pipeline_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          target: pipeline_exporter
+        annotations:
+          summary: "Prometheus exporter unreachable"
+          description: "prometheus_exporter.py has not responded on 127.0.0.1:9191 for 1 minute. All workstation and pipeline metrics are stale."
+
+      # sessions_total is exported as a gauge sampled from Supabase, so delta()
+      # is the correct function here - increase() assumes a counter.
+      - alert: HybridSessionFailed
+        expr: delta(hybrid_pipeline_sessions_total{status="failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          target: pipeline_sessions
+        annotations:
+          summary: "Pipeline session failed in the last 15 minutes"
+          description: "{{ printf \"%.0f\" $value }} session(s) moved to failed. Check daemon_stderr.log and the metadata.error field in user_vaults."
+
+      - alert: HybridSessionFailureBurst
+        expr: delta(hybrid_pipeline_sessions_total{status="failed"}[15m]) > 2
+        for: 0m
+        labels:
+          severity: critical
+          target: pipeline_sessions
+        annotations:
+          summary: "Repeated pipeline failures detected"
+          description: "{{ printf \"%.0f\" $value }} sessions failed within 15 minutes. This suggests a systemic fault rather than a single bad render."
+
+      - alert: HybridQueueBacklog
+        expr: hybrid_pipeline_sessions_total{status="pending"} > 5
+        for: 10m
+        labels:
+          severity: warning
+          target: pipeline_queue
+        annotations:
+          summary: "Pending session backlog not draining"
+          description: "{{ printf \"%.0f\" $value }} sessions have been pending for over 10 minutes. daemon_poller.py may be stopped or stuck on a single job."
+
+      # A session stuck in `processing` never returns to pending or completed,
+      # so a non-zero plateau is the signal, not the value itself.
+      - alert: HybridSessionStalled
+        expr: hybrid_pipeline_sessions_total{status="processing"} > 0
+        for: 30m
+        labels:
+          severity: critical
+          target: pipeline_queue
+        annotations:
+          summary: "Session stuck in processing for over 30 minutes"
+          description: "A render has held `processing` for 30+ minutes. run_master_pipeline.ps1 likely died without reaching its catch block, leaving the vault row orphaned."
+
+  - name: hybrid_pipeline_latency
+    rules:
+      - alert: HybridPipelineSlow
+        expr: hybrid_pipeline_stage_duration_seconds{stage="pipeline"} > 30
+        for: 0m
+        labels:
+          severity: warning
+          target: pipeline_latency
+        annotations:
+          summary: "Master pipeline duration exceeded 30s"
+          description: "Last full render took {{ printf \"%.1f\" $value }}s. Note this gauge holds the most recent value until the next run completes, so it will stay firing until a faster render lands."

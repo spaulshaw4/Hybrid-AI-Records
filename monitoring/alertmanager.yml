@@ -1,0 +1,67 @@
+# D:\MusicDatasets\config\alertmanager.yml
+global:
+  resolve_timeout: 5m
+  # Set your primary Slack or Discord webhook endpoint:
+  # For Discord, append '/slack' to your Discord webhook URL to use Slack-compatible payloads:
+  # https://discord.com/api/webhooks/<WEBHOOK_ID>/<WEBHOOK_TOKEN>/slack
+  slack_api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+
+# Inhibit warning alerts if a critical alert for the same target is already active
+inhibit_rules:
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["target"]
+
+route:
+  group_by: ["alertname", "target", "severity"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2h
+  receiver: "slack-warning-channel"
+  routes:
+    # Critical incidents route to priority receiver
+    - matchers:
+        - severity = "critical"
+      receiver: "slack-critical-channel"
+      repeat_interval: 30m
+    # Warning alerts route to standard telemetry receiver
+    - matchers:
+        - severity = "warning"
+      receiver: "slack-warning-channel"
+      repeat_interval: 2h
+
+receivers:
+  - name: "slack-warning-channel"
+    slack_configs:
+      - channel: "#hybrid-telemetry-alerts"
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}#eab308{{ else }}#22c55e{{ end }}'
+        title: '[{{ .Status | toUpper }} - WARNING] {{ .GroupLabels.alertname }}'
+        title_link: 'http://localhost:9090'
+        text: >-
+          {{ range .Alerts }}
+            *Summary:* {{ .Annotations.summary }}
+            *Details:* {{ .Annotations.description }}
+            *Target Subsystem:* `{{ .Labels.target }}`
+            *Severity:* `{{ .Labels.severity }}`
+            *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
+          {{ end }}
+
+  - name: "slack-critical-channel"
+    slack_configs:
+      - channel: "#hybrid-critical-ops"
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}#ef4444{{ else }}#22c55e{{ end }}'
+        title: '[{{ .Status | toUpper }} - CRITICAL INCIDENT] {{ .GroupLabels.alertname }}'
+        title_link: 'http://localhost:9090'
+        text: >-
+          <!channel>
+          {{ range .Alerts }}
+            *CRITICAL FAILURE DETECTED*
+            *Summary:* {{ .Annotations.summary }}
+            *Details:* {{ .Annotations.description }}
+            *Target Subsystem:* `{{ .Labels.target }}`
+            *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
+          {{ end }}
