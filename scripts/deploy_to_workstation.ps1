@@ -134,6 +134,7 @@ $Manifest = @(
     "test_crest_and_dc.py",
     "test_plr_gate.py",
     "test_lufs_approximation.py",
+    "enterprise_catalog_packager.py",
     "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",
@@ -377,7 +378,12 @@ $resolvedPython = Get-HybridPython -Quiet
 if ($resolvedPython) {
     Write-Host "  [OK]      python $((& $resolvedPython --version 2>&1) -replace 'Python\s*','') at $resolvedPython" -ForegroundColor Green
 
-    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy")) {
+    # scipy and prometheus_client are load-bearing, not optional: the QC
+    # analyzer needs scipy for BS.1770 K-weighting and polyphase true-peak
+    # detection, and silently degrades to unweighted loudness and sample peak
+    # without it - which the upload gate would then act on.
+    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy",
+                       "scipy", "prometheus_client")) {
         & $resolvedPython -c "import $pkg" 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  [OK]      python package: $pkg" -ForegroundColor Green
