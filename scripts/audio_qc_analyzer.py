@@ -51,6 +51,23 @@ OVERLAP = 0.75
 ABSOLUTE_GATE_LUFS = -70.0
 RELATIVE_GATE_LU = -10.0
 
+# Acceptance standards and enforcement thresholds, per architecture spec
+# section 5. Defined here rather than lower down because they are used as
+# default argument values, which Python evaluates at function definition time.
+#
+# The phase band has an upper bound as well as a lower one: below +0.25 the mix
+# cancels on a mono speaker, above +0.95 it is effectively mono already and the
+# Q2 width stage has accomplished nothing. SPEC_PHASE_WARN is the separate,
+# lower threshold the spec sets for the mono-incompatibility warning.
+SPEC_LUFS_TARGET = -14.0
+SPEC_LUFS_TOLERANCE = 1.0
+SPEC_TRUE_PEAK_CEILING = -0.5
+SPEC_PHASE_MIN = 0.25
+SPEC_PHASE_MAX = 0.95
+SPEC_PHASE_WARN = 0.15
+SPEC_DC_LIMIT = 0.0001
+SPEC_REGAIN_DEVIATION_LU = 1.5
+
 
 def design_high_shelf(fs: float):
     """
@@ -194,12 +211,92 @@ def compute_true_peak_dbtp(signal: np.ndarray, fs: int) -> tuple:
     return round(float(20.0 * np.log10(max_peak + 1e-9)), 2), "4x polyphase oversampled"
 
 
+def plan_loudness_regain(current_lufs, current_true_peak_dbtp,
+                         target_lufs=SPEC_LUFS_TARGET,
+                         deviation_trigger=SPEC_REGAIN_DEVIATION_LU,
+                         true_peak_ceiling=SPEC_TRUE_PEAK_CEILING):
+    """
+    Decide the gain needed to bring loudness to target, per spec section 5's
+    "re-gain stage master bus if deviation > 1.5 LUFS".
+
+    Returns (should_apply, gain_db, reason).
+
+    The gain is capped by available true-peak headroom. Loudness and peak move
+    together, so applying the full correction to a quiet-but-peaky master would
+    push it past -0.5 dBTP and trade a soft failure for a hard one. When the cap
+    binds, the master is left short of target rather than made non-compliant.
+    """
+    if current_lufs <= -99.0:
+        return False, 0.0, "loudness unmeasurable (silent or near-silent)"
+
+    deviation = target_lufs - current_lufs
+
+    if abs(deviation) <= deviation_trigger:
+        return False, 0.0, f"within {deviation_trigger} LU of target ({deviation:+.2f} LU)"
+
+    headroom_db = true_peak_ceiling - current_true_peak_dbtp
+
+    if deviation > 0:
+        # Turning up: bounded by true-peak headroom
+        gain_db = min(deviation, headroom_db)
+        if gain_db <= 0.01:
+            return False, 0.0, (f"needs {deviation:+.2f} dB but only {headroom_db:.2f} dB "
+                                f"of true-peak headroom remains")
+        capped = gain_db < deviation - 0.01
+        reason = (f"raising {gain_db:+.2f} dB toward {target_lufs} LUFS"
+                  + (f" (capped from {deviation:+.2f} by true-peak headroom)" if capped else ""))
+        return True, gain_db, reason
+
+    # Turning down is always safe for peak
+    return True, deviation, f"lowering {deviation:+.2f} dB toward {target_lufs} LUFS"
+
+
 def compute_phase_correlation(stereo_signal: np.ndarray) -> float:
     left = stereo_signal[:, 0]
     right = stereo_signal[:, 1]
 
     denom = np.sqrt(np.sum(left ** 2) * np.sum(right ** 2)) + 1e-12
     return float(np.clip(np.sum(left * right) / denom, -1.0, 1.0))
+
+
+def dbfs_to_linear_scalar(db: float) -> float:
+    return float(10.0 ** (db / 20.0))
+
+
+def apply_ceiling_clamp(signal: np.ndarray, true_peak_ceiling=SPEC_TRUE_PEAK_CEILING) -> np.ndarray:
+    """Scale down if the post-gain peak sits above the ceiling."""
+    ceiling_linear = dbfs_to_linear_scalar(true_peak_ceiling)
+    peak = float(np.max(np.abs(signal)))
+
+    if peak > ceiling_linear and peak > 0:
+        signal = signal * (ceiling_linear / peak)
+        print(f"[RE-GAIN] Scaled back {20.0 * np.log10(ceiling_linear / peak):+.2f} dB "
+              f"to hold the {true_peak_ceiling} dBTP ceiling")
+
+    return np.clip(signal, -ceiling_linear, ceiling_linear)
+
+
+def write_wav(wav_path: str, signal: np.ndarray, sample_rate: int, sampwidth: int):
+    """Write back at the original bit depth. No dither: the signal was already
+    quantized once, and re-dithering a re-gained master adds a second noise
+    floor for no benefit."""
+    import struct
+
+    with wave.open(wav_path, "wb") as out:
+        out.setnchannels(signal.shape[1])
+        out.setframerate(sample_rate)
+        out.setsampwidth(sampwidth)
+
+        if sampwidth == 2:
+            out.writeframes(np.clip(signal * 32767.0, -32768.0, 32767.0).astype("<i2").tobytes())
+        elif sampwidth == 3:
+            quant = np.clip(signal * 8388607.0, -8388608.0, 8388607.0).astype("<i4")
+            raw = bytearray()
+            for s in quant.flatten():
+                raw.extend(struct.pack("<i", int(s))[:3])
+            out.writeframes(bytes(raw))
+        else:
+            out.writeframes(signal.astype("<f4").tobytes())
 
 
 def read_wav(wav_path: str):
@@ -232,18 +329,6 @@ def read_wav(wav_path: str):
             data = data[:, :2]
 
     return data.astype(np.float64), fr, sw, n_ch, nf
-
-
-# Acceptance standards, per the Hybrid 1.0 architecture spec section 7.
-# The phase correlation band has an upper bound as well as a lower one: below
-# +0.25 the mix cancels on a mono speaker, while above +0.95 it is effectively
-# mono already and the Q2 width stage has done nothing.
-SPEC_LUFS_TARGET = -14.0
-SPEC_LUFS_TOLERANCE = 1.0
-SPEC_TRUE_PEAK_CEILING = -0.5
-SPEC_PHASE_MIN = 0.25
-SPEC_PHASE_MAX = 0.95
-SPEC_DC_LIMIT = 0.0001
 
 
 def analyze_master_qc(wav_path: str,
@@ -282,6 +367,12 @@ def analyze_master_qc(wav_path: str,
     phase_pass = bool(phase_min <= phase_correlation <= phase_max)
     dc_pass = bool(abs(dc_offset_l) < dc_limit and abs(dc_offset_r) < dc_limit)
 
+    regain_needed, regain_gain_db, regain_reason = plan_loudness_regain(
+        integrated_lufs, true_peak_dbtp,
+        target_lufs=(target_lufs_min + target_lufs_max) / 2.0,
+        true_peak_ceiling=true_peak_ceiling
+    )
+
     report = {
         "master_file": os.path.basename(wav_path),
         "sample_rate": fr,
@@ -307,6 +398,14 @@ def analyze_master_qc(wav_path: str,
             "phase_window": [phase_min, phase_max],
             "dc_offset_limit": dc_limit
         },
+        "enforcement": {
+            "regain_recommended": bool(regain_needed),
+            "regain_gain_db": round(float(regain_gain_db), 2),
+            "regain_reason": regain_reason,
+            # Section 5 sets a second, lower phase threshold for the
+            # mono-incompatibility warning than the compliance band's floor.
+            "mono_incompatible": bool(phase_correlation < SPEC_PHASE_WARN)
+        },
         "compliance": {
             "streaming_target_met": streaming_lufs_pass,
             "true_peak_safety_met": true_peak_pass,
@@ -331,6 +430,14 @@ def analyze_master_qc(wav_path: str,
     print("================================================================")
     print("HYBRID 1.0 - AUDIO MASTER QUALITY CONTROL REPORT")
     print("================================================================")
+
+    if not SCIPY_AVAILABLE:
+        # The pipeline's QC gate blocks uploads on this verdict, so a degraded
+        # measurement is not a cosmetic issue - it decides whether a master ships.
+        print("[WARNING] scipy is not installed. Loudness is unweighted and peak")
+        print("          is sample-peak, not true-peak. The QC gate is deciding")
+        print("          on degraded numbers. Install scipy before trusting this.")
+        print("----------------------------------------------------------------")
     print(f"Master File : {report['master_file']} ({report['bit_depth']}-bit / {fr} Hz / {duration_sec}s)")
     print(f"Loudness    : {m['integrated_lufs']} LUFS  (LRA {m['loudness_range_lu']} LU)")
     print(f"              method: {m['lufs_method']}")
@@ -345,6 +452,17 @@ def analyze_master_qc(wav_path: str,
     print(f"  DC offset < {dc_limit}         : {'PASS' if c['dc_offset_clean'] else 'FAIL'}")
     print(f"  loudness in [{target_lufs_min}, {target_lufs_max}]  : "
           f"{'PASS' if c['streaming_target_met'] else 'outside window (informational)'}")
+
+    e = report["enforcement"]
+    if e["regain_recommended"]:
+        print(f"  re-gain              : {e['regain_gain_db']:+.2f} dB - {e['regain_reason']}")
+        print(f"                         (apply with --apply-gain)")
+    else:
+        print(f"  re-gain              : not needed - {e['regain_reason']}")
+
+    if e["mono_incompatible"]:
+        print(f"  [WARN] phase {m['stereo_phase_correlation']} is below {SPEC_PHASE_WARN}: "
+              f"this master will partially cancel on a mono speaker.")
     print("----------------------------------------------------------------")
     print(f"QC VERDICT  : {'[PASS]' if c['overall_qc_passed'] else '[FAIL]'}")
     print(f"Report      : {report_out}")
@@ -357,11 +475,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hybrid 1.0 audio QC analyzer")
     parser.add_argument("--wav-path", required=True, help="Path to master WAV file")
     parser.add_argument("--report-out", default=None, help="Override report JSON path")
-    parser.add_argument("--lufs-min", type=float, default=-16.0)
-    parser.add_argument("--lufs-max", type=float, default=-9.0)
-    parser.add_argument("--true-peak-ceiling", type=float, default=-0.1)
+    # Derived from the spec constants rather than restated. Hardcoding these
+    # separately is how the CLI drifted from the function defaults: the window
+    # was [-16, -9], so --apply-gain re-gained to its midpoint of -12.5 instead
+    # of the -14.0 target.
+    parser.add_argument("--lufs-min", type=float,
+                        default=SPEC_LUFS_TARGET - SPEC_LUFS_TOLERANCE)
+    parser.add_argument("--lufs-max", type=float,
+                        default=SPEC_LUFS_TARGET + SPEC_LUFS_TOLERANCE)
+    parser.add_argument("--true-peak-ceiling", type=float, default=SPEC_TRUE_PEAK_CEILING)
     parser.add_argument("--fail-on-loudness", action="store_true",
                         help="Also gate the exit code on the loudness window")
+    parser.add_argument("--apply-gain", action="store_true",
+                        help="Re-gain the master toward target when deviation exceeds "
+                             "1.5 LU, then re-measure (spec section 5 enforcement)")
     args = parser.parse_args()
 
     rep = analyze_master_qc(
@@ -371,6 +498,28 @@ if __name__ == "__main__":
         true_peak_ceiling=args.true_peak_ceiling,
         report_out=args.report_out
     )
+
+    if args.apply_gain and rep["enforcement"]["regain_recommended"]:
+        gain_db = rep["enforcement"]["regain_gain_db"]
+        print(f"\n[RE-GAIN] Applying {gain_db:+.2f} dB and re-measuring...")
+
+        data, fr, sw, n_ch, _ = read_wav(args.wav_path)
+        adjusted = data * dbfs_to_linear_scalar(gain_db)
+
+        # Re-limit after gain: raising level can create new inter-sample
+        # overshoot even when the planned gain respected the measured peak.
+        adjusted = apply_ceiling_clamp(adjusted, true_peak_ceiling=args.true_peak_ceiling)
+
+        write_wav(args.wav_path, adjusted, fr, sw)
+        print(f"[RE-GAIN] Rewrote {args.wav_path}")
+
+        rep = analyze_master_qc(
+            args.wav_path,
+            target_lufs_min=args.lufs_min,
+            target_lufs_max=args.lufs_max,
+            true_peak_ceiling=args.true_peak_ceiling,
+            report_out=args.report_out
+        )
 
     ok = rep["compliance"]["overall_qc_passed"]
     if args.fail_on_loudness:

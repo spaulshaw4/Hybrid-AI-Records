@@ -128,7 +128,7 @@ foreach ($dep in @("ffmpeg", "nssm")) {
 
 # Packages every daemon imports at module scope
 if ($resolvedPython) {
-    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy", "prometheus_client")) {
+    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy", "scipy", "prometheus_client")) {
         & $resolvedPython -c "import $pkg" 2>$null
         if ($LASTEXITCODE -eq 0) {
             Record-Check "Python Packages" $pkg "PASS" "Importable."

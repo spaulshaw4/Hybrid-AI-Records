@@ -95,12 +95,16 @@ Write-Host "`n[STEP 2/8] Installing required Python libraries..." -ForegroundCol
 
 # pydub, psutil and watchdog are not optional: the slicers, telemetry emitter,
 # exporter, storage guard and ingest watchdog all import them at module scope.
-$PipPackages = @("supabase", "pydub", "psutil", "watchdog", "prometheus_client", "numpy", "pystray", "pillow")
+# scipy is required, not optional: audio_qc_analyzer uses it for the BS.1770
+# K-weighting biquads and polyphase true-peak oversampling. Without it the
+# analyzer falls back to unweighted loudness and sample peak, and since the QC
+# gate now blocks uploads, that would mean gating on the wrong numbers.
+$PipPackages = @("supabase", "pydub", "psutil", "watchdog", "prometheus_client", "numpy", "scipy", "pystray", "pillow")
 
 & $Python -m pip install --quiet --upgrade @PipPackages
 
 $missing = @()
-foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "prometheus_client", "numpy")) {
+foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "prometheus_client", "numpy", "scipy")) {
     & $Python -c "import $pkg" 2>$null
     if ($LASTEXITCODE -ne 0) { $missing += $pkg }
 }
