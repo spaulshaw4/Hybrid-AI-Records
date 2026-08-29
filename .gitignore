@@ -64,3 +64,7 @@ data/fma/
 # EP batch output (may contain R2 presigned URLs)
 generated_ep_manifest.json
 hybrid_studio.db
+
+# Python bytecode caches
+__pycache__/
+*.pyc

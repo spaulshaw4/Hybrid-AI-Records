@@ -264,7 +264,29 @@ foreach ($varName in @("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")) {
     }
 }
 
-foreach ($dep in @("python", "ffmpeg", "nssm")) {
+# Python is checked via the resolver, not Get-Command: PATH usually resolves to
+# the WindowsApps App Execution Alias stub, which is not an interpreter.
+. "$SourceDir\resolve_python.ps1"
+$resolvedPython = Get-HybridPython -Quiet
+
+if ($resolvedPython) {
+    Write-Host "  [OK]      python $((& $resolvedPython --version 2>&1) -replace 'Python\s*','') at $resolvedPython" -ForegroundColor Green
+
+    foreach ($pkg in @("supabase", "pydub", "psutil", "watchdog", "numpy")) {
+        & $resolvedPython -c "import $pkg" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  [OK]      python package: $pkg" -ForegroundColor Green
+        } else {
+            Write-Host "  [MISSING] python package: $pkg" -ForegroundColor Red
+            $envOk = $false
+        }
+    }
+} else {
+    Write-Host "  [MISSING] python (no real interpreter; PATH may only hold the Store stub)" -ForegroundColor Red
+    $envOk = $false
+}
+
+foreach ($dep in @("ffmpeg", "nssm")) {
     if (Get-Command $dep -ErrorAction SilentlyContinue) {
         Write-Host "  [OK]      $dep resolved in PATH" -ForegroundColor Green
     } else {
