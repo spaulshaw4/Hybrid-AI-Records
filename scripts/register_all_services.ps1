@@ -192,7 +192,33 @@ foreach ($svc in $ServiceDefinitions) {
         nssm set $sname AppRotateFiles 1
         nssm set $sname AppRotateBytes 10485760
 
+        # Rotate while the service holds the handle. Without this a long-running
+        # daemon keeps writing to the same file regardless of size, because NSSM
+        # only rotates at startup.
+        nssm set $sname AppRotateOnline 1
+        nssm set $sname AppRotateSeconds 86400
+
+        # Crash backoff. AppThrottle is the window in which a fast exit counts as
+        # a failed start; without it a daemon that dies immediately - missing
+        # credentials, for instance - respawns in a tight loop and floods the log
+        # with the same traceback. AppRestartDelay spaces the retries.
+        nssm set $sname AppThrottle 1500
+        nssm set $sname AppRestartDelay 5000
+
+        # Give the process a chance to exit cleanly before NSSM escalates to
+        # terminate, so a daemon mid-write is not killed with a partial file.
+        nssm set $sname AppStopMethodConsole 3000
+        nssm set $sname AppStopMethodWindow 3000
+        nssm set $sname AppStopMethodThreads 3000
+
         if ($injectEnv) {
+            # Fallback only. AppEnvironmentExtra writes the value into this
+            # service's registry key, where `nssm dump <service>` and any admin
+            # process can read it back in clear text. Machine-scope variables are
+            # preferred above because the key is then stored once rather than
+            # duplicated into every service definition, and it never appears in a
+            # script or a service dump. Never hardcode the key into a committed
+            # installer file.
             nssm set $sname AppEnvironmentExtra `
                 "SUPABASE_URL=$($env:SUPABASE_URL)" `
                 "SUPABASE_SERVICE_ROLE_KEY=$($env:SUPABASE_SERVICE_ROLE_KEY)"
