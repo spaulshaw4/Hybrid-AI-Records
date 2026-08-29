@@ -38,8 +38,8 @@ param(
     [string]$BaseDir = "D:\MusicDatasets",
     [switch]$VerifyOnly = $false,
     [switch]$DryRun = $false,
-    [int]$MinFreeGB = 200,
-    [int]$MaxPasses = 3,
+    [int]$MinFreeGB = 50,
+    [int]$MaxPasses = 6,
     [string]$Filter = "*",
     [switch]$Force = $false
 )
@@ -95,15 +95,24 @@ function Test-IsArchive {
     return $false
 }
 
+function Test-IsExcluded {
+    param([string]$FullPath)
+
+    foreach ($segment in $ExcludedSegments) {
+        if ($FullPath -like "*$segment*") { return $true }
+    }
+    return $false
+}
+
 function Get-CandidateArchives {
     Get-ChildItem -Path $BaseDir -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object {
-            (Test-IsArchive -FileName $_.Name) -and
-            -not ($ExcludedSegments | Where-Object { $_ -and $_.FullName -like "*$_*" })
-        } |
-        Where-Object {
-            $rel = $_.FullName.Replace("$BaseDir\", "")
-            $rel -like $Filter
+            # $_ must be captured before the nested loop: inside a piped
+            # Where-Object the automatic variable rebinds to the inner item.
+            $file = $_
+            (Test-IsArchive -FileName $file.Name) -and
+            -not (Test-IsExcluded -FullPath $file.FullName) -and
+            ($file.FullName.Replace("$BaseDir\", "") -like $Filter)
         } |
         Sort-Object Length
 }
