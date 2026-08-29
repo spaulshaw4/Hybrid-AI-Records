@@ -14,6 +14,44 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "vault-storage"
 
 
+def collect_slice_provenance(work_dir):
+    """
+    Summarise the slices that fed this render.
+
+    Stores a manifest, not the audio. Full slice names are capped because a
+    long render can consume thousands and the metadata column should stay small;
+    the count and digest still identify the input set exactly.
+    """
+    import hashlib
+
+    staged = os.path.join(work_dir, "raw_stems")
+    premixed = os.path.join(work_dir, "premixed_stems")
+
+    if not os.path.isdir(staged):
+        return None
+
+    slices = sorted(f for f in os.listdir(staged) if f.lower().endswith(".wav"))
+    if not slices:
+        return None
+
+    # Digest over the ordered name list: two renders from the same inputs in the
+    # same order produce the same digest, which makes a render reproducible.
+    digest = hashlib.sha256("\n".join(slices).encode("utf-8")).hexdigest()
+
+    premix_count = 0
+    if os.path.isdir(premixed):
+        premix_count = sum(1 for f in os.listdir(premixed) if f.lower().endswith(".wav"))
+
+    MAX_NAMES = 50
+    return {
+        "slice_count": len(slices),
+        "premix_positions": premix_count,
+        "slice_set_sha256": digest,
+        "slice_names": slices[:MAX_NAMES],
+        "slice_names_truncated": len(slices) > MAX_NAMES
+    }
+
+
 def upload_master_to_cloud(session_id, work_dir):
     print("\n================================================================")
     print(f"CLOUD PERSISTENCE - UPLOADING MASTER TO SUPABASE: {session_id}")
@@ -53,6 +91,15 @@ def upload_master_to_cloud(session_id, work_dir):
         "storage_bucket": BUCKET_NAME,
         "storage_path": storage_path
     })
+
+    # Record which source slices produced this master, so a track can be traced
+    # back to its inputs later. Names only, not the audio: a 7-minute render
+    # consumes ~1680 slices, and uploading those would push exactly the egress
+    # this pipeline exists to keep local, while duplicating corpus already on D:.
+    provenance = collect_slice_provenance(work_dir)
+    if provenance:
+        merged_metadata["source_provenance"] = provenance
+        print(f"[CLOUD UPLOADER] Recorded provenance for {provenance['slice_count']} source slice(s).")
 
     # This is the point where the session becomes 'completed': the master is
     # verifiably in cloud storage and storage_url is about to be persisted.
