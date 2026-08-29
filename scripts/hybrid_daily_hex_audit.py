@@ -7,6 +7,14 @@ from datetime import datetime
 from supabase import create_client, Client
 from hybrid_hex_hasher import HybridHexHasher
 
+# Loads .env / .env.local into os.environ before the credential reads below.
+# os.environ.get() returns only the process environment and Python does not read
+# .env on its own, so credentials configured in a file are otherwise invisible
+# here. A value already present in the real environment still wins.
+import os as _hybrid_os, sys as _hybrid_sys
+_hybrid_sys.path.insert(0, _hybrid_os.path.dirname(_hybrid_os.path.abspath(__file__)))
+import hybrid_env  # noqa: F401,E402
+
 
 class HybridDailyHexAudit:
     def __init__(self):

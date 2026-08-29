@@ -32,6 +32,11 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
+# Loads .env / .env.local into os.environ before export_and_upload reads the
+# Supabase credentials. os.environ.get() sees only the process environment and
+# Python does not read .env on its own; a real environment value still wins.
+import hybrid_env  # noqa: F401,E402
+
 from hybrid_dsp import (
     read_wav_float32,
     write_wav_float32,

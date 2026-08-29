@@ -31,6 +31,14 @@ import psutil
 from prometheus_client import start_http_server, Gauge, Counter, Info
 from supabase import create_client, Client
 
+# Loads .env / .env.local into os.environ before the credential reads below.
+# os.environ.get() returns only the process environment and Python does not read
+# .env on its own, so credentials configured in a file are otherwise invisible
+# here. A value already present in the real environment still wins.
+import os as _hybrid_os, sys as _hybrid_sys
+_hybrid_sys.path.insert(0, _hybrid_os.path.dirname(_hybrid_os.path.abspath(__file__)))
+import hybrid_env  # noqa: F401,E402
+
 PORT = int(os.environ.get("PROMETHEUS_EXPORTER_PORT", 9191))
 
 # Loopback by default. Neither this exporter nor Prometheus has authentication,

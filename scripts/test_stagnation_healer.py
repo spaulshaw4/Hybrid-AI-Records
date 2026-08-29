@@ -16,6 +16,9 @@ _here = os.path.dirname(os.path.abspath(__file__))
 if _here not in sys.path:
     sys.path.insert(0, _here)
 
+# Loads .env / .env.local before the credential reads below.
+import hybrid_env  # noqa: F401,E402
+
 from pipeline_stagnation_healer import (
     scan_and_heal_stagnant_jobs,
     is_session_process_active,

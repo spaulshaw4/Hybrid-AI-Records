@@ -111,6 +111,7 @@ $Manifest = @(
     # Render chain
     "ai_inference_engine.py",
     "hybrid_dsp.py",
+    "hybrid_env.py",
     "genre_quadrant_engine.py",
     "alertmanager_bridge.py",
     "install_binary_dependencies.ps1",

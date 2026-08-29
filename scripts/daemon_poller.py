@@ -7,6 +7,14 @@ import subprocess
 from datetime import datetime, timezone
 from supabase import create_client, Client
 
+# Populates os.environ from .env / .env.local before the reads below.
+# os.environ.get() sees only the process environment, and Python does not read
+# .env on its own, so credentials configured in a file were invisible here even
+# when correctly set for the web app. A value already in the real environment
+# still takes precedence.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hybrid_env  # noqa: F401,E402
+
 BASE_DIR = r"D:\MusicDatasets"
 SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
 RUN_PIPELINE = os.path.join(SCRIPTS_DIR, "run_master_pipeline.ps1")
@@ -23,7 +31,12 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    print("[FATAL] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.")
+    print("[FATAL] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.")
+    print("        Searched the process environment and these files:")
+    for candidate in hybrid_env._candidate_files():
+        print(f"          {candidate}")
+    print("        Set them in .env, export them, point HYBRID_ENV_FILE at the file,")
+    print("        or use Machine scope so a Windows service inherits them.")
     sys.exit(1)
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
