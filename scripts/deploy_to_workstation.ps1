@@ -56,8 +56,15 @@ $RequiredDirs = @(
     (Join-Path $BaseDir "uploaded_slices"),
     (Join-Path $BaseDir "renders"),
     (Join-Path $BaseDir "archive"),
+    # backup_disaster_recovery.ps1 creates this on demand, but
+    # verify_pipeline_health.ps1 checks for it, so create it up front.
+    (Join-Path $BaseDir "archive\backups"),
     (Join-Path $BaseDir "logs"),
     (Join-Path $BaseDir "config"),
+    # Prometheus and Alertmanager TSDB paths, created by
+    # register_monitoring_services.ps1 but checked by the health script.
+    (Join-Path $BaseDir "monitoring\data\prometheus"),
+    (Join-Path $BaseDir "monitoring\data\alertmanager"),
     $TargetDir
 )
 
