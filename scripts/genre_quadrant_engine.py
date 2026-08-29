@@ -166,8 +166,39 @@ def spectral_centroid(signal: np.ndarray, sample_rate: int) -> float:
     return float((freqs * spectrum).sum() / total)
 
 
+# Foundation boundary. Deliberately below the 220 Hz region where guitar and
+# keyboard fundamentals sit - a higher boundary pulls rhythm parts into Q1. It
+# lines up with the 110-160 Hz q1_mono_cutoff_hz range in the genre profiles.
+FOUNDATION_MAX_HZ = 150.0
+AIR_MIN_HZ = 4000.0
+
+
+def band_energy_fractions(signal: np.ndarray, sample_rate: int):
+    """
+    Returns (fraction below FOUNDATION_MAX_HZ, fraction at or above AIR_MIN_HZ).
+
+    Preferred over the centroid for routing because percussive material skews
+    the centroid badly: a kick carries almost all its energy under 100 Hz, but
+    its broadband transient attack pulls the centroid into the mid-band and gets
+    it misrouted to Q2. An energy fraction is not sensitive to that.
+    """
+    mono = signal.mean(axis=1)
+    if len(mono) == 0:
+        return 0.0, 0.0
+
+    power = np.abs(np.fft.rfft(mono)) ** 2
+    freqs = np.fft.rfftfreq(len(mono), d=1.0 / sample_rate)
+    total = power.sum()
+
+    if total < 1e-12:
+        return 0.0, 0.0
+
+    return (float(power[freqs < FOUNDATION_MAX_HZ].sum() / total),
+            float(power[freqs >= AIR_MIN_HZ].sum() / total))
+
+
 def classify_stem(filename: str, signal: np.ndarray, sample_rate: int) -> int:
-    """Returns 1, 2 or 3. Filename keywords win; otherwise route on centroid."""
+    """Returns 1, 2 or 3. Filename keywords win; otherwise route on band energy."""
     lower = filename.lower()
 
     if any(k in lower for k in Q1_KEYWORDS):
@@ -175,13 +206,12 @@ def classify_stem(filename: str, signal: np.ndarray, sample_rate: int) -> int:
     if any(k in lower for k in Q3_KEYWORDS):
         return 3
 
-    centroid = spectral_centroid(signal, sample_rate)
+    low_frac, high_frac = band_energy_fractions(signal, sample_rate)
 
-    # Thresholds chosen to bracket the mid-body: below ~250 Hz is foundation
-    # material, above ~4 kHz is air and transient content.
-    if centroid < 250.0:
+    # Majority of energy in one outer band claims the stem; ties go to Q2.
+    if low_frac >= 0.5 and low_frac > high_frac:
         return 1
-    if centroid > 4000.0:
+    if high_frac >= 0.5 and high_frac > low_frac:
         return 3
     return 2
 

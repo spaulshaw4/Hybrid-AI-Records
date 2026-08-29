@@ -25,6 +25,7 @@ $Services = @(
     "HybridPrometheusDaemon",
     "HybridAlertmanagerDaemon",
     "HybridAlertBridgeDaemon",
+    "HybridHardwareMacroDaemon",
     "HybridStorageGuardDaemon",
     "HybridWatchdogDaemon",
     "HybridAudioDaemon",

@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import shutil
+import argparse
 import subprocess
 from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
@@ -211,4 +212,19 @@ def run_stagnation_healer():
 
 
 if __name__ == "__main__":
-    run_stagnation_healer()
+    parser = argparse.ArgumentParser(description="Hybrid 1.0 pipeline stagnation healer")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run a single sweep and exit, instead of polling forever. Used by the "
+             "macro server and terminal HUD, which would otherwise leak a permanent "
+             "process on every manual heal."
+    )
+    args = parser.parse_args()
+
+    if args.once:
+        print("[HEALER] Single sweep requested.")
+        scan_and_heal_stagnant_jobs()
+        print("[HEALER] Sweep complete.")
+    else:
+        run_stagnation_healer()
