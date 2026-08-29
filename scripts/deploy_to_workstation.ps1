@@ -121,6 +121,8 @@ $Manifest = @(
 
     # Backup and disaster recovery
     "backup_disaster_recovery.ps1",
+    "restore_disaster_recovery.ps1",
+    "replay_database_snapshots.py",
     "register_backup_task.ps1",
 
     # Model training
