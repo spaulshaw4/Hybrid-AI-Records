@@ -48,7 +48,27 @@ from genre_quadrant_engine import band_energy_fractions, FOUNDATION_MAX_HZ, AIR_
 
 PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-QUADRANT_NAMES = {1: "Q1_Foundation", 2: "Q2_Harmonics", 3: "Q3_Leads"}
+QUADRANT_NAMES = {1: "Q1_Foundation", 2: "Q2_Harmonics", 3: "Q3_Leads", 4: "Q4_Aux"}
+
+# Q4 is overloaded across the spec: the Cylinder Master Bus in the DSP chain,
+# and a fourth stem category here for risers, crashes and atmospheres. This is
+# the stem sense.
+#
+# Detected by filename only, never spectrally. A crash cymbal and a hi-hat have
+# almost identical band-energy distribution, so an energy classifier would put
+# both in Q3; what distinguishes an FX layer is its musical role, not its
+# spectrum. Unmatched files fall through to spectral routing.
+Q4_KEYWORDS = ("riser", "crash", "sweep", "fx", "atmos", "ambient", "impact",
+               "whoosh", "downlifter", "uplifter", "reverse", "drone", "texture",
+               "foley", "noise_sweep", "transition")
+
+# Tolerance for the bar-length quantisation check, in samples.
+#
+# An exact modulo test is wrong at fractional tempos: a perfectly cut 1-bar loop
+# at 110 BPM is 96218.18 frames, and 96218 % 24055 != 0, so exact division
+# rejects a correct loop. Comparing against the true fractional bar length
+# within a tolerance accepts it, which is what the +/-16 window is for.
+GRID_TOLERANCE_SAMPLES = 16
 
 DEFAULT_DB = "stem_registry.db"
 BATCH_SIZE = 500
@@ -76,6 +96,8 @@ CREATE TABLE IF NOT EXISTS stems (
     key_confidence  REAL,
     source_bpm      REAL,
     grid_aligned    INTEGER,
+    grid_beats      INTEGER,
+    grid_delta_frames REAL,
     is_silent       INTEGER,
     indexed_at      TEXT NOT NULL
 );
@@ -174,8 +196,31 @@ def estimate_key(mono, sample_rate):
     return PITCH_NAMES[int(order[0])], confidence
 
 
-def frames_per_beat(bpm, sample_rate):
-    return int(round((60.0 / bpm) * sample_rate))
+def frames_per_beat_exact(bpm, sample_rate):
+    """Unrounded. Rounding here is what makes the grid drift."""
+    return (60.0 / bpm) * sample_rate
+
+
+def check_grid_alignment(frames, bpm, sample_rate, ts_num=4,
+                         tolerance=GRID_TOLERANCE_SAMPLES):
+    """
+    Returns (aligned, nearest_beats, delta_frames).
+
+    Measures against the exact fractional beat length and reports the closest
+    whole number of beats, so a loop cut a few samples short still passes.
+    """
+    fpb = frames_per_beat_exact(bpm, sample_rate)
+    if fpb <= 0:
+        return None, None, None
+
+    beats = frames / fpb
+    nearest = round(beats)
+
+    if nearest < 1:
+        return 0, nearest, abs(frames - nearest * fpb)
+
+    delta = abs(frames - nearest * fpb)
+    return (1 if delta <= tolerance else 0), int(nearest), float(delta)
 
 
 def inspect_slice(path, genre=None, target_bpm=None, source_bpm=None,
@@ -196,7 +241,10 @@ def inspect_slice(path, genre=None, target_bpm=None, source_bpm=None,
 
     low_frac, high_frac = band_energy_fractions(stereo, sr)
 
-    if low_frac >= 0.5 and low_frac > high_frac:
+    lower_name = os.path.basename(path).lower()
+    if any(k in lower_name for k in Q4_KEYWORDS):
+        quadrant = 4
+    elif low_frac >= 0.5 and low_frac > high_frac:
         quadrant = 1
     elif high_frac >= 0.5 and high_frac > low_frac:
         quadrant = 3
@@ -207,12 +255,14 @@ def inspect_slice(path, genre=None, target_bpm=None, source_bpm=None,
     if root_key is not None and key_conf < key_floor:
         root_key = None
 
-    # Whole multiple of a beat at the target tempo? A slice that is not lands
-    # off-grid when placed, which is what the frame-alignment anchor guards.
+    # Does the length land on a whole number of beats at the target tempo,
+    # within tolerance? A slice that does not will sit off-grid when placed.
     grid_aligned = None
+    grid_beats = None
+    grid_delta = None
     if target_bpm:
-        fpb = frames_per_beat(target_bpm, sr)
-        grid_aligned = 1 if fpb and meta["frames"] % fpb == 0 else 0
+        grid_aligned, grid_beats, grid_delta = check_grid_alignment(
+            meta["frames"], target_bpm, sr)
 
     row = {
         "path": os.path.abspath(path),
@@ -234,6 +284,8 @@ def inspect_slice(path, genre=None, target_bpm=None, source_bpm=None,
         "key_confidence": round(key_conf, 4),
         "source_bpm": source_bpm,
         "grid_aligned": grid_aligned,
+        "grid_beats": grid_beats,
+        "grid_delta_frames": round(grid_delta, 2) if grid_delta is not None else None,
         "is_silent": 1 if rms_dbfs < -90.0 else 0,
         "indexed_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -244,7 +296,8 @@ def inspect_slice(path, genre=None, target_bpm=None, source_bpm=None,
 COLUMNS = ["path", "filename", "genre", "quadrant", "quadrant_name", "sample_rate",
            "frames", "duration_sec", "channels", "bit_depth", "rms_dbfs", "peak_dbfs",
            "dc_offset", "low_band_frac", "high_band_frac", "root_key", "key_confidence",
-           "source_bpm", "grid_aligned", "is_silent", "indexed_at"]
+           "source_bpm", "grid_aligned", "grid_beats", "grid_delta_frames",
+           "is_silent", "indexed_at"]
 
 INSERT_SQL = (f"INSERT OR REPLACE INTO stems ({', '.join(COLUMNS)}) "
               f"VALUES ({', '.join('?' * len(COLUMNS))})")
