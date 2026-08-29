@@ -122,6 +122,7 @@ $Manifest = @(
     "test_genre_quadrants_suite.py",
     "track_constructor_engine.py",
     "test_track_constructor.py",
+    "build_stem_registry.py",
     "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",
