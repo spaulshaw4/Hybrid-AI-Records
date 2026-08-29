@@ -1,5 +1,6 @@
 import os
 import argparse
+from datetime import datetime, timezone
 from supabase import create_client, Client
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -40,15 +41,30 @@ def upload_master_to_cloud(session_id, work_dir):
     public_url = url_response if isinstance(url_response, str) else url_response.get("publicUrl")
 
     print(f"[CLOUD UPLOADER] Updating vault ledger with storage link...")
+
+    # Merge into existing metadata rather than replacing it, so the token cost,
+    # trigger source, and enlinement blueprints written earlier survive.
+    existing = supabase.table('user_vaults').select('metadata').eq('session_id', session_id).limit(1).execute()
+    merged_metadata = {}
+    if existing.data and existing.data[0].get('metadata'):
+        merged_metadata = dict(existing.data[0]['metadata'])
+
+    merged_metadata.update({
+        "storage_bucket": BUCKET_NAME,
+        "storage_path": storage_path
+    })
+
+    # This is the point where the session becomes 'completed': the master is
+    # verifiably in cloud storage and storage_url is about to be persisted.
     supabase.table('user_vaults').update({
         "storage_url": public_url,
-        "metadata": {
-            "storage_bucket": BUCKET_NAME,
-            "storage_path": storage_path
-        }
+        "status": "completed",
+        "metadata": merged_metadata,
+        "updated_at": datetime.now(timezone.utc).isoformat()
     }).eq("session_id", session_id).execute()
 
     print(f"[SUCCESS] Master track uploaded and linked in Supabase: {public_url}")
+    print(f"[SUCCESS] Session {session_id} promoted to 'completed'.")
     return public_url
 
 

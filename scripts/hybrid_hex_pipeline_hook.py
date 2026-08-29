@@ -1,6 +1,7 @@
 import os
 import hashlib
 import argparse
+from datetime import datetime, timezone
 from supabase import create_client, Client
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -34,10 +35,13 @@ def hex_pipeline_hook(session_id, work_dir):
     print(f"  -> Master Hash: {master_hash}")
 
     print("[HEX HOOK] Committing lock to Supabase vault ledger...")
+
+    # Status deliberately stays 'processing' here. upload_master_to_cloud.py
+    # promotes it to 'completed' only after the master reaches Supabase Storage,
+    # so 'completed' always implies a usable storage_url for the frontend.
     response = supabase.table('user_vaults').update({
         "master_hash": master_hash,
-        "status": "completed",
-        "updated_at": "now()"
+        "updated_at": datetime.now(timezone.utc).isoformat()
     }).eq("session_id", session_id).execute()
 
     print(f"[SUCCESS] Cryptographic hex lock secured for session {session_id}.")

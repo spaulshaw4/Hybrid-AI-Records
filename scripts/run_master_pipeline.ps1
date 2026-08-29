@@ -106,7 +106,27 @@ try {
     $StepTimer.Stop()
     Send-Telemetry -EventType "upload_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
 
-    # 7. Pipeline Completion
+    # 7. Egress Protection - purge the 420 staged stems now that the master is
+    #    hashed and safely in cloud storage. Runs only after upload succeeds, so
+    #    a failed upload leaves the stems recoverable for a re-run.
+    $StepTimer.Restart()
+    Write-Host "[PIPELINE] Purging local raw stems to reclaim D: capacity..."
+    $EgressScript = Join-Path $ScriptsDir "egress_protection.py"
+
+    if (Test-Path $EgressScript) {
+        python $EgressScript --session $SessionId --dir (Join-Path $BaseDir "renders")
+        $StepTimer.Stop()
+        Send-Telemetry -EventType "stems_purged" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    } elseif (Test-Path $RawStemsDir) {
+        Remove-Item -Recurse -Force $RawStemsDir
+        $StepTimer.Stop()
+        Write-Host "  -> Purged $RawStemsDir directly (egress_protection.py not found)."
+        Send-Telemetry -EventType "stems_purged" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    } else {
+        Write-Host "  -> [INFO] No raw_stems directory present. Nothing to purge."
+    }
+
+    # 8. Pipeline Completion
     $TotalTimer.Stop()
     $totalSec = [math]::Round($TotalTimer.Elapsed.TotalSeconds, 2)
     Write-Host "[SUCCESS] Master pipeline execution completed successfully for session $SessionId in ${totalSec}s."
