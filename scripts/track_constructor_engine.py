@@ -62,8 +62,20 @@ class BinaryCompositeConstructor:
         ts = recipe.get("time_signature", [4, 4])
         self.ts_num = int(ts[0]) if isinstance(ts, (list, tuple)) and ts else 4
 
-        # Integer frame grid, established once
-        self.samples_per_beat = int(np.round((60.0 / self.bpm) * self.sample_rate))
+        # Exact frame rate per beat, kept in floating point deliberately.
+        #
+        # Rounding this to an integer before multiplying - which is what
+        # F_beat = floor(60/B * fs) prescribes - accumulates error at any tempo
+        # where the quotient is not whole. At 110 BPM the true rate is 24054.5455
+        # frames/beat; rounding to 24055 first adds 0.4545 frames per beat, which
+        # reaches 464 frames (10.5 ms) by bar 256. Computing each event's absolute
+        # beat offset and rounding once holds the error to +/-0.5 frame with no
+        # accumulation, which is what "zero drift" actually requires.
+        self.frames_per_beat_exact = (60.0 / self.bpm) * self.sample_rate
+
+        # Nominal integer values, for slice-length checks and motion resolution.
+        # Not used for positioning.
+        self.samples_per_beat = int(round(self.frames_per_beat_exact))
         self.samples_per_bar = self.samples_per_beat * self.ts_num
 
         self.bit_depth = int(recipe.get("bit_depth", 16))
@@ -92,8 +104,15 @@ class BinaryCompositeConstructor:
         self.skipped = []
 
     def bar_beat_to_frame(self, bar: int, beat: float) -> int:
-        return int((int(bar) - 1) * self.samples_per_bar +
-                   int(round((float(beat) - 1.0) * self.samples_per_beat)))
+        """
+        Absolute frame for a bar/beat position.
+
+        Converts to a total beat offset first, then rounds once. Rounding
+        frames-per-beat up front and multiplying instead lets the rounding error
+        compound with every beat.
+        """
+        total_beats = (int(bar) - 1) * self.ts_num + (float(beat) - 1.0)
+        return int(round(total_beats * self.frames_per_beat_exact))
 
     def validate_recipe(self):
         """
