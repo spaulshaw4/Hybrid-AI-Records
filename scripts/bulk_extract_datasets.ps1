@@ -126,6 +126,7 @@ $extracted = @()
 $skipped = @()
 $corrupt = @()
 $failed = @()
+$corruptDetail = @()
 $totalBytesIn = 0
 
 for ($pass = 1; $pass -le $MaxPasses; $pass++) {
@@ -169,9 +170,36 @@ for ($pass = 1; $pass -le $MaxPasses; $pass++) {
         $testExit = $LASTEXITCODE
 
         if ($testExit -ne 0) {
+            $joined = ($testOutput -join " ")
             $firstError = ($testOutput | Select-Object -First 1)
-            Write-Host "`r  [CORRUPT] $rel ($sizeGb GB) - $firstError" -ForegroundColor Red
+
+            # Classify the failure, because the remedy differs:
+            #   NOT-AN-ARCHIVE : re-fetch (HTML/JSON error page, or text-mangled)
+            #   SPLIT-ARCHIVE  : fetch the missing .z01..z0N parts as well
+            #   TRUNCATED      : resume the transfer; tar listed real entries
+            #                    before hitting a premature EOF
+            $mode = "UNKNOWN"
+            if ($joined -match "Unrecognized archive format") {
+                $hasParts = @(Get-ChildItem -Path $archive.DirectoryName -Filter "$($archive.BaseName).z*" -File -ErrorAction SilentlyContinue).Count -gt 1
+                if ($archive.Length -lt 1MB) {
+                    $mode = "NOT-AN-ARCHIVE"
+                } elseif (-not $hasParts) {
+                    $mode = "SPLIT-ARCHIVE"
+                } else {
+                    $mode = "NOT-AN-ARCHIVE"
+                }
+            } elseif ($firstError -match "[\\/]" -or $firstError -match "\.\w+$") {
+                $mode = "TRUNCATED"
+            }
+
+            Write-Host "`r  [$mode] $rel ($sizeGb GB) - $firstError" -ForegroundColor Red
             $corrupt += $archive.FullName
+            $script:corruptDetail += [PSCustomObject]@{
+                Path = $rel
+                SizeGB = $sizeGb
+                Mode = $mode
+                Detail = $firstError
+            }
             continue
         }
 
@@ -237,7 +265,26 @@ Write-Host "  Corrupt   : $($corrupt.Count)" -ForegroundColor $(if ($corrupt.Cou
 Write-Host "  Failed    : $($failed.Count)" -ForegroundColor $(if ($failed.Count -gt 0) { "Red" } else { "Gray" })
 Write-Host "  Free Space: $(Get-FreeGB) GB"
 
-if ($corrupt.Count -gt 0) {
+if ($corruptDetail.Count -gt 0) {
+    Write-Host "`nUNREADABLE ARCHIVES, GROUPED BY REMEDY:" -ForegroundColor Red
+
+    $remedies = @{
+        "TRUNCATED"      = "Resume the transfer: fetch_dataset_binary.ps1 resumes with curl -C -"
+        "NOT-AN-ARCHIVE" = "Re-download. File is an HTML/JSON error page or was text-mangled."
+        "SPLIT-ARCHIVE"  = "Fetch the missing .z01..z0N parts; libarchive cannot read a lone final segment."
+        "UNKNOWN"        = "Inspect manually."
+    }
+
+    foreach ($group in ($corruptDetail | Group-Object Mode | Sort-Object Name)) {
+        Write-Host "`n  [$($group.Name)] - $($remedies[$group.Name])" -ForegroundColor Yellow
+        foreach ($item in ($group.Group | Sort-Object -Property SizeGB -Descending)) {
+            Write-Host ("    {0,8:N2} GB  {1}" -f $item.SizeGB, $item.Path) -ForegroundColor Red
+        }
+    }
+
+    $lostGb = [math]::Round((($corruptDetail | Measure-Object SizeGB -Sum).Sum), 2)
+    Write-Host "`n  Total unusable: $lostGb GB across $($corruptDetail.Count) archive(s)" -ForegroundColor Red
+} elseif ($corrupt.Count -gt 0) {
     Write-Host "`nCORRUPT ARCHIVES - these need re-downloading:" -ForegroundColor Red
     $corrupt | ForEach-Object { Write-Host "  $($_.Replace("$BaseDir\",''))" -ForegroundColor Red }
 }
