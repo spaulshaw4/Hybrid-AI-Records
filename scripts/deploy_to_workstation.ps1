@@ -115,6 +115,10 @@ $Manifest = @(
     "reclaim_render_storage.ps1",
     "egress_protection.py",
 
+    # Backup and disaster recovery
+    "backup_disaster_recovery.ps1",
+    "register_backup_task.ps1",
+
     # Model training
     "ai_feature_learner.py",
     "ai_model_trainer.py",
@@ -127,6 +131,12 @@ $Manifest = @(
     "verify_and_run_alertmanager.ps1",
     "configure_nssm_logging.ps1",
     "manage_all_services.ps1",
+
+    # Operator UI
+    "hybrid_control_center.bat",
+    "setup_desktop_shortcuts.ps1",
+    "hybrid_tray_app.py",
+    "install_tray_startup.ps1",
 
     # Diagnostics and test harnesses
     "verify_pipeline_health.ps1",

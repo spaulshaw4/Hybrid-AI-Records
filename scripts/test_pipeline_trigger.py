@@ -1,80 +1,202 @@
 # D:\MusicDatasets\scripts\test_pipeline_trigger.py
 import os
+import sys
+import math
+import wave
+import struct
 import time
+import uuid
+import subprocess
 from supabase import create_client, Client
+
+BASE_DIR = r"D:\MusicDatasets"
+INCOMING_DIR = os.path.join(BASE_DIR, "incoming")
+SLICES_DIR = os.path.join(BASE_DIR, "uploaded_slices")
+RENDERS_DIR = os.path.join(BASE_DIR, "renders")
+SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
+RUN_PIPELINE_SCRIPT = os.path.join(SCRIPTS_DIR, "run_master_pipeline.ps1")
+LOCAL_SLICER_SCRIPT = os.path.join(SCRIPTS_DIR, "local_slicer.py")
+
+# The whole pipeline keys off this: watchdog_slicing_daemon and local_slicer both
+# derive genre from the parent folder name, and run_master_pipeline stages from
+# uploaded_slices\<GenreLock>\. Staging under a session-named folder instead
+# would label the slices with the session id and the render would find nothing.
+GENRE_LOCK = "heavy_alternative_rock"
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise EnvironmentError("Missing Supabase credentials in environment variables.")
+    print("[ERROR] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing from environment variables.")
+    sys.exit(1)
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+SAMPLE_RATE = 44100
+DURATION_SEC = 5.0
 
-def trigger_test_session():
+STEM_FREQUENCIES = {
+    "drums": 60.0,       # Low kick tone
+    "bass": 110.0,      # A2 sub-bass tone
+    "guitar": 440.0,    # A4 mid tone
+    "vocals": 880.0     # A5 upper harmonic
+}
+
+
+def generate_sine_stem_wav(file_path: str, frequency: float, duration: float = 5.0, sample_rate: int = 44100):
+    total_samples = int(sample_rate * duration)
+
+    with wave.open(file_path, "w") as wav_file:
+        wav_file.setnchannels(2)      # Stereo
+        wav_file.setsampwidth(2)      # 16-bit PCM
+        wav_file.setframerate(sample_rate)
+
+        frames = bytearray()
+        for i in range(total_samples):
+            t = float(i) / sample_rate
+            # Sine wave with smooth fade-in and fade-out envelope
+            env = min(1.0, t / 0.2) * min(1.0, (duration - t) / 0.2)
+            sample_val = int(32767.0 * 0.5 * env * math.sin(2.0 * math.pi * frequency * t))
+            packed = struct.pack("<hh", sample_val, sample_val)
+            frames.extend(packed)
+
+        wav_file.writeframes(frames)
+
+
+def run_smoke_test():
+    session_id = f"smoke_test_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+    # Stage into the genre folder, not a session folder - see GENRE_LOCK note above
+    session_dir = os.path.join(INCOMING_DIR, GENRE_LOCK)
+    os.makedirs(session_dir, exist_ok=True)
+
+    print("================================================================")
+    print("HYBRID 1.0 - END-TO-END PIPELINE INTEGRATION PROBE")
+    print(f"Session ID       : {session_id}")
+    print(f"Staging Path     : {session_dir}")
+    print(f"Genre Lock       : {GENRE_LOCK}")
+    print("================================================================")
+
+    # 1. Generate 4 synthetic audio stems
+    print("\n[STEP 1/6] Synthesizing multitrack test audio stems...")
+    for stem_name, freq in STEM_FREQUENCIES.items():
+        stem_path = os.path.join(session_dir, f"{session_id}_{stem_name}.wav")
+        generate_sine_stem_wav(stem_path, freq, DURATION_SEC, SAMPLE_RATE)
+        size_kb = round(os.path.getsize(stem_path) / 1024, 1)
+        print(f"  -> Generated {os.path.basename(stem_path)} ({freq} Hz, {size_kb} KB)")
+
+    # 2. Slice explicitly rather than waiting on the watchdog service, so the
+    #    probe is self-contained and does not silently pass when it is stopped.
+    print("\n[STEP 2/6] Slicing staged stems into 1000ms segments...")
+    if os.path.exists(LOCAL_SLICER_SCRIPT):
+        slice_proc = subprocess.run([sys.executable, LOCAL_SLICER_SCRIPT], capture_output=True, text=True)
+        for line in (slice_proc.stdout or "").splitlines():
+            if "SUCCESS" in line or "ERROR" in line or "INGEST" in line:
+                print(f"  {line.strip()}")
+        if slice_proc.returncode != 0:
+            print(f"[WARN] local_slicer exited {slice_proc.returncode}")
+            if slice_proc.stderr:
+                print(slice_proc.stderr[:500])
+    else:
+        print(f"[WARN] {LOCAL_SLICER_SCRIPT} not found; relying on the watchdog daemon.")
+        time.sleep(5)
+
+    genre_slice_dir = os.path.join(SLICES_DIR, GENRE_LOCK)
+    slice_count = len([f for f in os.listdir(genre_slice_dir) if f.endswith(".wav")]) if os.path.isdir(genre_slice_dir) else 0
+    print(f"  -> {slice_count} slice(s) available in {genre_slice_dir}")
+
+    if slice_count == 0:
+        print("\n[FATAL] No slices produced. run_master_pipeline will abort on an empty genre pool.")
+        sys.exit(1)
+
+    # 3. Register session in user_vaults ledger
+    print("\n[STEP 3/6] Creating database entry in user_vaults...")
     test_user_id = "00000000-0000-0000-0000-000000000001"
-    session_id = f"hyb_test_{int(time.time())}"
-    genre_lock = "heavy_alternative_rock"
 
-    print("================================================================")
-    print("HYBRID 1.0 - END-TO-END PIPELINE TEST TRIGGER")
-    print(f"Initializing test session: {session_id}")
-    print("================================================================")
+    try:
+        supabase.table("user_vaults").insert({
+            "session_id": session_id,
+            "user_id": test_user_id,
+            "genre_lock": GENRE_LOCK,
+            "status": "pending",
+            "metadata": {
+                "smoke_test": True,
+                "stem_count": len(STEM_FREQUENCIES),
+                "duration_sec": DURATION_SEC
+            }
+        }).execute()
+        print("  -> Ledger record registered as 'pending'.")
+    except Exception as e:
+        print(f"[FATAL ERROR] Supabase insert failed: {e}")
+        sys.exit(1)
 
-    # Ensure test incoming files exist so watchdog/staging works smoothly
-    incoming_dir = r"D:\MusicDatasets\incoming\heavy_alternative_rock"
-    os.makedirs(incoming_dir, exist_ok=True)
-    sample_file = os.path.join(incoming_dir, "test_track.wav")
-
-    if not os.path.exists(sample_file):
-        print(f"[SETUP] Creating dummy test audio file at {sample_file}...")
-        from pydub import AudioSegment
-        tone = AudioSegment.sine(440, duration=3000)  # 3 seconds of 440Hz tone
-        tone.export(sample_file, format="wav")
-
-    print("[TRIGGER] Inserting pending session into Supabase vault ledger...")
-    response = supabase.table('user_vaults').insert({
-        "session_id": session_id,
-        "user_id": test_user_id,
-        "genre_lock": genre_lock,
-        "status": "pending",
-        "metadata": {
-            "token_cost_usd": 2.00,
-            "trigger_source": "test_script"
-        }
-    }).execute()
-
-    print(f"[SUCCESS] Session {session_id} inserted. Polling for state transitions...")
-
-    timeout_sec = 120
+    # 4. Execute master orchestration pipeline
+    print("\n[STEP 4/6] Executing run_master_pipeline.ps1...")
     start_time = time.time()
 
-    while time.time() - start_time < timeout_sec:
-        res = supabase.table('user_vaults').select('*').eq('session_id', session_id).single().execute()
-        data = res.data
+    cmd = [
+        "powershell.exe",
+        "-ExecutionPolicy", "Bypass",
+        "-File", RUN_PIPELINE_SCRIPT,
+        "-SessionId", session_id,
+        "-GenreLock", GENRE_LOCK,
+        "-UserId", test_user_id
+    ]
 
-        if data:
-            status = data.get('status')
-            print(f"  -> Current status: [{status.upper()}]")
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    elapsed = round(time.time() - start_time, 2)
 
-            if status == 'completed':
-                print("\n================================================================")
-                print("[SUCCESS] Pipeline execution finished successfully!")
-                print(f"  - Session ID : {session_id}")
-                print(f"  - Master Hash: {data.get('master_hash')}")
-                print(f"  - Storage URL: {data.get('storage_url')}")
-                print("================================================================")
-                return
+    print(proc.stdout)
+    if proc.stderr:
+        print(f"[POWERSHELL STDERR]\n{proc.stderr}")
 
-            elif status == 'failed':
-                print(f"\n[ERROR] Pipeline failed. Metadata: {data.get('metadata')}")
-                return
+    # 5. Verify output artifacts on D: drive
+    print("\n[STEP 5/6] Verifying local render artifacts...")
+    render_session_dir = os.path.join(RENDERS_DIR, session_id)
+    master_file = os.path.join(render_session_dir, "master_output.wav")
 
-        time.sleep(3)
+    if os.path.exists(master_file):
+        master_size_mb = round(os.path.getsize(master_file) / (1024 * 1024), 2)
+        print(f"  -> Master file exists: {master_file} ({master_size_mb} MB)")
+    else:
+        print(f"  -> [WARN] Local master output not found at {master_file}")
 
-    print("\n[TIMEOUT] Test execution timed out waiting for completion.")
+    # 6. Validate Supabase final state and telemetry emission
+    print("\n[STEP 6/6] Checking final database state and telemetry stream...")
+    time.sleep(1)
+
+    vault_res = supabase.table("user_vaults").select("*").eq("session_id", session_id).execute()
+    vault_status = "UNKNOWN"
+    master_hash = None
+    storage_url = None
+
+    if vault_res.data:
+        vault_status = vault_res.data[0].get("status")
+        master_hash = vault_res.data[0].get("master_hash")
+        storage_url = vault_res.data[0].get("storage_url")
+
+    telemetry_res = (
+        supabase.table("pipeline_telemetry_logs")
+        .select("event_type, created_at")
+        .filter("metadata->>session_id", "eq", session_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    logged_events = [r.get("event_type") for r in (telemetry_res.data or [])]
+
+    print(f"  - Ledger Status       : {vault_status}")
+    print(f"  - Cryptographic Hash  : {master_hash or 'None'}")
+    print(f"  - Storage URL         : {storage_url or 'None'}")
+    print(f"  - Telemetry Pipeline  : {' -> '.join(logged_events) if logged_events else 'None captured'}")
+    print(f"  - Total Test Duration : {elapsed}s")
+
+    print("\n================================================================")
+    if vault_status == "completed" and storage_url and len(logged_events) >= 5:
+        print("RESULT: [PASS] End-to-end pipeline test executed successfully.")
+    else:
+        print("RESULT: [FAIL / INCOMPLETE] Pipeline did not reach final verified state.")
+    print("================================================================")
 
 
 if __name__ == "__main__":
-    trigger_test_session()
+    run_smoke_test()
