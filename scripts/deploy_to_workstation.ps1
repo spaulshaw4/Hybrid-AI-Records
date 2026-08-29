@@ -126,6 +126,7 @@ $Manifest = @(
     "test_frame_alignment.py",
     "test_subdivision_alignment.py",
     "test_stem_registry.py",
+    "test_euclidean_patterns.py",
     "cylinder_premix_overlay.py",
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",
