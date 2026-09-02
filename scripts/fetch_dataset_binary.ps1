@@ -108,7 +108,10 @@ Write-Host "`n[2/5] Downloading (resumable, raw bytes to disk)..." -ForegroundCo
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
+# --speed-limit/--speed-time abort a stalled socket so --retry can resume
+# from the last written byte instead of sitting at 0 B/s (curl 55).
 & $curl -L -C - --retry $MaxRetries --retry-delay $RetryDelaySec --retry-all-errors `
+    --connect-timeout 30 --speed-limit 8192 --speed-time 90 `
     --fail-with-body -o $OutFile $Url
 
 $curlExit = $LASTEXITCODE
