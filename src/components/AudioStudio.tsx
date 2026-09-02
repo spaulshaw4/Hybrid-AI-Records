@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Check, ChevronDown, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CloudCheck, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
@@ -5027,15 +5027,15 @@ export function AudioStudio() {
                   .trim()}
               </p>
               {retryPlan ? (
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
+                  aria-label="Retry generation"
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
                   onClick={() => void handleRetry()}
                 >
-                  <RefreshCw className="size-4" aria-hidden /> {retryPlan.label}
-                </Button>
+                  <CloudCheck className="size-4" aria-hidden="true" />
+                  {retryPlan.label}
+                </button>
               ) : null}
             </div>
           ) : null}
