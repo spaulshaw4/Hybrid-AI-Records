@@ -11,6 +11,9 @@
     },
     "hex": {
       "enabled": true
+    },
+    "grafana-assistant": {
+      "enabled": true
     }
   }
 }

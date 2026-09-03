@@ -91,6 +91,7 @@ describe("persistUserVault", () => {
       user_id: userId,
       status: "completed",
       master_url: "https://cdn.example/m.mp3",
+      style: "Synthwave",
       title: "Night Drive",
     });
     logSpy.mockRestore();
@@ -128,6 +129,7 @@ describe("persistUserVault", () => {
     expect(upsertRow).toMatchObject({
       id: vaultId,
       status: "processing",
+      style: "Pop",
       provider_task_id: "sonic-task-xyz",
     });
   });

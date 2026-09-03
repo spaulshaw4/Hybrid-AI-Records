@@ -50,7 +50,12 @@ export async function expectBadgeAria(scope: Locator, aria: BadgeAria) {
   await expect(chip).not.toHaveAttribute("aria-expanded", /.*/);
 
   if (aria.tooltipOpen !== undefined) {
-    await expect(chip).toHaveAttribute("data-state", aria.tooltipOpen ? /open$/ : "closed");
+    // Error badges put Radix's trigger on the presentational cluster so Retry
+    // can sit beside the chip without nested-interactive. Healthy phases keep
+    // data-state on the chip itself.
+    const cluster = scope.getByTestId("radio-sync-error-cluster");
+    const trigger = (await cluster.count()) > 0 ? cluster : chip;
+    await expect(trigger).toHaveAttribute("data-state", aria.tooltipOpen ? /open$/ : "closed");
   }
 
   if (aria.busy) await expect(chip).toHaveAttribute("aria-busy", "true");
@@ -70,9 +75,11 @@ export async function expectRetryAria(scope: Locator, opts: { retrying?: boolean
   if (opts.retrying) {
     await expect(retry).toHaveAttribute("aria-disabled", "true");
     await expect(retry).toHaveAttribute("aria-busy", "true");
+    await expect(retry).toHaveAttribute("aria-live", "assertive");
     await expect(retry).not.toHaveAttribute("disabled", /.*/);
   } else {
     await expect(retry).not.toHaveAttribute("aria-disabled", /.*/);
+    await expect(retry).not.toHaveAttribute("aria-live", /.*/);
   }
   await expect(retry).toHaveAttribute("aria-describedby", /.+/);
 }
@@ -84,7 +91,7 @@ export async function expectRetryAria(scope: Locator, opts: { retrying?: boolean
  */
 export async function expectTooltipAria(page: Page, text?: string | RegExp) {
   const popper = page.locator("[data-radix-popper-content-wrapper]").first();
-  await expect(popper).toBeVisible();
+  await expect(popper).toBeVisible({ timeout: 3000 });
 
   // Radix keeps a single visually-hidden copy with role="tooltip" for the a11y
   // tree; the painted content is aria-hidden so nothing is announced twice.
@@ -94,4 +101,22 @@ export async function expectTooltipAria(page: Page, text?: string | RegExp) {
   await expect(content).toHaveAttribute("aria-hidden", "true");
   await expect(content).toHaveAttribute("data-state", /open$/);
   if (text !== undefined) await expect(content).toContainText(text);
+}
+
+/**
+ * Vite compiles the harness route on first hit. Queries fired against the
+ * SSR shell race React hydration and swallow the first hover/Tab. Wait for
+ * the root marker — it flips true only after effects attach listeners.
+ */
+export async function waitForHarnessHydrated(page: Page) {
+  const marker = '[data-testid="sync-badge-harness"][data-hydrated="true"]';
+  try {
+    await page.waitForSelector(marker, { state: "attached", timeout: 30_000 });
+  } catch {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector(marker, { state: "attached", timeout: 30_000 });
+  }
+  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible({
+    timeout: 30_000,
+  });
 }

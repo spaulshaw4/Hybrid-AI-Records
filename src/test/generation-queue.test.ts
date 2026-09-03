@@ -120,6 +120,15 @@ describe("executeGenerationCortex unit", () => {
     vi.doMock("@/integrations/supabase/client.server", () => ({
       tryGetSupabaseAdmin: () => ({
         from: (table: string) => {
+          if (table === "system_config") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: { value: "ARMED" }, error: null }),
+                }),
+              }),
+            };
+          }
           if (table !== "generation_queue") {
             throw new Error(`unexpected table ${table}`);
           }
@@ -136,9 +145,37 @@ describe("executeGenerationCortex unit", () => {
                 }),
               };
             },
+            select: () => ({
+              eq: (_col: string, val: string) => {
+                if (val === "pending") {
+                  return Promise.resolve({ count: 0, error: null });
+                }
+                return {
+                  gte: async () => ({ count: 0, error: null }),
+                };
+              },
+            }),
           };
         },
       }),
+    }));
+
+    vi.doMock("@/lib/ProactiveFlowEnforcer", () => ({
+      handleIngatePreflight: async () => ({
+        status: 200,
+        proceedToQueue: true,
+        context: {},
+      }),
+      ProactiveFlowEnforcer: {
+        enforcePreFlightFlow: async () => ({ allowed: true }),
+      },
+    }));
+
+    vi.doMock("@/lib/PipelineActivatorSwitch", () => ({
+      PipelineActivatorSwitch: {
+        verifySystemArmed: async () => ({ armed: true, state: "ARMED", message: "armed" }),
+        bustCache: () => undefined,
+      },
     }));
 
     vi.doMock("@/lib/pipeline-idempotency.server", () => ({

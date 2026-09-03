@@ -5016,16 +5016,18 @@ export function AudioStudio() {
 
           {!busy && rollbackNotice ? (
 
-            <div
-              className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-center text-xs text-destructive-foreground"
-              role="alert"
-            >
-              <p>
-                {rollbackNotice
-                  .replace(/\bStudioStreamDroppedError\b/gi, "")
-                  .replace(/\s{2,}/g, " ")
-                  .trim()}
-              </p>
+            <div className="space-y-2">
+              <div
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-center text-xs text-destructive-foreground"
+                role="alert"
+              >
+                <p>
+                  {rollbackNotice
+                    .replace(/\bStudioStreamDroppedError\b/gi, "")
+                    .replace(/\s{2,}/g, " ")
+                    .trim()}
+                </p>
+              </div>
               {retryPlan ? (
                 <button
                   type="button"

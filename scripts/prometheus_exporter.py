@@ -22,6 +22,7 @@ itself is not installed on this workstation.
 
 import os
 import sys
+import json
 import time
 import shutil
 import threading
@@ -131,6 +132,24 @@ SYSTEM_INFO = Info(
     "hybrid_pipeline_info",
     "Hybrid 1.0 Pipeline & Workstation Metadata"
 )
+GAUGE_TRUE_PEAK = Gauge(
+    "hybrid_master_true_peak_dbtp",
+    "Latest master true-peak in dBTP",
+    ["session_id"]
+)
+GAUGE_PHASE = Gauge(
+    "hybrid_master_phase_correlation",
+    "Latest master stereo phase correlation",
+    ["session_id"]
+)
+GAUGE_ACTIVE_JOBS = Gauge(
+    "hybrid_pipeline_active_jobs",
+    "Sessions currently in processing"
+)
+COUNTER_PROCESSED_SLICES = Counter(
+    "hybrid_processed_slices_total",
+    "Slices staged or processed by the audio pipeline"
+)
 
 STAGE_EVENTS = [
     "staging_completed",
@@ -220,8 +239,12 @@ def collect_supabase_metrics(client):
             GAUGE_ACTIVE_SESSIONS.labels(status=st_label).set(count)
 
         GAUGE_STAGNANT_SESSIONS.set(stagnant_count)
+        GAUGE_ACTIVE_JOBS.set(status_counts.get("processing", 0))
     except Exception as e:
         print(f"[EXPORTER ERROR] Failed to fetch session status counts: {e}")
+
+    collect_qc_file_metrics()
+    collect_slice_throughput(client)
 
     # 2. Latest duration per pipeline stage
     for stage in STAGE_EVENTS:
@@ -279,6 +302,67 @@ def collect_supabase_metrics(client):
                 PROCESSED_TELEMETRY_IDS.pop()
     except Exception as e:
         print(f"[EXPORTER ERROR] Failed to fetch autoheal telemetry metrics: {e}")
+
+
+def collect_qc_file_metrics():
+    roots = [
+        r"D:\MusicDatasets\releases",
+        r"D:\MusicDatasets\renders",
+    ]
+    reports = []
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if name.endswith("_qc_report.json"):
+                    reports.append(os.path.join(dirpath, name))
+    reports.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    for path in reports[:8]:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.loads(handle.read())
+            metrics = payload.get("metrics") or {}
+            session_id = (
+                payload.get("session_id")
+                or os.path.basename(os.path.dirname(path))
+                or "unknown"
+            )
+            peak = metrics.get("true_peak_dbtp")
+            phase = metrics.get("stereo_phase_correlation")
+            if peak is not None:
+                GAUGE_TRUE_PEAK.labels(session_id=session_id).set(float(peak))
+            if phase is not None:
+                GAUGE_PHASE.labels(session_id=session_id).set(float(phase))
+        except Exception:
+            continue
+
+
+def collect_slice_throughput(client):
+    if not client:
+        return
+    try:
+        res = (
+            client.table("pipeline_telemetry_logs")
+            .select("id, metadata")
+            .eq("event_type", "staging_completed")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        for row in reversed(res.data or []):
+            log_id = row.get("id")
+            if not log_id or log_id in PROCESSED_TELEMETRY_IDS:
+                continue
+            meta = row.get("metadata") or {}
+            staged = meta.get("stems_staged") or meta.get("slice_count") or 0
+            try:
+                COUNTER_PROCESSED_SLICES.inc(float(staged))
+            except (TypeError, ValueError):
+                pass
+            PROCESSED_TELEMETRY_IDS.add(log_id)
+    except Exception as e:
+        print(f"[EXPORTER ERROR] Failed to collect slice throughput: {e}")
 
 
 def metric_collection_loop(client):

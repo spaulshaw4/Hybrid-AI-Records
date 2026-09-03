@@ -24,6 +24,25 @@ scrape_configs:
           service: "hybrid-1.0-audio-pipeline"
           host: "primary-node"
 
+  - job_name: "hybrid_audio_exporter"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["127.0.0.1:9192"]
+        labels:
+          environment: "workstation_production"
+          service: "hybrid-1.0-audio-metrics"
+          host: "primary-node"
+
+  # 9193 = token balances. 9090 remains Prometheus TSDB; do not scrape tokens there.
+  - job_name: "hybrid_token_exporter"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["127.0.0.1:9193"]
+        labels:
+          environment: "workstation_production"
+          service: "hybrid-1.0-token-metrics"
+          host: "primary-node"
+
   - job_name: "prometheus"
     metrics_path: "/metrics"
     static_configs:

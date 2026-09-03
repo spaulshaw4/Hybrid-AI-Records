@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Layout-shift guard for the sync badge tooltip.
@@ -26,10 +27,7 @@ async function openHarness(page: Page) {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.clock.setFixedTime(new Date("2026-01-15T12:00:00Z"));
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Hydration re-renders the badge subtree, which detaches the SSR nodes; a
-  // locator resolved before that point throws "not attached to the DOM".
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 
@@ -178,10 +176,7 @@ async function openNarrowHarness(page: Page, width: number, search = "") {
   await page.setViewportSize({ width, height: 900 });
   await page.clock.setFixedTime(new Date("2026-01-15T12:00:00Z"));
   await page.goto(`${HARNESS}${search}`);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Tooltips ignore focus/hover until React has attached its listeners, and a
-  // swallowed event has no follow-up to recover from.
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }

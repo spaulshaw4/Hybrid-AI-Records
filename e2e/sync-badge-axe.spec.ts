@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createRequire } from "node:module";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Browser-level axe-core gate for the sync badge and its Retry button.
@@ -31,8 +32,7 @@ type Violation = { id: string; impact?: string | null; help: string; nodes: stri
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
   await page.addScriptTag({ path: AXE_PATH });
@@ -89,7 +89,8 @@ for (const theme of THEMES) {
       // Pressing Retry flips the harness badge into its disabled/retrying state.
       await page.keyboard.press("Enter");
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toBeVisible();
-      await expect(retry).toBeDisabled();
+      await expect(retry).toHaveAttribute("aria-disabled", "true");
+      await expect(retry).not.toHaveAttribute("disabled");
       expect(await scan(page, selector)).toEqual([]);
     });
   });

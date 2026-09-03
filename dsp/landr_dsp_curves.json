@@ -1,0 +1,32 @@
+{
+    "acoustic": {
+        "_meta": {
+            "plugin_path": "C:\\Program Files\\Common Files\\VST3\\LANDR\\LANDR FX Acoustic.vst3\\Contents\\x86_64-win\\LANDR FX Acoustic.vst3",
+            "error": "Pedalboard/JUCE host crashed while loading this VST3 (exit=3221225477)."
+        }
+    },
+    "voice": {
+        "_meta": {
+            "plugin_path": "C:\\Program Files\\Common Files\\VST3\\LANDR\\LANDR FX Voice.vst3\\Contents\\x86_64-win\\LANDR FX Voice.vst3",
+            "error": "Pedalboard/JUCE host crashed while loading this VST3 (exit=3221225477)."
+        }
+    },
+    "bass": {
+        "_meta": {
+            "plugin_path": "C:\\Program Files\\Common Files\\VST3\\LANDR\\LANDR FX Bass.vst3\\Contents\\x86_64-win\\LANDR FX Bass.vst3",
+            "error": "Pedalboard/JUCE host crashed while loading this VST3 (exit=3221225477)."
+        }
+    },
+    "beats": {
+        "_meta": {
+            "plugin_path": "C:\\Program Files\\Common Files\\VST3\\LANDR\\LANDR FX Beats.vst3\\Contents\\x86_64-win\\LANDR FX Beats.vst3",
+            "error": "Pedalboard/JUCE host crashed while loading this VST3 (exit=3221225477)."
+        }
+    },
+    "electric": {
+        "_meta": {
+            "plugin_path": "C:\\Program Files\\Common Files\\VST3\\LANDR\\LANDR FX Electric.vst3\\Contents\\x86_64-win\\LANDR FX Electric.vst3",
+            "error": "Pedalboard/JUCE host crashed while loading this VST3 (exit=3221225477)."
+        }
+    }
+}

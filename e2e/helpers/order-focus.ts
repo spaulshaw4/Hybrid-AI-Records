@@ -18,7 +18,7 @@ export const ORDER_SECTION = "#order";
 /** Longer budgets under CI; keep local runs snappy. */
 const CI = !!process.env.CI;
 export const ORDER_VISIBLE_MS = CI ? 30_000 : 15_000;
-export const ORDER_FOCUS_MS = CI ? 20_000 : 12_000;
+export const ORDER_FOCUS_MS = 20_000;
 export const ORDER_SCROLL_MS = CI ? 15_000 : 8_000;
 export const ORDER_RETURN_MS = CI ? 12_000 : 8_000;
 

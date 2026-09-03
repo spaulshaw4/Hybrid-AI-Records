@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * WCAG contrast and focus-ring validation for the sync badge.
@@ -21,8 +22,7 @@ const NON_TEXT_AA = 3;
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -155,7 +155,8 @@ async function settle(page: Page, selector: string) {
     (selector) => {
       const el = document.querySelector(selector);
       if (!el) return false;
-      const now = getComputedStyle(el).boxShadow;
+      const style = getComputedStyle(el);
+      const now = `${style.boxShadow}|${style.outlineWidth}|${style.outlineColor}`;
       const store = window as unknown as Record<string, string>;
       const key = `__shadow:${selector}`;
       const previous = store[key];
@@ -169,6 +170,23 @@ async function settle(page: Page, selector: string) {
 
 const sel = (theme: string, id: string, testid: string) =>
   `[data-testid="badge-${theme}-${id}"] [data-testid="${testid}"]`;
+
+/** Tab onto a control so :focus-visible (not programmatic :focus) applies. */
+async function keyboardFocus(page: Page, selector: string) {
+  const target = page.locator(selector);
+  await target.scrollIntoViewIfNeeded();
+  await page.locator("body").click({ position: { x: 2, y: 2 } });
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  for (let i = 0; i < 48; i += 1) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((el) => el === document.activeElement)) {
+      // Headless Chromium sometimes Tabs without flipping :focus-visible.
+      await target.evaluate((el) => (el as HTMLElement).focus({ focusVisible: true }));
+      return;
+    }
+  }
+  throw new Error(`Tab never reached ${selector}`);
+}
 
 test.describe("SyncBadge contrast and focus rings", () => {
   for (const theme of THEMES) {
@@ -197,7 +215,7 @@ test.describe("SyncBadge contrast and focus rings", () => {
     test(`the last-aligned chip stays readable on the ${theme} surface`, async ({ page }) => {
       await openHarness(page);
       await installContrastTools(page);
-      // This chip is rendered at reduced opacity — the most likely regression.
+      // This chip used to dim with opacity-90, which failed AA on dark glass.
       const result = await contrastOf(page, sel(theme, "resolved", "radio-sync-last-resolved"));
       expect(result.ratio, `last-aligned chip = ${result.ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(TEXT_AA);
     });
@@ -206,8 +224,14 @@ test.describe("SyncBadge contrast and focus rings", () => {
       await openHarness(page);
       await installContrastTools(page);
 
-      for (const id of ["synced-aligned", "error"]) {
-        const result = await contrastOf(page, sel(theme, id, "radio-sync-status"), "borderTopColor");
+      // Error un-nests Retry: the visible pill border lives on the cluster, not
+      // the inner `role="alert"` chip (which has no box border of its own).
+      const cases: Array<[string, string]> = [
+        ["synced-aligned", "radio-sync-status"],
+        ["error", "radio-sync-error-cluster"],
+      ];
+      for (const [id, testid] of cases) {
+        const result = await contrastOf(page, sel(theme, id, testid), "borderTopColor");
         expect(result.ratio, `${theme}/${id} border = ${result.ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
           NON_TEXT_AA,
         );
@@ -225,13 +249,12 @@ test.describe("SyncBadge contrast and focus rings", () => {
       expect((await ringOf(page, badgeSel)).present).toBe(false);
 
       for (const selector of [badgeSel, retrySel]) {
-        // Chromium only matches :focus-visible when focus arrives by keyboard,
-        // so step off the target and Tab back onto it like a real user.
-        await page.locator(selector).focus();
-        await page.keyboard.press("Shift+Tab");
-        await page.keyboard.press("Tab");
+        await keyboardFocus(page, selector);
         await expect(page.locator(selector)).toBeFocused();
-        // The badge transitions into its ring; sample only the settled value.
+        // Latch the painted ring (attribute/state), not a CSS transition tick.
+        await expect
+          .poll(async () => (await ringOf(page, selector)).present, { timeout: 3000 })
+          .toBe(true);
         await settle(page, selector);
         const ring = await ringOf(page, selector);
         expect(ring.present, `no focus ring on ${selector}: ${ring.shadow}`).toBe(true);

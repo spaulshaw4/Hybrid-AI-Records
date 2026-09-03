@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Repeat-focus behaviour for the sync badge tooltip.
@@ -20,7 +21,7 @@ test.use({ timezoneId: "UTC" });
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
 }
 

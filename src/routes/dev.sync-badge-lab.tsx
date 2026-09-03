@@ -16,6 +16,7 @@ import { SyncBadge, type ResolveState } from "@/components/radio/SyncBadge";
  */
 
 export const Route = createFileRoute("/dev/sync-badge-lab")({
+  ssr: false,
   beforeLoad: devOnlyBeforeLoad,
   head: () =>
     pageHead({
@@ -31,8 +32,9 @@ export const Route = createFileRoute("/dev/sync-badge-lab")({
   component: SyncBadgeLab,
 });
 
-/** Frozen offset keeps the badge's "1m ago" chip stable across runs. */
-const LAST_RESOLVED = Date.now() - 61_000;
+/** Frozen clock so SSR and the client paint the same "1m ago" label. */
+const HARNESS_NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
+const LAST_RESOLVED = HARNESS_NOW - 61_000;
 
 type Phase = {
   id: string;
@@ -224,6 +226,7 @@ function SyncBadgeLab() {
             resolveState={phase.resolveState}
             conflictNotice={phase.conflictNotice ?? false}
             lastResolvedAt={phase.lastResolvedAt ?? null}
+            nowTick={HARNESS_NOW}
             retrying={(phase.retrying ?? false) || retries > 0}
             onRetry={() => setRetries((n) => n + 1)}
             tooltipOpen={tooltipOpen ? true : undefined}

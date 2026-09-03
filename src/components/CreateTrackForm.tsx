@@ -10,7 +10,7 @@ import { useTrackGenerator } from "@/hooks/useTrackGenerator";
 
 const busy: Array<ReturnType<typeof useTrackGenerator>["status"]> = ["queued", "running"];
 
-function SyncBadge({ "aria-hidden": hidden = true }: { "aria-hidden"?: boolean | "true" }) {
+function RetryMark({ "aria-hidden": hidden = true }: { "aria-hidden"?: boolean | "true" }) {
   return <CloudCheck className="size-4" aria-hidden={hidden === false ? undefined : true} />;
 }
 
@@ -79,7 +79,7 @@ export function CreateTrackForm() {
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
           onClick={handleRetry}
         >
-          <SyncBadge aria-hidden="true" />
+          <RetryMark aria-hidden="true" />
           Retry generation
         </button>
       ) : null}

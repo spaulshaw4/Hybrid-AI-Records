@@ -189,11 +189,14 @@ export function ArtistTokenStore({ tokens }: { tokens: ArtistTokens }) {
   const buy = useCallback(async (bundle: ArtistTokenBundle) => {
     setPhase({ kind: "loading" });
     try {
+      const params = new URLSearchParams(window.location.search);
+      const trackId = params.get("track")?.trim() || params.get("trackId")?.trim() || undefined;
       const result = await createArtistTokenCheckoutSession({
         data: {
           priceId: bundle.priceId,
           returnUrl: `${window.location.origin}${window.location.pathname}?${ARTIST_TOKEN_RETURN_PARAM}={CHECKOUT_SESSION_ID}`,
           environment: getStripeEnvironment(),
+          ...(trackId ? { trackId } : {}),
         },
       });
       if ("error" in result) {

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Visual regression for keyboard-only journeys through the sync badge.
@@ -18,11 +19,7 @@ test.use({ timezoneId: "UTC" });
 async function openHarness(page: Page) {
   await page.clock.setFixedTime(new Date("2026-01-15T12:00:00Z"));
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Focus only opens the tooltip once React has attached its listeners. A Tab
-  // press before hydration is swallowed silently, so gate on the harness's own
-  // hydration marker rather than trusting networkidle.
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -84,13 +81,16 @@ async function shotAround(page: Page, target: ReturnType<typeof popper>, name: s
     .toBe(true);
 
   const { x, y, width, height } = box!;
+  const viewport = page.viewportSize() ?? { width: 1280, height: 1800 };
+  const clipX = Math.max(0, Math.floor(x) - pad);
+  const clipY = Math.max(0, Math.floor(y) - pad);
   await expect(page).toHaveScreenshot(name, {
     ...SHOT,
     clip: {
-      x: Math.max(0, Math.floor(x) - pad),
-      y: Math.max(0, Math.floor(y) - pad),
-      width: Math.ceil(width) + pad * 2,
-      height: Math.ceil(height) + pad * 2,
+      x: clipX,
+      y: clipY,
+      width: Math.max(1, Math.min(Math.ceil(width) + pad * 2, viewport.width - clipX)),
+      height: Math.max(1, Math.min(Math.ceil(height) + pad * 2, viewport.height - clipY)),
     },
   });
 }
@@ -195,7 +195,7 @@ test.describe("SyncBadge keyboard-only navigation", () => {
     // rather than a page-wide popper lookup: poppers are portalled to the body,
     // so a global ":visible" query can pick up an unrelated badge's tooltip and
     // fail for the wrong reason.
-    await expect(badge(page, "error").getByTestId("radio-sync-status")).toHaveAttribute(
+    await expect(badge(page, "error").getByTestId("radio-sync-error-cluster")).toHaveAttribute(
       "data-state",
       "closed",
     );

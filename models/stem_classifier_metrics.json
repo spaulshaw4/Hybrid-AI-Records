@@ -1,0 +1,69 @@
+{
+  "accuracy": 0.923,
+  "macro_f1": 0.9234,
+  "per_class": {
+    "drums": {
+      "precision": 0.9357,
+      "recall": 0.932,
+      "f1": 0.9339,
+      "support": 500
+    },
+    "bass": {
+      "precision": 0.9469,
+      "recall": 0.928,
+      "f1": 0.9374,
+      "support": 500
+    },
+    "vocals": {
+      "precision": 0.8564,
+      "recall": 0.942,
+      "f1": 0.8971,
+      "support": 500
+    },
+    "other": {
+      "precision": 0.9632,
+      "recall": 0.89,
+      "f1": 0.9252,
+      "support": 500
+    }
+  },
+  "confusion": [
+    [
+      466,
+      8,
+      26,
+      0
+    ],
+    [
+      5,
+      464,
+      22,
+      9
+    ],
+    [
+      14,
+      7,
+      471,
+      8
+    ],
+    [
+      13,
+      11,
+      31,
+      445
+    ]
+  ],
+  "labels": [
+    "drums",
+    "bass",
+    "vocals",
+    "other"
+  ],
+  "backend": "sklearn 1.9.0 HistGradientBoostingClassifier",
+  "train_seconds": 12.29,
+  "filename_baseline_accuracy": 0.73,
+  "n_train": 6000,
+  "n_val": 2000,
+  "n_groups_train": 75,
+  "n_groups_val": 25
+}

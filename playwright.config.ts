@@ -78,7 +78,25 @@ const browserEnv = LD_PATH
 
 
 
-/** E2E config — runs against the already-running dev server when present. */
+/**
+ * Dedicated Playwright origin. Vite's human-facing `dev` stays on 8080;
+ * the headless job runner often binds 8082. Pinning 8085 with `--strictPort`
+ * stops the a11y suite from following Vite's auto-increment onto a foreign
+ * process (FastAPI 404s, stale HMR, tooltip hover races).
+ */
+const E2E_PORT = Number(process.env.E2E_PORT ?? 8085);
+const E2E_ORIGIN = process.env.E2E_BASE_URL ?? `http://localhost:${E2E_PORT}`;
+
+function playwrightWebServerCommand(port: number): string {
+  if (process.env.PLAYWRIGHT_WEB_SERVER_COMMAND) {
+    return process.env.PLAYWRIGHT_WEB_SERVER_COMMAND;
+  }
+  const extra = `--host 127.0.0.1 --port ${port} --strictPort`;
+  // CI images install Bun, not a Node global `npx`. Local Windows has no bun.
+  return process.env.CI ? `bun run dev -- ${extra}` : `npx vite ${extra}`;
+}
+
+/** E2E config — starts its own Vite on 8085 unless E2E_BASE_URL is set. */
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
@@ -88,7 +106,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [["list"]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8080",
+    baseURL: E2E_ORIGIN,
     viewport: { width: 1280, height: 1800 },
     trace: "on-first-retry",
     screenshot: "only-on-failure",
@@ -136,8 +154,8 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: "bun run dev",
-        url: "http://localhost:8080",
+        command: playwrightWebServerCommand(E2E_PORT),
+        url: `http://127.0.0.1:${E2E_PORT}`,
         // Never reuse a stray local server in CI — it masks cold-start failures
         // and can point at a stale build that flakes focus/deep-link assertions.
         reuseExistingServer: !process.env.CI,

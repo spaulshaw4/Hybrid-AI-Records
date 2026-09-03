@@ -53,6 +53,19 @@ if ((Test-Path $TargetDir) -and $resolvedSource -eq (Resolve-Path $TargetDir).Pa
 # -------------------------------------------------------------------------
 $RequiredDirs = @(
     (Join-Path $BaseDir "incoming"),
+    (Join-Path $BaseDir "incoming_zips"),
+    (Join-Path $BaseDir "oneshots"),
+    (Join-Path $BaseDir "oneshots\kick"),
+    (Join-Path $BaseDir "oneshots\snare"),
+    (Join-Path $BaseDir "oneshots\hat"),
+    (Join-Path $BaseDir "oneshots\perc"),
+    (Join-Path $BaseDir "oneshots\fx"),
+    (Join-Path $BaseDir "oneshots\other"),
+    (Join-Path $BaseDir "raw_packs"),
+    (Join-Path $BaseDir "incoming_stems"),
+    (Join-Path $BaseDir "incoming_stems\_processed"),
+    (Join-Path $BaseDir "incoming_stems\_failed"),
+    (Join-Path $BaseDir "scratch\uploads"),
     (Join-Path $BaseDir "uploaded_slices"),
     (Join-Path $BaseDir "renders"),
     (Join-Path $BaseDir "archive"),
@@ -61,6 +74,7 @@ $RequiredDirs = @(
     (Join-Path $BaseDir "archive\backups"),
     (Join-Path $BaseDir "logs"),
     (Join-Path $BaseDir "config"),
+    (Join-Path $BaseDir "engine"),
     # Prometheus and Alertmanager TSDB paths, created by
     # register_monitoring_services.ps1 but checked by the health script.
     (Join-Path $BaseDir "monitoring\data\prometheus"),
@@ -106,6 +120,17 @@ $Manifest = @(
     # Orchestration
     "daemon_poller.py",
     "run_master_pipeline.ps1",
+    "run_production_pipeline.ps1",
+    "batch_album_generator.ps1",
+    "deploy_production_release.ps1",
+    "maintenance_cleanup.ps1",
+    "batch_reslice_corpus.py",
+    "resilient_corpus_slicer.py",
+    "generic_slice_stager.py",
+    "run_slicing_campaign.py",
+    "run_slicing_campaign.ps1",
+    "slicing_campaign_ledger.py",
+    "qc_master_gate.py",
     "cylinder_orchestrator.py",
 
     # Render chain
@@ -140,12 +165,23 @@ $Manifest = @(
     "cylinder_bus_summation.py",
     "hybrid_hex_pipeline_hook.py",
     "upload_master_to_cloud.py",
+    "s3_storage_lifecycle.py",
+    "apply_s3_lifecycle.py",
+    "benchmark_master_engine.py",
+    "verify_master_compliance.py",
+
+    # Headless / prompt-driven generation entry points
+    "arrange_from_prompt.py",
+    "generate_from_prompt.ps1",
+    "start_engine_headless.ps1",
+    "test_local_engine.ps1",
 
     # Observability
     "log_telemetry.py",
     "analyze_telemetry_performance.py",
     "prometheus_exporter.py",
     "telemetry_monitor.py",
+    "start_metrics_exporters.ps1",
     "tail_logs.ps1",
 
     # Self-healing
@@ -159,6 +195,43 @@ $Manifest = @(
 
     # Backup and disaster recovery
     "backup_disaster_recovery.ps1",
+    "backup_ledger_to_s3.py",
+    "credit_user_token.py",
+    "debit_user_token.py",
+    "queue_master_session.py",
+    "read_session_status.py",
+    "read_meter_snapshot.py",
+    "read_user_tokens.py",
+    "corpus_sync_daemon.py",
+    "ledger_schema.py",
+    "sync_master_ledger.py",
+    "init_master_schema.py",
+    "read_system_health.py",
+    "master_queue_worker.py",
+    "stem_preflight.py",
+    "calibrate_genre_target.py",
+    "audio_metadata_tagger.py",
+    "export_distribution_manifest.py",
+    "s3_multipart_uploader.py",
+    "stem_mix_balancer.py",
+    "purge_cdn_cache.py",
+    "db_sentinel.py",
+    "generate_cue_sheet.py",
+    "emergency_rollback.ps1",
+    "catalog_migration_importer.py",
+    "hardware_thermal_guard.py",
+    "multi_format_encoder.py",
+    "build_genre_matrix.py",
+    "generate_waveform_peaks.py",
+    "build_release_package.py",
+    "sync_release_distro.py",
+    "log_rotation_guard.py",
+    "check_s3_vault.py",
+    "check_sqlite_wal.py",
+    "verify_system_readiness.ps1",
+    "ingest_all_unzipped.ps1",
+    "ingest_landr_packs.ps1",
+    "auto_unzip_purge_and_index.ps1",
     "restore_disaster_recovery.ps1",
     "replay_database_snapshots.py",
     "register_backup_task.ps1",
@@ -175,6 +248,7 @@ $Manifest = @(
     "verify_and_run_alertmanager.ps1",
     "configure_nssm_logging.ps1",
     "manage_all_services.ps1",
+    "install_headless_service.ps1",
 
     # Orchestration entry points
     "register_all_services.ps1",
@@ -195,6 +269,7 @@ $Manifest = @(
     "health_check.py",
     "admin_dashboard.py",
     "test_pipeline_trigger.py",
+    "test_pipeline_e2e.ps1",
     "dispatch_test_session.py",
     "create_mock_session.py",
     "test_fire_alert.ps1",
@@ -211,6 +286,151 @@ foreach ($name in $Manifest) {
     } else {
         $missingFromRepo += $name
     }
+}
+
+$dspNames = @(
+    "true_peak_limiter.py",
+    "loudness_meter.py",
+    "midside_processor.py",
+    "dynamic_eq_processor.py",
+    "transient_shaper.py",
+    "pitch_key_aligner.py",
+    "tempo_time_stretch.py",
+    "tape_saturation.py",
+    "phase_aligner.py",
+    "harmonic_exciter.py",
+    "stereo_widener.py",
+    "sub_harmonic_synth.py",
+    "polarity_inverter_check.py",
+    "tpdf_dither.py",
+    "micro_crossfader.py",
+    "smart_transient_slicer.py",
+    "vocal_pitch_corrector.py",
+    "qc_metric_validator.py",
+    "stem_sidechain_glue.py",
+    "__init__.py"
+)
+$DspTarget = Join-Path $BaseDir "dsp"
+foreach ($dspName in $dspNames) {
+    $dspFile = Join-Path (Split-Path $SourceDir -Parent) "dsp\$dspName"
+    if (Test-Path $dspFile) {
+        $sourceFiles += Get-Item $dspFile
+        if (-not $DryRun) {
+            if (-not (Test-Path $DspTarget)) {
+                New-Item -ItemType Directory -Force -Path $DspTarget | Out-Null
+            }
+            Copy-Item -Path $dspFile -Destination (Join-Path $DspTarget $dspName) -Force
+        }
+    }
+}
+
+# Extra-copy engine modules next to the workstation corpus (not into scripts\).
+$engineNames = @(
+    "blueprint_track_assembler.py",
+    "stem_role_router.py",
+    "blueprint_schema.py",
+    "gemini_arranger.py",
+    "generate_track_headless.py",
+    "smart_transient_slicer.py",
+    "slice_rotator.py",
+    "local_track_synthesizer.py",
+    "release_packager.py",
+    "metadata_tagger.py",
+    "video_visualizer_generator.py",
+    "neural_vocal_pipeline.py",
+    "distro_bundle_packager.py"
+)
+$EngineTarget = Join-Path $BaseDir "engine"
+$engineCopied = 0
+Write-Host "`nENGINE SYNC -> $EngineTarget" -ForegroundColor Yellow
+foreach ($engineName in $engineNames) {
+    $engineFile = Join-Path (Split-Path $SourceDir -Parent) "engine\$engineName"
+    if (-not (Test-Path $engineFile)) {
+        Write-Host "  [ABSENT]  $engineName" -ForegroundColor DarkYellow
+        continue
+    }
+    if (-not $DryRun) {
+        if (-not (Test-Path $EngineTarget)) {
+            New-Item -ItemType Directory -Force -Path $EngineTarget | Out-Null
+        }
+        Copy-Item -Path $engineFile -Destination (Join-Path $EngineTarget $engineName) -Force
+    }
+    Write-Host "  [ENGINE]  $engineName" -ForegroundColor Cyan
+    $engineCopied++
+}
+
+# Extra-copy corpus indexer modules next to the workstation database (not into scripts\).
+$dbNames = @(
+    "index_578gb_corpus.py",
+    "sample_indexer.py",
+    "pack_tracker.py",
+    "catalog_syncer.py",
+    "__init__.py"
+)
+$DbTarget = Join-Path $BaseDir "db"
+$dbCopied = 0
+Write-Host "`nDB SYNC -> $DbTarget" -ForegroundColor Yellow
+foreach ($dbName in $dbNames) {
+    $dbFile = Join-Path (Split-Path $SourceDir -Parent) "db\$dbName"
+    if (-not (Test-Path $dbFile)) {
+        Write-Host "  [ABSENT]  $dbName" -ForegroundColor DarkYellow
+        continue
+    }
+    if (-not $DryRun) {
+        if (-not (Test-Path $DbTarget)) {
+            New-Item -ItemType Directory -Force -Path $DbTarget | Out-Null
+        }
+        Copy-Item -Path $dbFile -Destination (Join-Path $DbTarget $dbName) -Force
+    }
+    Write-Host "  [DB]      $dbName" -ForegroundColor Cyan
+    $dbCopied++
+}
+
+# Extra-copy headless API daemon next to the workstation corpus (not into scripts\).
+$apiNames = @("headless_job_runner.py")
+$ApiTarget = Join-Path $BaseDir "api"
+$apiCopied = 0
+Write-Host "`nAPI SYNC -> $ApiTarget" -ForegroundColor Yellow
+foreach ($apiName in $apiNames) {
+    $apiFile = Join-Path (Split-Path $SourceDir -Parent) "api\$apiName"
+    if (-not (Test-Path $apiFile)) {
+        Write-Host "  [ABSENT]  $apiName" -ForegroundColor DarkYellow
+        continue
+    }
+    if (-not $DryRun) {
+        if (-not (Test-Path $ApiTarget)) {
+            New-Item -ItemType Directory -Force -Path $ApiTarget | Out-Null
+        }
+        Copy-Item -Path $apiFile -Destination (Join-Path $ApiTarget $apiName) -Force
+    }
+    Write-Host "  [API]     $apiName" -ForegroundColor Cyan
+    $apiCopied++
+}
+
+# Prometheus exporters live in monitoring\ and are launched from D:, so mirror the
+# whole monitoring\*.py set there. The *.yml configs go to config\ further below;
+# these are the processes prometheus.yml scrapes on 9192/9193.
+$MonitoringPySource = Join-Path (Split-Path $SourceDir -Parent) "monitoring"
+$MonitoringTarget = Join-Path $BaseDir "monitoring"
+$monitoringCopied = 0
+Write-Host "`nMONITORING EXPORTER SYNC -> $MonitoringTarget" -ForegroundColor Yellow
+if (Test-Path $MonitoringPySource) {
+    $monitoringPyFiles = @(Get-ChildItem -Path (Join-Path $MonitoringPySource "*.py") -File -ErrorAction SilentlyContinue)
+    if ($monitoringPyFiles.Count -eq 0) {
+        Write-Host "  [ABSENT]  no *.py under $MonitoringPySource" -ForegroundColor DarkYellow
+    }
+    foreach ($pyFile in $monitoringPyFiles) {
+        if (-not $DryRun) {
+            if (-not (Test-Path $MonitoringTarget)) {
+                New-Item -ItemType Directory -Force -Path $MonitoringTarget | Out-Null
+            }
+            Copy-Item -Path $pyFile.FullName -Destination (Join-Path $MonitoringTarget $pyFile.Name) -Force
+        }
+        Write-Host "  [MONITOR] $($pyFile.Name)" -ForegroundColor Cyan
+        $monitoringCopied++
+    }
+} else {
+    Write-Host "  [ABSENT]  $MonitoringPySource" -ForegroundColor DarkYellow
 }
 
 if ($missingFromRepo.Count -gt 0) {

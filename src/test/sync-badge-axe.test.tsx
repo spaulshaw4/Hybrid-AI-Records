@@ -86,6 +86,8 @@ describe("axe-core: radio sync badge phases", () => {
     const retry = screen.getByTestId("radio-sync-retry");
     expect(retry).toHaveAccessibleName("Retry timestamp sync");
     expect(retry).not.toBeDisabled();
+    expect(retry).not.toHaveAttribute("aria-live", /.*/);
+    expect(screen.getByRole("alert").contains(retry)).toBe(false);
     expect(await violationsIn(container)).toEqual([]);
 
     rerender(
@@ -99,6 +101,8 @@ describe("axe-core: radio sync badge phases", () => {
     const retrying = screen.getByTestId("radio-sync-retry");
     expect(retrying).toHaveAccessibleName("Retrying timestamp sync");
     expect(retrying).toHaveAttribute("aria-disabled", "true");
+    expect(retrying).toHaveAttribute("aria-live", "assertive");
+    expect(retrying).toHaveAttribute("aria-atomic", "true");
     expect(await violationsIn(container)).toEqual([]);
   });
 

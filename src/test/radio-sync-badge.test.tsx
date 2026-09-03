@@ -57,6 +57,9 @@ describe("sync badge aria-live announcements", () => {
     expect(badge).toHaveAttribute("role", "alert");
     expect(badge).toHaveAttribute("aria-live", "assertive");
     expect(badge).toHaveTextContent("Sync failed. Network unreachable");
+    expect(screen.getByTestId("radio-sync-error-cluster")).toHaveAttribute("role", "group");
+    expect(screen.getByTestId("radio-sync-error-cluster")).toHaveAttribute("tabindex", "-1");
+    expect(badge.contains(screen.getByTestId("radio-sync-retry"))).toBe(false);
     expect(screen.getByTestId("radio-sync-retry")).toHaveAccessibleName("Retry timestamp sync");
   });
 
@@ -182,7 +185,7 @@ describe("tooltip content rendering", () => {
       lastResolvedAt: at,
     });
     expect(text).toContain("Devices last aligned 1h ago");
-    expect(text).toContain(new Date(at).toLocaleString());
+    expect(text).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/);
   });
 
   it("explains a restored conflict instead of the account email", () => {

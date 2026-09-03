@@ -28,11 +28,26 @@ export const getArtistTokenState = createServerFn({ method: "POST" })
     };
   });
 
+function clipCheckoutField(raw: unknown, max = 200): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[\r\n\0]/g, " ").trim().slice(0, max);
+}
+
 /** Starts an embedded Stripe Checkout for one Artist Token bundle. */
 export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: { priceId: string; returnUrl: string; environment: StripeEnv }) => {
+  .validator((data: {
+    priceId: string;
+    returnUrl: string;
+    environment: StripeEnv;
+    trackId?: string;
+    artistName?: string;
+    songTitle?: string;
+    artistPayoutTarget?: string;
+    payoutAddress?: string;
+  }) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.priceId)) throw new Error("Invalid priceId");
+    if (data.trackId && !/^[a-zA-Z0-9_:-]+$/.test(data.trackId)) throw new Error("Invalid trackId");
     return data;
   })
   .handler(async ({ data, context }): Promise<CheckoutResult> => {
@@ -42,9 +57,40 @@ export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" 
 
       const { allowedSiteUrl, defaultSiteOrigin } = await import("@/lib/site-origin.server");
       const { createStripeClient, getStripeErrorMessage } = await import("@/lib/stripe.server");
+      const { buildFanTokenCheckoutMetadata } = await import("@/lib/fan-token-purchase");
       const returnUrl =
         allowedSiteUrl(data.returnUrl) ??
         `${defaultSiteOrigin()}/?artist_token_session={CHECKOUT_SESSION_ID}`;
+
+      let artistName = clipCheckoutField(data.artistName);
+      let songTitle = clipCheckoutField(data.songTitle);
+      if (data.trackId && (!artistName || !songTitle)) {
+        const { STREAM_TRACKS } = await import("@/lib/radio-tracks");
+        const track = STREAM_TRACKS.find((item) => item.id === data.trackId);
+        if (track) {
+          artistName = artistName || track.artist;
+          songTitle = songTitle || track.title;
+        }
+      }
+
+      let buyerEmail = "";
+      try {
+        const { data: auth } = await context.supabase.auth.getUser();
+        buyerEmail = clipCheckoutField(auth.user?.email, 320);
+      } catch {
+        buyerEmail = "";
+      }
+
+      const payoutTarget =
+        clipCheckoutField(data.artistPayoutTarget || data.payoutAddress, 320) ||
+        clipCheckoutField(process.env.ARTIST_PAYOUT_TARGET, 320);
+
+      const routing = buildFanTokenCheckoutMetadata({
+        artistName,
+        songTitle,
+        artistPayoutTarget: payoutTarget,
+        buyerEmail,
+      });
 
       const stripe = createStripeClient(data.environment);
       const prices = await stripe.prices.list({ lookup_keys: [data.priceId] });
@@ -58,12 +104,19 @@ export const createArtistTokenCheckoutSession = createServerFn({ method: "POST" 
         return_url: returnUrl,
         payment_intent_data: {
           description: `Artist Tokens — ${bundle.name} (${bundle.tokens} downloads)`,
+          metadata: {
+            kind: "artist_tokens",
+            priceId: data.priceId,
+            userId: context.userId,
+            ...routing,
+          },
         },
         managed_payments: { enabled: true },
         metadata: {
           kind: "artist_tokens",
           priceId: data.priceId,
           userId: context.userId,
+          ...routing,
         },
       } as import("stripe").Stripe.Checkout.SessionCreateParams);
 

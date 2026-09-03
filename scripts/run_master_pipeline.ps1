@@ -4,7 +4,13 @@ param(
     [string]$SessionId,
 
     [Parameter(Mandatory=$true)]
+    [Alias("TargetGenre")]
     [string]$GenreLock,
+
+    # Slice length used by the 4.0s corpus assembler. Does not replace
+    # DurationSeconds (full track length).
+    [Parameter(Mandatory=$false)]
+    [double]$SliceDuration = 1.0,
 
     [Parameter(Mandatory=$false)]
     [string]$UserId = "00000000-0000-0000-0000-000000000001",
@@ -133,7 +139,13 @@ try {
     $ResolverScript = Join-Path $ScriptsDir "genre_resolver.py"
     $ResolvedGenre = $GenreLock
 
-    if ((Test-Path $ResolverScript) -and -not (Test-Path (Join-Path "$BaseDir\uploaded_slices" $GenreLock))) {
+    $ScratchMix = Join-Path $BaseDir "scratch\$SessionId\unmastered_mix.wav"
+    $Preassembled = Test-Path $ScratchMix
+    if ($Preassembled) {
+        Write-Host "[PIPELINE] Pre-assembled mix detected at $ScratchMix (slice $($SliceDuration.ToString($inv))s). Skipping restage." -ForegroundColor Cyan
+    }
+
+    if ((Test-Path $ResolverScript) -and -not $Preassembled -and -not (Test-Path (Join-Path "$BaseDir\uploaded_slices" $GenreLock))) {
         # Interpreter already resolved at script scope above
         if ($script:Python) {
             $candidate = (& $script:Python $ResolverScript --requested $GenreLock --slices-dir "$BaseDir\uploaded_slices" 2>$null | Select-Object -First 1)
@@ -147,6 +159,23 @@ try {
         }
     }
 
+    if ($Preassembled) {
+        $StudioScript = Join-Path $ScriptsDir "studio_master_chain.py"
+        $MasterWav = Join-Path $WorkDir "master_output.wav"
+        $ReleaseDir = Join-Path $BaseDir "releases\$SessionId"
+        if (!(Test-Path $ReleaseDir)) { New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null }
+
+        $StepTimer.Restart()
+        Write-Host "[PIPELINE] Mastering pre-assembled mix through studio DSP chain..."
+        if (-not (Test-Path $StudioScript)) { throw "studio_master_chain.py not found at $StudioScript" }
+        & $script:Python $StudioScript --input $ScratchMix --output $MasterWav --genre $ResolvedGenre --bit-depth 24 --ceiling -0.5
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $MasterWav)) {
+            throw "Studio master chain failed for pre-assembled mix."
+        }
+        Copy-Item -Path $MasterWav -Destination (Join-Path $ReleaseDir "master_output.wav") -Force
+        $StepTimer.Stop()
+        Send-Telemetry -EventType "summation_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"preassembled`":true,`"slice_duration`":$SliceDuration}"
+    } else {
     # 2. Stage slices as raw stems for summation
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Staging 1000ms audio slices from $SlicesDir..."
@@ -238,6 +267,7 @@ try {
     & $script:Python $SummationScript --session $SessionId --dir $WorkDir
     $StepTimer.Stop()
     Send-Telemetry -EventType "summation_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    }
 
     # 4b. QC Compliance Gate
     #     A master that fails true-peak, phase, or DC must not reach the Vault,
@@ -279,17 +309,35 @@ try {
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Executing Cryptographic Hex Hashing & Vault Lock..."
     $HexScript = Join-Path $ScriptsDir "hybrid_hex_pipeline_hook.py"
-    & $script:Python $HexScript --session $SessionId --dir $WorkDir
-    $StepTimer.Stop()
-    Send-Telemetry -EventType "hashing_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    try {
+        & $script:Python $HexScript --session $SessionId --dir $WorkDir
+        if ($LASTEXITCODE -ne 0) { throw "hex hook exited $LASTEXITCODE" }
+        $StepTimer.Stop()
+        Send-Telemetry -EventType "hashing_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    } catch {
+        if ($Preassembled) {
+            Write-Host "  -> [WARN] Hex lock skipped (local preassembled master retained): $($_.Exception.Message)" -ForegroundColor Yellow
+        } else {
+            throw
+        }
+    }
 
     # 6. Execute Cloud Upload to Supabase Storage
     $StepTimer.Restart()
     Write-Host "[PIPELINE] Uploading master render to Supabase cloud storage..."
     $UploadScript = Join-Path $ScriptsDir "upload_master_to_cloud.py"
-    & $script:Python $UploadScript --session $SessionId --dir $WorkDir
-    $StepTimer.Stop()
-    Send-Telemetry -EventType "upload_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    try {
+        & $script:Python $UploadScript --session $SessionId --dir $WorkDir
+        if ($LASTEXITCODE -ne 0) { throw "upload exited $LASTEXITCODE" }
+        $StepTimer.Stop()
+        Send-Telemetry -EventType "upload_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
+    } catch {
+        if ($Preassembled) {
+            Write-Host "  -> [WARN] Cloud upload skipped (local release already written): $($_.Exception.Message)" -ForegroundColor Yellow
+        } else {
+            throw
+        }
+    }
 
     # 7. Egress Protection - purge the 420 staged stems now that the master is
     #    hashed and safely in cloud storage. Runs only after upload succeeds, so

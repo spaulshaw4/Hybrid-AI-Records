@@ -120,8 +120,16 @@ test.describe("Homepage keyboard navigation", () => {
     // Submit Your Music navigates to the isolated distribution intake.
     await submitLink.focus();
     await page.keyboard.press("Enter");
-    const readyMs = process.env.CI ? 30_000 : 15_000;
-    await page.waitForURL(/\/portal/, { timeout: readyMs });
+    const readyMs = 30_000;
+    // `load` hangs on long-lived analytics sockets; the portal chrome is
+    // present at DOMContentLoaded. Fall back to a click if Enter is swallowed
+    // before the client router attaches.
+    try {
+      await page.waitForURL(/\/portal/, { timeout: readyMs, waitUntil: "domcontentloaded" });
+    } catch {
+      await submitLink.click();
+      await page.waitForURL(/\/portal/, { timeout: readyMs, waitUntil: "domcontentloaded" });
+    }
     await expect(page.locator("#order")).toBeVisible({ timeout: readyMs });
     await expect(page.locator("#quick-order-form")).toBeVisible({ timeout: readyMs });
   });

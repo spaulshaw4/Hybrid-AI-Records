@@ -91,7 +91,9 @@
   --input: rgb(9 9 11 / 0.6);
   --ring: #e11d48;
 
-  --status-accent: #be123c;
+  /* Rose-500: AA 4.5:1 for small text on the dark glass canvas. .theme-light
+     re-points this to a darker rose so the same token stays AA on white. */
+  --status-accent: #f43f5e;
   --status-outline: #e11d48;
 
   --wordmark-red: #e11d48;

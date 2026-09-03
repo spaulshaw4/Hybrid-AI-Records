@@ -398,7 +398,7 @@ describe("MusicAPI sonic workflow", () => {
       "[PIPELINE_INIT_FAILED] MusicAPI (Base Arrangement) failed: Missing MUSIC_API_KEY";
     expect(() => musicApiKey()).toThrow(message);
     expect(error).toHaveBeenCalledWith(
-      "[MUSICAPI] AIMUSICAPI_KEY / MUSICAPI_KEY / MUSIC_API_KEY is undefined — add it to .env.local (server), not only a VITE_ client key",
+      "[MUSICAPI] AIMUSICAPI_KEY / MUSICAPI_KEY / MUSIC_API_KEY / SHARED_API_KEY is undefined — add it to .env.local (server), not only a VITE_ client key",
     );
     expect(error).toHaveBeenCalledWith(message);
   });

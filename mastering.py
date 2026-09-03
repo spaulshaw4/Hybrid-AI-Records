@@ -13,6 +13,7 @@ from pedalboard import (
     Pedalboard,
 )
 from spatial_fx import process_stereo_field
+from dsp.landr_vst_bridge import apply_landr_bus_with_fallback
 
 
 def apply_mastering_chain(
@@ -21,6 +22,9 @@ def apply_mastering_chain(
     target_lufs: float = -14.0,
     mono_bass_crossover_hz: float = 120.0,
     stereo_width: float = 1.30,
+    landr_bus_type: str | None = None,
+    landr_intensity: float = 0.5,
+    landr_prefer_vst: bool = True,
 ) -> np.ndarray:
     """EQ, M/S bass-mono + high width, glue compress, limit, then LUFS normalize.
 
@@ -28,6 +32,15 @@ def apply_mastering_chain(
     """
     if audio.ndim == 1:
         audio = np.vstack([audio, audio])
+
+    if landr_bus_type:
+        audio = apply_landr_bus_with_fallback(
+            audio,
+            sr=int(sr),
+            bus_type=landr_bus_type,
+            intensity=float(landr_intensity),
+            prefer_vst=bool(landr_prefer_vst),
+        )
 
     pre_eq = Pedalboard(
         [

@@ -80,8 +80,10 @@ describe("screen reader announcements (role + name queries)", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveAttribute("aria-live", "assertive");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    // The retry control's name is part of the alert; assert on the sentence only.
+    // Retry is a sibling of the alert (not nested) so the chip name stays the
+    // failure sentence and axe nested-interactive stays clean.
     expect(alert).toHaveTextContent("Sync failed. Network unreachable");
+    expect(alert.contains(screen.getByRole("button", { name: "Retry timestamp sync" }))).toBe(false);
   });
 
   it("names the retry control by its action, not by its icon", () => {
@@ -106,6 +108,7 @@ describe("screen reader announcements (role + name queries)", () => {
     expect(retrying).toHaveAttribute("aria-disabled", "true");
     // Decorative spinner/static markers must not leak into the accessible name.
     expect(retrying).not.toHaveAccessibleName(/⋯/);
+    expect(retrying).toHaveAttribute("aria-live", "assertive");
   });
 });
 

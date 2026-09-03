@@ -166,7 +166,16 @@ def render_composition(
         for _, layer in processed_layers:
             mixed[:, : layer.shape[1]] += layer.astype(np.float32)
 
-        final_master = apply_mastering_chain(mixed, TARGET_SR, target_lufs=-14.0)
+        landr_bus = meta.get("landr_bus_type") or meta.get("landr_bus")
+        landr_intensity = float(meta.get("landr_intensity") or 0.5)
+        final_master = apply_mastering_chain(
+            mixed,
+            TARGET_SR,
+            target_lufs=-14.0,
+            landr_bus_type=landr_bus if isinstance(landr_bus, str) and landr_bus else None,
+            landr_intensity=landr_intensity,
+            landr_prefer_vst=True,
+        )
         render_path = os.path.join(tmpdir, "render_output.wav")
         sf.write(render_path, final_master.T, TARGET_SR, subtype="PCM_24")
         qc_job_id = job_id or Path(output_key).stem

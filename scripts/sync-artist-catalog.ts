@@ -67,7 +67,14 @@ function isImage(name: string): boolean {
 /** Optional static metadata overlays keyed by folder / album title. */
 const ALBUM_META: Record<
   string,
-  { artist: string; genre: string; credits: string; division?: string; title?: string }
+  {
+    artist: string;
+    genre: string;
+    credits: string;
+    division?: string;
+    title?: string;
+    tracks?: string[];
+  }
 > = {
   "voices before the fall": {
     artist: "Sage Zimba",
@@ -125,6 +132,45 @@ const ALBUM_META: Record<
     credits: "Written by Stephen P. Shaw · Produced by Phillip S. Thomas (Jester AI)",
     division: "jester",
   },
+  "heavy sky arrival": {
+    artist: "Stephen P. Shaw",
+    genre: "Space Rock",
+    credits: "Written by Stephen P. Shaw · Produced by Hybrid AI Records",
+    division: "usa",
+    tracks: [
+      "The World We Live In",
+      "Time Is Not My Friend",
+      "Millionaire of Miles",
+      "Iron and Mortar",
+      "Unvarnished Verity",
+      "Kinetic Kingdom",
+      "Heavy Sky Arrival",
+      "The Unified Pulse (An Earth Ballet)",
+      "Brothers Rest",
+      "The Absolute Pulse",
+    ],
+  },
+  "kilimanjaro": {
+    title: "Kilimanjaro",
+    artist: "Golden Ice 265",
+    genre: "Amapiano",
+    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
+    division: "nigeria",
+  },
+  "golden ice 265": {
+    title: "Kilimanjaro",
+    artist: "Golden Ice 265",
+    genre: "Amapiano",
+    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
+    division: "nigeria",
+  },
+  "golden ice 265 kilimanjaro": {
+    title: "Kilimanjaro",
+    artist: "Golden Ice 265",
+    genre: "Amapiano",
+    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
+    division: "nigeria",
+  },
 };
 
 function albumMeta(folderName: string) {
@@ -138,7 +184,38 @@ function albumMeta(folderName: string) {
     genre: hit?.genre ?? null,
     credits: hit?.credits ?? null,
     division: hit?.division ?? null,
+    tracks: hit?.tracks,
   };
+}
+
+function normalizeTrackTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function applyTrackOrder(
+  parsed: { file: string; title: string; trackNumber: number }[],
+  order: string[] | undefined,
+): { file: string; title: string; trackNumber: number }[] {
+  if (!order?.length) return parsed;
+  const byTitle = new Map(parsed.map((row) => [normalizeTrackTitle(row.title), row]));
+  const used = new Set<string>();
+  const ordered: { file: string; title: string; trackNumber: number }[] = [];
+  for (const [index, title] of order.entries()) {
+    const hit = byTitle.get(normalizeTrackTitle(title));
+    if (!hit) continue;
+    const key = normalizeTrackTitle(hit.title);
+    if (used.has(key)) continue;
+    used.add(key);
+    ordered.push({ ...hit, trackNumber: index + 1 });
+  }
+  const rest = parsed
+    .filter((row) => !used.has(normalizeTrackTitle(row.title)))
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((row, index) => ({ ...row, trackNumber: ordered.length + index + 1 }));
+  return [...ordered, ...rest];
 }
 
 type StorageFile = { name: string };
@@ -277,14 +354,17 @@ async function main(): Promise<void> {
     const { coverFile, coverUrl } = resolveAlbumCoverUrl(supabaseUrl, bucket, folder, files);
     const audioFiles = files.filter((f) => isAudio(f.name));
 
-    const parsed = audioFiles.map((f, index) => {
-      const { trackNumber, title } = parseTrackFilename(f.name);
-      return {
-        file: f.name,
-        title,
-        trackNumber: trackNumber ?? index + 1,
-      };
-    });
+    const parsed = applyTrackOrder(
+      audioFiles.map((f, index) => {
+        const { trackNumber, title } = parseTrackFilename(f.name);
+        return {
+          file: f.name,
+          title,
+          trackNumber: trackNumber ?? index + 1,
+        };
+      }),
+      meta.tracks,
+    );
     parsed.sort((a, b) => a.trackNumber - b.trackNumber || a.title.localeCompare(b.title));
     const trackTotal = parsed.length;
 

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Screen-reader-style end-to-end coverage for the sync badge.
@@ -60,8 +61,7 @@ type Announcement = { politeness: string; text: string };
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -214,7 +214,10 @@ for (const theme of ["dark", "light"] as const) {
       await page.keyboard.press("Enter");
 
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toHaveText("Retry fired 1");
-      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toBeDisabled();
+      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
       // The old name must be gone — a stale "Retry timestamp sync" would let an
       // AT user press a control that no longer does anything.
       await expect(scope.getByRole("button", { name: "Retry timestamp sync", exact: true })).toHaveCount(0);
@@ -235,7 +238,10 @@ for (const theme of ["dark", "light"] as const) {
       await page.keyboard.press("Space");
 
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toHaveText("Retry fired 1");
-      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toBeDisabled();
+      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
 
       const heard = await spoken(page);
       expect(heard.some((a) => /Retrying timestamp sync/.test(a.text))).toBe(true);

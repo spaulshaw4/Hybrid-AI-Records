@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * The tooltip must stay anchored to the badge that opened it, at every mobile
@@ -48,10 +49,7 @@ async function openHarness(page: Page, width: number) {
   await page.setViewportSize({ width, height: 844 });
   await page.clock.setFixedTime(new Date("2026-01-15T12:00:00Z"));
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Tooltips ignore focus until React attaches its listeners, and a swallowed
-  // event has no follow-up to recover from.
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }

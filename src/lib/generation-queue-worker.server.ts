@@ -969,22 +969,25 @@ async function processClaimedJob(
     // 4. PASS CTX INTO END-GATE — delivery owner = CTX.userId only.
     //    On success → Ledger Settlement Gate; on fault → Isolated Ground (catch).
     ContextFactory.assertOwner(ctx, ctx.userId);
+    const { PipelineFluxCoating } = await import("@/lib/PipelineFluxCoating");
     const { EndGateDispatcher } = await import("@/lib/EndGateDispatcher");
     const delivery = await EndGateDispatcher.deliverToUserVault({
-      jobId: coatedJob.id,
-      userId: ctx.userId,
-      audioUrl: result.audioUrl,
-      prompt: genre || studioPayload.prompt,
-      providerName: provider.name,
-      title: result.title || studioPayload.title || "Untitled Track",
-      style: result.style || genre,
-      vaultId: coatedJob.vault_id ?? result.vaultId ?? null,
-      instrumentalUrl: result.instrumentalUrl ?? null,
-      vocalUrl: result.vocalUrl ?? null,
-      rawAudioUrl: result.rawAudioUrl ?? null,
-      providerTaskId: result.taskId ?? null,
-      spendIdempotencyKey: coatedJob.spend_idempotency_key,
-      correlationId,
+      ...PipelineFluxCoating.coatEndGate({
+        jobId: coatedJob.id,
+        userId: ctx.userId,
+        audioUrl: result.audioUrl,
+        prompt: genre || studioPayload.prompt,
+        providerName: provider.name,
+        title: result.title || studioPayload.title || "Untitled Track",
+        style: result.style || genre,
+        vaultId: coatedJob.vault_id ?? result.vaultId ?? null,
+        instrumentalUrl: result.instrumentalUrl ?? null,
+        vocalUrl: result.vocalUrl ?? null,
+        rawAudioUrl: result.rawAudioUrl ?? null,
+        providerTaskId: result.taskId ?? null,
+        spendIdempotencyKey: coatedJob.spend_idempotency_key,
+        correlationId,
+      }),
       executionContext: ctx,
       generationCost: 1,
       result: {

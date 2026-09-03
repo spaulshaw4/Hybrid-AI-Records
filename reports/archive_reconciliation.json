@@ -1,0 +1,4836 @@
+[
+ {
+  "archive": "D:\\MusicDatasets\\slakh\\slakh.tar.gz",
+  "zip_bytes": 106601183940,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fma\\fma_large.zip",
+  "zip_bytes": 58276208640,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\dnr\\dnr.tar.gz",
+  "zip_bytes": 51543404076,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch_v2.tar",
+  "zip_bytes": 31630174208,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\spheres\\multichannel.zip",
+  "zip_bytes": 29305669469,
+  "members": 1524,
+  "uncompressed_bytes": 26225708770,
+  "list_secs": 0.07,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch_v3.tar",
+  "zip_bytes": 26123438080,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\aam\\aam_multitracks.zip",
+  "zip_bytes": 26108561064,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch_v4.tar",
+  "zip_bytes": 25529782272,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch\\aam-stems\\aam-1000-multitracks.zip",
+  "zip_bytes": 18454937600,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\dsd100\\DSD100.zip",
+  "zip_bytes": 15989815305,
+  "members": 502,
+  "uncompressed_bytes": 22217634725,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 400,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\dsd100\\DSD100\\DSD100\\Sources\\Test\\045 - Traffic Experiment - Sirens",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\dsd100\\DSD100\\Sources\\Test\\045 - Traffic Experiment - Sirens",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\dsd100\\DSD100\\DSD100\\Sources\\Test\\039 - Swinging Steaks - Lost My Way",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch\\spheres\\multichannel.zip",
+  "zip_bytes": 14831264256,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fma\\fma_full.zip",
+  "zip_bytes": 13020113056,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fma_full.zip",
+  "zip_bytes": 7805206528,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\Glitch With Friends_ Samples Vol. 3.zip",
+  "zip_bytes": 6327957312,
+  "members": 2555,
+  "uncompressed_bytes": 7768888798,
+  "list_secs": 0.03,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch\\ensembleset\\ensembleset.zip",
+  "zip_bytes": 6286704640,
+  "status": "UNREADABLE",
+  "reason": "File is not a zip file"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-23.tar",
+  "zip_bytes": 5769287680,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-17.tar",
+  "zip_bytes": 5767731200,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-28.tar",
+  "zip_bytes": 5767639040,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-22.tar",
+  "zip_bytes": 5652008960,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-16.tar",
+  "zip_bytes": 5623695360,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-13.tar",
+  "zip_bytes": 5592975360,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-06.tar",
+  "zip_bytes": 5574103040,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-02.tar",
+  "zip_bytes": 5571594240,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-15.tar",
+  "zip_bytes": 5563944960,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-29.tar",
+  "zip_bytes": 5556899840,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-27.tar",
+  "zip_bytes": 5516881920,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-03.tar",
+  "zip_bytes": 5506621440,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-21.tar",
+  "zip_bytes": 5497446400,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-14.tar",
+  "zip_bytes": 5454131200,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-00.tar",
+  "zip_bytes": 5449502720,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-18.tar",
+  "zip_bytes": 5441443840,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-30.tar",
+  "zip_bytes": 5435576320,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-19.tar",
+  "zip_bytes": 5418455040,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-05.tar",
+  "zip_bytes": 5397340160,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-20.tar",
+  "zip_bytes": 5393070080,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR-20260830-013433.zip",
+  "zip_bytes": 5363237819,
+  "members": 1660,
+  "uncompressed_bytes": 6249683492,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 399,
+  "found_fraction": 0.998,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    399
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-04.tar",
+  "zip_bytes": 5303029760,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-24.tar",
+  "zip_bytes": 5284085760,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-25.tar",
+  "zip_bytes": 5260840960,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-26.tar",
+  "zip_bytes": 5219184640,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-12.tar",
+  "zip_bytes": 5196195840,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-01.tar",
+  "zip_bytes": 5188659200,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-11.tar",
+  "zip_bytes": 5138472960,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-09.tar",
+  "zip_bytes": 5062318080,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-08.tar",
+  "zip_bytes": 5054525440,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-07.tar",
+  "zip_bytes": 4926341120,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\mtg\\raw_30s_audio-10.tar",
+  "zip_bytes": 4762767360,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\musdb18\\musdb18.zip",
+  "zip_bytes": 4684228845,
+  "members": 151,
+  "uncompressed_bytes": 5688916914,
+  "list_secs": 0.02,
+  "sampled": 151,
+  "sample_found": 151,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\musdb18\\musdb18\\train",
+    100
+   ],
+   [
+    "D:\\MusicDatasets\\musdb18\\musdb18\\test",
+    50
+   ],
+   [
+    "D:\\MusicDatasets\\musdb18\\musdb18",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\377DrumLoopsSamplePack.zip",
+  "zip_bytes": 3714959232,
+  "members": 377,
+  "uncompressed_bytes": 3714887096,
+  "list_secs": 0.02,
+  "sampled": 377,
+  "sample_found": 377,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets",
+    377
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR-20260830-125254.zip",
+  "zip_bytes": 3285160269,
+  "members": 2352,
+  "uncompressed_bytes": 4157766422,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 400,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    400
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR-20260830-115253.zip",
+  "zip_bytes": 3230511733,
+  "members": 2496,
+  "uncompressed_bytes": 3980401834,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 400,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    400
+   ],
+   [
+    "D:\\MusicDatasets",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR-20260830-115408.zip",
+  "zip_bytes": 3230511733,
+  "members": 2496,
+  "uncompressed_bytes": 3980401834,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 400,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    400
+   ],
+   [
+    "D:\\MusicDatasets",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fsd50k\\FSD50K.eval_audio.zip",
+  "zip_bytes": 3037675767,
+  "status": "UNREADABLE",
+  "reason": "zipfiles that span multiple disks are not supported"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch\\openmic\\openmic.tgz",
+  "zip_bytes": 2623376754,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR-20260830-011603.zip",
+  "zip_bytes": 2522700633,
+  "members": 1728,
+  "uncompressed_bytes": 3187643850,
+  "list_secs": 0.03,
+  "sampled": 400,
+  "sample_found": 400,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    400
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    13
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Total Harmonic Distortion [SampleScience Edition].zip",
+  "zip_bytes": 2382884560,
+  "members": 1428,
+  "uncompressed_bytes": 3098759937,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fsd50k\\FSD50K.dev_audio.zip",
+  "zip_bytes": 2306663327,
+  "status": "UNREADABLE",
+  "reason": "zipfiles that span multiple disks are not supported"
+ },
+ {
+  "archive": "D:\\CHRISSA SJE & NIKOS - INFINITE (SOUND PACK).zip",
+  "zip_bytes": 1886895526,
+  "members": 165,
+  "uncompressed_bytes": 2229175826,
+  "list_secs": 0.02,
+  "sampled": 165,
+  "sample_found": 165,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\04. Midi Kit \u221e\\01. Melody Midi",
+    22
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\04. Midi Kit \u221e\\04. Snare_Perc patterns",
+    11
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\05. Drum Kit \u221e\\02. Hi-hats",
+    11
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\CHRISSA SJE & NIKOS - INFINITE (SOUND PACK).zip",
+  "zip_bytes": 1886895526,
+  "members": 165,
+  "uncompressed_bytes": 2229175826,
+  "list_secs": 0.0,
+  "sampled": 165,
+  "sample_found": 165,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\04. Midi Kit \u221e\\01. Melody Midi",
+    22
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\04. Midi Kit \u221e\\04. Snare_Perc patterns",
+    11
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CHRISSA_SJE_&_NIKOS_INFINITE_(SOUND_PACK)\\05. Drum Kit \u221e\\02. Hi-hats",
+    11
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Glitch With Friends.zip",
+  "zip_bytes": 1782004131,
+  "members": 718,
+  "uncompressed_bytes": 2039764060,
+  "list_secs": 0.01,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\NIKOS & GSTONE_SA - LETS GO TO SPACE (SOUND PACK).zip",
+  "zip_bytes": 1762102762,
+  "members": 198,
+  "uncompressed_bytes": 2261622123,
+  "list_secs": 0.01,
+  "sampled": 198,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch_full.tar",
+  "zip_bytes": 1512333312,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Fire Trap Loops.zip",
+  "zip_bytes": 1272184091,
+  "members": 53,
+  "uncompressed_bytes": 1800426197,
+  "list_secs": 0.02,
+  "sampled": 53,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Emotional Sounds Vol 2.zip",
+  "zip_bytes": 867446950,
+  "members": 287,
+  "uncompressed_bytes": 1193711794,
+  "list_secs": 0.01,
+  "sampled": 287,
+  "sample_found": 287,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    141
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    84
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    69
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\digital_underglow.zip",
+  "zip_bytes": 769836354,
+  "members": 633,
+  "uncompressed_bytes": 769687044,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Italian Thriller Toolkit.zip",
+  "zip_bytes": 685731163,
+  "members": 127,
+  "uncompressed_bytes": 721029056,
+  "list_secs": 0.02,
+  "sampled": 127,
+  "sample_found": 127,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    64
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    36
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    32
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SisterWaize_NightmareFantasia_SAMPLEPACK_WAV.zip",
+  "zip_bytes": 680276268,
+  "members": 76,
+  "uncompressed_bytes": 762214167,
+  "list_secs": 0.01,
+  "sampled": 76,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\NIKOS - PRODUCER PAX VOL. 01.zip",
+  "zip_bytes": 625619942,
+  "members": 208,
+  "uncompressed_bytes": 630881828,
+  "list_secs": 0.02,
+  "sampled": 208,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Emotional Sounds Vol 1.zip",
+  "zip_bytes": 547984041,
+  "members": 261,
+  "uncompressed_bytes": 636367384,
+  "list_secs": 0.03,
+  "sampled": 261,
+  "sample_found": 261,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    134
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    79
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    54
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Music_2000_Sample_library_44k_WAV.zip",
+  "zip_bytes": 496434785,
+  "members": 2899,
+  "uncompressed_bytes": 495836651,
+  "list_secs": 0.04,
+  "sampled": 400,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\Rossi - SOULS (Loop kit + MIDI) Pack.zip",
+  "zip_bytes": 468848612,
+  "members": 159,
+  "uncompressed_bytes": 531440579,
+  "list_secs": 0.01,
+  "sampled": 159,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Male House Vocals.zip",
+  "zip_bytes": 456297375,
+  "members": 181,
+  "uncompressed_bytes": 541619114,
+  "list_secs": 0.02,
+  "sampled": 181,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Uk Drill & Vocals.zip",
+  "zip_bytes": 455764807,
+  "members": 285,
+  "uncompressed_bytes": 669328454,
+  "list_secs": 0.02,
+  "sampled": 285,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Sounds from Hell Vol2.zip",
+  "zip_bytes": 436130090,
+  "members": 278,
+  "uncompressed_bytes": 602694286,
+  "list_secs": 0.03,
+  "sampled": 278,
+  "sample_found": 278,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    140
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    84
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    57
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Day Dreams Lofi Guitar Loops.zip",
+  "zip_bytes": 432753812,
+  "members": 73,
+  "uncompressed_bytes": 463318616,
+  "list_secs": 0.02,
+  "sampled": 73,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Sounds from Hell Vol1.zip",
+  "zip_bytes": 382334941,
+  "members": 266,
+  "uncompressed_bytes": 560950510,
+  "list_secs": 0.01,
+  "sampled": 266,
+  "sample_found": 266,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    141
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    66
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    64
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Antidote Audio - Advent 2018 Mega Pack.zip",
+  "zip_bytes": 359100892,
+  "members": 763,
+  "uncompressed_bytes": 395496117,
+  "list_secs": 0.02,
+  "sampled": 400,
+  "sample_found": 399,
+  "found_fraction": 0.998,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Antidote Advent - Infected Track Drums Ableton Project\\Samples\\Imported",
+    56
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Drums - Kitchen Foley Sounds & Loops",
+    35
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Sci-Fi Lasers",
+    30
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\Antidote Audio - Advent 2018 Mega Pack.zip",
+  "zip_bytes": 359100892,
+  "members": 763,
+  "uncompressed_bytes": 395496117,
+  "list_secs": 0.0,
+  "sampled": 400,
+  "sample_found": 399,
+  "found_fraction": 0.998,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Antidote Advent - Infected Track Drums Ableton Project\\Samples\\Imported",
+    56
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Drums - Kitchen Foley Sounds & Loops",
+    35
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Advent_2018_Mega_Pack\\Antidote Audio - Advent 2018 Mega Pack\\Sci-Fi Lasers",
+    30
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fma\\fma_metadata.zip",
+  "zip_bytes": 358412441,
+  "members": 12,
+  "uncompressed_bytes": 1464836461,
+  "list_secs": 0.02,
+  "sampled": 12,
+  "sample_found": 12,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\fma\\fma_metadata\\fma_metadata",
+    12
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\PANTONE Color of the Year 2020 The Classic Blue 19-4052 Sample Pack.zip",
+  "zip_bytes": 357762702,
+  "members": 145,
+  "uncompressed_bytes": 396725108,
+  "list_secs": 0.01,
+  "sampled": 145,
+  "sample_found": 145,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    124
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    21
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - RNB Dreams Guitar Loops.zip",
+  "zip_bytes": 334612644,
+  "members": 84,
+  "uncompressed_bytes": 443880149,
+  "list_secs": 0.01,
+  "sampled": 84,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Festival Dance.zip",
+  "zip_bytes": 325844988,
+  "members": 214,
+  "uncompressed_bytes": 374804628,
+  "list_secs": 0.02,
+  "sampled": 214,
+  "sample_found": 214,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    214
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Acapella Samples.zip",
+  "zip_bytes": 301927753,
+  "members": 20,
+  "uncompressed_bytes": 365289918,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    15
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    5
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Purple Drip Sample Pack.zip",
+  "zip_bytes": 291716601,
+  "members": 52,
+  "uncompressed_bytes": 410880828,
+  "list_secs": 0.01,
+  "sampled": 52,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Care Package.zip",
+  "zip_bytes": 282158012,
+  "members": 100,
+  "uncompressed_bytes": 306018548,
+  "list_secs": 0.01,
+  "sampled": 100,
+  "sample_found": 100,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    50
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    30
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    21
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Chilled Reggae Guitar loops.zip",
+  "zip_bytes": 277631039,
+  "members": 87,
+  "uncompressed_bytes": 504727387,
+  "list_secs": 0.02,
+  "sampled": 87,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Lofi Rock.zip",
+  "zip_bytes": 262275508,
+  "members": 174,
+  "uncompressed_bytes": 323594958,
+  "list_secs": 0.01,
+  "sampled": 174,
+  "sample_found": 174,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    174
+   ],
+   [
+    "D:\\MusicDatasets",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Emily Fox _ Signature Sounds Raw Vocal Cuts  Dry Studio Vocals.zip",
+  "zip_bytes": 249376659,
+  "members": 57,
+  "uncompressed_bytes": 331476056,
+  "list_secs": 0.02,
+  "sampled": 57,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Seasons Piano Loops.zip",
+  "zip_bytes": 235982542,
+  "members": 44,
+  "uncompressed_bytes": 246322650,
+  "list_secs": 0.02,
+  "sampled": 44,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\beckstrom-modular-drum-loops-1.zip",
+  "zip_bytes": 231467068,
+  "members": 33,
+  "uncompressed_bytes": 231460200,
+  "list_secs": 0.02,
+  "sampled": 33,
+  "sample_found": 33,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\beckstrom_modular_drum_loops_1",
+    33
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\beckstrom-modular-drum-loops-1.zip",
+  "zip_bytes": 231467068,
+  "members": 33,
+  "uncompressed_bytes": 231460200,
+  "list_secs": 0.0,
+  "sampled": 33,
+  "sample_found": 33,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\beckstrom_modular_drum_loops_1",
+    33
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Apollo Studios SFX Library.zip",
+  "zip_bytes": 223625851,
+  "members": 68,
+  "uncompressed_bytes": 254249116,
+  "list_secs": 0.02,
+  "sampled": 68,
+  "sample_found": 68,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    34
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    20
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    16
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Psychedelic Rock.zip",
+  "zip_bytes": 217744320,
+  "members": 136,
+  "uncompressed_bytes": 257404256,
+  "list_secs": 0.01,
+  "sampled": 136,
+  "sample_found": 134,
+  "found_fraction": 0.985,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    134
+   ],
+   [
+    "D:\\MusicDatasets",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\The Composer Sound Kit.zip",
+  "zip_bytes": 213520686,
+  "members": 125,
+  "uncompressed_bytes": 285554878,
+  "list_secs": 0.01,
+  "sampled": 125,
+  "sample_found": 125,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    54
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    45
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    27
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Dusty Guitar.zip",
+  "zip_bytes": 208424427,
+  "members": 114,
+  "uncompressed_bytes": 227569734,
+  "list_secs": 0.01,
+  "sampled": 114,
+  "sample_found": 111,
+  "found_fraction": 0.974,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    111
+   ],
+   [
+    "D:\\MusicDatasets",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Guitar Americana.zip",
+  "zip_bytes": 208069921,
+  "members": 212,
+  "uncompressed_bytes": 262930222,
+  "list_secs": 0.01,
+  "sampled": 212,
+  "sample_found": 212,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    114
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    56
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    48
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Unlocked  FREE Vintage Breaks.zip",
+  "zip_bytes": 207805709,
+  "members": 20,
+  "uncompressed_bytes": 231482170,
+  "list_secs": 0.02,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Starboy Type Beats.zip",
+  "zip_bytes": 206050574,
+  "members": 45,
+  "uncompressed_bytes": 223903956,
+  "list_secs": 0.02,
+  "sampled": 45,
+  "sample_found": 38,
+  "found_fraction": 0.844,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    38
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LANDR Sampler Toolkit.zip",
+  "zip_bytes": 195815920,
+  "members": 50,
+  "uncompressed_bytes": 217345679,
+  "list_secs": 0.02,
+  "sampled": 50,
+  "sample_found": 48,
+  "found_fraction": 0.96,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    48
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Luv Pack.zip",
+  "zip_bytes": 194494699,
+  "members": 143,
+  "uncompressed_bytes": 217971400,
+  "list_secs": 0.01,
+  "sampled": 143,
+  "sample_found": 143,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    143
+   ],
+   [
+    "D:\\MusicDatasets",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Element Soundkit.zip",
+  "zip_bytes": 193639954,
+  "members": 194,
+  "uncompressed_bytes": 232110136,
+  "list_secs": 0.02,
+  "sampled": 194,
+  "sample_found": 194,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    101
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    55
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    43
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Six Feet Deep.zip",
+  "zip_bytes": 193454585,
+  "members": 160,
+  "uncompressed_bytes": 216789590,
+  "list_secs": 0.01,
+  "sampled": 160,
+  "sample_found": 160,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    81
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    46
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    37
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Billie Type Beat.zip",
+  "zip_bytes": 192316698,
+  "members": 27,
+  "uncompressed_bytes": 221150646,
+  "list_secs": 0.02,
+  "sampled": 27,
+  "sample_found": 26,
+  "found_fraction": 0.963,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    26
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Filament.zip",
+  "zip_bytes": 189009842,
+  "members": 20,
+  "uncompressed_bytes": 211714456,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    9
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Deep Analog Journey.zip",
+  "zip_bytes": 187040591,
+  "members": 232,
+  "uncompressed_bytes": 225255230,
+  "list_secs": 0.01,
+  "sampled": 232,
+  "sample_found": 232,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    119
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    64
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    53
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Real Dirty Pack Vol. 1.zip",
+  "zip_bytes": 177317193,
+  "members": 168,
+  "uncompressed_bytes": 206776068,
+  "list_secs": 0.01,
+  "sampled": 168,
+  "sample_found": 168,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    90
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    46
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    37
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Lofi Noiiz.zip",
+  "zip_bytes": 169965226,
+  "members": 198,
+  "uncompressed_bytes": 267967668,
+  "list_secs": 0.01,
+  "sampled": 198,
+  "sample_found": 181,
+  "found_fraction": 0.914,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    181
+   ],
+   [
+    "D:\\MusicDatasets",
+    6
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Starter Collection.zip",
+  "zip_bytes": 166611113,
+  "members": 50,
+  "uncompressed_bytes": 181812266,
+  "list_secs": 0.01,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    50
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\ModeAudio_-_Ambient_Cassette_Loops_[Freebie].zip",
+  "zip_bytes": 165028222,
+  "members": 100,
+  "uncompressed_bytes": 171396854,
+  "list_secs": 0.01,
+  "sampled": 100,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Meek Type Beat.zip",
+  "zip_bytes": 160864716,
+  "members": 32,
+  "uncompressed_bytes": 270056236,
+  "list_secs": 0.02,
+  "sampled": 32,
+  "sample_found": 32,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    32
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Beckstrom - Weird TR-808 Sample Pack.zip",
+  "zip_bytes": 157201226,
+  "members": 340,
+  "uncompressed_bytes": 304339974,
+  "list_secs": 0.02,
+  "sampled": 340,
+  "sample_found": 340,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\guiro",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\megaphone",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\paint_can",
+    65
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\Beckstrom - Weird TR-808 Sample Pack.zip",
+  "zip_bytes": 157201226,
+  "members": 340,
+  "uncompressed_bytes": 304339974,
+  "list_secs": 0.0,
+  "sampled": 340,
+  "sample_found": 340,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\guiro",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\megaphone",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\Beckstrom_Weird_TR_808_Sample_Pack\\808variations\\paint_can",
+    65
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Real Drums Vol. 1.zip",
+  "zip_bytes": 157068281,
+  "members": 181,
+  "uncompressed_bytes": 200313851,
+  "list_secs": 0.01,
+  "sampled": 181,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\COUCH KIT VOL. 1.zip",
+  "zip_bytes": 155659819,
+  "members": 325,
+  "uncompressed_bytes": 204564182,
+  "list_secs": 0.01,
+  "sampled": 325,
+  "sample_found": 146,
+  "found_fraction": 0.449,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\02 ONE SHOTS\\HiHat",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\02 ONE SHOTS\\Snare",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\01 LOOPS\\15 Fills and Breaks",
+    13
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\COUCH KIT VOL. 1.zip",
+  "zip_bytes": 155659819,
+  "members": 325,
+  "uncompressed_bytes": 204564182,
+  "list_secs": 0.0,
+  "sampled": 325,
+  "sample_found": 146,
+  "found_fraction": 0.449,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\02 ONE SHOTS\\HiHat",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\02 ONE SHOTS\\Snare",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\COUCH_KIT_VOL._1\\COUCH KIT VOL. 1\\01 LOOPS\\15 Fills and Breaks",
+    13
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Sample Music Festival Pack.zip",
+  "zip_bytes": 154509979,
+  "members": 39,
+  "uncompressed_bytes": 168941118,
+  "list_secs": 0.0,
+  "sampled": 39,
+  "sample_found": 39,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    39
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\IVO SHANDOR I.zip",
+  "zip_bytes": 147771334,
+  "members": 107,
+  "uncompressed_bytes": 175897882,
+  "list_secs": 0.01,
+  "sampled": 107,
+  "sample_found": 107,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    53
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    31
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    27
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Lucid Trap Samples.zip",
+  "zip_bytes": 143639050,
+  "members": 30,
+  "uncompressed_bytes": 175302402,
+  "list_secs": 0.01,
+  "sampled": 30,
+  "sample_found": 30,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    30
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Vaporwave Shadows.zip",
+  "zip_bytes": 143144186,
+  "members": 69,
+  "uncompressed_bytes": 162908256,
+  "list_secs": 0.01,
+  "sampled": 69,
+  "sample_found": 67,
+  "found_fraction": 0.971,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    27
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    23
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    17
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Psych-Funk-Wop-Soundscapes.zip",
+  "zip_bytes": 139870401,
+  "members": 108,
+  "uncompressed_bytes": 220608044,
+  "list_secs": 0.01,
+  "sampled": 108,
+  "sample_found": 108,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    57
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    28
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    24
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Loops and Samples.zip",
+  "zip_bytes": 138963596,
+  "members": 15,
+  "uncompressed_bytes": 154242000,
+  "list_secs": 0.01,
+  "sampled": 15,
+  "sample_found": 15,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    15
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - SHAPES Loop Pack.zip",
+  "zip_bytes": 138608485,
+  "members": 24,
+  "uncompressed_bytes": 156550994,
+  "list_secs": 0.03,
+  "sampled": 24,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\50 Best Free Guitar Samples.zip",
+  "zip_bytes": 134795183,
+  "members": 50,
+  "uncompressed_bytes": 153178888,
+  "list_secs": 0.02,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    12
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Audio Samples.zip",
+  "zip_bytes": 128980776,
+  "members": 21,
+  "uncompressed_bytes": 136626354,
+  "list_secs": 0.02,
+  "sampled": 21,
+  "sample_found": 20,
+  "found_fraction": 0.952,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\40 Best Free Piano Samples.zip",
+  "zip_bytes": 121162576,
+  "members": 40,
+  "uncompressed_bytes": 135799374,
+  "list_secs": 0.01,
+  "sampled": 40,
+  "sample_found": 40,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Eurodanz.zip",
+  "zip_bytes": 117035983,
+  "members": 160,
+  "uncompressed_bytes": 140170028,
+  "list_secs": 0.01,
+  "sampled": 160,
+  "sample_found": 157,
+  "found_fraction": 0.981,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    74
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    48
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    40
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Strawberries.zip",
+  "zip_bytes": 116870924,
+  "members": 141,
+  "uncompressed_bytes": 134891784,
+  "list_secs": 0.01,
+  "sampled": 141,
+  "sample_found": 138,
+  "found_fraction": 0.979,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    76
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    38
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    26
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Dusty Keys Sample Pack.zip",
+  "zip_bytes": 113631202,
+  "members": 89,
+  "uncompressed_bytes": 123348194,
+  "list_secs": 0.01,
+  "sampled": 89,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\SchoolBound.zip",
+  "zip_bytes": 113205211,
+  "members": 117,
+  "uncompressed_bytes": 131488100,
+  "list_secs": 0.02,
+  "sampled": 117,
+  "sample_found": 117,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    58
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    38
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    23
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Pan-Pot Sample Pack.zip",
+  "zip_bytes": 111186836,
+  "members": 194,
+  "uncompressed_bytes": 160867562,
+  "list_secs": 0.01,
+  "sampled": 194,
+  "sample_found": 191,
+  "found_fraction": 0.985,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    95
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    50
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    47
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Blueprint Type Beat.zip",
+  "zip_bytes": 110102960,
+  "members": 29,
+  "uncompressed_bytes": 122126338,
+  "list_secs": 0.01,
+  "sampled": 29,
+  "sample_found": 29,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    29
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Vocal Samples.zip",
+  "zip_bytes": 108915761,
+  "members": 50,
+  "uncompressed_bytes": 126923330,
+  "list_secs": 0.02,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    18
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    16
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\BlueSheep.zip",
+  "zip_bytes": 107598816,
+  "members": 111,
+  "uncompressed_bytes": 173234670,
+  "list_secs": 0.01,
+  "sampled": 111,
+  "sample_found": 111,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    54
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    31
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    29
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\ShowMeHow2Live.zip",
+  "zip_bytes": 106651250,
+  "members": 117,
+  "uncompressed_bytes": 120808632,
+  "list_secs": 0.01,
+  "sampled": 117,
+  "sample_found": 117,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    117
+   ],
+   [
+    "D:\\MusicDatasets",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Donuts Type Beat.zip",
+  "zip_bytes": 106128643,
+  "members": 36,
+  "uncompressed_bytes": 126462436,
+  "list_secs": 0.02,
+  "sampled": 36,
+  "sample_found": 33,
+  "found_fraction": 0.917,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    33
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Drum Loops & Breaks.zip",
+  "zip_bytes": 104755206,
+  "members": 50,
+  "uncompressed_bytes": 126415892,
+  "list_secs": 0.01,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    27
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    13
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\New Moon.zip",
+  "zip_bytes": 103709565,
+  "members": 99,
+  "uncompressed_bytes": 127607334,
+  "list_secs": 0.01,
+  "sampled": 99,
+  "sample_found": 99,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    52
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    27
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    23
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\IGOR Type Beat.zip",
+  "zip_bytes": 102045319,
+  "members": 28,
+  "uncompressed_bytes": 113182896,
+  "list_secs": 0.02,
+  "sampled": 28,
+  "sample_found": 21,
+  "found_fraction": 0.75,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\50 Best Free Synth Samples.zip",
+  "zip_bytes": 101702282,
+  "members": 50,
+  "uncompressed_bytes": 113138776,
+  "list_secs": 0.0,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    21
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    12
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\GINTRO - BOOM BAP DRUM KIT VOL.1.zip",
+  "zip_bytes": 100918892,
+  "members": 220,
+  "uncompressed_bytes": 125549018,
+  "list_secs": 0.01,
+  "sampled": 220,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Infamous Classic Kit.zip",
+  "zip_bytes": 99134206,
+  "members": 116,
+  "uncompressed_bytes": 109396444,
+  "list_secs": 0.01,
+  "sampled": 116,
+  "sample_found": 116,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    56
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    34
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    28
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Retro Future Pop.zip",
+  "zip_bytes": 96669878,
+  "members": 142,
+  "uncompressed_bytes": 114510464,
+  "list_secs": 0.01,
+  "sampled": 142,
+  "sample_found": 142,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    76
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    35
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    32
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Dutty Free Loops.rar",
+  "zip_bytes": 96211175,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\702 Rocker.zip",
+  "zip_bytes": 95521219,
+  "members": 56,
+  "uncompressed_bytes": 103061764,
+  "list_secs": 0.01,
+  "sampled": 56,
+  "sample_found": 56,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    56
+   ],
+   [
+    "D:\\MusicDatasets",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Wavetick Label Sampler - 01.zip",
+  "zip_bytes": 92895097,
+  "members": 42,
+  "uncompressed_bytes": 103791394,
+  "list_secs": 0.01,
+  "sampled": 42,
+  "sample_found": 42,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    42
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Supplements Vol. 1.zip",
+  "zip_bytes": 91862936,
+  "members": 181,
+  "uncompressed_bytes": 130170140,
+  "list_secs": 0.01,
+  "sampled": 181,
+  "sample_found": 181,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    181
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\WINTERS - Vocal Pack (Volume. 2).zip",
+  "zip_bytes": 91527719,
+  "members": 60,
+  "uncompressed_bytes": 126886590,
+  "list_secs": 0.01,
+  "sampled": 60,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Best Free Synths Samples.zip",
+  "zip_bytes": 90047318,
+  "members": 26,
+  "uncompressed_bytes": 94943418,
+  "list_secs": 0.01,
+  "sampled": 26,
+  "sample_found": 26,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    24
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Lovers and Friends.zip",
+  "zip_bytes": 89633535,
+  "members": 25,
+  "uncompressed_bytes": 111012678,
+  "list_secs": 0.02,
+  "sampled": 25,
+  "sample_found": 25,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    25
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Futuristic Pack by Mike & Keys.zip",
+  "zip_bytes": 88777339,
+  "members": 107,
+  "uncompressed_bytes": 114760270,
+  "list_secs": 0.03,
+  "sampled": 107,
+  "sample_found": 107,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    55
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    31
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    23
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Dusty Lo-Fi.zip",
+  "zip_bytes": 87690632,
+  "members": 50,
+  "uncompressed_bytes": 95965024,
+  "list_secs": 0.02,
+  "sampled": 50,
+  "sample_found": 50,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    22
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    20
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Desired House.zip",
+  "zip_bytes": 87338387,
+  "members": 148,
+  "uncompressed_bytes": 148650020,
+  "list_secs": 0.01,
+  "sampled": 148,
+  "sample_found": 148,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    68
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    52
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    31
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Sauce.zip",
+  "zip_bytes": 87330642,
+  "members": 20,
+  "uncompressed_bytes": 99056070,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Hot Mic Free Samples (1).zip",
+  "zip_bytes": 86899911,
+  "members": 32,
+  "uncompressed_bytes": 93321342,
+  "list_secs": 0.01,
+  "sampled": 32,
+  "sample_found": 32,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    32
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Hot Mic Free Samples.zip",
+  "zip_bytes": 86899911,
+  "members": 32,
+  "uncompressed_bytes": 93321342,
+  "list_secs": 0.01,
+  "sampled": 32,
+  "sample_found": 32,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    32
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Yacht Type Beat.zip",
+  "zip_bytes": 85427371,
+  "members": 23,
+  "uncompressed_bytes": 95666204,
+  "list_secs": 0.02,
+  "sampled": 23,
+  "sample_found": 23,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    23
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Melody Samples.zip",
+  "zip_bytes": 85186642,
+  "members": 20,
+  "uncompressed_bytes": 88186510,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 16,
+  "found_fraction": 0.8,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    16
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\LoversQuarrel.zip",
+  "zip_bytes": 84568256,
+  "members": 113,
+  "uncompressed_bytes": 106250620,
+  "list_secs": 0.01,
+  "sampled": 113,
+  "sample_found": 113,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    55
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    32
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    29
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Best Free Guitar Samples.zip",
+  "zip_bytes": 84465592,
+  "members": 29,
+  "uncompressed_bytes": 93213084,
+  "list_secs": 0.01,
+  "sampled": 29,
+  "sample_found": 28,
+  "found_fraction": 0.966,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Maelstrom.zip",
+  "zip_bytes": 82761091,
+  "members": 10,
+  "uncompressed_bytes": 127275076,
+  "list_secs": 0.02,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Phantom.zip",
+  "zip_bytes": 81407693,
+  "members": 111,
+  "uncompressed_bytes": 138439236,
+  "list_secs": 0.02,
+  "sampled": 111,
+  "sample_found": 106,
+  "found_fraction": 0.955,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    51
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    33
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    25
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free SAVBEAT.zip",
+  "zip_bytes": 80816115,
+  "members": 20,
+  "uncompressed_bytes": 95094884,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\High Energy Vocals.zip",
+  "zip_bytes": 80485010,
+  "members": 56,
+  "uncompressed_bytes": 138682952,
+  "list_secs": 0.01,
+  "sampled": 56,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Central C Type Beat.zip",
+  "zip_bytes": 79157663,
+  "members": 22,
+  "uncompressed_bytes": 99749818,
+  "list_secs": 0.01,
+  "sampled": 22,
+  "sample_found": 20,
+  "found_fraction": 0.909,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Blonde Type Beat.zip",
+  "zip_bytes": 77403092,
+  "members": 24,
+  "uncompressed_bytes": 84894972,
+  "list_secs": 0.02,
+  "sampled": 24,
+  "sample_found": 22,
+  "found_fraction": 0.917,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    22
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Lo-Fi Samples.zip",
+  "zip_bytes": 75836101,
+  "members": 30,
+  "uncompressed_bytes": 95202660,
+  "list_secs": 0.19,
+  "sampled": 30,
+  "sample_found": 30,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    18
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Sample Tools by Cr2 Free Starter Kit (1).zip",
+  "zip_bytes": 74197220,
+  "members": 26,
+  "uncompressed_bytes": 84028232,
+  "list_secs": 0.01,
+  "sampled": 26,
+  "sample_found": 26,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Sample Tools by Cr2 Free Starter Kit.zip",
+  "zip_bytes": 74197220,
+  "members": 26,
+  "uncompressed_bytes": 84028232,
+  "list_secs": 0.02,
+  "sampled": 26,
+  "sample_found": 26,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Puzzled.zip",
+  "zip_bytes": 73673823,
+  "members": 197,
+  "uncompressed_bytes": 83637910,
+  "list_secs": 0.03,
+  "sampled": 197,
+  "sample_found": 197,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    101
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    56
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    45
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Royalty Free Samples Gratis (1).zip",
+  "zip_bytes": 72591339,
+  "members": 15,
+  "uncompressed_bytes": 85262228,
+  "list_secs": 0.01,
+  "sampled": 15,
+  "sample_found": 15,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    15
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Royalty Free Samples Gratis.zip",
+  "zip_bytes": 72591339,
+  "members": 15,
+  "uncompressed_bytes": 85262228,
+  "list_secs": 0.01,
+  "sampled": 15,
+  "sample_found": 15,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    15
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Litany.zip",
+  "zip_bytes": 70219149,
+  "members": 22,
+  "uncompressed_bytes": 84934808,
+  "list_secs": 0.02,
+  "sampled": 22,
+  "sample_found": 22,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SHAKE.zip",
+  "zip_bytes": 69934431,
+  "members": 195,
+  "uncompressed_bytes": 77848859,
+  "list_secs": 0.02,
+  "sampled": 195,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Phonk Samples.zip",
+  "zip_bytes": 69475755,
+  "members": 23,
+  "uncompressed_bytes": 76665662,
+  "list_secs": 0.01,
+  "sampled": 23,
+  "sample_found": 23,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    23
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Loops.zip",
+  "zip_bytes": 68385597,
+  "members": 15,
+  "uncompressed_bytes": 76935760,
+  "list_secs": 0.01,
+  "sampled": 15,
+  "sample_found": 15,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    15
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Doom Type Beat.zip",
+  "zip_bytes": 67879184,
+  "members": 15,
+  "uncompressed_bytes": 73630464,
+  "list_secs": 0.01,
+  "sampled": 15,
+  "sample_found": 6,
+  "found_fraction": 0.4,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Jazzfeezy LANDR Sounds Vol. 1.zip",
+  "zip_bytes": 67264679,
+  "members": 174,
+  "uncompressed_bytes": 108341184,
+  "list_secs": 0.02,
+  "sampled": 174,
+  "sample_found": 174,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    79
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    50
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    46
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Apex Beatmaker Kit.zip",
+  "zip_bytes": 66829458,
+  "members": 24,
+  "uncompressed_bytes": 87609268,
+  "list_secs": 0.0,
+  "sampled": 24,
+  "sample_found": 24,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    22
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\fermi riffs - Final Set.zip",
+  "zip_bytes": 66089754,
+  "members": 96,
+  "uncompressed_bytes": 114293000,
+  "list_secs": 0.01,
+  "sampled": 96,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Say Yes to the Serpent Say No to the Serpent.zip",
+  "zip_bytes": 65495628,
+  "members": 49,
+  "uncompressed_bytes": 74823158,
+  "list_secs": 0.01,
+  "sampled": 49,
+  "sample_found": 47,
+  "found_fraction": 0.959,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    47
+   ],
+   [
+    "D:\\MusicDatasets",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Savbeat Collection.zip",
+  "zip_bytes": 64681650,
+  "members": 40,
+  "uncompressed_bytes": 79095148,
+  "list_secs": 0.01,
+  "sampled": 40,
+  "sample_found": 40,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    40
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Kato on the Track Beats.zip",
+  "zip_bytes": 64677841,
+  "members": 10,
+  "uncompressed_bytes": 70095422,
+  "list_secs": 0.0,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Bonus Beats (2).zip",
+  "zip_bytes": 64158292,
+  "members": 10,
+  "uncompressed_bytes": 69903756,
+  "list_secs": 0.01,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Bonus Beats (1).zip",
+  "zip_bytes": 64158232,
+  "members": 10,
+  "uncompressed_bytes": 69903756,
+  "list_secs": 0.01,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Bonus Beats.zip",
+  "zip_bytes": 64158232,
+  "members": 10,
+  "uncompressed_bytes": 69903756,
+  "list_secs": 0.01,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\ModeAudio_-_Electric_Guitar_Loops_[FREE].zip",
+  "zip_bytes": 61763235,
+  "members": 32,
+  "uncompressed_bytes": 69653061,
+  "list_secs": 0.01,
+  "sampled": 32,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Prism Soul Beats.zip",
+  "zip_bytes": 61217834,
+  "members": 10,
+  "uncompressed_bytes": 70124288,
+  "list_secs": 0.01,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Drums from Another Planet.zip",
+  "zip_bytes": 60537364,
+  "members": 186,
+  "uncompressed_bytes": 66647862,
+  "list_secs": 0.01,
+  "sampled": 186,
+  "sample_found": 186,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    186
+   ],
+   [
+    "D:\\MusicDatasets",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Astro Type Beats.zip",
+  "zip_bytes": 60065616,
+  "members": 20,
+  "uncompressed_bytes": 69971288,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    17
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Cascades.zip",
+  "zip_bytes": 57039132,
+  "members": 11,
+  "uncompressed_bytes": 69591436,
+  "list_secs": 0.01,
+  "sampled": 11,
+  "sample_found": 11,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    2
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free House Samples.zip",
+  "zip_bytes": 56261328,
+  "members": 20,
+  "uncompressed_bytes": 59310706,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 16,
+  "found_fraction": 0.8,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    16
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Ron Got the Recipe Free Collection.zip",
+  "zip_bytes": 53514156,
+  "members": 11,
+  "uncompressed_bytes": 58956652,
+  "list_secs": 0.02,
+  "sampled": 11,
+  "sample_found": 11,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    11
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Unlocked  FREE Sub Bass.zip",
+  "zip_bytes": 52216905,
+  "members": 20,
+  "uncompressed_bytes": 61839612,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Greminos Jungle Sample Pack vol 2.zip",
+  "zip_bytes": 51561567,
+  "members": 71,
+  "uncompressed_bytes": 62957176,
+  "list_secs": 0.02,
+  "sampled": 71,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Holiday Special.zip",
+  "zip_bytes": 50536685,
+  "members": 16,
+  "uncompressed_bytes": 64631948,
+  "list_secs": 0.02,
+  "sampled": 16,
+  "sample_found": 16,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    13
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Arrangement Hack Pack.zip",
+  "zip_bytes": 50479196,
+  "members": 20,
+  "uncompressed_bytes": 61340168,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    11
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Midnight - Dark Trap Loops.zip",
+  "zip_bytes": 49287926,
+  "members": 23,
+  "uncompressed_bytes": 55582282,
+  "list_secs": 0.02,
+  "sampled": 23,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\90s MPC Sample Pack.zip",
+  "zip_bytes": 45816866,
+  "members": 222,
+  "uncompressed_bytes": 56758060,
+  "list_secs": 0.02,
+  "sampled": 222,
+  "sample_found": 222,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\90s MPC Sample Pack\\90's MPC Sample Pack\\Kick",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\90's MPC Sample Pack\\Kick",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\Kick",
+    65
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\90s MPC Sample Pack.zip",
+  "zip_bytes": 45816866,
+  "members": 222,
+  "uncompressed_bytes": 56758060,
+  "list_secs": 0.01,
+  "sampled": 222,
+  "sample_found": 222,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\90s MPC Sample Pack\\90's MPC Sample Pack\\Kick",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\90's MPC Sample Pack\\Kick",
+    65
+   ],
+   [
+    "D:\\MusicDatasets\\Kick",
+    65
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\crackle-and-click-1.0.zip",
+  "zip_bytes": 45809213,
+  "members": 211,
+  "uncompressed_bytes": 52224298,
+  "list_secs": 0.02,
+  "sampled": 211,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Drum Loops.zip",
+  "zip_bytes": 45545947,
+  "members": 14,
+  "uncompressed_bytes": 52733384,
+  "list_secs": 0.02,
+  "sampled": 14,
+  "sample_found": 14,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    14
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Best Free Vocal Samples.zip",
+  "zip_bytes": 44473246,
+  "members": 19,
+  "uncompressed_bytes": 50187918,
+  "list_secs": 0.01,
+  "sampled": 19,
+  "sample_found": 19,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    18
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Blinded by the Beats.zip",
+  "zip_bytes": 42243132,
+  "members": 8,
+  "uncompressed_bytes": 48389792,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\From my House to the Warehouse.zip",
+  "zip_bytes": 42061056,
+  "members": 113,
+  "uncompressed_bytes": 46495510,
+  "list_secs": 0.02,
+  "sampled": 113,
+  "sample_found": 113,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    113
+   ],
+   [
+    "D:\\MusicDatasets",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Ultimate Rap Bars & Vocals.zip",
+  "zip_bytes": 40967800,
+  "members": 76,
+  "uncompressed_bytes": 48194278,
+  "list_secs": 0.01,
+  "sampled": 76,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\For The Flavourful.zip",
+  "zip_bytes": 38607463,
+  "members": 13,
+  "uncompressed_bytes": 55168472,
+  "list_secs": 0.01,
+  "sampled": 13,
+  "sample_found": 13,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    13
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Weird Drums.zip",
+  "zip_bytes": 38489060,
+  "members": 132,
+  "uncompressed_bytes": 45313712,
+  "list_secs": 0.01,
+  "sampled": 132,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\SoundPacks.com - Velvet - Soul Jazz Loops.zip",
+  "zip_bytes": 37675673,
+  "members": 23,
+  "uncompressed_bytes": 40706989,
+  "list_secs": 0.01,
+  "sampled": 23,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free 808 Samples.zip",
+  "zip_bytes": 35189942,
+  "members": 20,
+  "uncompressed_bytes": 45130776,
+  "list_secs": 0.01,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Savage Lust.zip",
+  "zip_bytes": 33037081,
+  "members": 6,
+  "uncompressed_bytes": 35283740,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Ionize.zip",
+  "zip_bytes": 31691189,
+  "members": 7,
+  "uncompressed_bytes": 32834336,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Contra Type Beat.zip",
+  "zip_bytes": 31256152,
+  "members": 16,
+  "uncompressed_bytes": 33146354,
+  "list_secs": 0.01,
+  "sampled": 16,
+  "sample_found": 16,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Dreamy & Hazy Shoegaze Guitar Chords.zip",
+  "zip_bytes": 31034514,
+  "members": 10,
+  "uncompressed_bytes": 33173764,
+  "list_secs": 0.01,
+  "sampled": 10,
+  "sample_found": 10,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    10
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Titanic Trap.zip",
+  "zip_bytes": 26766546,
+  "members": 7,
+  "uncompressed_bytes": 29877624,
+  "list_secs": 0.01,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\Timeless Jungle Breaks.zip",
+  "zip_bytes": 24941370,
+  "members": 35,
+  "uncompressed_bytes": 37848240,
+  "list_secs": 0.02,
+  "sampled": 35,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Cr2 Build A Beat Kit.zip",
+  "zip_bytes": 24561594,
+  "members": 6,
+  "uncompressed_bytes": 37099198,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\EDM Start to Finish.zip",
+  "zip_bytes": 23862250,
+  "members": 15,
+  "uncompressed_bytes": 27373900,
+  "list_secs": 0.02,
+  "sampled": 15,
+  "sample_found": 15,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\House Beat Maker.zip",
+  "zip_bytes": 23448503,
+  "members": 4,
+  "uncompressed_bytes": 27233622,
+  "list_secs": 0.01,
+  "sampled": 4,
+  "sample_found": 4,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\anabelle_lee.zip",
+  "zip_bytes": 23214518,
+  "members": 11,
+  "uncompressed_bytes": 29012544,
+  "list_secs": 0.02,
+  "sampled": 11,
+  "sample_found": 11,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\anabelle_lee",
+    11
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\anabelle_lee\\anabelle_lee",
+    11
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Unlocked  FREE 808 One Shots.zip",
+  "zip_bytes": 22561512,
+  "members": 20,
+  "uncompressed_bytes": 32418624,
+  "list_secs": 0.02,
+  "sampled": 20,
+  "sample_found": 20,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    20
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Crepuscular.zip",
+  "zip_bytes": 22081733,
+  "members": 7,
+  "uncompressed_bytes": 25127828,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Delirium (1).zip",
+  "zip_bytes": 22075626,
+  "members": 8,
+  "uncompressed_bytes": 25392448,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Delirium.zip",
+  "zip_bytes": 22075626,
+  "members": 8,
+  "uncompressed_bytes": 25392448,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Createro.zip",
+  "zip_bytes": 21968115,
+  "members": 5,
+  "uncompressed_bytes": 25790324,
+  "list_secs": 0.01,
+  "sampled": 5,
+  "sample_found": 4,
+  "found_fraction": 0.8,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    4
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Peach Beats.zip",
+  "zip_bytes": 21488293,
+  "members": 6,
+  "uncompressed_bytes": 26095216,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 5,
+  "found_fraction": 0.833,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    3
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Slapncrunch.zip",
+  "zip_bytes": 20899964,
+  "members": 14,
+  "uncompressed_bytes": 44832946,
+  "list_secs": 0.01,
+  "sampled": 14,
+  "sample_found": 14,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    9
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Helium.zip",
+  "zip_bytes": 20245326,
+  "members": 7,
+  "uncompressed_bytes": 22094648,
+  "list_secs": 0.03,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Vocalfry.zip",
+  "zip_bytes": 19706438,
+  "members": 11,
+  "uncompressed_bytes": 21921832,
+  "list_secs": 0.05,
+  "sampled": 11,
+  "sample_found": 11,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    11
+   ],
+   [
+    "D:\\MusicDatasets",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Thick Beats.zip",
+  "zip_bytes": 19266604,
+  "members": 6,
+  "uncompressed_bytes": 26485484,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Nonstop Creator.zip",
+  "zip_bytes": 18190739,
+  "members": 6,
+  "uncompressed_bytes": 22768444,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 5,
+  "found_fraction": 0.833,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    5
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\Antidote Audio - Free Bass One Shots.zip",
+  "zip_bytes": 17386067,
+  "members": 80,
+  "uncompressed_bytes": 17514514,
+  "list_secs": 0.01,
+  "sampled": 80,
+  "sample_found": 80,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Free_Bass_One_Shots\\Antidote Audio - Free Bass One Shots",
+    80
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\Antidote Audio - Free Bass One Shots.zip",
+  "zip_bytes": 17386067,
+  "members": 80,
+  "uncompressed_bytes": 17514514,
+  "list_secs": 0.0,
+  "sampled": 80,
+  "sample_found": 80,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\Antidote_Audio_Free_Bass_One_Shots\\Antidote Audio - Free Bass One Shots",
+    80
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Butter Beats.zip",
+  "zip_bytes": 16779039,
+  "members": 6,
+  "uncompressed_bytes": 22117770,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 5,
+  "found_fraction": 0.833,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    2
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Viral Drill Beats.zip",
+  "zip_bytes": 16573378,
+  "members": 6,
+  "uncompressed_bytes": 18237568,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\the_world_is_under_attack.zip",
+  "zip_bytes": 16182615,
+  "members": 13,
+  "uncompressed_bytes": 24766702,
+  "list_secs": 0.01,
+  "sampled": 13,
+  "sample_found": 13,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\the_world_is_under_attack",
+    13
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\the_world_is_under_attack\\the_world_is_under_attack",
+    13
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\wreck.zip",
+  "zip_bytes": 15850730,
+  "members": 9,
+  "uncompressed_bytes": 18800350,
+  "list_secs": 0.01,
+  "sampled": 9,
+  "sample_found": 9,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\wreck",
+    9
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\wreck\\wreck",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\no_more_work.zip",
+  "zip_bytes": 14931538,
+  "members": 5,
+  "uncompressed_bytes": 15463594,
+  "list_secs": 0.01,
+  "sampled": 5,
+  "sample_found": 5,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\no_more_work",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\no_more_work\\no_more_work",
+    5
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Basaltic.zip",
+  "zip_bytes": 14885570,
+  "members": 6,
+  "uncompressed_bytes": 15876624,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Venice.zip",
+  "zip_bytes": 14097873,
+  "members": 7,
+  "uncompressed_bytes": 17122622,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\mix_tape.zip",
+  "zip_bytes": 13739607,
+  "members": 12,
+  "uncompressed_bytes": 15463304,
+  "list_secs": 0.01,
+  "sampled": 12,
+  "sample_found": 12,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\mix_tape",
+    12
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\mix_tape\\mix_tape",
+    12
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Beat Dreams.zip",
+  "zip_bytes": 13433330,
+  "members": 6,
+  "uncompressed_bytes": 15179124,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    1
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Deep House Rollers.zip",
+  "zip_bytes": 13375127,
+  "members": 5,
+  "uncompressed_bytes": 16752400,
+  "list_secs": 0.02,
+  "sampled": 5,
+  "sample_found": 5,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    3
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    2
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Neon.zip",
+  "zip_bytes": 13277741,
+  "members": 6,
+  "uncompressed_bytes": 16346040,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Hedonism.zip",
+  "zip_bytes": 13209264,
+  "members": 13,
+  "uncompressed_bytes": 14786726,
+  "list_secs": 0.01,
+  "sampled": 13,
+  "sample_found": 13,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    13
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\sun_under_shadows.zip",
+  "zip_bytes": 13196637,
+  "members": 6,
+  "uncompressed_bytes": 14262170,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\sun_under_shadows",
+    6
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\sun_under_shadows\\sun_under_shadows",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Beached.zip",
+  "zip_bytes": 13033203,
+  "members": 6,
+  "uncompressed_bytes": 14590674,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Jazz Beat Maker.zip",
+  "zip_bytes": 12521313,
+  "members": 4,
+  "uncompressed_bytes": 15671270,
+  "list_secs": 0.01,
+  "sampled": 4,
+  "sample_found": 4,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\glamorama.zip",
+  "zip_bytes": 12193850,
+  "members": 8,
+  "uncompressed_bytes": 15415374,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\glamorama",
+    8
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\glamorama\\glamorama",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\CA+Beer+Can+Drum+Kit.zip",
+  "zip_bytes": 12112581,
+  "members": 71,
+  "uncompressed_bytes": 15281268,
+  "list_secs": 0.02,
+  "sampled": 71,
+  "sample_found": 31,
+  "found_fraction": 0.437,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Misc",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Hats",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Toms",
+    5
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\incoming_zips\\CA+Beer+Can+Drum+Kit.zip",
+  "zip_bytes": 12112581,
+  "members": 71,
+  "uncompressed_bytes": 15281268,
+  "list_secs": 0.0,
+  "sampled": 71,
+  "sample_found": 31,
+  "found_fraction": 0.437,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Misc",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Hats",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\raw_packs\\CA+Beer+Can+Drum+Kit\\CA Beer Can Drum Kit\\Toms",
+    5
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Essential Lo-Fi Drum Patterns.zip",
+  "zip_bytes": 12097273,
+  "members": 10,
+  "uncompressed_bytes": 22088288,
+  "list_secs": 0.02,
+  "sampled": 10,
+  "sample_found": 9,
+  "found_fraction": 0.9,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    9
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\DnB Drum Loops.zip",
+  "zip_bytes": 11683882,
+  "members": 8,
+  "uncompressed_bytes": 13730016,
+  "list_secs": 0.01,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Trap Basics (1).zip",
+  "zip_bytes": 11444040,
+  "members": 6,
+  "uncompressed_bytes": 20032282,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Trap Basics.zip",
+  "zip_bytes": 11444040,
+  "members": 6,
+  "uncompressed_bytes": 20032282,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\dreams.zip",
+  "zip_bytes": 11278761,
+  "members": 7,
+  "uncompressed_bytes": 12473138,
+  "list_secs": 0.01,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\dreams",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\dreams\\dreams",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Moments.zip",
+  "zip_bytes": 11094643,
+  "members": 5,
+  "uncompressed_bytes": 12082384,
+  "list_secs": 0.02,
+  "sampled": 5,
+  "sample_found": 5,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    5
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\life_as_a_disturbed_infobeing.zip",
+  "zip_bytes": 10638799,
+  "members": 9,
+  "uncompressed_bytes": 12948677,
+  "list_secs": 0.01,
+  "sampled": 9,
+  "sample_found": 9,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\life_as_a_disturbed_infobeing",
+    9
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\life_as_a_disturbed_infobeing\\life_as_a_disturbed_infobeing",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\PS1 2000's Jungle.zip",
+  "zip_bytes": 10491015,
+  "members": 7,
+  "uncompressed_bytes": 11888094,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\styltriady.zip",
+  "zip_bytes": 9998617,
+  "members": 14,
+  "uncompressed_bytes": 15900382,
+  "list_secs": 0.02,
+  "sampled": 14,
+  "sample_found": 14,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\styltriady",
+    14
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\styltriady\\styltriady",
+    14
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Pandemic.zip",
+  "zip_bytes": 9967203,
+  "members": 7,
+  "uncompressed_bytes": 14358188,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\the_ones_we_love.zip",
+  "zip_bytes": 9846024,
+  "members": 7,
+  "uncompressed_bytes": 10979996,
+  "list_secs": 0.02,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\the_ones_we_love",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\the_ones_we_love\\the_ones_we_love",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\jiggly.zip",
+  "zip_bytes": 8820872,
+  "members": 5,
+  "uncompressed_bytes": 8964014,
+  "list_secs": 0.01,
+  "sampled": 5,
+  "sample_found": 5,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\jiggly",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\jiggly\\jiggly",
+    5
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Hydroelectric.zip",
+  "zip_bytes": 8740232,
+  "members": 6,
+  "uncompressed_bytes": 17103070,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\scenaric.zip",
+  "zip_bytes": 8642920,
+  "members": 11,
+  "uncompressed_bytes": 10796292,
+  "list_secs": 0.02,
+  "sampled": 11,
+  "sample_found": 11,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\scenaric",
+    11
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\scenaric\\scenaric",
+    11
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Drift.zip",
+  "zip_bytes": 8367876,
+  "members": 4,
+  "uncompressed_bytes": 8951456,
+  "list_secs": 0.01,
+  "sampled": 4,
+  "sample_found": 3,
+  "found_fraction": 0.75,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    3
+   ],
+   [
+    "D:\\MusicDatasets",
+    1
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\natmin.zip",
+  "zip_bytes": 8363589,
+  "members": 7,
+  "uncompressed_bytes": 9038448,
+  "list_secs": 0.01,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\natmin",
+    7
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\natmin\\natmin",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\50 Best Free Kick Samples.zip",
+  "zip_bytes": 8329364,
+  "members": 50,
+  "uncompressed_bytes": 13639150,
+  "list_secs": 0.02,
+  "sampled": 50,
+  "sample_found": 48,
+  "found_fraction": 0.96,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-125254",
+    19
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    14
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Dissolution (1).zip",
+  "zip_bytes": 7770938,
+  "members": 6,
+  "uncompressed_bytes": 19548612,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Dissolution.zip",
+  "zip_bytes": 7770938,
+  "members": 6,
+  "uncompressed_bytes": 19548612,
+  "list_secs": 0.01,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\fsd50k\\FSD50K.metadata.zip",
+  "zip_bytes": 6700838,
+  "members": 8,
+  "uncompressed_bytes": 31273851,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\fsd50k\\FSD50K.metadata\\FSD50K.metadata",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\fsd50k\\FSD50K.metadata\\FSD50K.metadata\\collection",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Cosmic.zip",
+  "zip_bytes": 6654098,
+  "members": 9,
+  "uncompressed_bytes": 8556378,
+  "list_secs": 0.02,
+  "sampled": 9,
+  "sample_found": 8,
+  "found_fraction": 0.889,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    8
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\freedom_fries.zip",
+  "zip_bytes": 6560914,
+  "members": 6,
+  "uncompressed_bytes": 7002742,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\freedom_fries",
+    6
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\freedom_fries\\freedom_fries",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Ron Got The Recipe's MPC Starter Pack.zip",
+  "zip_bytes": 6327995,
+  "members": 8,
+  "uncompressed_bytes": 6666074,
+  "list_secs": 0.02,
+  "sampled": 8,
+  "sample_found": 8,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    8
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\we_werent_there.zip",
+  "zip_bytes": 6201655,
+  "members": 6,
+  "uncompressed_bytes": 6513178,
+  "list_secs": 0.02,
+  "sampled": 6,
+  "sample_found": 6,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\we_werent_there",
+    6
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\we_werent_there\\we_werent_there",
+    6
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Fred Again Free Collection.zip",
+  "zip_bytes": 6090036,
+  "members": 47,
+  "uncompressed_bytes": 8588168,
+  "list_secs": 0.02,
+  "sampled": 47,
+  "sample_found": 47,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    43
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Polymer.zip",
+  "zip_bytes": 5303664,
+  "members": 7,
+  "uncompressed_bytes": 8183906,
+  "list_secs": 0.01,
+  "sampled": 7,
+  "sample_found": 7,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-115408",
+    7
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\blue_backdrop.zip",
+  "zip_bytes": 5128308,
+  "members": 9,
+  "uncompressed_bytes": 7354159,
+  "list_secs": 0.02,
+  "sampled": 9,
+  "sample_found": 9,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\blue_backdrop",
+    9
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\blue_backdrop\\blue_backdrop",
+    9
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\parting_friends.zip",
+  "zip_bytes": 3096241,
+  "members": 3,
+  "uncompressed_bytes": 3137297,
+  "list_secs": 0.01,
+  "sampled": 3,
+  "sample_found": 3,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\parting_friends",
+    3
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\parting_friends\\parting_friends",
+    3
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\crackle-and-click-op1-1.0.zip",
+  "zip_bytes": 2822149,
+  "members": 12,
+  "uncompressed_bytes": 4131850,
+  "list_secs": 0.02,
+  "sampled": 12,
+  "sample_found": 0,
+  "found_fraction": 0.0,
+  "top_locations": [],
+  "status": "NOT_EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\carol_of_the_bells.zip",
+  "zip_bytes": 2424762,
+  "members": 5,
+  "uncompressed_bytes": 2508260,
+  "list_secs": 0.01,
+  "sampled": 5,
+  "sample_found": 5,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\carol_of_the_bells",
+    5
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\carol_of_the_bells\\carol_of_the_bells",
+    5
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Free Snare Samples.zip",
+  "zip_bytes": 2211343,
+  "members": 20,
+  "uncompressed_bytes": 3797504,
+  "list_secs": 0.02,
+  "sampled": 20,
+  "sample_found": 18,
+  "found_fraction": 0.9,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    16
+   ],
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-011603",
+    2
+   ]
+  ],
+  "status": "PARTIAL"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Analog Drum Machines 1.zip",
+  "zip_bytes": 2156995,
+  "members": 41,
+  "uncompressed_bytes": 4756702,
+  "list_secs": 0.02,
+  "sampled": 41,
+  "sample_found": 41,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\LANDR-20260830-013433",
+    41
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\buried_in_sand.zip",
+  "zip_bytes": 1525180,
+  "members": 4,
+  "uncompressed_bytes": 1549292,
+  "list_secs": 0.01,
+  "sampled": 4,
+  "sample_found": 4,
+  "found_fraction": 1.0,
+  "top_locations": [
+   [
+    "D:\\MusicDatasets\\bass_db\\buried_in_sand",
+    4
+   ],
+   [
+    "D:\\MusicDatasets\\bass_db\\buried_in_sand\\buried_in_sand",
+    4
+   ]
+  ],
+  "status": "EXTRACTED"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\test_tar.tar",
+  "zip_bytes": 20486,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\medley\\medley_solos.tar.gz",
+  "zip_bytes": 14173,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\bass_db\\bass_db.tar.gz",
+  "zip_bytes": 14165,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\pod_stems\\scratch.tar",
+  "zip_bytes": 22,
+  "status": "UNKNOWN_TAR",
+  "reason": "tar/gz requires full stream to list"
+ },
+ {
+  "archive": "D:\\MusicDatasets\\Chill House Vocals.zip",
+  "zip_bytes": 22,
+  "members": 0,
+  "uncompressed_bytes": 0,
+  "list_secs": 0.0,
+  "status": "EMPTY"
+ }
+]

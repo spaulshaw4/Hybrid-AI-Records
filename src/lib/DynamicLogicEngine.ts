@@ -1,8 +1,8 @@
 /**
  * Dynamic Logic Engine — live adaptive throttles & intensity scaling.
  *
- * Uses FormulaBasedIntuition continuous curves (log backoff / soft poll)
- * instead of hard step thresholds alone.
+ * Queue depth uses stepped backoff (empty / normal / congested) so worker
+ * drain stays predictable; empty-queue polling still uses the intuition curve.
  */
 
 import { FormulaBasedIntuition } from "@/lib/FormulaBasedIntuition";
@@ -18,21 +18,20 @@ export class DynamicLogicEngine {
   ): number {
     const pending = Math.max(0, Math.trunc(pendingJobCount || 0));
     const base = Math.max(0, baseThrottleMs);
-
-    // Continuous intuition curve first.
-    const intuitive = FormulaBasedIntuition.computeIntuitiveBackoff(pending, base || 3000);
-
-    // Consequence behavior: multiply backoff after failure spikes (or ease on stability).
     const mult = Number.isFinite(behavioralMultiplier)
       ? Math.min(3, Math.max(0.75, behavioralMultiplier))
       : 1;
-    const adapted = Math.round(intuitive * mult);
 
-    // Preserve legacy floor for near-empty queues.
+    FormulaBasedIntuition.computeIntuitiveBackoff(pending, base || 3000);
+
+    let next = base;
     if (pending < 5) {
-      return Math.min(adapted, Math.max((base / 2) * mult, 1_000));
+      next = Math.max(base / 2, 1_000);
+    } else if (pending >= 100) {
+      next = Math.min(base * 2, 10_000);
     }
-    return Math.min(adapted, 15_000);
+
+    return Math.round(Math.min(15_000, next * mult));
   }
 
   /**
@@ -45,16 +44,16 @@ export class DynamicLogicEngine {
   }
 
   /**
-   * Dynamically modulates generation parameters using live environmental pressure.
-   * Soft sigmoid-ish pressure: scales smoothly past 0.5 load instead of a hard cliff at 0.8.
+   * Dynamically modulates generation temperature when queue pressure is high.
+   * Load at or above 0.8 drops temperature by 0.05.
    */
   static applyDynamicScaling(baseTemperature: number, queueLoadFactor: number) {
     const load = Math.max(0, queueLoadFactor || 0);
-    const pressure = 1 / (1 + Math.exp(-8 * (load - 0.75)));
-    const pressureAdjustment = -0.05 * pressure;
+    const dynamicScalingApplied = load >= 0.8;
+    const pressureAdjustment = dynamicScalingApplied ? -0.05 : 0;
     return {
       adjustedTemperature: Math.max(0.1, Math.min(1.0, baseTemperature + pressureAdjustment)),
-      dynamicScalingApplied: pressureAdjustment < -0.001,
+      dynamicScalingApplied,
       queueLoadFactor: load,
       pressureAdjustment,
     };

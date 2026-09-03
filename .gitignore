@@ -68,3 +68,15 @@ hybrid_studio.db
 # Python bytecode caches
 __pycache__/
 *.pyc
+
+# Generated DSP matrix cache (scripts/build_genre_matrix.py)
+config/dsp_matrix.json
+config/dsp_matrix_*.json
+
+# Stem-role classifier artifacts and feature caches (ml/train_stem_classifier.py).
+# The model is a couple of MB and the feature cache is tens of MB; both are
+# reproducible from D:\MusicDatasets, so they stay out of git.
+models/*.joblib
+models/*.npz
+models/*.onnx
+ml/cache/

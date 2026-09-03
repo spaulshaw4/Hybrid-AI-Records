@@ -79,6 +79,32 @@ test.describe("Order form accessibility", () => {
     await expectFieldClearOfStickyHeader(page, field);
   });
 
+  test("deep-link focus returns to the first field if a retry/error control mounts", async ({
+    page,
+  }) => {
+    await gotoPortal(page, "/portal#order");
+    await expectOrderFieldFocused(page);
+
+    await page.evaluate(() => {
+      const form = document.getElementById("quick-order-form");
+      if (!form) return;
+      const banner = document.createElement("div");
+      banner.setAttribute("role", "alert");
+      banner.tabIndex = 0;
+      banner.setAttribute("data-testid", "injected-retry-error");
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.setAttribute("aria-label", "Retry generation");
+      retry.textContent = "Retry generation";
+      banner.append(retry);
+      form.prepend(banner);
+      retry.focus();
+    });
+
+    await expect(page.getByTestId("injected-retry-error")).toBeVisible();
+    await expectOrderFieldFocused(page);
+  });
+
   test("back/forward navigation restores focus on both sides of #order", async ({ page }) => {
     await gotoPortal(page);
     const cta = page.locator(CTA).first();

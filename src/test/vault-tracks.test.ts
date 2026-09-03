@@ -20,6 +20,7 @@ describe("sanitizeVaultTracks", () => {
       {
         id: "temp-1",
         title: "In flight",
+        style: "Synthwave",
         status: "processing",
         master_url: "https://cdn.example/master.mp3",
         created_at: "2026-08-22T00:00:00.000Z",
@@ -27,6 +28,7 @@ describe("sanitizeVaultTracks", () => {
     ]);
     expect(row?.status).toBe("completed");
     expect(row?.master_url).toBe("https://cdn.example/master.mp3");
+    expect(row?.style).toBe("Synthwave");
     expect(row?.artist_name).toBe(VAULT_DEFAULT_ARTIST);
     expect(row?.album_name).toBe(VAULT_DEFAULT_ALBUM);
   });
@@ -36,6 +38,7 @@ describe("sanitizeVaultTracks", () => {
       {
         id: "track-rel",
         title: "Joined",
+        style: "Alt Rock",
         status: "completed",
         master_url: "https://cdn.example/master.mp3",
         created_at: "2026-08-22T00:00:00.000Z",
@@ -45,6 +48,7 @@ describe("sanitizeVaultTracks", () => {
     ]);
     expect(row?.artist_name).toBe("Hybrid AI");
     expect(row?.album_name).toBe("Night Drive");
+    expect(row?.style).toBe("Alt Rock");
   });
 
   it("treats completed rows with a null audio_url as failed, not playable", () => {

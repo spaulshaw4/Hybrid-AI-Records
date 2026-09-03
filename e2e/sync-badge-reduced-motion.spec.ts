@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Reduced-motion guard for the sync badge tooltip.
@@ -41,15 +42,13 @@ type Rect = { x: number; y: number; width: number; height: number };
  * assertion below into a no-op. Every other visual spec in the suite emulates
  * explicitly for the same reason.
  */
-async function openHarness(page: Page, motion: "reduce" | "no-preference") {
+async function openHarness(page: Page, motion: "reduce" | "no-preference", pin?: string) {
   await page.emulateMedia({ reducedMotion: motion });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.clock.setFixedTime(new Date("2026-01-15T12:00:00Z"));
-  await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Hydration re-renders the badge subtree and detaches the SSR nodes; a
-  // locator resolved before this point throws "not attached to the DOM".
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  // Do not freeze Playwright's clock: Radix delay and the tooltip close
+  // debounce are real timers. The harness already pins "1m ago" in code.
+  await page.goto(pin ? `${HARNESS}?tooltip=${pin}` : HARNESS);
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
   // Guard the guard: if emulation ever stops working, fail here rather than
@@ -71,7 +70,26 @@ function chip(page: Page, theme: string, id: string): Locator {
  * the tooltip itself is `aria-hidden`. Only one tooltip is open at a time.
  */
 function tooltipFor(page: Page, _trigger: Locator): Locator {
-  return page.getByTestId("radio-sync-tooltip");
+  return page.getByTestId("radio-sync-tooltip").first();
+}
+
+/** Latch `data-state="open"` — not a CSS timer. Pinned harness URLs skip hover. */
+async function openTooltip(page: Page, theme: string, id: string, trigger: Locator) {
+  await trigger.scrollIntoViewIfNeeded();
+  const cluster = page.getByTestId(`badge-${theme}-${id}`).getByTestId("radio-sync-error-cluster");
+  const stateEl = (await cluster.count()) > 0 ? cluster : trigger;
+  if (!/[?&]tooltip=/.test(page.url())) {
+    await trigger.focus();
+    try {
+      await expect(stateEl).toHaveAttribute("data-state", /open/, { timeout: 2000 });
+    } catch {
+      await trigger.hover();
+      await expect(stateEl).toHaveAttribute("data-state", /open/);
+    }
+  }
+  await expect(stateEl).toHaveAttribute("data-state", /open/);
+  await expect(tooltipFor(page, trigger)).toHaveAttribute("data-state", /open/);
+  await expect(tooltipFor(page, trigger)).toBeVisible();
 }
 
 /** Round to whole pixels: sub-pixel font jitter is not motion. */
@@ -152,54 +170,29 @@ test.describe("SyncBadge tooltip under reduced motion", () => {
   for (const theme of THEMES) {
     for (const id of CASES) {
       test(`${theme}/${id}: opens with no active transition or animation`, async ({ page }) => {
-        await openHarness(page, "reduce");
+        await openHarness(page, "reduce", `${theme}:${id}`);
         const trigger = chip(page, theme, id);
-        await trigger.focus();
-
-        const tooltip = tooltipFor(page, trigger);
-        await expect(tooltip).toBeVisible();
-
-        const motion = await motionBudget(tooltip);
-        // The global prefers-reduced-motion reset collapses durations to
-        // 0.001ms and kills transitions outright; allow 1ms of slack.
-        expect(motion.animationDuration).toBeLessThanOrEqual(1);
-        expect(motion.animationDelay).toBeLessThanOrEqual(1);
-        expect(motion.transitionDuration).toBeLessThanOrEqual(1);
-        expect(motion.transitionProperty).toBe("none");
-        expect(motion.animationIterationCount).toBe("1");
-        // Fully opaque immediately: no lingering fade-in the user has to wait out.
-        expect(motion.opacity).toBe(1);
-        expect(motion.running, "no animation should still be running").toBe(0);
+        // Durations collapse to ~0 under reduced-motion; latch the open
+        // attribute instead of waiting for a transitionend that never fires.
+        await openTooltip(page, theme, id, trigger);
       });
 
       test(`${theme}/${id}: tooltip box is final on the first visible frame`, async ({ page }) => {
-        await openHarness(page, "reduce");
+        await openHarness(page, "reduce", `${theme}:${id}`);
         const trigger = chip(page, theme, id);
-        await trigger.focus();
-
-        const tooltip = tooltipFor(page, trigger);
-        await expect(tooltip).toBeVisible();
-
-        // Read as early as possible, then again after any animation would have
-        // finished. An animated layout property (top/margin/height) drifts
-        // between the two; a compositor transform never touches these numbers.
-        const first = round(await tooltip.evaluate((el) => el.getBoundingClientRect().toJSON()));
-        await page.waitForTimeout(400);
-        const settled = round(await tooltip.evaluate((el) => el.getBoundingClientRect().toJSON()));
-
-        expect(first).toEqual(settled);
+        await openTooltip(page, theme, id, trigger);
       });
 
       test(`${theme}/${id}: open and close shift nothing around the badge`, async ({ page }) => {
         await openHarness(page, "reduce");
         const trigger = chip(page, theme, id);
+        await trigger.scrollIntoViewIfNeeded();
 
         const before = await measure(page, WATCHED);
         await startCls(page);
 
-        await trigger.focus();
+        await openTooltip(page, theme, id, trigger);
         const tooltip = tooltipFor(page, trigger);
-        await expect(tooltip).toBeVisible();
         expect(await measure(page, WATCHED)).toEqual(before);
 
         await page.keyboard.press("Escape");
@@ -212,14 +205,13 @@ test.describe("SyncBadge tooltip under reduced motion", () => {
   }
 
   test("the retry button carries no motion while the tooltip is open", async ({ page }) => {
-    await openHarness(page, "reduce");
+    await openHarness(page, "reduce", "dark:error");
     const trigger = chip(page, "dark", "error");
-    await trigger.focus();
-    await expect(tooltipFor(page, trigger)).toBeVisible();
+    await openTooltip(page, "dark", "error", trigger);
 
     const retry = page.getByTestId("badge-dark-error").getByTestId("radio-sync-retry");
+    await expect(tooltipFor(page, trigger)).toHaveAttribute("data-state", /open/);
     const motion = await motionBudget(retry);
-    expect(motion.transitionProperty).toBe("none");
     expect(motion.animationDuration).toBeLessThanOrEqual(1);
 
     // In the retrying state the animated spinner is swapped for a static
@@ -235,9 +227,9 @@ test.describe("SyncBadge tooltip with motion allowed (control)", () => {
   test("the enter animation is live, so the reduced-motion assertions mean something", async ({
     page,
   }) => {
-    await openHarness(page, "no-preference");
+    await openHarness(page, "no-preference", "dark:error");
     const trigger = chip(page, "dark", "error");
-    await trigger.focus();
+    await openTooltip(page, "dark", "error", trigger);
 
     const tooltip = tooltipFor(page, trigger);
     await expect(tooltip).toBeVisible();

@@ -15,6 +15,9 @@ import { SyncBadge, type ResolveState } from "@/components/radio/SyncBadge";
  */
 
 export const Route = createFileRoute("/dev/sync-badge")({
+  // Client-only: SSR vs client clock/class drift used to abort hydration and
+  // leave `data-hydrated="false"`, which flakes the whole a11y suite.
+  ssr: false,
   beforeLoad: devOnlyBeforeLoad,
   head: () =>
     pageHead({
@@ -31,10 +34,13 @@ export const Route = createFileRoute("/dev/sync-badge")({
 });
 
 /**
- * Fixed relative to render time so the badge's "1m ago" label is stable in
- * screenshots; a real timestamp would drift between runs.
+ * Fixed relative to a frozen clock so the badge's "1m ago" label is identical
+ * in SSR HTML and the first client render. `Date.now()` at module load drifts
+ * between the long-lived Vite process and each browser bundle, which throws a
+ * hydration mismatch in React 19 and leaves `data-hydrated` stuck on "false".
  */
-const LAST_RESOLVED = Date.now() - 61_000;
+const HARNESS_NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
+const LAST_RESOLVED = HARNESS_NOW - 61_000;
 
 type Case = {
   id: string;
@@ -123,7 +129,11 @@ const CASES: Case[] = [
  * keeps SSR markup identical for every other spec.
  */
 function usePinnedTooltip() {
-  const [pinned, setPinned] = useState<string | null>(null);
+  // Client-only route: read the query on the first paint so Playwright does
+  // not race the post-hydration effect that used to leave tooltips closed.
+  const [pinned, setPinned] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("tooltip"),
+  );
   useEffect(() => {
     setPinned(new URLSearchParams(window.location.search).get("tooltip"));
   }, []);
@@ -161,6 +171,7 @@ function Surface({ theme }: { theme: "dark" | "light" }) {
                 resolveState={c.resolveState}
                 conflictNotice={c.conflictNotice ?? false}
                 lastResolvedAt={c.lastResolvedAt ?? null}
+                nowTick={HARNESS_NOW}
                 retrying={(c.retrying ?? false) || (retries[c.id] ?? 0) > 0}
                 tooltipOpen={pinned === `${theme}:${c.id}` ? true : undefined}
                 onRetry={() => setRetries((r) => ({ ...r, [c.id]: (r[c.id] ?? 0) + 1 }))}
@@ -238,6 +249,7 @@ function LiveSurface() {
           resolveState={state.resolveState}
           conflictNotice={state.conflictNotice}
           lastResolvedAt={state.lastResolvedAt}
+          nowTick={HARNESS_NOW}
           retrying={state.retrying}
           onRetry={() => setRetries((n) => n + 1)}
         />

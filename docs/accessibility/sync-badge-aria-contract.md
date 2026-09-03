@@ -124,6 +124,10 @@ signal for tests is Radix's `data-state` attribute, not ARIA.
 
 - Retry MUST be a real `<button type="button">`. It MUST NOT be a `div`, `span`
   or link with a click handler.
+- Retry MUST be a sibling of the focusable chip, never a descendant. Nesting a
+  button inside `role="alert"` with `tabindex="0"` is a `nested-interactive`
+  failure. The two sit in a presentational cluster (`role="group"`,
+  `tabindex="-1"`) so the pill still looks like one control.
 - Its accessible name MUST be exactly `Retry timestamp sync` when idle and
   `Retrying timestamp sync` while in flight. The name MUST change with state —
   a static name leaves a screen-reader user unable to tell the retry started.
@@ -134,6 +138,10 @@ signal for tests is Radix's `data-state` attribute, not ARIA.
   `<button>`; this is why the element type is normative).
 - Retry MUST carry `aria-describedby` pointing at the failure-reason node, so
   focusing the action reads *why* it is being offered.
+- While retrying, Retry MUST also be an assertive live region (`aria-live="assertive"`,
+  `aria-atomic="true"`). The name change is how AT learns the retry started; because
+  Retry is a sibling of the alert (not nested in it), that name change would otherwise
+  never be spoken. Idle Retry MUST NOT be a live region.
 
 ### 4.1 Busy state MUST use `aria-disabled`, never `disabled`
 

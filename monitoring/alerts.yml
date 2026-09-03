@@ -181,3 +181,35 @@ groups:
         annotations:
           summary: "Master pipeline duration exceeded 30s"
           description: "Last full render took {{ printf \"%.1f\" $value }}s. Note this gauge holds the most recent value until the next run completes, so it will stay firing until a faster render lands."
+
+  - name: hybrid_audio_pipeline_alerts
+    rules:
+      - alert: TruePeakThresholdExceeded
+        expr: hybrid_master_true_peak_dbtp > -0.50
+        for: 0m
+        labels:
+          severity: critical
+          target: dsp_true_peak
+        annotations:
+          summary: "Master output exceeded True Peak ceiling (-0.50 dBTP)"
+          description: "Session {{ $labels.session_id }} registered {{ $value }} dBTP. Immediate brickwall limiting intervention required."
+
+      - alert: PhaseCorrelationDegradation
+        expr: hybrid_master_phase_correlation < 0.80
+        for: 0m
+        labels:
+          severity: warning
+          target: dsp_phase
+        annotations:
+          summary: "Low phase correlation detected in composite master"
+          description: "Session {{ $labels.session_id }} dropped to {{ $value }} phase correlation. Check stem alignment or mono summing."
+
+      - alert: AudioDaemonStagnation
+        expr: rate(hybrid_processed_slices_total[5m]) == 0 and hybrid_pipeline_active_jobs > 0
+        for: 3m
+        labels:
+          severity: critical
+          target: pipeline_queue
+        annotations:
+          summary: "Audio processing daemon stalled"
+          description: "Active jobs detected but 0 slices processed in the last 3 minutes."

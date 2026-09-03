@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { expectBadgeAria, expectRetryAria, expectTooltipAria } from "./helpers/sync-badge-aria";
+import { expectBadgeAria, expectRetryAria, expectTooltipAria, waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * Pointer-driven tooltip behaviour for the sync badge.
@@ -18,9 +18,7 @@ const popper = (page: Page) => page.locator("[data-radix-popper-content-wrapper]
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  // Tooltip behaviour only exists after hydration.
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -38,31 +36,39 @@ async function activeTestId(page: Page) {
   });
 }
 
-/** Moves the pointer off a target in small steps so pointerleave really fires. */
-async function movePointerAway(page: Page, from: ReturnType<typeof chip>) {
-  const box = (await from.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, Math.max(2, box.y - 200), { steps: 12 });
+/** Parks the pointer on the page heading so it cannot land on another badge. */
+async function movePointerAway(page: Page, _from?: ReturnType<typeof chip>) {
+  await page.getByRole("heading", { name: "Sync badge states" }).hover();
 }
 
 /**
- * Hover a trigger until its tooltip is actually open.
- *
- * A single `hover()` is a one-shot mouse move: if it lands before React has
- * hydrated the harness, Radix never sees the event and no further pointer
- * movement follows, so the tooltip stays shut forever and the assertion times
- * out. Under a loaded CI machine that race is easy to lose, so re-hover until
- * the popper appears instead of trusting the first move.
+ * Hover a trigger and latch on the portalled tooltip — not a one-shot mouse
+ * move that Chromium can drop as a pointerleave before React sees it.
  */
-async function hoverOpen(page: Page, trigger: ReturnType<typeof chip>) {
+async function hoverOpen(page: Page, trigger: ReturnType<typeof chip>, text?: string | RegExp) {
+  await trigger.scrollIntoViewIfNeeded();
+  const cluster = trigger.locator("xpath=ancestor::*[@data-testid='radio-sync-error-cluster'][1]");
   await expect
     .poll(
       async () => {
+        // Real hover (not force): a teleport skips pointerleave on the
+        // previous badge and leaves two poppers mounted.
         await trigger.hover();
-        return popper(page).count();
+        const stateEl = (await cluster.count()) > 0 ? cluster : trigger;
+        const state = await stateEl.getAttribute("data-state");
+        if (!state || !/open/.test(state)) return state ?? "closed";
+        if ((await popper(page).count()) < 1) return "open-but-no-popper";
+        if (!text) return "ready";
+        const body = (await popper(page).textContent()) ?? "";
+        const match = typeof text === "string" ? body.includes(text) : text.test(body);
+        return match ? "ready" : `wrong-tooltip:${body.slice(0, 80)}`;
       },
-      { message: "tooltip never opened on hover" },
+      { timeout: 10_000, message: "tooltip never opened on hover" },
     )
-    .toBe(1);
+    .toBe("ready");
+  await expect(page.locator("[data-radix-popper-content-wrapper]").first()).toBeVisible({
+    timeout: 3000,
+  });
 }
 
 
@@ -95,8 +101,8 @@ for (const theme of THEMES) {
       await hoverOpen(page, trigger);
 
       await movePointerAway(page, trigger);
-      await expect(popper(page)).toHaveCount(0);
       await expect(trigger).toHaveAttribute("data-state", "closed");
+      await expect(popper(page)).toHaveCount(0);
       expect(await activeTestId(page)).toBe("body");
     });
 
@@ -146,14 +152,13 @@ for (const theme of THEMES) {
       const first = chip(page, theme, "resolved");
       const second = chip(page, theme, "conflict");
 
-      await hoverOpen(page, first);
+      await hoverOpen(page, first, "Kept the most recent play position");
 
-      await hoverOpen(page, second);
-      // The count must settle at exactly one: the first badge's popper has to be
-      // gone, not merely covered by the second.
+      await hoverOpen(page, second, "A newer change from another device was restored");
+      await expect(second).toHaveAttribute("data-state", /open/);
+      await expect(first).toHaveAttribute("data-state", "closed");
       await expect(popper(page)).toHaveCount(1);
       await expect(popper(page)).toContainText("A newer change from another device was restored");
-      await expect(first).toHaveAttribute("data-state", "closed");
 
     });
 
@@ -167,7 +172,10 @@ for (const theme of THEMES) {
 
       await retry.click();
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toHaveText("Retry fired 1");
-      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toBeDisabled();
+      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
       await expect(popper(page)).toHaveCount(0);
 
       // Pointer is still over the badge, so hovering it again must work — a

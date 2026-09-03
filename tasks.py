@@ -258,7 +258,16 @@ def hybrid_vocal_mix_task(
         sr = int(vocal_sr or inst_sr or 44100)
         mixed = _mix_vocal_instrumental(vocal_audio, inst_audio)
         update_render_progress(job_id, "mastering", 75, "Mastering mix")
-        mastered = apply_mastering_chain(mixed, sr=sr, target_lufs=-14.0)
+        landr_bus = meta.get("landr_bus_type") or meta.get("landr_bus")
+        landr_intensity = float(meta.get("landr_intensity") or 0.5)
+        mastered = apply_mastering_chain(
+            mixed,
+            sr=sr,
+            target_lufs=-14.0,
+            landr_bus_type=landr_bus if isinstance(landr_bus, str) and landr_bus else None,
+            landr_intensity=landr_intensity,
+            landr_prefer_vst=True,
+        )
         master_wav = str(work / "master.wav")
         sf.write(master_wav, mastered.T, sr, subtype="PCM_24")
         metrics = enforce_safety_limiting(master_wav, max_true_peak_dbfs=-0.5)

@@ -18,6 +18,13 @@ export function OrderIntakeSection() {
   const focusGenRef = useRef(0);
   /** Bumps to cancel in-flight scroll-correction loops. */
   const scrollGenRef = useRef(0);
+  /** Disconnects the deep-link focus guard when Escape/back leaves #order. */
+  const focusGuardRef = useRef<{ disconnect: () => void } | null>(null);
+
+  const stopFocusGuard = () => {
+    focusGuardRef.current?.disconnect();
+    focusGuardRef.current = null;
+  };
 
   const headerOffset = () => {
     const header = document.querySelector("header");
@@ -99,21 +106,59 @@ export function OrderIntakeSection() {
     scrollOrderIntoView(field, reduced || instant ? "auto" : "smooth");
 
     const gen = ++focusGenRef.current;
-    let attempts = 0;
-    // ~3s of rAF retries so throttled CI CPUs still win against late layout.
-    const maxFocusAttempts = 180;
-    const settle = () => {
-      if (gen !== focusGenRef.current) return;
+    stopFocusGuard();
+    const userMovedToAnotherField = (active: Element | null) =>
+      !!active &&
+      active !== firstOrderField() &&
+      !!form.contains(active) &&
+      (active instanceof HTMLInputElement ||
+        active instanceof HTMLSelectElement ||
+        active instanceof HTMLTextAreaElement);
+
+    const restoreField = () => {
+      // Escape/back bump `focusGenRef`, which is the cancel signal. Do not also
+      // require `#order` here: pushState can lag a frame behind the click, and
+      // a hash mismatch would abort the settle loop with focus still on <body>.
+      if (gen !== focusGenRef.current) return false;
       const el = firstOrderField();
-      if (!el) {
-        if (++attempts < maxFocusAttempts) window.requestAnimationFrame(settle);
-        return;
-      }
-      if (document.activeElement === el) return;
-      el.focus({ preventScroll: true });
-      if (++attempts < maxFocusAttempts) window.requestAnimationFrame(settle);
+      if (!el) return true;
+      const active = document.activeElement;
+      if (userMovedToAnotherField(active)) return false;
+      if (active !== el) el.focus({ preventScroll: true });
+      return true;
+    };
+
+    const settleStarted = performance.now();
+    const settle = () => {
+      if (!restoreField()) return;
+      // Wall-clock, not frame count: throttled CI / cold Vite compiles can
+      // drop well below 60fps, so 180 rAF was ending before layout finished.
+      if (performance.now() - settleStarted < 8000) window.requestAnimationFrame(settle);
     };
     window.requestAnimationFrame(settle);
+
+    const mountedRetryOrError = (node: Node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      const label = `${node.getAttribute("aria-label") || ""} ${node.textContent || ""}`;
+      return (
+        node.getAttribute("role") === "alert" ||
+        !!node.querySelector?.('[role="alert"]') ||
+        /retry/i.test(label) ||
+        !!node.querySelector?.('[aria-label*="retry" i], [aria-label*="Retry"]')
+      );
+    };
+
+    // Late-mounting retry/error chrome can steal focus after the rAF window.
+    const observer = new MutationObserver((mutations) => {
+      const added = mutations.some((m) => [...m.addedNodes].some(mountedRetryOrError));
+      if (!added) return;
+      restoreField();
+      window.requestAnimationFrame(() => restoreField());
+    });
+    observer.observe(form, { childList: true, subtree: true });
+    focusGuardRef.current = {
+      disconnect: () => observer.disconnect(),
+    };
 
     setScrollAnnouncement("");
     window.requestAnimationFrame(() =>
@@ -123,6 +168,7 @@ export function OrderIntakeSection() {
 
   const restoreOrderFocus = (announce = false, force = false) => {
     // Cancel any settle loop that would steal focus back onto the first field.
+    stopFocusGuard();
     focusGenRef.current += 1;
     scrollGenRef.current += 1;
     const form = document.getElementById("quick-order-form");
@@ -177,6 +223,7 @@ export function OrderIntakeSection() {
     window.addEventListener("hashchange", handle);
     window.addEventListener("popstate", handle);
     return () => {
+      stopFocusGuard();
       window.removeEventListener("load", onLoad);
       window.removeEventListener("hashchange", handle);
       window.removeEventListener("popstate", handle);
@@ -188,6 +235,7 @@ export function OrderIntakeSection() {
     if (e.key !== "Escape") return;
     e.stopPropagation();
     // Cancel in-flight field focus immediately so Escape cannot lose the race.
+    stopFocusGuard();
     focusGenRef.current += 1;
     scrollGenRef.current += 1;
     if (window.location.hash === "#order" && orderPushedRef.current) {
