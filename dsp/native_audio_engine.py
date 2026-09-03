@@ -151,7 +151,7 @@ class NativeAudioEngine:
         b_cut, a_cut = self._biquad_shelf(
             gain_db=-max_cut_db, freq_hz=sidechain_freq, shelf_type="high"
         )
-        filtered_high = signal.lfilter(b_cut, a_cut, audio)
+        filtered_high = signal.lfilter(b_cut, a_cut, audio, axis=-1)
 
         return audio * gain_reduction + filtered_high * (1.0 - gain_reduction)
 
@@ -346,8 +346,8 @@ class NativeAudioEngine:
             out = signal.lfilter(b_notch, a_notch, out, axis=-1)
             out = signal.lfilter(b_pick, a_pick, out, axis=-1)
             out = signal.lfilter(b_air, a_air, out, axis=-1)
-            # Synthesise new upper air above 5 kHz (ReHance-style)
-            out = self._harmonic_exciter(out, blend=0.10 * intensity, highpass_hz=5000.0)
+            # Single acoustic exciter pass — 4.5 kHz @ 0.10 (voice uses 4.2 kHz)
+            out = self._harmonic_exciter(out, blend=0.10 * intensity, highpass_hz=4500.0)
 
         elif bus_type == "voice":
             b_pres, a_pres = self._biquad_peaking(
@@ -364,8 +364,8 @@ class NativeAudioEngine:
                 threshold_db=-18.0 + 5.0 * (1.0 - intensity),
                 max_cut_db=6.0,
             )
-            # Harmonic exciter: synthesise new upper-air content (ReHance-style)
-            out = self._harmonic_exciter(out, blend=0.10 * intensity, highpass_hz=4500.0)
+            # Single voice exciter pass — 4.2 kHz @ 0.15 (do not stack acoustic 4.5 kHz)
+            out = self._harmonic_exciter(out, blend=0.15 * intensity, highpass_hz=4200.0)
             out = self._asymmetric_saturate(
                 out, drive=1.0 + 0.45 * intensity, asymmetry=0.12
             )
@@ -390,7 +390,7 @@ class NativeAudioEngine:
             out = signal.lfilter(b_sub, a_sub, out, axis=-1)
             out = signal.lfilter(b_box, a_box, out, axis=-1)
             out = signal.lfilter(b_snap, a_snap, out, axis=-1)
-            # VCA compressor for transient punch before saturation
+            # VCA: −16 dBFS @ 0.50 intensity → −14 dBFS @ 1.0; ratio 3.0–3.5
             out = self._vca_compress(
                 out,
                 threshold_db=-14.0 - 4.0 * (1.0 - intensity),
