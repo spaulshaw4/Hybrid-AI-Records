@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForHarnessHydrated } from "./helpers/sync-badge-aria";
 
 /**
  * iOS-style touch coverage for the sync badge tooltip.
@@ -27,8 +28,7 @@ const chip = (page: Page, id: string, theme: "dark" | "light" = "dark") =>
 
 async function openHarness(page: Page) {
   await page.goto(HARNESS);
-  await expect(page.getByRole("heading", { name: "Sync badge states" })).toBeVisible();
-  await expect(page.getByTestId("sync-badge-harness")).toHaveAttribute("data-hydrated", "true");
+  await waitForHarnessHydrated(page);
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => document.fonts.ready);
 }
@@ -198,7 +198,7 @@ test.describe("SyncBadge tooltip — iOS long-press", () => {
 
       expect(await ariaSnapshot(page, owner)).toEqual(before);
       await expect(popper(page)).toHaveCount(0);
-      await expect(chip(page, phase)).toHaveAttribute("data-state", "closed");
+      await expect(page.locator(`[data-testid="${owner}"] [data-testid="radio-sync-error-cluster"], [data-testid="${owner}"] [data-testid="radio-sync-status"]`).first()).toHaveAttribute("data-state", "closed");
     });
   }
 

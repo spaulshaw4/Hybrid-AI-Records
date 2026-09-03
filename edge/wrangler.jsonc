@@ -1,0 +1,8 @@
+{
+  "name": "hybrid-audio-range",
+  "main": "audio_range_worker.ts",
+  "compatibility_date": "2026-08-30",
+  "observability": {
+    "enabled": true
+  }
+}

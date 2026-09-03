@@ -93,7 +93,10 @@ test.describe("SyncBadge tooltip — touch", () => {
     await retry.tap();
 
     await expect(page.getByTestId("retry-count-dark-error")).toHaveText("Retry fired 1");
-    await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toBeDisabled();
+    await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await page.waitForTimeout(400);
     await expect(popper(page)).toHaveCount(0);
   });
