@@ -16,10 +16,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -28,6 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
+          pip install pytest
 
       - name: True-peak limiter kernel
         run: python -m unittest tests.test_true_peak_limiter -v
@@ -35,8 +36,32 @@ jobs:
       - name: BS.1770-4 loudness meter
         run: python -m unittest tests.test_loudness_meter -v
 
-      - name: Audio pipeline unit tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+      # Scoped to DSP kernels only. Full `unittest discover` pulls in pytest-only
+      # modules (arrangement/conductor/etc.) that are not CI dependencies and
+      # fails import before any assertions run.
+      - name: Native DSP kernel tests
+        run: >
+          python -m pytest -q
+          tests/test_native_audio_engine.py
+          tests/test_true_peak_limiter.py
+          tests/test_loudness_meter.py
+          tests/test_tape_saturation.py
+          tests/test_sub_harmonic_synth.py
+          tests/test_stem_sidechain_glue.py
+          tests/test_micro_crossfader.py
+          tests/test_dynamic_eq_processor.py
+          tests/test_polarity_inverter_check.py
+          tests/test_harmonic_exciter.py
+          tests/test_midside_processor.py
+          tests/test_phase_aligner.py
+          tests/test_stereo_widener.py
+          tests/test_tpdf_dither.py
+          tests/test_transient_shaper.py
+          tests/test_landr_vst_bridge.py
+          tests/test_wsola_silent_head.py
+          tests/test_vocal_pitch_corrector.py
+          tests/test_pitch_tempo_align.py
+          tests/test_audio_features.py
 
       - name: Genre matrix smoke (skips when workstation chain is absent)
         run: python scripts/benchmark_master_engine.py
@@ -47,10 +72,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js 20.x
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20.x"
           cache: npm
