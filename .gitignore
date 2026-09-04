@@ -80,3 +80,11 @@ models/*.joblib
 models/*.npz
 models/*.onnx
 ml/cache/
+
+# Generated dataset manifests (scripts/build_dataset_manifest.py)
+reports/dataset_manifest.sqlite
+reports/dataset_manifest.jsonl
+
+# Continuous learner checkpoints
+models/checkpoints/
+reports/drive_inventory.sqlite

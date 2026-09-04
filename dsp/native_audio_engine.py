@@ -28,6 +28,42 @@ from __future__ import annotations
 import numpy as np
 import scipy.signal as signal
 
+try:
+    from numba import njit
+
+    @njit(cache=True)
+    def _envelope_attack_release(
+        abs_x: np.ndarray, alpha_att: float, alpha_rel: float
+    ) -> np.ndarray:
+        n = abs_x.shape[0]
+        env = np.empty(n, dtype=np.float64)
+        curr = 0.0
+        for i in range(n):
+            v = abs_x[i]
+            if v > curr:
+                curr = alpha_att * curr + (1.0 - alpha_att) * v
+            else:
+                curr = alpha_rel * curr + (1.0 - alpha_rel) * v
+            env[i] = curr
+        return env
+
+except ImportError:  # pragma: no cover - fallback when numba is absent
+
+    def _envelope_attack_release(
+        abs_x: np.ndarray, alpha_att: float, alpha_rel: float
+    ) -> np.ndarray:
+        n = abs_x.shape[0]
+        env = np.empty(n, dtype=np.float64)
+        curr = 0.0
+        for i in range(n):
+            v = abs_x[i]
+            if v > curr:
+                curr = alpha_att * curr + (1.0 - alpha_att) * v
+            else:
+                curr = alpha_rel * curr + (1.0 - alpha_rel) * v
+            env[i] = curr
+        return env
+
 
 class NativeAudioEngine:
     def __init__(self, sample_rate: int = 44100):
@@ -251,35 +287,24 @@ class NativeAudioEngine:
     ) -> np.ndarray:
         """Feed-forward VCA compressor with smooth attack/release ballistics.
 
-        Tracks the signal envelope with separate attack and release time
-        constants, converts to dB, and applies gain reduction above the
-        threshold — no hard clipping, so transient punch is preserved rather
-        than sheared off.
-
-        The sample loop operates on the *last* axis, so the method handles
-        both mono ``(N,)`` and channels-first ``(C, N)`` arrays.
+        Envelope tracking uses a Numba-accelerated one-pole follower when
+        available (orders of magnitude faster than a pure-Python sample loop),
+        then applies the gain computer in vectorized NumPy.
         """
         alpha_att = float(np.exp(-1.0 / (self.sr * attack_ms / 1000.0)))
         alpha_rel = float(np.exp(-1.0 / (self.sr * release_ms / 1000.0)))
+        slope = float(1.0 - 1.0 / max(ratio, 1e-6))
 
         def _compress_1d(x: np.ndarray) -> np.ndarray:
-            abs_x = np.abs(x.astype(np.float64)) + 1e-8
-            env = np.empty_like(abs_x)
-            curr = 0.0
-            for i, v in enumerate(abs_x):
-                if v > curr:
-                    curr = alpha_att * curr + (1.0 - alpha_att) * v
-                else:
-                    curr = alpha_rel * curr + (1.0 - alpha_rel) * v
-                env[i] = curr
+            abs_x = np.abs(np.asarray(x, dtype=np.float64)) + 1e-8
+            env = _envelope_attack_release(abs_x, alpha_att, alpha_rel)
             env_db = 20.0 * np.log10(env)
             over_db = env_db - threshold_db
-            gr_db = np.where(over_db > 0.0, -over_db * (1.0 - 1.0 / ratio), 0.0)
-            return (x * 10.0 ** (gr_db / 20.0)).astype(np.float32)
+            gr_db = np.where(over_db > 0.0, -over_db * slope, 0.0)
+            return (x * np.power(10.0, gr_db / 20.0)).astype(np.float32)
 
         if audio.ndim == 1:
             return _compress_1d(audio)
-        # channels-first: compress each channel independently
         return np.stack([_compress_1d(audio[c]) for c in range(audio.shape[0])])
 
     def _cab_sim_eq(self, audio: np.ndarray) -> np.ndarray:
