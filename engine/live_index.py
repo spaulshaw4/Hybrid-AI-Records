@@ -23,6 +23,16 @@ LIVE_INDEX = os.environ.get("CORPUS_INDEX_LIVE") or DEFAULT_LIVE_INDEX
 # Refresh at most this often. Mid-job generates reuse the snapshot.
 REFRESH_EVERY_SEC = 6 * 60 * 60
 COPY_TIMEOUT_SEC = 90
+# select_for_role() filters slice_index.stem_type (there is no corpus.role table).
+# idx_corpus_role is the covering map for that lookup plus the rms/path sort.
+ROLE_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_corpus_role "
+    "ON slice_index (stem_type, rms_db, file_path)",
+    "CREATE INDEX IF NOT EXISTS idx_corpus_role_ml "
+    "ON slice_index (stem_type_ml, rms_db)",
+    "CREATE INDEX IF NOT EXISTS idx_corpus_role_filename "
+    "ON slice_index (stem_type, filename)",
+)
 
 
 def _as_uri(path: str, *, mode: str = "ro") -> str:
@@ -79,6 +89,27 @@ def _enable_wal(path: str) -> None:
         conn.close()
 
 
+def ensure_role_indexes(path: str | None = None) -> list[str]:
+    """Build the role lookup map on the C: replica. Never opens the D: source."""
+    dest = path or live_index_path()
+    if not os.path.isfile(dest):
+        raise FileNotFoundError(f"Live replica missing: {dest}")
+    conn = sqlite3.connect(dest, timeout=30)
+    built: list[str] = []
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        for ddl in ROLE_INDEX_DDL:
+            conn.execute(ddl)
+            built.append(ddl.split("INDEX IF NOT EXISTS ", 1)[-1].split(" ", 1)[0])
+        conn.execute("ANALYZE slice_index")
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"[LIVE_INDEX] role indexes={','.join(built)} db={dest}", flush=True)
+    return built
+
+
 def _copy_file_timeout(src: str, dest: str, timeout_sec: int = COPY_TIMEOUT_SEC) -> None:
     import subprocess
 
@@ -108,11 +139,13 @@ def refresh_live_index_replica(*, force: bool = False) -> str:
         and os.path.isfile(dest)
         and (time.time() - os.path.getmtime(dest)) < REFRESH_EVERY_SEC
     ):
+        ensure_role_indexes(dest)
         return dest
 
     src = source_index_path()
     if not os.path.isfile(src):
         if os.path.isfile(dest):
+            ensure_role_indexes(dest)
             return dest
         raise FileNotFoundError(f"No corpus index at {src} and no live replica at {dest}")
 
@@ -127,6 +160,7 @@ def refresh_live_index_replica(*, force: bool = False) -> str:
             src_conn.close()
         os.replace(tmp, dest)
         _enable_wal(dest)
+        ensure_role_indexes(dest)
     except (sqlite3.Error, OSError, TimeoutError) as exc:
         if os.path.isfile(tmp):
             try:
@@ -135,11 +169,13 @@ def refresh_live_index_replica(*, force: bool = False) -> str:
                 pass
         if os.path.isfile(dest):
             print(f"[LIVE_INDEX] replica refresh skipped ({exc}); using existing {dest}", flush=True)
+            ensure_role_indexes(dest)
             return dest
         print(f"[LIVE_INDEX] sqlite backup failed ({exc}); timed copy fallback", flush=True)
         try:
             _copy_file_timeout(src, dest)
             _enable_wal(dest)
+            ensure_role_indexes(dest)
         except (OSError, shutil.Error, TimeoutError) as copy_exc:
             if os.path.isfile(dest):
                 print(
