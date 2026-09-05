@@ -1,0 +1,32 @@
+END USER LICENSE AGREEMENT (EULA)
+
+IMPORTANT — READ CAREFULLY: This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity, hereinafter "Licensee") and Hybrid AI Records LLC ("Licensor") for the Hybrid AI Neural Audio Engine software, which includes computer software, neural network weights (including .pt files), scripts, and associated media and printed materials (collectively, the "Software").
+
+By installing, copying, or otherwise using the Software, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the Software.
+
+1. GRANT OF LICENSE
+Hybrid AI Records LLC grants you a revocable, non-exclusive, non-transferable, limited right to install and use the Software strictly for your personal or commercial audio production purposes. This is a license, not a sale of the Software or its underlying intellectual property.
+
+2. RESTRICTIONS ON USE
+You shall use the Software strictly in accordance with the terms of this EULA and shall not:
+Reverse Engineer: Decompile, reverse engineer, disassemble, attempt to derive the source code of, or decrypt the Software, its neural network weights, or its proprietary DAW XML assembly logic.
+Redistribute: Sell, rent, lease, sub-license, distribute, or otherwise transfer the Software or any of its components to any third party.
+Derivative Works: Modify, adapt, translate, or create derivative works based upon the Software.
+AI Training: Use the Software, its outputs, or its internal model weights to train, validate, or build any competing machine learning model, AI system, or DSP architecture.
+
+3. INTELLECTUAL PROPERTY RIGHTS
+The Software, including all algorithms, DSP routing logic, neural classification architectures, and DAW micro-fade integration, is the exclusive property of Hybrid AI Records LLC. All title, ownership rights, and intellectual property rights in and to the Software remain exclusively with Hybrid AI Records LLC. The Software is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties.
+
+4. DISCLAIMER OF WARRANTIES
+The Software is provided strictly on an "AS IS" and "AS AVAILABLE" basis. Hybrid AI Records LLC expressly disclaims all warranties of any kind, whether express, implied, or statutory, including, but not limited to, the implied warranties of merchantability, fitness for a particular purpose, and non-infringement. Hybrid AI Records LLC does not warrant that the Software will meet your requirements or that its operation will be uninterrupted or error-free.
+
+5. LIMITATION OF LIABILITY
+To the maximum extent permitted by applicable law, in no event shall Hybrid AI Records LLC be liable for any special, incidental, indirect, or consequential damages whatsoever (including, without limitation, damages for loss of business profits, business interruption, loss of audio data, DAW session corruption, or any other pecuniary loss) arising out of the use of or inability to use the Software, even if Hybrid AI Records LLC has been advised of the possibility of such damages.
+
+6. TERMINATION
+This EULA is effective until terminated. Your rights under this EULA will terminate automatically without notice from Hybrid AI Records LLC if you fail to comply with any term(s) of this EULA. Upon termination, you must cease all use of the Software and destroy all copies, full or partial, of the Software.
+
+7. GOVERNING LAW
+This EULA shall be governed by and construed in accordance with the laws of the State of Tennessee, without regard to its conflict of law principles. Any legal action or proceeding arising under this EULA will be brought exclusively in the federal or state courts located in Tennessee, and the parties hereby consent to personal jurisdiction and venue therein.
+
+By installing or using the Software, you agree to this EULA.

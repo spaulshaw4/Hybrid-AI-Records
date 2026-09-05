@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hybrid-neural-audio-engine"
+version = "1.0.0"
+description = "Hybrid AI Neural Audio Engine — PyTorch classifier, RMS gating, and Reaper session compiler"
+readme = "STEM_ENGINE.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "numpy>=1.23.0",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+]
+
+[project.scripts]
+hybrid-engine = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli"]
+packages = ["engine"]

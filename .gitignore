@@ -88,3 +88,8 @@ reports/dataset_manifest.jsonl
 # Continuous learner checkpoints
 models/checkpoints/
 reports/drive_inventory.sqlite
+reports/*.flag
+
+# Customer package trees (the zip is attached to the GitHub release)
+Hybrid_AI_*_Engine_v*/
+Hybrid_AI_*_Engine_v*.zip
