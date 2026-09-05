@@ -169,7 +169,8 @@ def ensure_uvicorn() -> None:
     else:
         log("Uvicorn missing; starting.")
     run_shell(
-        "cd /workspace && PYTHONPATH=/workspace nohup python -m uvicorn server:app "
+        "cd /workspace && CUDA_VISIBLE_DEVICES= HYBRID_INFER_DEVICE=cpu "
+        "PYTHONPATH=/workspace nohup python -m uvicorn server:app "
         "--host 0.0.0.0 --port 8000 --workers 2 > /workspace/uvicorn.log 2>&1 &"
     )
 

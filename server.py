@@ -456,4 +456,6 @@ async def hybrid_mix(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ.setdefault("HYBRID_INFER_DEVICE", "cpu")
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False, workers=2)

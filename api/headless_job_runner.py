@@ -201,10 +201,18 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _update_job(session_id: str, **fields: Any) -> dict[str, Any]:
+    disk = None
+    with _registry_lock:
+        job = _jobs.get(session_id)
+    if job is None:
+        disk = _load_job_from_disk(session_id)
     with _registry_lock:
         job = _jobs.get(session_id)
         if job is None:
-            raise KeyError(session_id)
+            if disk is None:
+                raise KeyError(session_id)
+            _jobs[session_id] = disk
+            job = disk
         job.update(fields)
         job["updated_at"] = _utc_now()
         snapshot = dict(job)
@@ -230,16 +238,15 @@ def _load_job_from_disk(session_id: str) -> dict[str, Any] | None:
 
 
 def _lookup_job(session_id: str) -> dict[str, Any] | None:
+    disk = _load_job_from_disk(session_id)
     with _registry_lock:
+        if disk is not None:
+            _jobs[session_id] = disk
+            return dict(disk)
         job = _jobs.get(session_id)
         if job is not None:
             return dict(job)
-    disk = _load_job_from_disk(session_id)
-    if disk is None:
-        return None
-    with _registry_lock:
-        _jobs.setdefault(session_id, disk)
-        return dict(_jobs[session_id])
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -362,10 +369,26 @@ def _resolve_stream_path(filename: str) -> str | None:
 # Subprocess helpers
 # ---------------------------------------------------------------------------
 
+def pin_live_api_to_cpu() -> None:
+    """Hide the MX450 from this process so the CUDA trainer keeps the GPU lock."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["HYBRID_INFER_DEVICE"] = "cpu"
+    os.environ.setdefault("OMP_NUM_THREADS", "2")
+    os.environ.setdefault("MKL_NUM_THREADS", "2")
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "2")
+
+
+pin_live_api_to_cpu()
+
+
 def _child_env() -> dict[str, str]:
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = _REPO_ROOT + (os.pathsep + existing if existing else "")
+    env["CUDA_VISIBLE_DEVICES"] = ""
+    env["HYBRID_INFER_DEVICE"] = "cpu"
+    env.setdefault("OMP_NUM_THREADS", "2")
+    env.setdefault("MKL_NUM_THREADS", "2")
     return env
 
 
@@ -535,6 +558,10 @@ def create_app() -> Any:
         allow_headers=["Content-Type"],
     )
 
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok", "device": "cpu", "role": "live-api"}
+
     @app.post("/api/tracks/create")
     def create_track(body: CreateTrackBody) -> dict[str, Any]:
         prompt = (body.prompt or "").strip()
@@ -561,6 +588,7 @@ def create_app() -> Any:
             _persist_job(job)
         except OSError as exc:
             _log(f"[create] persist failed: {exc}")
+            raise HTTPException(status_code=500, detail="could not persist job") from exc
         thread = threading.Thread(
             target=_worker,
             args=(session_id, prompt, genre, bool(body.dry_run)),
@@ -632,13 +660,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="Resolve interpreter and exit (no server)")
     parser.add_argument("--host", default=BIND_HOST)
     parser.add_argument("--port", type=int, default=BIND_PORT)
+    parser.add_argument(
+        "--device",
+        "-d",
+        default="cpu",
+        choices=["cpu"],
+        help="Live API is CPU-only so the CUDA trainer keeps the MX450",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        help="Uvicorn worker processes (2-4). Accepts web payloads while composition runs.",
+    )
     args = parser.parse_args(argv)
+
+    pin_live_api_to_cpu()
 
     global _DRY_RUN
     _DRY_RUN = bool(args.dry_run)
 
     host = args.host if args.host in {"127.0.0.1", "localhost"} else BIND_HOST
     port = int(args.port) if args.port else BIND_PORT
+    workers = max(2, min(4, int(args.workers) or 2))
 
     try:
         python = resolve_workstation_python()
@@ -649,7 +693,7 @@ def main(argv: list[str] | None = None) -> int:
     headless = _headless_script()
     _log(f"[ok] python={python}")
     _log(f"[ok] headless={'present ' + headless if headless else 'MISSING — assembler fallback or job error'}")
-    _log(f"[ok] bind={host}:{port} docs_url=None dry_run={_DRY_RUN}")
+    _log(f"[ok] bind={host}:{port} workers={workers} device=cpu docs_url=None dry_run={_DRY_RUN}")
 
     if args.once:
         return 0
@@ -660,7 +704,13 @@ def main(argv: list[str] | None = None) -> int:
         _log(f"[fatal] uvicorn missing ({exc}); it is listed in requirements-engine.txt")
         return 1
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(
+        "api.headless_job_runner:app",
+        host=host,
+        port=port,
+        workers=workers,
+        log_level="info",
+    )
     return 0
 
 

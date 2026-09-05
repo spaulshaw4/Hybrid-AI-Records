@@ -36,7 +36,7 @@ BUS_COLORS = {
 class LiveAudioMonitor:
     def __init__(
         self,
-        checkpoint="models/checkpoints/stem_classifier_latest.pt",
+        checkpoint="models/release/stem_classifier_v1.0.0.pt",
         sample_rate=44100,
         block_duration=4.0,
         infer_device="cpu",

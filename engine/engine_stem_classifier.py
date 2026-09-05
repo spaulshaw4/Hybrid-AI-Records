@@ -110,6 +110,8 @@ def resolve_checkpoint_path(checkpoint_path: str) -> str:
 
     name = os.path.basename(checkpoint_path or "")
     aliases = {
+        "v1.0.0.pt": "stem_classifier_v1.0.0.pt",
+        "learning.pt": "stem_classifier_learning.pt",
         "latest.pt": "stem_classifier_latest.pt",
         "epoch_10.pt": "stem_classifier_epoch_10.pt",
         "epoch_9.pt": "stem_classifier_epoch_9.pt",
@@ -264,7 +266,10 @@ class EngineStemClassifier:
         if checkpoint_path is None:
             checkpoint_path = DEFAULT_LATEST
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            env = (os.environ.get("HYBRID_INFER_DEVICE") or "cpu").strip().lower()
+            device = env if env in {"cpu", "cuda"} else "cpu"
+            if device == "cuda" and not torch.cuda.is_available():
+                device = "cpu"
         self.device = torch.device(device)
         self.target_sr = int(target_sr)
         self.n_mels = int(n_mels)
@@ -298,7 +303,7 @@ class EngineStemClassifier:
             )
 
     def reload_if_updated(self) -> bool:
-        """Hot-swap GPU weights when ``latest.pt`` (or pinned path) is newer.
+        """Hot-swap weights when the pinned production file is newer.
 
         Safe if the trainer is mid-write: a failed load keeps the old net and
         retries on the next check. Call between tracks or on a 60s timer.
@@ -442,7 +447,7 @@ class EngineStemClassifier:
 
 
 class DynamicEngineStemClassifier(EngineStemClassifier):
-    """Live loop that tracks ``stem_classifier_latest.pt`` and hot-swaps epochs."""
+    """Live loop that tracks ``stem_classifier_v1.0.0.pt`` and hot-swaps epochs."""
 
     def __init__(
         self,

@@ -29,7 +29,7 @@ from engine.soft_bus_router import SoftBusRouter
 class LiveStreamRouter:
     def __init__(
         self,
-        checkpoint: str = "models/checkpoints/stem_classifier_latest.pt",
+        checkpoint: str = "models/release/stem_classifier_v1.0.0.pt",
         sample_rate: int = 44100,
         slice_duration: float = 4.0,
         device: str | None = None,

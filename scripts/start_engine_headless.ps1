@@ -85,11 +85,11 @@ if (-not (Test-Path $runner)) {
     exit 1
 }
 
-Write-Host "[START] visible: $python $runner --host $BindHost --port $BindPort"
+Write-Host "[START] visible CPU API: $python $runner --host $BindHost --port $BindPort --workers 2 -d cpu"
 $argList = @(
     "-NoExit",
     "-Command",
-    "& '$python' '$runner' --host $BindHost --port $BindPort"
+    "`$env:CUDA_VISIBLE_DEVICES=''; `$env:HYBRID_INFER_DEVICE='cpu'; & '$python' '$runner' --host $BindHost --port $BindPort --workers 2 -d cpu"
 )
 Start-Process -FilePath "powershell.exe" -ArgumentList $argList
 exit 0

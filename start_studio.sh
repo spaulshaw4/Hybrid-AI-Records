@@ -24,8 +24,11 @@ if command -v redis-cli >/dev/null 2>&1; then
   redis-cli ping >/dev/null 2>&1 && echo "Redis: PONG"
 fi
 
+# Live API stays on CPU so the MX450 trainer keeps the GPU lock.
+export CUDA_VISIBLE_DEVICES=
+export HYBRID_INFER_DEVICE=cpu
 # Celery lives on tasks.celery_app, not server.celery_app
-python3 -m uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1 &
+python3 -m uvicorn server:app --host 0.0.0.0 --port 8000 --workers 2 &
 FASTAPI_PID=$!
 
 celery -A tasks worker --loglevel=info --concurrency=4 &

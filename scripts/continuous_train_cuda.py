@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 os.environ.setdefault("OMP_NUM_THREADS", "6")
 os.environ.setdefault("MKL_NUM_THREADS", "6")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "6")
@@ -41,15 +42,25 @@ except RuntimeError:
     pass
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if DEVICE.type != "cuda":
+    raise SystemExit(
+        "[FATAL] CUDA trainer requires the MX450. Live API owns CPU — refusing CPU fallback."
+    )
 print(
     f"[INIT] Compute Target: {DEVICE} | Active Device: "
-    f"{torch.cuda.get_device_name(0) if DEVICE.type == 'cuda' else 'CPU Fallback'}"
+    f"{torch.cuda.get_device_name(0)}"
 )
 
 DB_PATH = os.path.join(REPO, "reports", "dataset_manifest.sqlite")
 CHECKPOINT_DIR = os.path.join(REPO, "models", "checkpoints")
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-LATEST_CKPT = os.path.join(CHECKPOINT_DIR, "stem_classifier_latest.pt")
+# Isolated from the live v1.0.0.pt file the web worker hot-reloads.
+LEARNING_CKPT = os.path.join(CHECKPOINT_DIR, "stem_classifier_learning.pt")
+LATEST_CKPT = LEARNING_CKPT
+RESUME_CANDIDATES = (
+    LEARNING_CKPT,
+    os.path.join(CHECKPOINT_DIR, "stem_classifier_latest.pt"),
+)
 BLACKLIST_PATH = os.path.join(REPO, "config", "trainer_blacklist.txt")
 
 
@@ -496,14 +507,15 @@ def run_training() -> None:
     scaler = torch.amp.GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
 
     start_epoch = 1
-    if os.path.exists(LATEST_CKPT):
-        ckpt = torch.load(LATEST_CKPT, map_location=DEVICE, weights_only=False)
+    resume_path = next((p for p in RESUME_CANDIDATES if os.path.exists(p)), None)
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location=DEVICE, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if ckpt.get("scaler_state") and scaler.is_enabled():
             scaler.load_state_dict(ckpt["scaler_state"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
-        print(f"[INIT] Resumed from epoch {start_epoch}")
+        print(f"[INIT] Resumed from {resume_path} -> next epoch {start_epoch}")
 
     print(
         f"[START] Mini-pool {pool_n:,} slices x {MINI_EPOCHS} epochs, "

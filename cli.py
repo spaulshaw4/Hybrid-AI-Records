@@ -114,9 +114,9 @@ def main():
     parser.add_argument(
         "--device",
         "-d",
-        default=None,
+        default="cpu",
         choices=["cuda", "cpu"],
-        help="Inference device",
+        help="Inference device (cpu keeps the MX450 free for the trainer)",
     )
     parser.add_argument(
         "--no-rpp",
