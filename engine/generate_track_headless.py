@@ -58,7 +58,7 @@ STEMS = ("rhythm", "harmonic", "lead", "vocal")
 STAGE_STEMS = STEMS + ("bass",)
 PITCH_STEMS = frozenset({"harmonic", "lead", "vocal", "bass"})
 DEFAULT_CORPUS = r"D:\MusicDatasets\corpus_4s"
-DEFAULT_SCRATCH = r"D:\MusicDatasets\scratch"
+DEFAULT_SCRATCH = os.environ.get("HYBRID_SCRATCH") or r"C:\live_web_outputs\scratch"
 SLICE_SECONDS = 4.0
 BASS_QUERY_TAGS = ["bass", "808", "sub"]
 FETCH_MULTIPLIER = 8
@@ -350,8 +350,22 @@ def stage_scored_session_cache(
     if not db_path or not os.path.isfile(db_path):
         return 0
     try:
-        conn = sqlite3.connect(db_path)
-    except sqlite3.Error:
+        from engine.live_index import (
+            is_source_index,
+            live_index_path,
+            open_live_index,
+            resolve_worker_index,
+        )
+
+        if is_source_index(db_path):
+            db_path = resolve_worker_index()
+        if os.path.normcase(os.path.abspath(db_path)) == os.path.normcase(
+            os.path.abspath(live_index_path())
+        ):
+            conn, _info = open_live_index(into_memory=True)
+        else:
+            conn = sqlite3.connect(db_path, timeout=5)
+    except (sqlite3.Error, OSError, FileNotFoundError):
         return 0
 
     staged = 0
@@ -362,6 +376,7 @@ def stage_scored_session_cache(
                 break
             # One spare beyond the variant pool so a drum fill has somewhere to go.
             want = min(int(max_per_stem), max(2, int(pool.get(role, 2)) + 1))
+            print(f"[SELECT] scoring {role} want={want} db={db_path}", flush=True)
             picks = select_for_role(
                 conn,
                 role,
@@ -538,6 +553,14 @@ def execute_prompt_pipeline(
         use_live = True
     else:
         use_live = token_present
+
+    try:
+        from engine.live_index import is_source_index, resolve_worker_index
+
+        if is_source_index(db_path):
+            db_path = resolve_worker_index()
+    except Exception:
+        pass
 
     rows = index_count(db_path)
     print(f"[DB] {os.path.abspath(db_path)} COUNT(*)={rows}")
@@ -776,7 +799,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Headless prompt-to-unmastered mix")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--session", default="headless_session_01")
-    parser.add_argument("--db", default=default_index_db())
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="Slice index. Default: C:\\live_web_outputs\\db\\corpus_index_live.sqlite",
+    )
     parser.add_argument("--scratch", default=DEFAULT_SCRATCH)
     parser.add_argument(
         "--corpus",
@@ -854,10 +881,26 @@ def main(argv: list[str] | None = None) -> int:
             corpus = DEFAULT_CORPUS
     print(f"[CORPUS] {corpus}", flush=True)
     try:
+        from engine.live_index import resolve_worker_index
+
+        db_path = resolve_worker_index(args.db)
+    except Exception:
+        live = r"C:\live_web_outputs\db\corpus_index_live.sqlite"
+        db_path = live if os.path.isfile(live) else (args.db or default_index_db())
+        if os.path.normcase(os.path.abspath(str(db_path))) in {
+            os.path.normcase(r"D:\MusicDatasets\db\corpus_index.sqlite"),
+            os.path.normcase(r"D:\MusicDatasets\database\corpus_index.sqlite"),
+        }:
+            raise RuntimeError(
+                "Live generate refused the D: corpus_index.sqlite lock. "
+                "Refresh C:\\live_web_outputs\\db\\corpus_index_live.sqlite first."
+            )
+    print(f"[LIVE_INDEX] {db_path}", flush=True)
+    try:
         result = execute_prompt_pipeline(
             args.prompt,
             args.session,
-            args.db,
+            db_path,
             args.scratch,
             genre=args.genre,
             offline=args.offline,

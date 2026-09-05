@@ -464,7 +464,7 @@ class DynamicEngineStemClassifier(EngineStemClassifier):
 
 if __name__ == "__main__":
     engine = EngineStemClassifier(
-        "models/checkpoints/stem_classifier_latest.pt",
+        "models/release/stem_classifier_v1.0.0.pt",
         smooth_window=1,
     )
     base_dir = r"C:\staging_slices\001 - ANiMAL - Clinic A"

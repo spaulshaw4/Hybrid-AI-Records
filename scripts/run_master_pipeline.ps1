@@ -81,11 +81,13 @@ $RequiredSlices = $DurationSeconds * $PremixLayers
 $ErrorActionPreference = "Stop"
 
 $BaseDir = "D:\MusicDatasets"
-$WorkDir = Join-Path $BaseDir "renders\$SessionId"
+$LiveRoot = if ($env:HYBRID_LIVE_OUTPUT) { $env:HYBRID_LIVE_OUTPUT } else { "C:\live_web_outputs" }
+$WorkDir = Join-Path $LiveRoot "renders\$SessionId"
 $RawStemsDir = Join-Path $WorkDir "raw_stems"
 $ScriptsDir = Join-Path $BaseDir "scripts"
 $SlicesDir = Join-Path "$BaseDir\uploaded_slices" $GenreLock
 $TelemetryScript = Join-Path $ScriptsDir "log_telemetry.py"
+Write-Host "[LIVE_IO] writes=$LiveRoot (not C:\staging_slices)"
 
 # Resolve a real interpreter once, at script scope, before anything invokes it.
 #
@@ -139,7 +141,11 @@ try {
     $ResolverScript = Join-Path $ScriptsDir "genre_resolver.py"
     $ResolvedGenre = $GenreLock
 
-    $ScratchMix = Join-Path $BaseDir "scratch\$SessionId\unmastered_mix.wav"
+    $ScratchMix = Join-Path $LiveRoot "scratch\$SessionId\unmastered_mix.wav"
+    if (-not (Test-Path $ScratchMix)) {
+        $LegacyMix = Join-Path $BaseDir "scratch\$SessionId\unmastered_mix.wav"
+        if (Test-Path $LegacyMix) { $ScratchMix = $LegacyMix }
+    }
     $Preassembled = Test-Path $ScratchMix
     if ($Preassembled) {
         $MixBytes = (Get-Item $ScratchMix).Length
@@ -169,7 +175,7 @@ try {
     if ($Preassembled) {
         $StudioScript = Join-Path $ScriptsDir "studio_master_chain.py"
         $MasterWav = Join-Path $WorkDir "master_output.wav"
-        $ReleaseDir = Join-Path $BaseDir "releases\$SessionId"
+        $ReleaseDir = Join-Path $LiveRoot "releases\$SessionId"
         if (!(Test-Path $ReleaseDir)) { New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null }
 
         $StepTimer.Restart()
@@ -354,7 +360,7 @@ try {
     $EgressScript = Join-Path $ScriptsDir "egress_protection.py"
 
     if (Test-Path $EgressScript) {
-        & $script:Python $EgressScript --session $SessionId --dir (Join-Path $BaseDir "renders")
+        & $script:Python $EgressScript --session $SessionId --dir (Join-Path $LiveRoot "renders")
         $StepTimer.Stop()
         Send-Telemetry -EventType "stems_purged" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))
     } elseif (Test-Path $RawStemsDir) {

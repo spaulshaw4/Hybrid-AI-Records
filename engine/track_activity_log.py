@@ -41,7 +41,7 @@ def _prob_dict(probs) -> dict[str, float]:
 def process_track_activity_log(
     track_dir: str,
     slice_duration: float = 4.0,
-    checkpoint: str = "models/checkpoints/stem_classifier_latest.pt",
+    checkpoint: str = "models/release/stem_classifier_v1.0.0.pt",
     bus_filter: str | None = None,
 ):
     engine = EngineStemClassifier(checkpoint, smooth_window=1)
@@ -261,7 +261,7 @@ def save_reports(activity_log, output_dir):
 
 def run_batch_logging(
     root_staging_dir,
-    checkpoint="models/checkpoints/stem_classifier_latest.pt",
+    checkpoint="models/release/stem_classifier_v1.0.0.pt",
     export_in_place=True,
     centralized_out_dir=None,
 ):

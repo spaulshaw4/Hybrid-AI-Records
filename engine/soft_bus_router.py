@@ -77,7 +77,7 @@ class SoftBusRouter:
 
 
 if __name__ == "__main__":
-    engine = EngineStemClassifier("models/checkpoints/stem_classifier_latest.pt")
+    engine = EngineStemClassifier("models/release/stem_classifier_v1.0.0.pt")
     router = SoftBusRouter(engine, bleed_threshold=0.15, solo_threshold=0.75)
 
     clinic = r"C:\staging_slices\001 - ANiMAL - Clinic A"

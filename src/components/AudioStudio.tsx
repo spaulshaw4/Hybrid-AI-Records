@@ -4973,7 +4973,13 @@ export function AudioStudio() {
                 {String(pipelineState.lastError.message ?? "")
                   .replace(/\bStudioStreamDroppedError\b/gi, "")
                   .replace(/\s{2,}/g, " ")
-                  .trim() || "Something went wrong. Please try again."}
+                  .trim() ||
+                  (displayPipelineStep(
+                    pipelineState.lastError.step || pipelineState.currentStep,
+                    pipelineState.currentStep,
+                  ) === "composition"
+                    ? "Composition failed. The Worker log (reports/live_api.out.log) has the Python traceback."
+                    : "Something went wrong. Please try again.")}
               </p>
               <Button
                 type="button"

@@ -16,7 +16,23 @@ PRODUCTION_CKPT = os.path.join(REPO, "models", "release", "stem_classifier_v1.0.
 STAGING_ROOT = r"C:\staging_slices"
 LOCKED_ROOT = r"D:\MusicDatasets\mtg\corpus_4s_dsp_locked"
 CORPUS_ROOT = r"D:\MusicDatasets\corpus_4s"
+LIVE_OUTPUT_ROOT = os.environ.get("HYBRID_LIVE_OUTPUT", r"C:\live_web_outputs")
 MIN_MIX_BYTES = 4096
+
+
+def live_output_tree() -> dict[str, str]:
+    """Web-traffic writes only. Never write .rpp / mixes into C:\\staging_slices."""
+    tree = {
+        "root": LIVE_OUTPUT_ROOT,
+        "scratch": os.path.join(LIVE_OUTPUT_ROOT, "scratch"),
+        "renders": os.path.join(LIVE_OUTPUT_ROOT, "renders"),
+        "releases": os.path.join(LIVE_OUTPUT_ROOT, "releases"),
+        "rpp": os.path.join(LIVE_OUTPUT_ROOT, "rpp"),
+        "logs": os.path.join(LIVE_OUTPUT_ROOT, "logs"),
+    }
+    for path in tree.values():
+        os.makedirs(path, exist_ok=True)
+    return tree
 
 _brain: Any = None
 _brain_info: dict[str, Any] | None = None
@@ -55,6 +71,11 @@ def load_production_brain() -> dict[str, Any]:
     os.environ["HYBRID_INFER_DEVICE"] = "cpu"
     if not os.path.isfile(PRODUCTION_CKPT):
         raise FileNotFoundError(f"Production brain missing: {PRODUCTION_CKPT}")
+    latest = os.path.join(REPO, "models", "checkpoints", "stem_classifier_latest.pt")
+    if os.path.normcase(os.path.abspath(PRODUCTION_CKPT)) == os.path.normcase(
+        os.path.abspath(latest)
+    ):
+        raise RuntimeError("Worker refused to open stem_classifier_latest.pt (Learner file).")
     from engine.engine_stem_classifier import EngineStemClassifier
 
     engine = EngineStemClassifier(

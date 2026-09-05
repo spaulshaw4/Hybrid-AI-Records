@@ -9,7 +9,8 @@ on a daemon thread. Does not use FastAPI BackgroundTasks.
 
 Expected headless CLI (do not overwrite that file):
   --prompt --session --genre [--offline] [--scratch]
-  writes D:\\MusicDatasets\\scratch\\{session}\\unmastered_mix.wav
+  writes C:\\live_web_outputs\\scratch\\{session}\\unmastered_mix.wav
+  (never writes into C:\\staging_slices)
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import re
 import subprocess
 import sys
 import threading
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -32,10 +34,25 @@ _THIS = os.path.abspath(__file__)
 _API_DIR = os.path.dirname(_THIS)
 _REPO_ROOT = os.path.dirname(_API_DIR)
 BASE_DIR = os.environ.get("MUSICDATASETS_ROOT", r"D:\MusicDatasets")
-SCRATCH_ROOT = os.path.join(BASE_DIR, "scratch")
-RENDERS_ROOT = os.path.join(BASE_DIR, "renders")
-RELEASES_ROOT = os.path.join(BASE_DIR, "releases")
+try:
+    from engine.worker_handoff import live_output_tree
+
+    _LIVE = live_output_tree()
+except Exception:
+    _LIVE = {
+        "root": r"C:\live_web_outputs",
+        "scratch": r"C:\live_web_outputs\scratch",
+        "renders": r"C:\live_web_outputs\renders",
+        "releases": r"C:\live_web_outputs\releases",
+        "logs": r"C:\live_web_outputs\logs",
+    }
+    for _path in _LIVE.values():
+        os.makedirs(_path, exist_ok=True)
+SCRATCH_ROOT = _LIVE["scratch"]
+RENDERS_ROOT = _LIVE["renders"]
+RELEASES_ROOT = _LIVE["releases"]
 ASSETS_ROOT = os.path.join(RELEASES_ROOT, "assets")
+_API_LOG = os.path.join(_REPO_ROOT, "reports", "live_api.out.log")
 MAX_PROMPT = 2000
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8000
@@ -70,7 +87,14 @@ def _redact(text: str) -> str:
 
 
 def _log(msg: str) -> None:
-    print(_redact(msg), flush=True)
+    line = _redact(msg)
+    print(line, flush=True)
+    try:
+        os.makedirs(os.path.dirname(_API_LOG), exist_ok=True)
+        with open(_API_LOG, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
 
 
 def _utc_now() -> str:
@@ -389,6 +413,15 @@ def _child_env() -> dict[str, str]:
     env["PYTHONPATH"] = _REPO_ROOT + (os.pathsep + existing if existing else "")
     env["CUDA_VISIBLE_DEVICES"] = ""
     env["HYBRID_INFER_DEVICE"] = "cpu"
+    env["HYBRID_LIVE_OUTPUT"] = _LIVE["root"]
+    env["HYBRID_SCRATCH"] = SCRATCH_ROOT
+    try:
+        from engine.live_index import live_index_path
+
+        env["CORPUS_INDEX_DB"] = live_index_path()
+        env["CORPUS_INDEX_LIVE"] = live_index_path()
+    except Exception:
+        env["CORPUS_INDEX_LIVE"] = r"C:\live_web_outputs\db\corpus_index_live.sqlite"
     env.setdefault("OMP_NUM_THREADS", "2")
     env.setdefault("MKL_NUM_THREADS", "2")
     return env
@@ -404,6 +437,20 @@ def _run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[
         check=False,
         env=_child_env(),
     )
+
+
+def _resolve_index() -> str:
+    try:
+        from engine.live_index import resolve_worker_index
+
+        return resolve_worker_index()
+    except Exception:
+        live = r"C:\live_web_outputs\db\corpus_index_live.sqlite"
+        if os.path.isfile(live):
+            return live
+        raise RuntimeError(
+            "Live replica missing at C:\\live_web_outputs\\db\\corpus_index_live.sqlite"
+        )
 
 
 def _resolve_corpus() -> str:
@@ -460,6 +507,8 @@ def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) ->
         SCRATCH_ROOT,
         "--corpus",
         corpus,
+        "--db",
+        _resolve_index(),
     ]
     if genre_hint:
         cmd += ["--genre", genre_hint]
@@ -541,6 +590,7 @@ def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> Non
         )
     except Exception as exc:
         _log(f"[worker] {session_id} failed: {exc}")
+        _log("[TRACEBACK]\n" + traceback.format_exc())
         try:
             _update_job(session_id, status="failed", error=_redact(str(exc))[:800])
         except KeyError:
@@ -598,6 +648,14 @@ def _boot_production_brain() -> dict[str, Any]:
             f"device={info.get('device')} bytes={info.get('bytes')} path={info.get('path')}"
         )
         _log(f"[CORPUS] worker={corpus}")
+        try:
+            from engine.live_index import refresh_live_index_replica
+
+            replica = refresh_live_index_replica()
+            _brain_health["index"] = replica
+            _log(f"[LIVE_INDEX] {replica}")
+        except Exception as index_exc:
+            _log(f"[LIVE_INDEX] replica refresh failed: {index_exc}")
         return info
     except Exception as exc:
         _brain_health = {"loaded": False, "error": str(exc)[:400]}
@@ -640,6 +698,7 @@ def create_app() -> Any:
             "brain_loaded": bool(_brain_health.get("loaded")),
             "brain_epoch": _brain_health.get("epoch"),
             "corpus": _brain_health.get("corpus"),
+            "index": _brain_health.get("index"),
             "brain_error": _brain_health.get("error"),
         }
 

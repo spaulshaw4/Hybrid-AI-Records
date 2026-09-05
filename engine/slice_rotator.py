@@ -292,7 +292,20 @@ def query_rotated_bank(
     """
     if not db_path or not os.path.isfile(db_path):
         return []
-    conn = sqlite3.connect(db_path)
+    try:
+        from engine.live_index import is_source_index, resolve_worker_index
+
+        if is_source_index(db_path):
+            db_path = resolve_worker_index()
+            if not db_path or not os.path.isfile(db_path):
+                return []
+    except Exception:
+        if os.path.normcase(os.path.abspath(db_path)) in {
+            os.path.normcase(r"D:\MusicDatasets\db\corpus_index.sqlite"),
+            os.path.normcase(r"D:\MusicDatasets\database\corpus_index.sqlite"),
+        }:
+            return []
+    conn = sqlite3.connect(db_path, timeout=5)
     try:
         try:
             init_rotation_schema(conn)

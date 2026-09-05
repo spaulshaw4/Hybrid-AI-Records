@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--checkpoint",
-        default="models/checkpoints/stem_classifier_latest.pt",
+        default="models/release/stem_classifier_v1.0.0.pt",
     )
     args = parser.parse_args(argv)
 
