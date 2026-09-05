@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -61,6 +62,10 @@ CORS_ORIGINS = (
     "http://127.0.0.1:8082",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 )
 POWERSHELL = os.environ.get(
     "HYBRID_POWERSHELL",
@@ -545,6 +550,19 @@ def _run_master_pipeline(session_id: str, genre_hint: str) -> None:
         raise RuntimeError(f"Master pipeline failed. {detail}")
 
 
+def _publish_audio(session_id: str, src: str) -> tuple[str, str]:
+    if not src or not os.path.isfile(src):
+        raise RuntimeError(f"No mix to publish for {session_id}: {src}")
+    ext = os.path.splitext(src)[1].lower() or ".wav"
+    mime = MIME_BY_EXT.get(ext, "audio/wav")
+    filename = f"{session_id}{ext}"
+    dest = os.path.join(ASSETS_ROOT, filename)
+    os.makedirs(ASSETS_ROOT, exist_ok=True)
+    if os.path.abspath(src) != os.path.abspath(dest):
+        shutil.copy2(src, dest)
+    return filename, mime
+
+
 def _attach_master(session_id: str) -> tuple[str, str]:
     candidates = _master_candidates(session_id)
     if not candidates:
@@ -552,11 +570,7 @@ def _attach_master(session_id: str) -> tuple[str, str]:
             "Pipeline finished but no master was found. "
             f"Expected WAV first at {os.path.join(RENDERS_ROOT, session_id, 'master_output.wav')}."
         )
-    path = candidates[0]
-    ext = os.path.splitext(path)[1].lower()
-    mime = MIME_BY_EXT.get(ext, "application/octet-stream")
-    filename = f"{session_id}{ext}"
-    return filename, mime
+    return _publish_audio(session_id, candidates[0])
 
 
 def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> None:
@@ -579,8 +593,14 @@ def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> Non
             f"mix_bytes={probe['mix_bytes']} slices={probe['slice_count']} "
             f"mix={probe['mix']}"
         )
-        _run_master_pipeline(session_id, genre_hint)
-        filename, mime = _attach_master(session_id)
+        filename, mime = _publish_audio(session_id, str(probe["mix"]))
+        try:
+            _run_master_pipeline(session_id, genre_hint)
+            filename, mime = _attach_master(session_id)
+        except Exception as master_exc:
+            _log(
+                f"[worker] master pipeline failed; Gate 1 uses unmastered mix: {master_exc}"
+            )
         _update_job(
             session_id,
             status="completed",
@@ -619,8 +639,12 @@ FastAPI, HTTPException, Request, CORSMiddleware, FileResponse, Response, BaseMod
 
 
 class CreateTrackBody(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT)
+    prompt: str = ""
     genre_hint: str | None = Field(default=None, max_length=120)
+    genre: str | None = Field(default=None, max_length=120)
+    genre_lock: str | None = Field(default=None, max_length=120)
+    style: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=200)
     dry_run: bool = False
 
 
@@ -702,14 +726,18 @@ def create_app() -> Any:
             "brain_error": _brain_health.get("error"),
         }
 
+    @app.post("/generate")
+    @app.post("/api/generate")
     @app.post("/api/tracks/create")
     def create_track(body: CreateTrackBody) -> dict[str, Any]:
-        prompt = (body.prompt or "").strip()
+        prompt = (body.prompt or body.title or body.style or "").strip()
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt is required")
         if len(prompt) > MAX_PROMPT:
             raise HTTPException(status_code=400, detail=f"prompt exceeds {MAX_PROMPT} characters")
-        genre = (body.genre_hint or "").strip()
+        genre = (
+            body.genre_hint or body.genre or body.genre_lock or body.style or ""
+        ).strip()
         _log(
             f"[API_PAYLOAD] prompt_chars={len(prompt)} genre={genre!r} "
             f"brain_loaded={_brain_health.get('loaded')}"

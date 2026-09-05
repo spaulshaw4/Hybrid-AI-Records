@@ -72,10 +72,35 @@ export async function POST(request: Request) {
     const payloadPath = path.join(PAYLOAD_DIR, `job_${sessionId}.json`);
     fs.writeFileSync(payloadPath, JSON.stringify(jobPayload, null, 2));
 
+    const worker = (process.env.HYBRID_WORKER_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+    const workerRes = await fetch(`${worker}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        genre_hint: genre_lock,
+        genre_lock,
+      }),
+    });
+    const workerBody = (await workerRes.json().catch(() => ({}))) as {
+      session_id?: string;
+      detail?: string;
+    };
+    if (!workerRes.ok) {
+      return NextResponse.json(
+        {
+          error: `Local worker at ${worker}/generate rejected the job: ${
+            workerBody.detail || workerRes.status
+          }`,
+        },
+        { status: 502 },
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      session_id: sessionId,
-      message: 'Token deducted, vault initialized, and job payload dispatched to local engine.'
+      session_id: workerBody.session_id || sessionId,
+      message: `Token deducted; job posted to ${worker}/generate.`,
     });
 
   } catch (err: unknown) {

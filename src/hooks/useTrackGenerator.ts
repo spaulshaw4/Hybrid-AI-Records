@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = (
+  (typeof import.meta !== "undefined" &&
+    (import.meta as ImportMeta & { env?: { VITE_HYBRID_WORKER_URL?: string } }).env
+      ?.VITE_HYBRID_WORKER_URL) ||
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 const POLL_MS = 2000;
 
 export type TrackGeneratorStatus = "idle" | "queued" | "running" | "completed" | "failed";

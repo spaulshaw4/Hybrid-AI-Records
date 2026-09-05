@@ -355,6 +355,38 @@ export async function runGenerateEngineTrack(
     let finished: Awaited<ReturnType<typeof waitForStudioTrack>>;
     let startedTaskId: string | null = null;
     try {
+    const { hybridWorkerUrl, generateFromHybridWorker, LOCAL_WORKER_TIMEOUT_MS } =
+      await import("@/lib/hybrid-worker.server");
+    const workerUrl = hybridWorkerUrl();
+    if (workerUrl) {
+      const { withTimeout: workerTimeout } = await import("@/lib/pipeline-gate.server");
+      const local = await workerTimeout(
+        generateFromHybridWorker({
+          prompt: payload.prompt || genre,
+          genreHint: genre,
+        }),
+        LOCAL_WORKER_TIMEOUT_MS,
+        "Gate 1 (local Hybrid worker)",
+        { step: "composition" },
+      );
+      started = {
+        taskId: local.sessionId,
+        payload: {} as Awaited<ReturnType<typeof generateStudioTrack>>["payload"],
+        status: "processing",
+      };
+      finished = {
+        taskId: local.sessionId,
+        status: "completed",
+        audioUrl: local.audioUrl,
+        imageUrl: null,
+        title: payload.title || null,
+        duration: null,
+        trackIds: [local.sessionId],
+        rawStatus: "completed",
+        clipCount: 1,
+      };
+      startedTaskId = local.sessionId;
+    } else {
     started = await generateStudioTrack({
       genre,
       subGenre: payload.subGenre?.trim() || undefined,
@@ -431,6 +463,7 @@ export async function runGenerateEngineTrack(
       ) as Error & { step: string };
       e.step = "composition";
       throw e;
+    }
     }
     const sonicUrl = finished.audioUrl;
     console.log("[HANDOFF] generation -> composition", {

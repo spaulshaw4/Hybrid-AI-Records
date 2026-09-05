@@ -372,7 +372,28 @@ export async function executePipeline(
       console.log("[Gate 1/6] currentStep=composition — AIMusicAPI create/poll");
 
       let rawAudioBuffer: Buffer;
-      if (input.gate1AudioUrl) {
+      const { hybridWorkerUrl, generateFromHybridWorker, LOCAL_WORKER_TIMEOUT_MS } =
+        await import("@/lib/hybrid-worker.server");
+      const workerUrl = hybridWorkerUrl();
+      if (workerUrl && !input.gate1AudioUrl) {
+        try {
+          const local = await withTimeout(
+            generateFromHybridWorker({
+              prompt: input.prompt || input.style || "",
+              genreHint: input.style || input.prompt || "",
+            }),
+            LOCAL_WORKER_TIMEOUT_MS,
+            "Gate 1 (local Hybrid worker)",
+            { step: "composition" },
+          );
+          rawAudioBuffer = local.buffer;
+        } catch (err) {
+          if (err && typeof err === "object" && "step" in err) throw err;
+          const e = new Error(errorMessage(err)) as Error & { step: string };
+          e.step = "composition";
+          throw e;
+        }
+      } else if (input.gate1AudioUrl) {
         try {
           rawAudioBuffer = await withTimeout(
             downloadBuffer(input.gate1AudioUrl),
