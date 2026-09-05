@@ -215,6 +215,22 @@ export async function runGenerateEngineTrack(
     );
     const payload = rest;
     const genre = (payload.genre || payload.style || payload.prompt).trim();
+    console.log("[WORKER_PAYLOAD] studio generate", {
+      genreChars: genre.length,
+      promptChars: (payload.prompt || "").length,
+      styleChars: (payload.style || "").length,
+      lyricsChars: (payload.lyrics || "").length,
+      instrumental: Boolean(payload.instrumental),
+      title: payload.title || "",
+      vaultId: payload.vaultId ?? null,
+    });
+    if (!genre) {
+      const empty = new Error(
+        "[Circuit Breaker] Gate 1 failed: API payload dropped genre/style/prompt — nothing to generate.",
+      ) as Error & { step: string };
+      empty.step = "composition";
+      throw empty;
+    }
     const bpm = controls?.bpm;
     const mood = payload.mood?.trim() || "";
     const instruments = (payload.instruments ?? []).map((item) => item.trim()).filter(Boolean);
@@ -417,6 +433,10 @@ export async function runGenerateEngineTrack(
       throw e;
     }
     const sonicUrl = finished.audioUrl;
+    console.log("[HANDOFF] generation -> composition", {
+      audioUrlChars: sonicUrl ? sonicUrl.length : 0,
+      taskId: started.taskId,
+    });
     if (!sonicUrl) {
       const empty = new Error(
         "[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.",

@@ -58,6 +58,7 @@ _SECRET_RE = re.compile(
 _registry_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
 _DRY_RUN = False
+_brain_health: dict[str, Any] = {"loaded": False, "error": None}
 
 
 # ---------------------------------------------------------------------------
@@ -277,9 +278,10 @@ def _assembler_script() -> str | None:
 
 
 def _pipeline_script() -> str | None:
+    # Prefer the repo copy so Worker handoff guards land even if D:\ is stale.
     return _first_existing(
-        os.path.join(BASE_DIR, "scripts", "run_master_pipeline.ps1"),
         os.path.join(_REPO_ROOT, "scripts", "run_master_pipeline.ps1"),
+        os.path.join(BASE_DIR, "scripts", "run_master_pipeline.ps1"),
     )
 
 
@@ -404,10 +406,27 @@ def _run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[
     )
 
 
+def _resolve_corpus() -> str:
+    try:
+        from engine.worker_handoff import resolve_worker_corpus
+
+        return resolve_worker_corpus()
+    except Exception:
+        staging = r"C:\staging_slices"
+        if os.path.isdir(staging):
+            return staging
+        return os.path.join(BASE_DIR, "corpus_4s")
+
+
 def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) -> None:
     script = _headless_script()
     mix = _session_mix_path(session_id)
     os.makedirs(os.path.dirname(mix), exist_ok=True)
+    corpus = _resolve_corpus()
+    _log(
+        f"[PAYLOAD] session={session_id} prompt_chars={len(prompt)} "
+        f"genre={genre_hint!r} corpus={corpus}"
+    )
     if script is None:
         assembler = _assembler_script()
         if assembler is None:
@@ -421,9 +440,7 @@ def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) ->
         )
         cmd = [python, assembler, "--out", mix]
         if os.path.basename(assembler) == "local_track_synthesizer.py":
-            corpus = os.path.join(BASE_DIR, "corpus_4s")
-            if os.path.isdir(corpus):
-                cmd += ["--corpus", corpus]
+            cmd += ["--corpus", corpus]
         result = _run(cmd, cwd=_REPO_ROOT)
         if result.returncode != 0 or not os.path.isfile(mix):
             detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
@@ -441,12 +458,16 @@ def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) ->
         session_id,
         "--scratch",
         SCRATCH_ROOT,
+        "--corpus",
+        corpus,
     ]
     if genre_hint:
         cmd += ["--genre", genre_hint]
     if not _replicate_token_set():
         cmd.append("--offline")
     result = _run(cmd, cwd=_REPO_ROOT)
+    if result.stdout:
+        _log("[generate] " + _redact(result.stdout.strip()[-1200:]))
     if result.returncode != 0 or not os.path.isfile(mix):
         detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
         raise RuntimeError(f"Headless generate failed. {detail}")
@@ -501,10 +522,14 @@ def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> Non
         python = resolve_workstation_python()
         _log(f"[worker] python={python} session={session_id}")
         _run_headless(python, session_id, prompt, genre_hint)
-        if not os.path.isfile(_session_mix_path(session_id)):
-            raise RuntimeError(
-                f"Headless step did not write {_session_mix_path(session_id)}"
-            )
+        from engine.worker_handoff import assert_handoff_ready
+
+        probe = assert_handoff_ready(SCRATCH_ROOT, session_id)
+        _log(
+            f"[HANDOFF] generation -> composition session={session_id} "
+            f"mix_bytes={probe['mix_bytes']} slices={probe['slice_count']} "
+            f"mix={probe['mix']}"
+        )
         _run_master_pipeline(session_id, genre_hint)
         filename, mime = _attach_master(session_id)
         _update_job(
@@ -549,8 +574,56 @@ class CreateTrackBody(BaseModel):
     dry_run: bool = False
 
 
+def _boot_production_brain() -> dict[str, Any]:
+    """Load frozen v1.0.0 weights on CPU. Failed load = empty routing arrays."""
+    global _brain_health
+    pin_live_api_to_cpu()
+    try:
+        from engine.worker_handoff import load_production_brain, resolve_worker_corpus
+
+        info = load_production_brain()
+        corpus = resolve_worker_corpus()
+        _brain_health = {
+            "loaded": True,
+            "error": None,
+            "epoch": info.get("epoch"),
+            "phase": info.get("phase"),
+            "device": info.get("device"),
+            "bytes": info.get("bytes"),
+            "path": info.get("path"),
+            "corpus": corpus,
+        }
+        _log(
+            f"[BRAIN] loaded epoch={info.get('epoch')} phase={info.get('phase')} "
+            f"device={info.get('device')} bytes={info.get('bytes')} path={info.get('path')}"
+        )
+        _log(f"[CORPUS] worker={corpus}")
+        return info
+    except Exception as exc:
+        _brain_health = {"loaded": False, "error": str(exc)[:400]}
+        _log(f"[BRAIN] FAILED {exc}")
+        raise
+
+
 def create_app() -> Any:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, title="Headless Generation")
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(_app: Any):
+        try:
+            _boot_production_brain()
+        except Exception:
+            # Jobs that need the brain will fail at the handoff, not at boot.
+            pass
+        yield
+
+    app = FastAPI(
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        title="Headless Generation",
+        lifespan=lifespan,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(CORS_ORIGINS),
@@ -559,8 +632,16 @@ def create_app() -> Any:
     )
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "device": "cpu", "role": "live-api"}
+    def health() -> dict[str, Any]:
+        return {
+            "status": "ok" if _brain_health.get("loaded") else "degraded",
+            "device": "cpu",
+            "role": "live-api",
+            "brain_loaded": bool(_brain_health.get("loaded")),
+            "brain_epoch": _brain_health.get("epoch"),
+            "corpus": _brain_health.get("corpus"),
+            "brain_error": _brain_health.get("error"),
+        }
 
     @app.post("/api/tracks/create")
     def create_track(body: CreateTrackBody) -> dict[str, Any]:
@@ -570,6 +651,12 @@ def create_app() -> Any:
         if len(prompt) > MAX_PROMPT:
             raise HTTPException(status_code=400, detail=f"prompt exceeds {MAX_PROMPT} characters")
         genre = (body.genre_hint or "").strip()
+        _log(
+            f"[API_PAYLOAD] prompt_chars={len(prompt)} genre={genre!r} "
+            f"brain_loaded={_brain_health.get('loaded')}"
+        )
+        if not genre and not prompt:
+            raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
         session_id = "ht_" + uuid.uuid4().hex[:12]
         job = {
             "session_id": session_id,
@@ -696,6 +783,11 @@ def main(argv: list[str] | None = None) -> int:
     _log(f"[ok] bind={host}:{port} workers={workers} device=cpu docs_url=None dry_run={_DRY_RUN}")
 
     if args.once:
+        try:
+            _boot_production_brain()
+        except Exception as exc:
+            _log(f"[warn] production brain not loaded: {exc}")
+            return 1
         return 0
 
     try:

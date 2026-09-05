@@ -142,7 +142,14 @@ try {
     $ScratchMix = Join-Path $BaseDir "scratch\$SessionId\unmastered_mix.wav"
     $Preassembled = Test-Path $ScratchMix
     if ($Preassembled) {
+        $MixBytes = (Get-Item $ScratchMix).Length
+        Write-Host "[HANDOFF] generation -> composition mix_bytes=$MixBytes path=$ScratchMix"
+        if ($MixBytes -lt 4096) {
+            throw "Composition has nothing to give: $ScratchMix is $MixBytes bytes (ghost mix)."
+        }
         Write-Host "[PIPELINE] Pre-assembled mix detected at $ScratchMix (slice $($SliceDuration.ToString($inv))s). Skipping restage." -ForegroundColor Cyan
+    } else {
+        Write-Host "[HANDOFF] no preassembled mix; composition would fall through to $SlicesDir"
     }
 
     if ((Test-Path $ResolverScript) -and -not $Preassembled -and -not (Test-Path (Join-Path "$BaseDir\uploaded_slices" $GenreLock))) {
@@ -184,7 +191,7 @@ try {
         $SliceFiles = Get-ChildItem -Path $SlicesDir -Filter "*.wav" | Select-Object -First $RequiredSlices
 
         if ($SliceFiles.Count -eq 0) {
-            throw "No audio slices found in $SlicesDir. Run ingestion first."
+            throw "Composition ghost folder: no audio slices in $SlicesDir. Generation must write scratch\$SessionId\unmastered_mix.wav first."
         }
 
         # Not enough material for the requested length: shorten rather than fail,
@@ -210,7 +217,7 @@ try {
         Write-Host "  -> Staged $stagedCount slices into raw_stems container ($([math]::Round($StepTimer.Elapsed.TotalSeconds, 2))s)."
         Send-Telemetry -EventType "staging_completed" -Duration ([math]::Round($StepTimer.Elapsed.TotalSeconds, 2)) -MetadataJson "{`"stems_staged`":$stagedCount}"
     } else {
-        throw "Genre slice directory not found: $SlicesDir"
+        throw "Composition ghost folder not found: $SlicesDir. Generation must write scratch\$SessionId\unmastered_mix.wav first."
     }
 
     # 3. Execute AI Inference / Stem Conditioning

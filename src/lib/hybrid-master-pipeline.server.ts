@@ -36,7 +36,12 @@ async function downloadAudioBytes(url: string): Promise<Uint8Array> {
   });
   if (!response.ok) throw new Error(`Could not download audio (${response.status}).`);
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength < 1024) throw new Error("Downloaded audio was empty.");
+  console.log(
+    `[HANDOFF] generation -> composition download bytes=${bytes.byteLength} url_chars=${url.length}`,
+  );
+  if (bytes.byteLength < 1024) {
+    throw new Error("[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.");
+  }
   return bytes;
 }
 

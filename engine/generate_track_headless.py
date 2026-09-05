@@ -648,6 +648,22 @@ def execute_prompt_pipeline(
     )
     if os.path.abspath(unmastered_named) != os.path.abspath(unmastered_mix):
         shutil.copy2(unmastered_named, unmastered_mix)
+    mix_bytes = os.path.getsize(unmastered_mix) if os.path.isfile(unmastered_mix) else 0
+    slice_count = 0
+    if os.path.isdir(session_corpus):
+        slice_count = sum(
+            1 for name in os.listdir(session_corpus) if name.lower().endswith(".wav")
+        )
+    print(
+        f"[HANDOFF] generation -> composition mix_bytes={mix_bytes} "
+        f"slices={slice_count} staged={staged} mix={unmastered_mix}",
+        flush=True,
+    )
+    if mix_bytes < 4096:
+        raise RuntimeError(
+            "Composition has nothing to give: unmastered mix is missing or empty. "
+            f"bytes={mix_bytes} slices={slice_count} corpus={corpus_dir}"
+        )
     exported = unmastered_mix
     r128_meta: dict[str, float] | None = None
     if output_path:
@@ -762,7 +778,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session", default="headless_session_01")
     parser.add_argument("--db", default=default_index_db())
     parser.add_argument("--scratch", default=DEFAULT_SCRATCH)
-    parser.add_argument("--corpus", default=DEFAULT_CORPUS)
+    parser.add_argument(
+        "--corpus",
+        default=None,
+        help="Slice corpus. Default: C:\\staging_slices, then locked D:, then corpus_4s.",
+    )
     parser.add_argument("--genre", default=None)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--live", action="store_true")
@@ -824,6 +844,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the local song conductor and use the legacy flat blueprint path",
     )
     args = parser.parse_args(argv)
+    corpus = args.corpus
+    if not corpus:
+        try:
+            from engine.worker_handoff import resolve_worker_corpus
+
+            corpus = resolve_worker_corpus()
+        except Exception:
+            corpus = DEFAULT_CORPUS
+    print(f"[CORPUS] {corpus}", flush=True)
     try:
         result = execute_prompt_pipeline(
             args.prompt,
@@ -833,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
             genre=args.genre,
             offline=args.offline,
             live=args.live,
-            corpus_dir=args.corpus,
+            corpus_dir=corpus,
             max_per_stem=args.max_per_stem,
             max_stage=args.max_stage,
             sr=args.sr,

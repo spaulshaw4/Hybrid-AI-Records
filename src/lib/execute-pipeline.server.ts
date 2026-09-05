@@ -182,7 +182,16 @@ async function downloadBuffer(url: string): Promise<Buffer> {
     throw new Error(`Download failed (HTTP ${response.status}).`);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength < 1024) throw new Error("Downloaded audio was empty.");
+  console.log(
+    `[HANDOFF] generation -> composition download bytes=${bytes.byteLength} url_chars=${url.length}`,
+  );
+  if (bytes.byteLength < 1024) {
+    const empty = new Error(
+      "[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.",
+    ) as Error & { step: string };
+    empty.step = "composition";
+    throw empty;
+  }
   return bytes;
 }
 
@@ -343,6 +352,23 @@ export async function executePipeline(
       telemetry = safeBumpTelemetry(telemetry, 1, "gate_1_generating");
       await beforeGate({ trackId, gate: 1, stage: "gate_1_generating" });
       reportPipelineProgress("composition", PIPELINE_PROGRESS.sonic, undefined, gateMask);
+      console.log("[WORKER_PAYLOAD] Gate 1 ingress", {
+        trackId,
+        promptChars: (input.prompt || "").length,
+        styleChars: (input.style || "").length,
+        lyricsChars: (input.lyrics || "").length,
+        instrumental: Boolean(input.instrumental),
+        hasGate1Url: Boolean(input.gate1AudioUrl),
+        hasGate1Task: Boolean(input.gate1TaskId),
+        title: input.title || "",
+      });
+      if (!(input.prompt || "").trim() && !(input.style || "").trim() && !input.gate1AudioUrl) {
+        const empty = new Error(
+          "[Circuit Breaker] Gate 1 failed: API payload dropped prompt/style — nothing to generate.",
+        ) as Error & { step: string };
+        empty.step = "composition";
+        throw empty;
+      }
       console.log("[Gate 1/6] currentStep=composition — AIMusicAPI create/poll");
 
       let rawAudioBuffer: Buffer;
@@ -410,6 +436,7 @@ export async function executePipeline(
             { step: "composition" },
           );
           if (!finished.audioUrl) {
+            console.log("[HANDOFF] generation -> composition audioUrl=null/empty");
             const empty = new Error(
               "[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.",
             ) as Error & { step: string };
@@ -417,6 +444,9 @@ export async function executePipeline(
             throw empty;
           }
           rawAudioBuffer = await downloadBuffer(finished.audioUrl);
+          console.log(
+            `[HANDOFF] generation -> composition rawAudioBuffer.bytes=${rawAudioBuffer.byteLength}`,
+          );
         } catch (err) {
           if (err && typeof err === "object" && "step" in err) throw err;
           const e = new Error(errorMessage(err)) as Error & { step: string };
