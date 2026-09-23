@@ -137,7 +137,18 @@ def init_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+_LAYER_FOLDERS = {"rhythm": "rhythm", "drums": "rhythm", "harmonic": "harmonic",
+                  "lead": "lead", "vocal": "vocal", "vocals": "vocal"}
+
+
 def infer_stem_type(path_lower: str) -> str:
+    # The slicer routes into corpus_4s/{rhythm,harmonic,lead,vocal}; that folder
+    # is authoritative. Keyword order below would file "…/harmonic/x_phrase.wav"
+    # as vocal because "phrase" is a vocal keyword.
+    parts = [p for p in path_lower.replace("\\", "/").split("/") if p]
+    for parent in reversed(parts[:-1]):
+        if parent in _LAYER_FOLDERS:
+            return _LAYER_FOLDERS[parent]
     blob = path_lower.replace("\\", "/").replace("_", " ").replace("-", " ")
     if any(key in blob for key in _RHYTHM_KEYS):
         return "rhythm"

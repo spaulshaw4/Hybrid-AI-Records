@@ -106,6 +106,12 @@ def _bpm_from_onset_intervals(env: np.ndarray, sr: int, hop: int) -> float | Non
 
 def estimate_slice_bpm(audio_mono: np.ndarray, sr: int = 44100) -> float:
     """Onset-strength autocorrelation BPM. Numpy path is the default."""
+    bpm = estimate_slice_bpm_or_none(audio_mono, sr=sr)
+    return float(bpm) if bpm is not None else 120.0
+
+
+def estimate_slice_bpm_or_none(audio_mono: np.ndarray, sr: int = 44100) -> float | None:
+    """Like ``estimate_slice_bpm`` but ``None`` when no tempo is detectable."""
     mono = np.asarray(audio_mono, dtype=np.float64)
     if mono.ndim > 1:
         mono = _mono(mono)
@@ -123,7 +129,7 @@ def estimate_slice_bpm(audio_mono: np.ndarray, sr: int = 44100) -> float:
                 bpm = float(np.atleast_1d(tempo)[0]) if len(np.atleast_1d(tempo)) else None
             except Exception:
                 bpm = None
-    return float(bpm) if bpm is not None else 120.0
+    return float(bpm) if bpm is not None else None
 
 
 def _wsola_channel(y: np.ndarray, rate: float, win: int = 1024, hop_s: int = 256) -> np.ndarray:
