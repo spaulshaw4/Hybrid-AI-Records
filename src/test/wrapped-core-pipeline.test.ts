@@ -112,7 +112,7 @@ describe("WrappedCorePipeline", () => {
     vi.spyOn(DetanglementReactor, "purgeCrossCorrelations").mockReturnValue({
       sanitizedPayload: { prompt: "bad" },
       reactorState: {
-        entanglementLevel: 0.09,
+        entanglementLevel: 0.12,
         suppressionActive: true,
         reactorNonce: "reactor_q",
         entropyScore: 0.9,

@@ -37,11 +37,108 @@ export type SecureCoreDispatch = {
 
 const SYSTEM_ACTOR = "00000000-0000-0000-0000-000000000000";
 
+/**
+ * Musical / prompt keys the audio reactor may see.
+ * Queue-row metadata (spend keys, vault ids, timestamps, isolation stamps) is excluded.
+ */
+const COMPOSITION_ALLOWLIST = new Set([
+  "prompt",
+  "title",
+  "style",
+  "lyrics",
+  "instrumental",
+  "audioFormat",
+  "voiceId",
+  "termsAccepted",
+  "language",
+  "customLanguage",
+  "customMode",
+  "tags",
+  "mv",
+  "model",
+  "engine",
+  "durationSeconds",
+  "allowReslice",
+  "controls",
+  "genre",
+  "subGenre",
+  "mood",
+  "instruments",
+  "vocalProfile",
+  "vocalGender",
+  "vocalTimbre",
+  "vocalStyle",
+  "referenceAudioUrl",
+  "rvcModelUrl",
+  "genreHint",
+  "genre_hint",
+  "bpm",
+  "keySignature",
+  "key_signature",
+  "bars",
+  "temperature",
+]);
+
+/**
+ * Strip database / isolation metadata before quarantine-isolation-node.
+ * Only composition properties reach the detanglement reactor.
+ */
+export function sanitizeCompositionInput(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const stripped = Object.keys(payload).filter((key) => !COMPOSITION_ALLOWLIST.has(key));
+  if (stripped.length > 0) {
+    console.warn("[DEEP ISOLATION] stripped non-composition keys before reactor", {
+      stripped,
+    });
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const key of COMPOSITION_ALLOWLIST) {
+    if (payload[key] !== undefined) sanitized[key] = payload[key];
+  }
+
+  const genre =
+    (typeof sanitized.genre === "string" && sanitized.genre.trim()) ||
+    (typeof sanitized.genreHint === "string" && sanitized.genreHint.trim()) ||
+    (typeof sanitized.genre_hint === "string" && sanitized.genre_hint.trim()) ||
+    (typeof sanitized.style === "string" && sanitized.style.trim()) ||
+    "";
+  if (genre) sanitized.genre = genre;
+
+  const controlsRaw =
+    sanitized.controls && typeof sanitized.controls === "object" && !Array.isArray(sanitized.controls)
+      ? { ...(sanitized.controls as Record<string, unknown>) }
+      : {};
+  const bpmCandidate = Number(sanitized.bpm ?? controlsRaw.bpm);
+  const bpm = Number.isFinite(bpmCandidate) && bpmCandidate > 0 ? bpmCandidate : 120;
+  sanitized.bpm = bpm;
+  if (controlsRaw.bpm === undefined) controlsRaw.bpm = bpm;
+  if (Object.keys(controlsRaw).length > 0) sanitized.controls = controlsRaw;
+
+  const keySignature =
+    (typeof sanitized.keySignature === "string" && sanitized.keySignature.trim()) ||
+    (typeof sanitized.key_signature === "string" && sanitized.key_signature.trim()) ||
+    "C";
+  sanitized.keySignature = keySignature;
+
+  const barsCandidate = Number(sanitized.bars);
+  sanitized.bars = Number.isFinite(barsCandidate) && barsCandidate > 0 ? barsCandidate : 32;
+
+  if (typeof sanitized.prompt !== "string" || !sanitized.prompt.trim()) {
+    if (genre) sanitized.prompt = genre;
+  }
+
+  return sanitized;
+}
+
 /** Entanglement fraction above which the payload is quarantined (reactor reports ~0–0.1). */
 function entanglementCeiling(): number {
   return Math.max(
     0.01,
-    Number.parseFloat(process.env.DEEP_ISOLATION_ENTANGLEMENT_CEILING ?? "0.08") || 0.08,
+    // Default 0.1: entropy alone maxes at ~0.0999 after dampening; quarantine is for
+    // real suppression failures / contamination, not hash noise on clean composition.
+    Number.parseFloat(process.env.DEEP_ISOLATION_ENTANGLEMENT_CEILING ?? "0.1") || 0.1,
   );
 }
 
@@ -58,10 +155,14 @@ export class DeepIsolationPlacement {
     ctx: ExecutionContext,
     rawPayload: Record<string, unknown>,
   ): Promise<PlacementEnvelope> {
+    // 0. Allowlist composition props only — never feed queue-row metadata to the reactor.
+    const compositionPayload = sanitizeCompositionInput(rawPayload);
+
     // 1. Pass payload through the deep isolation detanglement reactor.
+    // reactorNonce stays bound to ctx.sessionNonce (reactor_${sessionNonce}).
     const { sanitizedPayload, reactorState } = DetanglementReactor.purgeCrossCorrelations(
       ctx,
-      rawPayload,
+      compositionPayload,
     );
 
     // 2. Evaluate isolation integrity based on reactor metrics.

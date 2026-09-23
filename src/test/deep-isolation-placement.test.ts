@@ -6,6 +6,7 @@ import { DetanglementReactor } from "@/lib/DetanglementReactor";
 import {
   DeepIsolationPlacement,
   dispatchToSecureCore,
+  sanitizeCompositionInput,
 } from "@/lib/DeepIsolationPlacement";
 
 describe("DeepIsolationPlacement", () => {
@@ -138,10 +139,10 @@ describe("DeepIsolationPlacement", () => {
     vi.spyOn(DetanglementReactor, "purgeCrossCorrelations").mockReturnValue({
       sanitizedPayload: { prompt: "leaky", __sharedGlobalRef: true },
       reactorState: {
-        entanglementLevel: 0.09,
+        entanglementLevel: 0.12,
         suppressionActive: true,
         reactorNonce: "reactor_nonce_iso_q",
-        entropyScore: 0.9,
+        entropyScore: 0.95,
         aggressiveDampening: true,
       },
     });
@@ -157,6 +158,80 @@ describe("DeepIsolationPlacement", () => {
     expect(envelope.targetClusterNode).toBe("quarantine-isolation-node");
     expect(envelope.isolationLevel).toBe("MAXIMUM_SECURITY_STRIPPED");
     expect(envelope.sanitizedPayload.error).toMatch(/failed deep isolation/i);
+  });
+
+  it("strips queue-row metadata before the reactor and keeps composition fields", async () => {
+    const ctx = ContextFactory.create(
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "pro",
+      "cortex-worker",
+      { sessionNonce: "nonce_san", requestId: "req-san" },
+    );
+
+    const reactorSpy = vi.spyOn(DetanglementReactor, "purgeCrossCorrelations").mockReturnValue({
+      sanitizedPayload: {
+        prompt: "clean studio track",
+        genre: "house",
+        bpm: 124,
+        keySignature: "Am",
+        bars: 32,
+      },
+      reactorState: {
+        entanglementLevel: 0.02,
+        suppressionActive: true,
+        reactorNonce: "reactor_nonce_san",
+        entropyScore: 0.2,
+        aggressiveDampening: false,
+      },
+    });
+
+    vi.spyOn(
+      await import("@/integrations/supabase/client.server"),
+      "tryGetSupabaseAdmin",
+    ).mockReturnValue(null);
+
+    const envelope = await DeepIsolationPlacement.routeAndPlace(ctx, {
+      prompt: "clean studio track",
+      genre: "house",
+      spend_idempotency_key: "spend_abc",
+      vault_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      retry_count: 3,
+      created_at: "2026-01-01T00:00:00Z",
+      __isolatedSessionNonce: "leaked_nonce",
+      jobId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
+
+    expect(reactorSpy).toHaveBeenCalled();
+    const reactorInput = reactorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(reactorInput.prompt).toBe("clean studio track");
+    expect(reactorInput.genre).toBe("house");
+    expect(reactorInput.spend_idempotency_key).toBeUndefined();
+    expect(reactorInput.vault_id).toBeUndefined();
+    expect(reactorInput.retry_count).toBeUndefined();
+    expect(reactorInput.created_at).toBeUndefined();
+    expect(reactorInput.__isolatedSessionNonce).toBeUndefined();
+    expect(reactorInput.jobId).toBeUndefined();
+    expect(envelope.securityVerdict).toBe("PASSED_ISOLATION");
+    expect(envelope.reactorNonce).toBe("reactor_nonce_san");
+  });
+
+  it("sanitizeCompositionInput allowlists musical fields only", () => {
+    const cleaned = sanitizeCompositionInput({
+      prompt: "neon bass",
+      genre_hint: "techno",
+      bpm: "128",
+      spend_idempotency_key: "x",
+      vault_id: "y",
+      __entanglementState: "SUPPRESSED_ORTHOGONAL",
+    });
+    expect(cleaned.prompt).toBe("neon bass");
+    expect(cleaned.genre).toBe("techno");
+    expect(cleaned.bpm).toBe(128);
+    expect(cleaned.keySignature).toBe("C");
+    expect(cleaned.bars).toBe(32);
+    expect(cleaned.spend_idempotency_key).toBeUndefined();
+    expect(cleaned.vault_id).toBeUndefined();
+    expect(cleaned.__entanglementState).toBeUndefined();
   });
 
   it("dispatchToSecureCore returns node/payload/nonce or SECURITY HALT", async () => {
@@ -191,10 +266,10 @@ describe("DeepIsolationPlacement", () => {
     vi.spyOn(DetanglementReactor, "purgeCrossCorrelations").mockReturnValue({
       sanitizedPayload: {},
       reactorState: {
-        entanglementLevel: 0.09,
+        entanglementLevel: 0.12,
         suppressionActive: true,
         reactorNonce: "reactor_bad",
-        entropyScore: 0.9,
+        entropyScore: 0.95,
         aggressiveDampening: true,
       },
     });

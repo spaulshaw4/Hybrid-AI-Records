@@ -23,8 +23,29 @@ const BLEED_KEYS = [
   "__devOverrideUserId",
   "__adminSharedCache",
   "__crossTenantHint",
+  "__isolatedSessionNonce",
+  "__entanglementState",
+  "__isolatedRequestId",
   "sharedGlobalRef",
   "unsecuredVector",
+  // Queue-row / ledger metadata must never influence reactor entropy.
+  "spend_idempotency_key",
+  "spendIdempotencyKey",
+  "vault_id",
+  "vaultId",
+  "retry_count",
+  "retryCount",
+  "created_at",
+  "updated_at",
+  "started_at",
+  "completed_at",
+  "assigned_node",
+  "error_message",
+  "jobId",
+  "user_id",
+  "userId",
+  "idempotencyKey",
+  "cortexCorrelationId",
 ] as const;
 
 function deepClone<T>(value: T): T {
@@ -56,17 +77,11 @@ export class DetanglementReactor {
 
     // 3. Aggressive dampening when entropy/cross-talk exceeds safety bounds.
     const suppressionRequired = entropyScore > 0.85;
-    if (suppressionRequired) {
-      for (const key of BLEED_KEYS) {
-        if (key in sanitizedPayload) {
-          delete sanitizedPayload[key];
-        }
+    // Always strip bleed + queue-row metadata so they never affect downstream gates.
+    for (const key of BLEED_KEYS) {
+      if (key in sanitizedPayload) {
+        delete sanitizedPayload[key];
       }
-    }
-
-    // Always strip known bleed keys even below threshold (cheap insurance).
-    for (const key of ["__unsecuredVector", "__sharedGlobalRef"] as const) {
-      if (key in sanitizedPayload) delete sanitizedPayload[key];
     }
 
     const reactorState: ReactorCoreState = {
