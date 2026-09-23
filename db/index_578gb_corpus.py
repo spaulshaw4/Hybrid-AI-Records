@@ -40,6 +40,7 @@ INDEX_DDL = (
     "CREATE INDEX IF NOT EXISTS idx_corpus_role ON slice_index (stem_type, rms_db, file_path);",
     "CREATE INDEX IF NOT EXISTS idx_corpus_role_ml ON slice_index (stem_type_ml, rms_db);",
     "CREATE INDEX IF NOT EXISTS idx_corpus_role_filename ON slice_index (stem_type, filename);",
+    "CREATE INDEX IF NOT EXISTS idx_slice_index_bpm ON slice_index (stem_type, estimated_bpm);",
 )
 # UPSERT preserves stem_type_ml / stem_type_ml_confidence. INSERT OR REPLACE
 # would delete the row and NULLs those columns; the ML backfill must survive

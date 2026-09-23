@@ -239,6 +239,46 @@ def _bass_token_sql() -> tuple[str, list[str]]:
     return "(" + " OR ".join(clauses) + ")", params
 
 
+BPM_INDEX_NAME = "idx_slice_index_bpm"
+BPM_INDEX_DDL = (
+    f"CREATE INDEX IF NOT EXISTS {BPM_INDEX_NAME} ON slice_index (stem_type, estimated_bpm)"
+)
+
+
+def bpm_window_sql(
+    target_bpm: float,
+    tolerance: float,
+    *,
+    include_null: bool = False,
+) -> tuple[str, list[float]]:
+    """``estimated_bpm`` inside ±tolerance of target, half-time, or double-time.
+
+    ``include_null`` keeps rows with no detected BPM (phrase material such as
+    vocals); callers should rank those after rows with a measured tempo.
+    """
+    bpm = float(target_bpm)
+    lo, hi = bpm * (1.0 - float(tolerance)), bpm * (1.0 + float(tolerance))
+    clause = (
+        "(si.estimated_bpm BETWEEN ? AND ?"
+        " OR si.estimated_bpm BETWEEN ? AND ?"
+        " OR si.estimated_bpm BETWEEN ? AND ?"
+    )
+    params = [lo, hi, lo / 2.0, hi / 2.0, lo * 2.0, hi * 2.0]
+    if include_null:
+        clause += " OR si.estimated_bpm IS NULL"
+    return clause + ")", params
+
+
+def bpm_distance_sql(target_bpm: float) -> tuple[str, list[float]]:
+    """ORDER BY key: distance to the nearest of target / half / double tempo."""
+    bpm = float(target_bpm)
+    return (
+        "MIN(ABS(si.estimated_bpm - ?), ABS(si.estimated_bpm * 2.0 - ?), "
+        "ABS(si.estimated_bpm / 2.0 - ?))",
+        [bpm, bpm, bpm],
+    )
+
+
 def score_candidate(
     row: dict[str, Any],
     role: str,
@@ -246,29 +286,52 @@ def score_candidate(
     target_bpm: float | None,
     *,
     centroid_target_hz: float | None = None,
+    energy_level: float | None = None,
 ) -> dict[str, float]:
     """Weighted musical fit for one ``slice_index`` row.
 
     Returns the component scores plus a combined ``score`` in ``[0, 1]``.
     A dead (silent) slice scores 0 outright.
+
+    ``energy_level`` (0..1 from ``SectionPlan``) softly biases level fit so
+    sparse sections prefer quieter slices and climax sections prefer denser ones.
     """
     level = level_fit(row.get("rms_db"), role)
     if level <= 0.0:
-        return {"key": 0.0, "bpm": 0.0, "centroid": 0.0, "level": 0.0, "score": 0.0}
+        return {
+            "key": 0.0,
+            "bpm": 0.0,
+            "centroid": 0.0,
+            "level": 0.0,
+            "energy": 0.0,
+            "score": 0.0,
+        }
     key = key_compatibility(row.get("detected_key"), target_key)
     bpm = bpm_compatibility(row.get("estimated_bpm"), target_bpm)
     centroid = centroid_fit(row.get("spectral_centroid"), role, centroid_target_hz)
+    energy = 1.0
+    if energy_level is not None:
+        target = max(0.0, min(1.0, float(energy_level)))
+        # Map RMS (~-40..-6) into 0..1 and reward proximity to section energy.
+        rms = row.get("rms_db")
+        try:
+            rms_f = float(rms)
+        except (TypeError, ValueError):
+            rms_f = -20.0
+        loudness = max(0.0, min(1.0, (rms_f + 40.0) / 34.0))
+        energy = 1.0 - abs(loudness - target)
     score = (
         SCORE_WEIGHTS["key"] * key
         + SCORE_WEIGHTS["bpm"] * bpm
         + SCORE_WEIGHTS["centroid"] * centroid
-        + SCORE_WEIGHTS["level"] * level
+        + SCORE_WEIGHTS["level"] * level * (0.65 + 0.35 * energy)
     )
     return {
         "key": round(key, 4),
         "bpm": round(bpm, 4),
         "centroid": round(centroid, 4),
         "level": round(level, 4),
+        "energy": round(float(energy), 4),
         "score": round(float(score), 4),
     }
 
@@ -304,6 +367,7 @@ def fetch_candidate_rows(
     limit: int = 400,
     use_cooldown: bool = True,
     bass_source: str = "name",
+    bpm_window: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Pull candidate rows for a role, then score them offline.
 
@@ -314,6 +378,9 @@ def fetch_candidate_rows(
     ``use_cooldown=False`` orders by ``file_path`` instead, which makes the
     candidate list independent of how many times the corpus has been rendered.
     That is what lets an explicit ``--seed`` reproduce a track exactly.
+
+    ``bpm_window=(target_bpm, tolerance)`` applies the ±tolerance tempo filter
+    (incl. half/double time) in SQL so ``limit`` is spent on in-tempo rows.
 
     Bass: ``stem_type`` has zero bass rows. ``bass_source='name'`` matches
     filename/tags (``bass``, ``808``, ``sub``) and optional ``stem_type_ml``.
@@ -352,6 +419,12 @@ def fetch_candidate_rows(
         params.extend(f"%{tag}%" for tag in cleaned)
     where.append("si.rms_db > ?")
     params.append(float(DEAD_RMS_DBFS))
+    if bpm_window is not None:
+        window_sql, window_params = bpm_window_sql(
+            bpm_window[0], bpm_window[1], include_null=role == "vocal"
+        )
+        where.append(window_sql)
+        params.extend(window_params)
 
     if role == "bass" and bass_source == "low_centroid":
         order_sql = "ORDER BY si.spectral_centroid ASC, si.file_path ASC "
@@ -391,6 +464,7 @@ def rank_candidates(
     target_bpm: float | None,
     *,
     centroid_target_hz: float | None = None,
+    energy_level: float | None = None,
     require_on_disk: bool = True,
     use_cooldown: bool = True,
 ) -> list[dict[str, Any]]:
@@ -401,7 +475,12 @@ def rank_candidates(
         if require_on_disk and not os.path.isfile(path):
             continue
         detail = score_candidate(
-            row, role, target_key, target_bpm, centroid_target_hz=centroid_target_hz
+            row,
+            role,
+            target_key,
+            target_bpm,
+            centroid_target_hz=centroid_target_hz,
+            energy_level=energy_level,
         )
         if detail["score"] <= 0.0:
             continue
@@ -467,6 +546,7 @@ def select_for_role(
     *,
     tags: Iterable[str] | None = None,
     centroid_target_hz: float | None = None,
+    energy_level: float | None = None,
     fetch_limit: int = 400,
     top_k: int = 12,
     require_on_disk: bool = True,
@@ -491,6 +571,7 @@ def select_for_role(
         target_key,
         target_bpm,
         centroid_target_hz=centroid_target_hz,
+        energy_level=energy_level,
         require_on_disk=require_on_disk,
         use_cooldown=use_cooldown,
     )
@@ -509,6 +590,7 @@ def select_for_role(
             target_key,
             target_bpm,
             centroid_target_hz=centroid_target_hz,
+            energy_level=energy_level,
             require_on_disk=require_on_disk,
             use_cooldown=use_cooldown,
         )
@@ -524,6 +606,7 @@ def select_for_role(
             target_key,
             target_bpm,
             centroid_target_hz=centroid_target_hz,
+            energy_level=energy_level,
             require_on_disk=require_on_disk,
             use_cooldown=use_cooldown,
         )

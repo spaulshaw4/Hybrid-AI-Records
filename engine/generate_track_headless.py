@@ -347,6 +347,28 @@ def stage_scored_session_cache(
         "vocal": float(arrangement.get("vocal_centroid_hz") or 2600.0),
     }
 
+    # Global Song Plan constraints (built before this SQLite pass).
+    song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+    plan_energy = 0.55
+    if isinstance(song_plan, dict):
+        sections = song_plan.get("sections") or []
+        energies = [
+            float(s.get("energy_level") or 0.5)
+            for s in sections
+            if isinstance(s, dict)
+        ]
+        if energies:
+            plan_energy = sum(energies) / len(energies)
+        if song_plan.get("key"):
+            target_key = str(song_plan["key"])
+        if song_plan.get("bpm"):
+            target_bpm = float(song_plan["bpm"])
+        print(
+            f"[SONG_PLAN] retrieve bpm={target_bpm:.0f} key={target_key} "
+            f"energy={plan_energy:.2f} sections={len(sections)}",
+            flush=True,
+        )
+
     if not db_path or not os.path.isfile(db_path):
         return 0
     try:
@@ -385,6 +407,7 @@ def stage_scored_session_cache(
                 want,
                 rng,
                 centroid_target_hz=centroid_targets.get(role),
+                energy_level=plan_energy,
                 use_cooldown=not reproducible,
             )
             if not picks:
@@ -595,17 +618,53 @@ def execute_prompt_pipeline(
             duration_sec,
             seed=resolved_seed,
             request_id=resolved_request,
+            key=key,
+            scale=(blueprint.get("track_metadata") or {}).get("scale"),
         )
+        # Mirror resolved plan key onto blueprint before arrangement overlay.
+        sp = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+        if isinstance(sp, dict) and sp.get("key"):
+            meta["root_key"] = str(sp["key"])
+            if sp.get("scale"):
+                meta["scale"] = str(sp["scale"])
         blueprint = apply_arrangement_to_blueprint(blueprint, arrangement)
+        # Explicit CLI tempo/key always win over song_plan / prompt defaults.
+        if bpm is not None or key:
+            apply_cli_bpm_key(blueprint, bpm, key)
         # validate_blueprint rebuilds track_metadata from the contract fields,
         # which would drop CLI extras such as ``scale``. Carry them across.
         extra_meta = {
-            key: value
-            for key, value in (blueprint.get("track_metadata") or {}).items()
-            if key not in {"title", "bpm", "root_key", "genre", "total_bars"}
+            key_name: value
+            for key_name, value in (blueprint.get("track_metadata") or {}).items()
+            if key_name not in {"title", "bpm", "root_key", "genre", "total_bars"}
         }
         blueprint = validate_blueprint(blueprint, enforce_section_span=False)
         blueprint["track_metadata"].update(extra_meta)
+        if bpm is not None or key:
+            apply_cli_bpm_key(blueprint, bpm, key)
+        # Keep song_plan mirror aligned with the locked key (CLI or plan or E_minor).
+        from engine.local_song_conductor import resolve_final_key
+
+        meta_locked = blueprint.get("track_metadata") or {}
+        sp = (blueprint.get("arrangement") or {}).get("song_plan")
+        root, scale_mode = resolve_final_key(
+            key,
+            sp if isinstance(sp, dict) else None,
+        )
+        # Prefer already-locked blueprint root when CLI applied it.
+        if meta_locked.get("root_key"):
+            root = str(meta_locked["root_key"])
+            scale_mode = str(meta_locked.get("scale") or scale_mode)
+        meta_locked["root_key"] = root
+        meta_locked["scale"] = scale_mode
+        blueprint["track_metadata"] = meta_locked
+        if isinstance(sp, dict):
+            sp["key"] = root
+            sp["scale"] = scale_mode
+            if meta_locked.get("bpm"):
+                sp["bpm"] = int(meta_locked["bpm"])
+            if isinstance(arrangement, dict):
+                arrangement["song_plan"] = sp
         print(f"[CONDUCTOR] request_id={resolved_request}")
         print(describe_conducted(arrangement))
     elif duration_sec is not None and duration_sec > 0:
@@ -667,6 +726,10 @@ def execute_prompt_pipeline(
         target_bpm=None,
         index_db=None,
         use_index=False,
+        # Session context makes the assembler write bus_stems/ next to the
+        # session mix; Module 5 refuses to package without them.
+        session_id=session_id,
+        scratch_root=os.path.dirname(os.path.abspath(session_dir)),
         source_trace=source_trace,
     )
     if os.path.abspath(unmastered_named) != os.path.abspath(unmastered_mix):

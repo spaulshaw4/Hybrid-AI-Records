@@ -438,9 +438,22 @@ def apply_arrangement_to_blueprint(
             "skeleton",
             "index_honesty",
             "matrix_source",
+            "song_plan",
         )
         if key in arrangement
     }
+    # Mirror core plan metadata onto track_metadata so retrieval sees one key/bpm.
+    song_plan = arrangement.get("song_plan")
+    if isinstance(song_plan, dict):
+        if song_plan.get("key"):
+            meta["root_key"] = str(song_plan["key"])
+        if song_plan.get("scale"):
+            meta["scale"] = str(song_plan["scale"])
+        if song_plan.get("bpm"):
+            meta["bpm"] = int(song_plan["bpm"])
+        core = song_plan.get("core_metadata")
+        if isinstance(core, dict) and core.get("key"):
+            meta["plan_key"] = str(core["key"])
     return blueprint
 
 

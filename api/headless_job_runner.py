@@ -1,4 +1,4 @@
-"""Localhost headless track-generation API (127.0.0.1:8000).
+"""Localhost headless track-generation API (127.0.0.1:8880).
 
 POST /api/tracks/create  {prompt, genre_hint} -> {session_id, status: queued}
 GET  /api/tracks/status/{id}
@@ -15,6 +15,8 @@ Expected headless CLI (do not overwrite that file):
 from __future__ import annotations
 
 import argparse
+import gc
+import hmac
 import json
 import os
 import re
@@ -53,10 +55,15 @@ SCRATCH_ROOT = _LIVE["scratch"]
 RENDERS_ROOT = _LIVE["renders"]
 RELEASES_ROOT = _LIVE["releases"]
 ASSETS_ROOT = os.path.join(RELEASES_ROOT, "assets")
+# Finalized Module 5 packages: {DELIVERIES_ROOT}/{session_id}/ (master, mp3,
+# manifest, stems/, bundle zip). Kept outside scratch so scratch can be purged.
+DELIVERIES_ROOT = os.environ.get("HYBRID_DELIVERIES_ROOT") or os.path.join(
+    _LIVE["root"], "deliveries"
+)
 _API_LOG = os.path.join(_REPO_ROOT, "reports", "live_api.out.log")
 MAX_PROMPT = 2000
 BIND_HOST = "127.0.0.1"
-BIND_PORT = 8000
+BIND_PORT = 8880
 CORS_ORIGINS = (
     "http://localhost:8082",
     "http://127.0.0.1:8082",
@@ -66,13 +73,37 @@ CORS_ORIGINS = (
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://hybrid-ai-records.com",
+    "https://www.hybrid-ai-records.com",
 )
 POWERSHELL = os.environ.get(
     "HYBRID_POWERSHELL",
     r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
 )
 AUDIO_EXTS = {".wav", ".mp3"}
-MIME_BY_EXT = {".wav": "audio/wav", ".mp3": "audio/mpeg"}
+# /api/stream also serves the Module 5 manifest and stem bundle.
+STREAM_EXTS = AUDIO_EXTS | {".json", ".zip"}
+MIME_BY_EXT = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".json": "application/json",
+    ".zip": "application/zip",
+}
+STEM_FILENAMES = (
+    "drums.wav",
+    "bass.wav",
+    "rhythm_guitar.wav",
+    "lead_guitar.wav",
+    "synth.wav",
+    "vocals.wav",
+)
+BUS_STEM_NAMES = ("rhythm", "bass", "harmonic", "vocal")
+# Each render peaks around 1.5 GB; extra jobs wait in "queued" for a slot.
+_RENDER_SLOTS = threading.BoundedSemaphore(
+    value=max(1, int(os.environ.get("HYBRID_MAX_RENDERS", "2") or 2))
+)
+# Per subprocess step (generate, master). Observed full jobs: 85-126 s.
+_STEP_TIMEOUT_SEC = max(30, int(os.environ.get("HYBRID_STEP_TIMEOUT_SEC", "300") or 300))
 _SECRET_RE = re.compile(
     r"(?i)((?:replicate|gemini|google|lyric|api)[_-]?.*?(?:token|key|secret|password)|authorization)\s*[=:]\s*\S+"
 )
@@ -226,8 +257,122 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "audio_mime",
         "created_at",
         "updated_at",
+        "master_url",
+        "mp3_url",
+        "zip_url",
+        "manifest_url",
+        "stem_urls",
+        "integrated_lufs",
+        "true_peak_dbtp",
+        "provenance_hash",
+        "provenance_certified",
+        "song_plan",
+        "package_dir",
+        "delivery_status",
+        "delivery_error",
+        "scratch_purged_bytes",
+        "requested_bars",
+        "requested_bpm",
     )
-    return {key: job.get(key) for key in keys}
+    out: dict[str, Any] = {}
+    for key in keys:
+        if key in job:
+            out[key] = job.get(key)
+    return out
+
+
+def _link_or_copy(src: str, dest: str) -> None:
+    """Hard-link ``src`` to ``dest`` (no extra disk on the same volume), else copy."""
+    if os.path.lexists(dest):
+        os.remove(dest)
+    try:
+        os.link(src, dest)
+    except OSError:
+        shutil.copy2(src, dest)
+
+
+SCRATCH_AUDIO_EXTS = (".wav", ".flac", ".aif", ".aiff", ".mp3")
+
+
+def _purge_scratch_audio(session_id: str) -> int:
+    """Delete intermediate audio under ``SCRATCH_ROOT/session_id``; return bytes freed.
+
+    Only runs after a successful delivery. Keeps JSON (job, blueprint,
+    quality report) and never touches ``DELIVERIES_ROOT``. Set
+    ``HYBRID_KEEP_SCRATCH=1`` to keep buffers for debugging.
+    """
+    if (os.environ.get("HYBRID_KEEP_SCRATCH") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return 0
+    session_dir = os.path.join(SCRATCH_ROOT, session_id)
+    if not os.path.isdir(session_dir) or not _is_under(session_dir, SCRATCH_ROOT):
+        return 0
+    deliveries = os.path.abspath(DELIVERIES_ROOT)
+    freed = 0
+    for root, dirs, files in os.walk(session_dir, topdown=False):
+        if _is_under(root, deliveries):
+            continue
+        for name in files:
+            if not name.lower().endswith(SCRATCH_AUDIO_EXTS):
+                continue
+            path = os.path.join(root, name)
+            try:
+                size = os.path.getsize(path)
+                os.remove(path)
+                freed += size
+            except OSError as exc:
+                _log(f"[cleanup] could not remove {path}: {exc}")
+        if root != session_dir and not os.listdir(root):
+            try:
+                os.rmdir(root)
+            except OSError:
+                pass
+    return freed
+
+
+def _publish_delivery_package(session_id: str, package_dir: str) -> dict[str, Any]:
+    """Copy Module 5 artifacts to ``ASSETS_ROOT`` as ``{session_id}_<name>``.
+
+    Handles the current layout (``stems/<name>.wav``,
+    ``{session_id}_stems_bundle.zip``) and the legacy flat one (``<name>.wav``,
+    ``delivery.zip``). ``stem_urls`` is keyed by stem basename.
+    """
+    os.makedirs(ASSETS_ROOT, exist_ok=True)
+    published: dict[str, Any] = {"stem_urls": {}}
+    bundle = f"{session_id}_stems_bundle.zip"
+    # (relative source path, published filename, field). First existing wins.
+    entries: list[tuple[str, str, str]] = [
+        ("master.wav", f"{session_id}_master.wav", "master_url"),
+        ("master.mp3", f"{session_id}_master.mp3", "mp3_url"),
+        ("manifest.json", f"{session_id}_manifest.json", "manifest_url"),
+        (bundle, bundle, "zip_url"),
+        ("delivery.zip", bundle, "zip_url"),
+    ]
+    for stem in STEM_FILENAMES:
+        entries.append((os.path.join("stems", stem), f"{session_id}_{stem}", f"stem:{stem}"))
+        entries.append((stem, f"{session_id}_{stem}", f"stem:{stem}"))
+
+    for rel_src, dest_name, field in entries:
+        if field.startswith("stem:"):
+            if field[5:] in published["stem_urls"]:
+                continue
+        elif field in published:
+            continue
+        src = os.path.join(package_dir, rel_src)
+        if not os.path.isfile(src):
+            continue
+        dest = os.path.join(ASSETS_ROOT, dest_name)
+        if os.path.abspath(src) != os.path.abspath(dest):
+            _link_or_copy(src, dest)
+        url = f"/api/stream/{dest_name}"
+        if field.startswith("stem:"):
+            published["stem_urls"][field[5:]] = url
+            continue
+        published[field] = url
+        if field == "master_url":
+            published["audio_filename"] = dest_name
+            published["audio_mime"] = "audio/wav"
+    published["package_dir"] = package_dir
+    return published
 
 
 def _update_job(session_id: str, **fields: Any) -> dict[str, Any]:
@@ -328,7 +473,7 @@ def _sanitize_filename(filename: str) -> str | None:
     if ".." in filename or "/" in filename or "\\" in filename:
         return None
     stem, ext = os.path.splitext(filename)
-    if not stem or ext.lower() not in AUDIO_EXTS:
+    if not stem or ext.lower() not in STREAM_EXTS:
         return None
     if not re.fullmatch(r"[A-Za-z0-9._-]+", filename):
         return None
@@ -432,16 +577,46 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def _run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
+    """Kill ``proc`` and its children (PowerShell → python grandchildren)."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            check=False,
+        )
+    proc.kill()
+
+
+def _run(
+    cmd: list[str],
+    cwd: str | None = None,
+    *,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one pipeline step; raises ``RuntimeError`` after ``timeout`` seconds."""
+    limit = float(timeout if timeout is not None else _STEP_TIMEOUT_SEC)
     _log("[run] " + " ".join(cmd[:6]) + (" …" if len(cmd) > 6 else ""))
-    return subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         cwd=cwd or _REPO_ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
         env=_child_env(),
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc)
+        stdout, stderr = proc.communicate()
+        tail = _redact((stderr or stdout or "").strip()[-400:])
+        step = next((c for c in cmd if str(c).lower().endswith((".py", ".ps1"))), cmd[0])
+        raise RuntimeError(
+            f"Step timed out after {limit:.0f}s and was killed: "
+            f"{os.path.basename(str(step))}. {tail}"
+        ) from None
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _resolve_index() -> str:
@@ -470,7 +645,14 @@ def _resolve_corpus() -> str:
         return os.path.join(BASE_DIR, "corpus_4s")
 
 
-def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) -> None:
+def _run_headless(
+    python: str,
+    session_id: str,
+    prompt: str,
+    genre_hint: str,
+    render_opts: dict[str, Any] | None = None,
+) -> None:
+    opts = dict(render_opts or {})
     script = _headless_script()
     mix = _session_mix_path(session_id)
     os.makedirs(os.path.dirname(mix), exist_ok=True)
@@ -517,6 +699,10 @@ def _run_headless(python: str, session_id: str, prompt: str, genre_hint: str) ->
     ]
     if genre_hint:
         cmd += ["--genre", genre_hint]
+    if opts.get("bpm"):
+        cmd += ["--bpm", f"{float(opts['bpm']):.3f}"]
+    if opts.get("duration_sec"):
+        cmd += ["--duration", f"{float(opts['duration_sec']):.3f}"]
     if not _replicate_token_set():
         cmd.append("--offline")
     result = _run(cmd, cwd=_REPO_ROOT)
@@ -573,9 +759,203 @@ def _attach_master(session_id: str) -> tuple[str, str]:
     return _publish_audio(session_id, candidates[0])
 
 
-def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> None:
+def _try_module5_delivery(session_id: str, prompt: str, genre_hint: str) -> dict[str, Any]:
+    """Best-effort Module 5 package from conducted plan or existing master WAV."""
+    package_dir = os.path.join(DELIVERIES_ROOT, session_id)
+    os.makedirs(package_dir, exist_ok=True)
+    fields: dict[str, Any] = {}
+
+    # Prefer full conducted pipe when a song_plan sidecar exists.
+    plan_path = os.path.join(SCRATCH_ROOT, session_id, "song_plan.json")
+    arrangement_path = os.path.join(SCRATCH_ROOT, session_id, "arrangement.json")
+    arrangement: dict[str, Any] | None = None
+    if os.path.isfile(arrangement_path):
+        try:
+            with open(arrangement_path, encoding="utf-8") as fh:
+                arrangement = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            arrangement = None
+    if arrangement is None and os.path.isfile(plan_path):
+        try:
+            with open(plan_path, encoding="utf-8") as fh:
+                plan = json.load(fh)
+            arrangement = {"song_plan": plan, "seed": plan.get("seed", 0)}
+        except (OSError, json.JSONDecodeError):
+            arrangement = None
+
+    if isinstance(arrangement, dict) and isinstance(arrangement.get("song_plan"), dict):
+        from engine.local_song_conductor import deliver_conducted_track
+
+        result = deliver_conducted_track(
+            arrangement,
+            project_dir=package_dir,
+            session_id=session_id,
+            report_dir=package_dir,
+            public_base_url="/api/stream",
+            index_db=_resolve_index(),
+        )
+        published = _publish_delivery_package(session_id, package_dir)
+        mastering = result.get("mastering")
+        provenance = result.get("provenance")
+        fields.update(published)
+        if mastering is not None:
+            fields["integrated_lufs"] = getattr(
+                mastering, "integrated_lufs", None
+            ) or (mastering.get("integrated_lufs") if isinstance(mastering, dict) else None)
+            fields["true_peak_dbtp"] = getattr(
+                mastering, "true_peak_dbtp", None
+            ) or (mastering.get("true_peak_dbtp") if isinstance(mastering, dict) else None)
+        if provenance is not None:
+            fields["provenance_hash"] = getattr(
+                provenance, "certification_hash", None
+            ) or (
+                provenance.get("certification_hash")
+                if isinstance(provenance, dict)
+                else None
+            )
+            fields["provenance_certified"] = getattr(
+                provenance, "certified", None
+            ) or (
+                provenance.get("certified") if isinstance(provenance, dict) else None
+            )
+        fields["song_plan"] = arrangement.get("song_plan")
+        return fields
+
+    # Blueprint path: master the session mix and package the real bus stems
+    # the assembler wrote next to it.
+    mix_path = os.path.join(SCRATCH_ROOT, session_id, "unmastered_mix.wav")
+    if not os.path.isfile(mix_path):
+        raise RuntimeError(f"No unmastered session mix for Module 5: {mix_path}")
+
+    import soundfile as sf
+    import numpy as np
+    from engine.mastering_bus import MasteringBus
+    from engine.provenance_guard import ProvenanceGuard
+    from engine.stem_packager import StemPackager
+
+    song_plan, plan_bpm, seed = _load_session_plan(session_id)
+    audio, sr = sf.read(mix_path, always_2d=True)
+    audio = np.asarray(audio, dtype=np.float64)
+    stems = _load_bus_stems(session_id, audio.shape[0])
+
+    # Raises LoudnessComplianceError before anything is packaged or published.
+    bus = MasteringBus(
+        target_lufs=float(song_plan.get("master_lufs_target") or -14.0),
+        ceiling_dbtp=float(song_plan.get("true_peak_limit") or -1.0),
+        enforce_compliance=True,
+    )
+    mastered, report = bus.process(audio, int(sr))
+    guard = ProvenanceGuard(bpm=plan_bpm, sr=int(sr))
     try:
-        _update_job(session_id, status="running", error=None)
+        mastered, stems, prov = guard.check(mastered, stems=stems, seed=seed)
+    finally:
+        guard.close()
+    if prov.transforms_applied:
+        mastered, report = bus.process(mastered, int(sr))
+
+    extra: dict[str, Any] = {
+        "source": "blueprint_bus_stems",
+        "bus_stems_dir": os.path.join(SCRATCH_ROOT, session_id, "bus_stems"),
+        "request": {"prompt": prompt[:200], "genre_hint": genre_hint},
+    }
+    quality_path = os.path.join(SCRATCH_ROOT, session_id, "quality_report.json")
+    if os.path.isfile(quality_path):
+        with open(quality_path, encoding="utf-8") as fh:
+            extra["quality"] = json.load(fh)
+    packager = StemPackager(package_dir, sr=int(sr))
+    packager.package(
+        master=mastered,
+        stems=stems,
+        song_plan=song_plan,
+        mastering=report,
+        provenance=prov,
+        session_id=session_id,
+        extra_manifest=extra,
+    )
+    del audio, mastered, stems
+    published = _publish_delivery_package(session_id, package_dir)
+    fields.update(published)
+    fields["integrated_lufs"] = report.integrated_lufs
+    fields["true_peak_dbtp"] = report.true_peak_dbtp
+    fields["provenance_hash"] = prov.certification_hash
+    fields["provenance_certified"] = prov.certified
+    fields["song_plan"] = song_plan
+    return fields
+
+
+def _load_session_plan(session_id: str) -> tuple[dict[str, Any], float, int]:
+    """``(song_plan, bpm, seed)`` from ``{session_id}_blueprint.json``."""
+    path = os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_blueprint.json")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"No blueprint for Module 5 (song plan / BPM unknown): {path}")
+    with open(path, encoding="utf-8") as fh:
+        blueprint = json.load(fh)
+    arrangement = blueprint.get("arrangement") or {}
+    song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+    song_plan = dict(song_plan) if isinstance(song_plan, dict) else {}
+    meta = blueprint.get("track_metadata") or {}
+    bpm = song_plan.get("bpm") or arrangement.get("bpm") or meta.get("bpm")
+    if not bpm or float(bpm) <= 0:
+        raise RuntimeError(f"Blueprint has no BPM for provenance segmenting: {path}")
+    seed = song_plan.get("seed", arrangement.get("seed", 0))
+    return song_plan, float(bpm), int(seed or 0)
+
+
+def _load_bus_stems(session_id: str, n_samples: int) -> dict[str, Any]:
+    """Real per-bus stems written by the assembler, aligned to ``n_samples``."""
+    import numpy as np
+    import soundfile as sf
+
+    bus_dir = os.path.join(SCRATCH_ROOT, session_id, "bus_stems")
+    stems: dict[str, Any] = {}
+    for bus in BUS_STEM_NAMES:
+        path = os.path.join(bus_dir, f"{bus}.wav")
+        if not os.path.isfile(path):
+            continue
+        data, _sr = sf.read(path, always_2d=True)
+        data = np.asarray(data, dtype=np.float64)
+        if data.shape[0] < n_samples:
+            data = np.pad(data, ((0, n_samples - data.shape[0]), (0, 0)))
+        stems[bus] = data[:n_samples]
+    if not stems:
+        raise RuntimeError(
+            f"No bus stems found; refusing to package fabricated stems (looked in {bus_dir})"
+        )
+    return stems
+
+
+def _worker(
+    session_id: str,
+    prompt: str,
+    genre_hint: str,
+    dry_run: bool,
+    render_opts: dict[str, Any] | None = None,
+) -> None:
+    """Thread entry: wait for a render slot, run the job, then free memory."""
+    try:
+        if not _RENDER_SLOTS.acquire(blocking=False):
+            try:
+                _update_job(session_id, note="waiting for a free render slot")
+            except KeyError:
+                pass
+            _RENDER_SLOTS.acquire()
+        try:
+            _worker_inner(session_id, prompt, genre_hint, dry_run, render_opts)
+        finally:
+            _RENDER_SLOTS.release()
+    finally:
+        gc.collect()
+
+
+def _worker_inner(
+    session_id: str,
+    prompt: str,
+    genre_hint: str,
+    dry_run: bool,
+    render_opts: dict[str, Any] | None = None,
+) -> None:
+    try:
+        _update_job(session_id, status="running", error=None, note=None)
         if dry_run or _DRY_RUN:
             note = "dry-run: create accepted, pipeline not started"
             if _headless_script() is None:
@@ -584,7 +964,7 @@ def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> Non
             return
         python = resolve_workstation_python()
         _log(f"[worker] python={python} session={session_id}")
-        _run_headless(python, session_id, prompt, genre_hint)
+        _run_headless(python, session_id, prompt, genre_hint, render_opts)
         from engine.worker_handoff import assert_handoff_ready
 
         probe = assert_handoff_ready(SCRATCH_ROOT, session_id)
@@ -601,13 +981,54 @@ def _worker(session_id: str, prompt: str, genre_hint: str, dry_run: bool) -> Non
             _log(
                 f"[worker] master pipeline failed; Gate 1 uses unmastered mix: {master_exc}"
             )
+
+        try:
+            delivery_fields = _try_module5_delivery(session_id, prompt, genre_hint)
+        except Exception as m5_exc:
+            from engine.mastering_bus import LoudnessComplianceError
+
+            if isinstance(m5_exc, LoudnessComplianceError):
+                detail = f"Loudness compliance failed: {m5_exc.final_lufs:.2f} LUFS"
+                _log(f"[worker] {session_id} {m5_exc}")
+            else:
+                detail = _redact(str(m5_exc))[:400]
+            _log(f"[worker] {session_id} Module 5 delivery failed: {detail}")
+            _log("[TRACEBACK]\n" + traceback.format_exc())
+            # The master stays attached for inspection, but the job is not
+            # "completed": callers must not ship a track without its delivery pack.
+            _update_job(
+                session_id,
+                status="failed",
+                error=f"Module 5 delivery failed: {detail}",
+                audio_filename=filename,
+                audio_mime=mime,
+                delivery_status="failed",
+                delivery_error=detail,
+            )
+            return
+        delivered_name = delivery_fields.pop("audio_filename", None)
+        delivered_mime = delivery_fields.pop("audio_mime", None)
+        if delivered_name:
+            filename = str(delivered_name)
+            mime = str(delivered_mime or mime)
+        delivery_fields["delivery_status"] = "completed"
+        delivery_fields["delivery_error"] = None
+
         _update_job(
             session_id,
             status="completed",
             audio_filename=filename,
             audio_mime=mime,
             error=None,
+            **delivery_fields,
         )
+        # The delivery package is published; intermediate audio is redundant.
+        try:
+            freed = _purge_scratch_audio(session_id)
+            _log(f"[cleanup] {session_id} purged {freed / 1e6:.1f} MB of scratch audio")
+            _update_job(session_id, scratch_purged_bytes=freed)
+        except Exception as cleanup_exc:
+            _log(f"[cleanup] {session_id} scratch purge failed: {cleanup_exc}")
     except Exception as exc:
         _log(f"[worker] {session_id} failed: {exc}")
         _log("[TRACEBACK]\n" + traceback.format_exc())
@@ -638,6 +1059,20 @@ def _load_fastapi():
 FastAPI, HTTPException, Request, CORSMiddleware, FileResponse, Response, BaseModel, Field = _load_fastapi()
 
 
+def _require_worker_token(request: Request) -> None:
+    """When HYBRID_WORKER_TOKEN is set, tunneled / public callers must present it."""
+    expected = (os.environ.get("HYBRID_WORKER_TOKEN") or "").strip()
+    if not expected:
+        return
+    got = (request.headers.get("x-hybrid-worker-token") or "").strip()
+    if not got:
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            got = auth[7:].strip()
+    if not hmac.compare_digest(got, expected):
+        raise HTTPException(status_code=401, detail="worker token required")
+
+
 class CreateTrackBody(BaseModel):
     prompt: str = ""
     genre_hint: str | None = Field(default=None, max_length=120)
@@ -646,6 +1081,9 @@ class CreateTrackBody(BaseModel):
     style: str | None = Field(default=None, max_length=200)
     title: str | None = Field(default=None, max_length=200)
     dry_run: bool = False
+    # Optional arrangement length: bars (quarter-note 4/4 bars) at ``bpm``.
+    bars: int | None = Field(default=None, ge=4, le=256)
+    bpm: float | None = Field(default=None, ge=60.0, le=200.0)
 
 
 def _boot_production_brain() -> dict[str, Any]:
@@ -710,7 +1148,7 @@ def create_app() -> Any:
         CORSMiddleware,
         allow_origins=list(CORS_ORIGINS),
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization", "X-Hybrid-Worker-Token"],
     )
 
     @app.get("/health")
@@ -729,7 +1167,8 @@ def create_app() -> Any:
     @app.post("/generate")
     @app.post("/api/generate")
     @app.post("/api/tracks/create")
-    def create_track(body: CreateTrackBody) -> dict[str, Any]:
+    def create_track(body: CreateTrackBody, request: Request) -> dict[str, Any]:
+        _require_worker_token(request)
         prompt = (body.prompt or body.title or body.style or "").strip()
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt is required")
@@ -744,6 +1183,13 @@ def create_app() -> Any:
         )
         if not genre and not prompt:
             raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
+        if body.bars is not None and body.bpm is None:
+            raise HTTPException(status_code=400, detail="bars requires bpm")
+        render_opts: dict[str, Any] = {}
+        if body.bpm is not None:
+            render_opts["bpm"] = float(body.bpm)
+        if body.bars is not None:
+            render_opts["duration_sec"] = float(body.bars) * 4.0 * 60.0 / float(body.bpm)
         session_id = "ht_" + uuid.uuid4().hex[:12]
         job = {
             "session_id": session_id,
@@ -755,6 +1201,8 @@ def create_app() -> Any:
             "audio_mime": None,
             "created_at": _utc_now(),
             "updated_at": _utc_now(),
+            "requested_bars": body.bars,
+            "requested_bpm": body.bpm,
         }
         with _registry_lock:
             _jobs[session_id] = job
@@ -765,7 +1213,7 @@ def create_app() -> Any:
             raise HTTPException(status_code=500, detail="could not persist job") from exc
         thread = threading.Thread(
             target=_worker,
-            args=(session_id, prompt, genre, bool(body.dry_run)),
+            args=(session_id, prompt, genre, bool(body.dry_run), render_opts),
             name=f"headless-{session_id}",
             daemon=True,
         )
@@ -773,7 +1221,9 @@ def create_app() -> Any:
         return {"session_id": session_id, "status": "queued"}
 
     @app.get("/api/tracks/status/{session_id}")
-    def track_status(session_id: str) -> dict[str, Any]:
+    @app.get("/api/jobs/{session_id}")
+    def track_status(session_id: str, request: Request) -> dict[str, Any]:
+        _require_worker_token(request)
         job = _lookup_job(session_id)
         if job is None:
             raise HTTPException(status_code=404, detail="unknown session")
@@ -781,6 +1231,7 @@ def create_app() -> Any:
 
     @app.get("/api/stream/{filename}")
     def stream_audio(filename: str, request: Request) -> Any:
+        _require_worker_token(request)
         path = _resolve_stream_path(filename)
         if path is None or not os.path.isfile(path):
             raise HTTPException(status_code=404, detail="audio not found")

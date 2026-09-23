@@ -32,6 +32,9 @@ ROLE_INDEX_DDL = (
     "ON slice_index (stem_type_ml, rms_db)",
     "CREATE INDEX IF NOT EXISTS idx_corpus_role_filename "
     "ON slice_index (stem_type, filename)",
+    # Tempo-window retrieval (engine.stem_retriever.build_stem_sql).
+    "CREATE INDEX IF NOT EXISTS idx_slice_index_bpm "
+    "ON slice_index (stem_type, estimated_bpm)",
 )
 
 

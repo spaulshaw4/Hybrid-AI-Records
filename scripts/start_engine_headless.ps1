@@ -5,7 +5,7 @@
     Scaffolds dirs, resolves Get-HybridPython (never Start-Process python),
     warns if REPLICATE_API_TOKEN is missing (offline is OK), and checks the
     corpus index. Default is validate-only. -Start launches
-    api/headless_job_runner.py in a visible window on 127.0.0.1:8000.
+    api/headless_job_runner.py in a visible window on 127.0.0.1:8880.
     This script does not install NSSM.
 #>
 [CmdletBinding()]
@@ -13,7 +13,7 @@ param(
     [switch]$Start,
     [string]$BaseDir = "D:\MusicDatasets",
     [string]$BindHost = "127.0.0.1",
-    [int]$BindPort = 8000
+    [int]$BindPort = 8880
 )
 
 $ErrorActionPreference = "Stop"

@@ -163,3 +163,44 @@ def test_conducted_blueprint_keeps_bus_maps():
     for original, section in zip(plan["sections"], out["sections"]):
         assert section["bus_activation"] == original["bus_activation"]
         assert section["bars"] == original["bars"]
+
+
+def test_conduct_arrangement_attaches_song_plan():
+    plan = _plan(42)
+    assert "song_plan" in plan
+    song_plan = plan["song_plan"]
+    assert song_plan["bpm"] == 140
+    assert song_plan["key"]
+    assert song_plan["scale"]
+    assert song_plan["time_signature"] == "4/4"
+    assert song_plan["genre_blend"]["harmonic_complexity"] >= 0.0
+    assert song_plan["structural_array"]
+    assert len(song_plan["harmonic_roadmap"]) == song_plan["total_bars"]
+    assert song_plan["mix_intents"]["sidechain_kick_bass"] >= 0.0
+
+
+def test_conducted_blueprint_persists_song_plan():
+    plan = _plan(11)
+    blueprint = {
+        "track_metadata": {
+            "title": "t",
+            "bpm": 140,
+            "root_key": "A",
+            "genre": "rap_rock",
+            "total_bars": 32,
+        },
+        "sections": [
+            {
+                "name": "intro",
+                "slice_count": 4,
+                "energy": 0.3,
+                "volume_weights": {"rhythm": 0.3, "harmonic": 0.7, "lead": 0.2, "vocal": 0.0},
+                "query_tags": {},
+                "dsp_filters": {},
+            }
+        ],
+    }
+    out = apply_conducted_blueprint(blueprint, plan)
+    assert "song_plan" in out["arrangement"]
+    assert out["arrangement"]["song_plan"]["sections"]
+    assert out["track_metadata"].get("root_key") == plan["song_plan"]["key"]

@@ -1,0 +1,19 @@
+{
+  "name": "hybrid-control-plane",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Encore control plane for the Hybrid AI Forge DSP worker: job lifecycle, catalog, storage, Slack alerts.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "encore.dev": "^1.58.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.0"
+  }
+}

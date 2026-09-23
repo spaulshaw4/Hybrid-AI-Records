@@ -987,6 +987,36 @@ def _active_rms_dbfs(audio: np.ndarray, envelope: np.ndarray) -> float:
     return _bus_rms_dbfs(region)
 
 
+BUS_STEMS_DIRNAME = "bus_stems"
+
+
+def _write_bus_stems(
+    bus_dir: str,
+    bus_stems: dict[str, np.ndarray],
+    gain: float,
+    n_samples: int,
+    sr: int,
+    source_trace: dict | None,
+) -> None:
+    """Float WAVs that sum to the unmastered mix (no PCM clipping on buses)."""
+    os.makedirs(bus_dir, exist_ok=True)
+    written: dict[str, str] = {}
+    for bus in ARRANGE_BUSES:
+        audio = bus_stems.get(bus)
+        if audio is None:
+            continue
+        arr = np.asarray(audio, dtype=np.float64) * float(gain)
+        if arr.shape[0] < n_samples:
+            pad = ((0, n_samples - arr.shape[0]),) + ((0, 0),) * (arr.ndim - 1)
+            arr = np.pad(arr, pad)
+        path = os.path.join(bus_dir, f"{bus}.wav")
+        sf.write(path, arr[:n_samples], int(sr), subtype="FLOAT")
+        written[bus] = path
+    print(f"[SESSION] Wrote bus stems ({', '.join(written) or 'none'}): {bus_dir}")
+    if source_trace is not None:
+        source_trace["_bus_stems"] = {"dir": bus_dir, "files": written, "gain": float(gain)}
+
+
 def _finalize_mix(
     full_mix: np.ndarray,
     sr: int,
@@ -996,11 +1026,17 @@ def _finalize_mix(
     normalize_lufs: float | None,
     ceiling_dbtp: float,
     source_trace: dict | None,
+    bus_stems: dict[str, np.ndarray] | None = None,
 ) -> str:
-    """Shared write tail: -3 dBFS headroom, session contract copy, opt-in R128."""
+    """Shared write tail: -3 dBFS headroom, session contract copy, opt-in R128.
+
+    With a ``session_id``, ``bus_stems`` are written next to the session mix
+    as ``bus_stems/{rhythm,bass,harmonic,vocal}.wav`` (32-bit float, same
+    headroom gain as the mix) so Module 5 packages the real buses.
+    """
     peak = float(np.max(np.abs(full_mix))) if full_mix.size else 0.0
-    if peak > HEADROOM_PEAK:
-        full_mix = full_mix * (HEADROOM_PEAK / peak)
+    headroom_gain = (HEADROOM_PEAK / peak) if peak > HEADROOM_PEAK else 1.0
+    full_mix = full_mix * headroom_gain
     print(
         f"[MIX] unmastered peak={_peak_dbfs(full_mix):.2f} dBFS "
         f"(target {HEADROOM_DBFS:.1f} dBFS sample-peak, not true-peak)"
@@ -1011,6 +1047,15 @@ def _finalize_mix(
         if os.path.abspath(contract) != os.path.abspath(output_wav):
             _write_pcm24(contract, full_mix, sr)
             print(f"[SESSION] Wrote pipeline mix: {contract}")
+        if bus_stems:
+            _write_bus_stems(
+                os.path.join(os.path.dirname(contract), BUS_STEMS_DIRNAME),
+                bus_stems,
+                headroom_gain,
+                full_mix.shape[0],
+                sr,
+                source_trace,
+            )
     if normalize_lufs is not None:
         full_mix, lufs_val, dbtp_val = apply_r128_normalize(
             full_mix, sr, target_lufs=float(normalize_lufs), ceiling_dbtp=float(ceiling_dbtp)
@@ -1060,6 +1105,9 @@ def assemble_arranged_buses(
     fade: int,
     bus_targets: dict[str, float] | None = None,
     source_trace: dict | None = None,
+    mix_intents: dict | None = None,
+    section_plan: dict | None = None,
+    song_plan_sections: list[dict] | None = None,
 ) -> dict[str, np.ndarray]:
     """Render the four buses from a per-section activation map.
 
@@ -1068,6 +1116,9 @@ def assemble_arranged_buses(
     ramped activation envelope so a bus can drop right out for a section.
     The map is produced by ``engine.local_song_conductor``. Gain staging
     targets a per-bus RMS from the genre profile instead of a fixed multiplier.
+
+    After staging, ``RelationalMixer`` applies kick->bass ducking, vocal
+    pocketing, and a shared coherence reverb bus (Module 2).
     """
     targets = dict(DEFAULT_BUS_TARGET_RMS)
     targets.update({k: float(v) for k, v in (bus_targets or {}).items() if k in targets})
@@ -1090,24 +1141,6 @@ def assemble_arranged_buses(
             f"({', '.join(os.path.basename(p) for p in pools[bus]) or '-'})"
         )
 
-    if raw["bass"].size and raw["rhythm"].size and pools["bass"] and pools["rhythm"]:
-        from dsp.stem_sidechain_glue import apply_sidechain_glue
-
-        duck_floor = 10.0 ** (-SIDECHAIN_DUCK_DB / 20.0)
-        raw["bass"] = apply_sidechain_glue(
-            raw["bass"],
-            raw["rhythm"],
-            sr=int(sr),
-            ducking_ratio=duck_floor,
-            attack_ms=SIDECHAIN_ATTACK_MS,
-            release_ms=SIDECHAIN_RELEASE_MS,
-            cutoff_hz=100.0,
-        )
-        print(
-            f"[SIDECHAIN] bass ducked {SIDECHAIN_DUCK_DB:.1f} dB on kick "
-            f"(Butterworth LPF, release={SIDECHAIN_RELEASE_MS:.0f} ms)"
-        )
-
     staged: dict[str, np.ndarray] = {}
     for bus in ARRANGE_BUSES:
         staged[bus], measured, gain_db = _stage_bus_to_target(
@@ -1120,6 +1153,59 @@ def assemble_arranged_buses(
                 "gain_db": round(gain_db, 2),
                 "variants": list(sources[bus].values()),
             }
+
+    # Module 2: relational DSP before the final sum.
+    try:
+        from engine.relational_mixer import (
+            apply_relational_mix,
+            apply_sectioned_relational_mix,
+        )
+
+        bus_inputs = {bus: staged[bus] for bus in ARRANGE_BUSES}
+        if song_plan_sections and len(song_plan_sections) == len(plan):
+            # Per-section rules on this map's own sample grid.
+            windows = []
+            cursor = 0
+            for sp_section, (_section, _bars, n) in zip(song_plan_sections, plan):
+                windows.append((sp_section, cursor, cursor + int(n)))
+                cursor += int(n)
+            mixed = apply_sectioned_relational_mix(
+                bus_inputs, int(sr), windows, mix_intents=mix_intents
+            )
+        else:
+            active_section = section_plan
+            if active_section is None and plan:
+                # Use the loudest arranged section as the pocketing/sidechain hint.
+                sections = [item[0] for item in plan]
+                active_section = max(
+                    sections,
+                    key=lambda s: float(s.get("energy") or 0.0),
+                    default=sections[0],
+                )
+            mixed = apply_relational_mix(
+                bus_inputs,
+                int(sr),
+                mix_intents=mix_intents,
+                section=active_section,
+            )
+        for bus in ARRANGE_BUSES:
+            if bus in mixed.stems:
+                staged[bus] = mixed.stems[bus]
+        meters = mixed.meters
+        print(
+            "[RELATIONAL] "
+            f"sections={len(meters.get('sections') or []) or 'single'} "
+            f"sidechain={'yes' if meters.get('sidechain_applied') else 'no'} "
+            f"pocket={'yes' if meters.get('vocal_pocket_applied') else 'no'} "
+            f"reverb_send={float(meters.get('reverb_send') or 0):.2f} "
+            f"mix_peak={float(meters.get('mix_peak_dbfs') or -120):.1f} dBFS"
+        )
+        if source_trace is not None:
+            source_trace["_relational"] = dict(meters)
+        staged["_relational_mix"] = mixed.mix  # type: ignore[assignment]
+    except Exception as exc:
+        print(f"[RELATIONAL] skipped ({exc})")
+
     staged["_envelopes"] = envelopes  # type: ignore[assignment]
     return staged
 
@@ -1238,6 +1324,17 @@ def assemble_from_blueprint(
     if use_arrangement:
         arrange_meta = blueprint.get("arrangement") or {}
         bus_targets = arrange_meta.get("bus_target_rms_dbfs") or {}
+        song_plan = arrange_meta.get("song_plan") if isinstance(arrange_meta, dict) else None
+        mix_intents = None
+        peak_section = None
+        if isinstance(song_plan, dict):
+            mix_intents = song_plan.get("mix_intents")
+            sections = song_plan.get("sections") or []
+            if sections:
+                peak_section = max(
+                    sections,
+                    key=lambda s: float(s.get("energy_level") or 0.0),
+                )
         print(
             f"[ARRANGE] section map active: {len(plan_sections)} sections, "
             f"genre={arrange_meta.get('genre', '?')} family={arrange_meta.get('family', '?')} "
@@ -1256,12 +1353,18 @@ def assemble_from_blueprint(
                 xfade_len,
                 bus_targets=bus_targets,
                 source_trace=source_trace,
+                mix_intents=mix_intents,
+                section_plan=peak_section,
+                song_plan_sections=(
+                    list(song_plan.get("sections") or []) if isinstance(song_plan, dict) else None
+                ),
             )
         finally:
             if index_conn is not None:
                 index_conn.close()
 
         envelopes = staged.pop("_envelopes")
+        relational_mix = staged.pop("_relational_mix", None)
         for _idx, section, bars, _n, sec_dur in section_plan:
             activation = section_bus_activation(section) or {}
             variants = section.get("bus_variant") or {}
@@ -1284,7 +1387,33 @@ def assemble_from_blueprint(
                     "fill_bars": list(section.get("fill_bars") or []),
                 }
 
-        full_mix = sum(staged[bus] for bus in ARRANGE_BUSES)
+        if relational_mix is not None and np.asarray(relational_mix).size:
+            full_mix = np.asarray(relational_mix, dtype=np.float64)
+        else:
+            full_mix = sum(staged[bus] for bus in ARRANGE_BUSES)
+
+        # Module 3: quality gate after RelationalMixer, before export.
+        try:
+            from engine.local_song_conductor import gate_conducted_mix
+
+            report_dir = os.path.dirname(os.path.abspath(output_wav)) or "."
+            gated = gate_conducted_mix(
+                {bus: staged[bus] for bus in ARRANGE_BUSES if bus in staged},
+                full_mix,
+                {"song_plan": song_plan} if isinstance(song_plan, dict) else {},
+                sr=int(sr),
+                report_dir=report_dir,
+                regenerate_fn=None,
+            )
+            full_mix = np.asarray(gated.mix, dtype=np.float64)
+            for bus in ARRANGE_BUSES:
+                if bus in gated.stems:
+                    staged[bus] = gated.stems[bus]
+            if source_trace is not None:
+                source_trace["_quality"] = gated.to_report()
+        except Exception as exc:
+            print(f"[QUALITY] skipped ({exc})")
+
         mix_peak = float(np.max(np.abs(full_mix))) if full_mix.size else 0.0
         headroom_trim = (HEADROOM_PEAK / mix_peak) if mix_peak > HEADROOM_PEAK else 1.0
         for bus in ARRANGE_BUSES:
@@ -1305,6 +1434,7 @@ def assemble_from_blueprint(
         return _finalize_mix(
             full_mix, sr, output_wav, session_id, scratch_root,
             normalize_lufs, ceiling_dbtp, source_trace,
+            bus_stems={bus: staged[bus] for bus in ARRANGE_BUSES if bus in staged},
         )
 
     track_r_path = _pick_rotator_path(fallback_rotators["rhythm"])
@@ -1422,6 +1552,7 @@ def assemble_from_blueprint(
     return _finalize_mix(
         full_mix, sr, output_wav, session_id, scratch_root,
         normalize_lufs, ceiling_dbtp, source_trace,
+        bus_stems={"rhythm": r_bus, "bass": b_bus, "harmonic": h_bus, "vocal": v_bus},
     )
 
 

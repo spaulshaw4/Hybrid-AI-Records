@@ -60,6 +60,32 @@ from engine.genre_arrangement_profiles import (  # noqa: E402
     load_dsp_matrix,
     slugify_genre,
 )
+from engine.arrangement_assembler import (  # noqa: E402
+    ArrangementAssembler,
+    AssemblyResult,
+)
+from engine.song_plan import (  # noqa: E402
+    GlobalSongPlan,
+    beats_per_bar,
+    build_song_plan,
+    parse_key_scale,
+    song_plan_to_dict,
+)
+import numpy as np  # noqa: E402
+
+from engine.relational_mixer import (  # noqa: E402
+    apply_relational_mix,
+    apply_sectioned_relational_mix,
+)
+from engine.stem_adapter import section_sample_count  # noqa: E402
+from engine.song_evaluator import SongEvaluator  # noqa: E402
+from engine.regeneration_gate import (  # noqa: E402
+    GateResult,
+    RegenerationGatekeeper,
+)
+from engine.mastering_bus import MasteringBus  # noqa: E402
+from engine.provenance_guard import ProvenanceGuard  # noqa: E402
+from engine.stem_packager import PackageResult, StemPackager  # noqa: E402
 
 SKELETON_NAME = "intro_verse_build_drop"
 CONDUCTOR_NAME = "local_song_conductor"
@@ -159,6 +185,57 @@ def conduct_profile(genre: str | None) -> dict[str, Any]:
     return _documented_default_profile(genre)
 
 
+DEFAULT_KEY_SPEC = "E_minor"
+
+
+def resolve_final_key(
+    cli_key: str | None,
+    plan: GlobalSongPlan | dict[str, Any] | None = None,
+    *,
+    default: str = DEFAULT_KEY_SPEC,
+) -> tuple[str, str]:
+    """CLI key wins; else plan key/scale; else ``E_minor``.
+
+    Returns ``(root, scale)`` suitable for ``GlobalSongPlan`` / blueprint meta.
+    """
+    if cli_key:
+        return parse_key_scale(str(cli_key))
+    plan_key = None
+    plan_scale = None
+    if isinstance(plan, GlobalSongPlan):
+        plan_key = plan.key
+        plan_scale = plan.scale
+    elif isinstance(plan, dict):
+        plan_key = plan.get("key") or plan.get("root_key")
+        plan_scale = plan.get("scale")
+    if plan_key:
+        combined = f"{plan_key}_{plan_scale}" if plan_scale else str(plan_key)
+        return parse_key_scale(combined)
+    return parse_key_scale(default)
+
+
+def apply_key_override(
+    song_plan: GlobalSongPlan,
+    cli_key: str | None,
+) -> GlobalSongPlan:
+    """Lock ``song_plan`` to the resolved key (frozen model → ``model_copy``).
+
+    Equivalent to the intended::
+
+        final_key = cli_key or (plan.key if plan.key else \"E_minor\")
+        song_plan.key = final_key
+    """
+    final_key = cli_key or (
+        f"{song_plan.key}_{song_plan.scale}"
+        if getattr(song_plan, "key", None)
+        else DEFAULT_KEY_SPEC
+    )
+    root, scale_mode = parse_key_scale(str(final_key))
+    core = dict(song_plan.core_metadata or {})
+    core["key"] = f"{root}_{scale_mode}"
+    return song_plan.model_copy(update={"key": root, "scale": scale_mode, "core_metadata": core})
+
+
 def conduct_arrangement(
     prompt: str,
     genre: str | None,
@@ -168,6 +245,8 @@ def conduct_arrangement(
     seed: int | None = None,
     request_id: str | None = None,
     explicit_seed: int | None = None,
+    key: str | None = None,
+    scale: str | None = None,
 ) -> dict[str, Any]:
     """Build a seeded Intro→Verse→Build→Drop map with per-section bus gains."""
     profile = conduct_profile(genre)
@@ -184,6 +263,39 @@ def conduct_arrangement(
     arrangement["conductor"] = CONDUCTOR_NAME
     arrangement["skeleton"] = SKELETON_NAME
     arrangement["index_honesty"] = INDEX_HONESTY
+    # Global Song Plan is built BEFORE any SQLite stem query. Section bar
+    # lengths follow the arrangement brain so the assembler stays aligned.
+    song_plan = build_song_plan(
+        prompt,
+        genre,
+        seed=int(arrangement.get("seed") or 0),
+        request_id=str(arrangement.get("request_id") or ""),
+        bpm=float(arrangement.get("bpm") or bpm),
+        key=key,
+        scale=scale,
+        arrangement_sections=arrangement.get("sections") or [],
+        total_bars=int(arrangement.get("total_bars") or 0) or None,
+    )
+    # CLI key (or plan key, or E_minor) is the single source of truth.
+    song_plan = apply_key_override(song_plan, key)
+    if scale and not key:
+        # Explicit scale-only override when no CLI key was provided.
+        song_plan = song_plan.model_copy(
+            update={
+                "scale": str(scale).strip().lower() or song_plan.scale,
+                "core_metadata": {
+                    **dict(song_plan.core_metadata or {}),
+                    "key": f"{song_plan.key}_{str(scale).strip().lower() or song_plan.scale}",
+                },
+            }
+        )
+    arrangement["song_plan"] = song_plan_to_dict(song_plan)
+    print(
+        f"[SONG_PLAN] key={song_plan.key}_{song_plan.scale} bpm={song_plan.bpm} "
+        f"bars={song_plan.total_bars} sections={len(song_plan.sections)} "
+        f"-> harmonic={song_plan.genre_blend.harmonic_complexity:.2f} "
+        f"aggression={song_plan.genre_blend.spectral_aggression:.2f}"
+    )
     return arrangement
 
 
@@ -207,6 +319,277 @@ apply_conducted_blueprint = apply_arrangement_to_blueprint
 conduct_signature = arrangement_signature
 
 
+def mix_conducted_stems(
+    stems: dict,
+    arrangement: dict[str, Any],
+    sr: int = 44100,
+):
+    """Apply Module 2 relational DSP per section of the conductor's song_plan.
+
+    Each ``SectionPlan`` window ``[start_sample, end_sample)`` (bar math with
+    the plan's time signature — the same grid ``ArrangementAssembler`` locks
+    sections to) is mixed with that section's ``active_stems`` and energy,
+    with 20 ms blends at the boundaries. Plans without BPM / bar counts fall
+    back to one window keyed on the highest-energy section.
+    """
+    song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+    mix_intents = None
+    section = None
+    if isinstance(song_plan, dict):
+        mix_intents = song_plan.get("mix_intents")
+        n = max((np.asarray(a).shape[0] for a in stems.values() if np.asarray(a).size), default=0)
+        windows = section_windows(song_plan, n, int(sr))
+        if windows:
+            return apply_sectioned_relational_mix(
+                stems, int(sr), windows, mix_intents=mix_intents
+            )
+        sections = song_plan.get("sections") or []
+        if sections:
+            section = max(sections, key=lambda s: float(s.get("energy_level") or 0.0))
+    return apply_relational_mix(
+        stems,
+        int(sr),
+        mix_intents=mix_intents,
+        section=section,
+    )
+
+
+def section_windows(
+    song_plan: dict[str, Any],
+    n_samples: int,
+    sr: int,
+) -> list[tuple[dict[str, Any], int, int]] | None:
+    """``(section, start_sample, end_sample)`` per plan section, or ``None``.
+
+    ``end - start = int(round(bars * beats_per_bar * 60 / bpm * sr))`` with
+    ``beats_per_bar`` from ``song_plan["time_signature"]``.
+    """
+    sections = song_plan.get("sections") or []
+    bpm = float(song_plan.get("bpm") or 0.0)
+    if not sections or bpm <= 0 or n_samples <= 0:
+        return None
+    if any(not isinstance(s, dict) or not s.get("bars") for s in sections):
+        return None
+    bpb = beats_per_bar(song_plan.get("time_signature"))
+    windows: list[tuple[dict[str, Any], int, int]] = []
+    cursor = 0
+    for section in sections:
+        length = section_sample_count(int(section["bars"]), bpm, int(sr), beats_per_bar=bpb)
+        windows.append((section, cursor, min(n_samples, cursor + length)))
+        cursor += length
+    return windows
+
+
+def assemble_conducted_tracks(
+    song_plan: GlobalSongPlan | dict[str, Any],
+    *,
+    sr: int = 44100,
+    index_db: str | None = None,
+    xfade_ms: float = 18.0,
+    seed: int = 0,
+    require_corpus: bool = True,
+) -> AssemblyResult:
+    """Module 4: plan-conditioned retrieval + section stitch via ArrangementAssembler.
+
+    Production default ``require_corpus=True``: a missing critical stem raises
+    instead of rendering synthetic tones. Pass ``False`` only for dry runs.
+    """
+    assembler = ArrangementAssembler(
+        sr=int(sr),
+        index_db=index_db,
+        xfade_ms=float(xfade_ms),
+        seed=int(seed),
+        require_corpus=bool(require_corpus),
+    )
+    try:
+        return assembler.assemble(song_plan)
+    finally:
+        assembler.close()
+
+
+def build_arrangement_tracks(
+    song_plan: GlobalSongPlan | dict[str, Any],
+    **kwargs: Any,
+) -> dict:
+    """Public alias matching ``ArrangementAssembler.build_arrangement(song_plan)``."""
+    return assemble_conducted_tracks(song_plan, **kwargs).tracks
+
+
+def render_conducted_mix(
+    arrangement: dict[str, Any],
+    *,
+    sr: int = 44100,
+    index_db: str | None = None,
+    report_dir: str | None = None,
+    xfade_ms: float = 18.0,
+    require_corpus: bool = True,
+):
+    """Module 4→2→3 pipe: assemble → relational mix → quality gate."""
+    raw_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+    if not isinstance(raw_plan, dict):
+        raise ValueError("arrangement.song_plan is required for render_conducted_mix")
+    seed = int(arrangement.get("seed") or raw_plan.get("seed") or 0)
+    assembly = assemble_conducted_tracks(
+        raw_plan,
+        sr=int(sr),
+        index_db=index_db,
+        xfade_ms=float(xfade_ms),
+        seed=seed,
+        require_corpus=bool(require_corpus),
+    )
+    mixed = mix_conducted_stems(assembly.as_mixer_stems(), arrangement, sr=int(sr))
+    gated = gate_conducted_mix(
+        mixed.stems,
+        mixed.mix,
+        arrangement,
+        sr=int(sr),
+        report_dir=report_dir,
+    )
+    return {
+        "tracks": assembly.tracks,
+        "assembly_trace": assembly.trace,
+        "relational": mixed,
+        "gate": gated,
+        "stems": gated.stems,
+        "mix": gated.mix,
+    }
+
+
+def deliver_conducted_track(
+    arrangement: dict[str, Any],
+    *,
+    project_dir: str,
+    sr: int = 44100,
+    index_db: str | None = None,
+    report_dir: str | None = None,
+    session_id: str | None = None,
+    public_base_url: str = "/api/stream",
+    provenance_refs: list | None = None,
+    require_corpus: bool = True,
+) -> dict[str, Any]:
+    """Sequential delivery pipe matching the architecture diagram::
+
+        Plan (M1) → Assembly (M4) → Relational Mix (M2)
+          → Quality Gate (M3, regen loop) → Master/Guard (M5)
+          → Distribution (master.wav + stem zip + manifest.json)
+
+    Returns mastered audio, package paths, and localized file URLs for FastAPI.
+    """
+    # M1 song_plan is expected on arrangement; M4→M2→M3 run inside render.
+    rendered = render_conducted_mix(
+        arrangement,
+        sr=int(sr),
+        index_db=index_db,
+        report_dir=report_dir or project_dir,
+        require_corpus=bool(require_corpus),
+    )
+    song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else {}
+    if not isinstance(song_plan, dict):
+        song_plan = {}
+    target_lufs = float(song_plan.get("master_lufs_target") or -14.0)
+    ceiling = float(song_plan.get("true_peak_limit") or -1.0)
+    bpm = float(song_plan.get("bpm") or arrangement.get("bpm") or 120.0)
+    seed = int(arrangement.get("seed") or song_plan.get("seed") or 0)
+
+    # M5 — Master Bus & Provenance Guard → Distribution Output
+    # Delivery path: a master outside the LUFS window raises before packaging.
+    bus = MasteringBus(target_lufs=target_lufs, ceiling_dbtp=ceiling, enforce_compliance=True)
+    mastered, master_report = bus.process(rendered["mix"], int(sr))
+
+    guard = ProvenanceGuard(index_db=index_db, bpm=bpm, sr=int(sr))
+    try:
+        for ref in provenance_refs or []:
+            guard.register_reference(ref.get("audio"), file_path=str(ref.get("file_path") or ""))
+        mastered, guarded_stems, prov_report = guard.check(
+            mastered,
+            stems=rendered["stems"],
+            seed=seed,
+            auto_remediate=True,
+        )
+    finally:
+        guard.close()
+
+    # Re-limit after provenance drift so delivery still meets -1.0 dBTP.
+    if prov_report.transforms_applied:
+        mastered, master_report = bus.process(mastered, int(sr))
+
+    packager = StemPackager(
+        project_dir, sr=int(sr), public_base_url=public_base_url
+    )
+    package = packager.package(
+        master=mastered,
+        stems=guarded_stems,
+        song_plan=song_plan,
+        mastering=master_report,
+        provenance=prov_report,
+        session_id=session_id,
+        extra_manifest={
+            "pipeline": [
+                "plan",
+                "assembly",
+                "relational_mix",
+                "evaluation_gate",
+                "mastering_guard",
+                "distribution",
+            ],
+            "quality": rendered["gate"].to_report()
+            if hasattr(rendered["gate"], "to_report")
+            else {},
+        },
+    )
+    return {
+        **rendered,
+        "master": mastered,
+        "mastering": master_report,
+        "provenance": prov_report,
+        "package": package,
+        "urls": package.urls,
+        "manifest": package.manifest,
+    }
+
+
+def gate_conducted_mix(
+    stems: dict,
+    mix,
+    arrangement: dict[str, Any],
+    sr: int = 44100,
+    *,
+    report_dir: str | None = None,
+    regenerate_fn=None,
+    max_retries: int = 2,
+    check_loudness: bool = False,
+) -> GateResult:
+    """Module 3 gatekeeper: evaluate after RelationalMixer, write quality_report.json.
+
+    Localized retries only touch failing stem/section bars (up to ``max_retries``).
+    Validated sections are preserved byte-for-byte in the returned stems/mix.
+    """
+    song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
+    if not isinstance(song_plan, dict):
+        song_plan = {}
+    plan_lufs = float(song_plan.get("master_lufs_target") or -14.0)
+    plan_tp = float(song_plan.get("true_peak_limit") or -1.0)
+    # Pre-master (default): loudness / true-peak compliance belongs to
+    # Module 5, so the gate judges harmony and spectral balance only.
+    gate = RegenerationGatekeeper(
+        evaluator=SongEvaluator(
+            lufs_target=plan_lufs,
+            true_peak_limit=plan_tp,
+            check_loudness=bool(check_loudness),
+        ),
+        max_retries=int(max_retries),
+    )
+    return gate.run(
+        stems,
+        mix,
+        int(sr),
+        song_plan=song_plan,
+        regenerate_fn=regenerate_fn,
+        report_dir=report_dir,
+        report_name="quality_report.json",
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover - manual inspection helper
     import argparse
 
@@ -217,7 +600,13 @@ if __name__ == "__main__":  # pragma: no cover - manual inspection helper
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--request-id", default=None)
+    parser.add_argument(
+        "--key",
+        default=None,
+        help="Explicit key override (e.g. Dmin, E_minor). Wins over plan default.",
+    )
     args = parser.parse_args()
+    # final_key = cli key or plan key or E_minor — applied inside conduct_arrangement
     plan = conduct_arrangement(
         args.prompt,
         args.genre,
@@ -225,5 +614,6 @@ if __name__ == "__main__":  # pragma: no cover - manual inspection helper
         args.duration,
         request_id=args.request_id,
         explicit_seed=args.seed,
+        key=args.key,
     )
     print(describe_conducted(plan))
