@@ -415,8 +415,8 @@ def fetch_candidate_rows(
         if role in {"harmonic", "lead"}:
             where.append("si.filename NOT LIKE 'bass%'")
         if role == "vocal":
-            # The live index labels ~480k corpus_4s\harmonic\ phrases (NULL bpm,
-            # NULL duration) as vocal; the folder is the more reliable label.
+            # The D: catalog labels ~470k corpus_4s\harmonic\ phrases as vocal.
+            # live_index relabels the replica; this guards other index copies.
             for folder in VOCAL_EXCLUDED_FOLDERS:
                 where.append("lower(replace(si.file_path, '/', '\\')) NOT LIKE ?")
                 params.append(f"%\\{folder}\\%")

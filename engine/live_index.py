@@ -92,6 +92,30 @@ def _enable_wal(path: str) -> None:
         conn.close()
 
 
+# The D: catalog files corpus_4s\harmonic\ phrases as stem_type='vocal'. Every
+# replica copy re-imports that, so the relabel runs on the C: replica each time.
+FOLDER_STEM_RELABELS = (
+    ("harmonic", "harmonic"),
+    ("rhythm", "rhythm"),
+    ("drums", "rhythm"),
+    ("bass", "bass"),
+)
+
+
+def relabel_misfiled_vocals(conn: sqlite3.Connection) -> dict[str, int]:
+    """Move ``stem_type='vocal'`` rows stored under instrument folders to that stem."""
+    norm = "lower(replace(file_path, '/', '\\'))"
+    moved: dict[str, int] = {}
+    for folder, label in FOLDER_STEM_RELABELS:
+        cur = conn.execute(
+            f"UPDATE slice_index SET stem_type = ? WHERE stem_type = 'vocal' AND {norm} LIKE ?",
+            (label, f"%\\{folder}\\%"),
+        )
+        if cur.rowcount:
+            moved[folder] = int(cur.rowcount)
+    return moved
+
+
 def ensure_role_indexes(path: str | None = None) -> list[str]:
     """Build the role lookup map on the C: replica. Never opens the D: source."""
     dest = path or live_index_path()
@@ -102,6 +126,9 @@ def ensure_role_indexes(path: str | None = None) -> list[str]:
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        moved = relabel_misfiled_vocals(conn)
+        if moved:
+            print(f"[LIVE_INDEX] relabeled misfiled vocal rows {moved}", flush=True)
         for ddl in ROLE_INDEX_DDL:
             conn.execute(ddl)
             built.append(ddl.split("INDEX IF NOT EXISTS ", 1)[-1].split(" ", 1)[0])

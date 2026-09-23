@@ -113,6 +113,26 @@ def test_adlibs_are_one_shots_not_a_loop():
     assert not active[: (ADLIB_SPACING_BARS - 1) * bar - 1].any()
 
 
+def test_replica_relabels_vocal_rows_filed_under_instrument_folders(tmp_path):
+    from engine.live_index import relabel_misfiled_vocals
+
+    db = sqlite3.connect(str(tmp_path / "live.sqlite"))
+    db.execute("CREATE TABLE slice_index (file_path TEXT, stem_type TEXT)")
+    db.executemany(
+        "INSERT INTO slice_index VALUES (?, ?)",
+        [
+            (r"D:\corpus_4s\harmonic\1_phrase_0001.wav", "vocal"),
+            ("D:/corpus_4s/drums/kick_loop.wav", "vocal"),
+            (r"D:\corpus_4s\001 - Song\vocals_s4_00041.wav", "vocal"),
+        ],
+    )
+    moved = relabel_misfiled_vocals(db)
+    assert moved == {"harmonic": 1, "drums": 1}
+    labels = [r[0] for r in db.execute("SELECT stem_type FROM slice_index ORDER BY rowid")]
+    assert labels == ["harmonic", "rhythm", "vocal"]
+    assert relabel_misfiled_vocals(db) == {}
+
+
 def test_vocal_selector_rejects_rows_filed_under_harmonic_folder(tmp_path):
     db = sqlite3.connect(str(tmp_path / "idx.sqlite"))
     db.executescript(
