@@ -133,13 +133,18 @@ export function coercePayload(payload: unknown): Record<string, unknown> {
     depth += 1;
     try {
       const parsed: unknown = JSON.parse(target);
+      // Nested encoding: JSON string of a JSON string — keep peeling.
+      if (typeof parsed === "string") {
+        target = parsed;
+        continue;
+      }
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
         target = parsed;
-      } else {
         break;
       }
+      break;
     } catch {
-      // Let the schema validator throw a detailed error on the raw string.
+      // If parsing fails, break and let the schema validator throw a detailed error.
       break;
     }
   }
@@ -170,8 +175,16 @@ export function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
   return result.data;
 }
 
-export function coatInGate(data: unknown) {
-  return coatAndVerify(InGateSchema, coercePayload(data));
+export function coatInGate(rawPayload: unknown, schema: z.ZodType = InGateSchema) {
+  const normalizedPayload = coercePayload(rawPayload);
+  // If normalizedPayload is empty after a string input, log explicit diagnostic details.
+  if (typeof rawPayload === "string" && Object.keys(normalizedPayload).length === 0) {
+    console.error(
+      "[coatInGate] Failed to deserialize string payload:",
+      rawPayload.slice(0, 500),
+    );
+  }
+  return coatAndVerify(schema, normalizedPayload);
 }
 
 export function coatFluctuated(data: unknown): FluctuatedPayload {
