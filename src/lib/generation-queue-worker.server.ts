@@ -217,7 +217,7 @@ async function processClaimedJob(
   job: GenerationQueueRow,
   queueLoadFactor = 0,
 ): Promise<void> {
-  const { coatQueueJob, coatInGate, coatFluctuated, normalizePromptPayload, FluxRejectionError } =
+  const { coatQueueJob, coatInGate, coatFluctuated, coercePayload, FluxRejectionError } =
     await import("@/lib/PipelineFluxCoating");
 
   // Flux Coating: reject contaminated queue rows before any side effects.
@@ -315,16 +315,12 @@ async function processClaimedJob(
   const { BinaryEntanglementSuppressor, executeIsolatedWorkerTask } = await import(
     "@/lib/BinaryEntanglementSuppressor"
   );
-  const normalizedPrompt = normalizePromptPayload(coatedJob.prompt_payload);
   const isolated = executeIsolatedWorkerTask(ctx, {
     jobId: coatedJob.id,
     userId: ctx.userId,
     vaultId: coatedJob.vault_id,
     spendIdempotencyKey: coatedJob.spend_idempotency_key,
-    prompt_payload:
-      normalizedPrompt && typeof normalizedPrompt === "object" && !Array.isArray(normalizedPrompt)
-        ? (normalizedPrompt as Record<string, unknown>)
-        : {},
+    prompt_payload: coercePayload(coatedJob.prompt_payload),
   });
   const isolatedPromptPayload = isolated.processedData.prompt_payload;
 

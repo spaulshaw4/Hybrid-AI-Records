@@ -122,21 +122,37 @@ export class FluxRejectionError extends Error {
   }
 }
 
-/** Coerce double-encoded jsonb / text prompt_payload into a plain object. */
+/**
+ * Unpack stringified JSON if prompt_payload was stored in a TEXT column
+ * (or double-encoded jsonb). Keeps peeling while the value is still a string.
+ */
+export function coercePayload(payload: unknown): Record<string, unknown> {
+  let target: unknown = payload;
+  let depth = 0;
+  while (typeof target === "string" && depth < 4) {
+    depth += 1;
+    try {
+      const parsed: unknown = JSON.parse(target);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        target = parsed;
+      } else {
+        break;
+      }
+    } catch {
+      // Let the schema validator throw a detailed error on the raw string.
+      break;
+    }
+  }
+  return target && typeof target === "object" && !Array.isArray(target)
+    ? (target as Record<string, unknown>)
+    : {};
+}
+
+/** @deprecated Prefer coercePayload — kept for existing call sites. */
 export function normalizePromptPayload(raw: unknown): unknown {
   if (raw == null) return raw;
   if (typeof raw === "object" && !Array.isArray(raw)) return raw;
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (!trimmed) return raw;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-      return parsed;
-    } catch {
-      return raw;
-    }
-  }
+  if (typeof raw === "string") return coercePayload(raw);
   return raw;
 }
 
@@ -155,7 +171,7 @@ export function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
 }
 
 export function coatInGate(data: unknown) {
-  return coatAndVerify(InGateSchema, normalizePromptPayload(data));
+  return coatAndVerify(InGateSchema, coercePayload(data));
 }
 
 export function coatFluctuated(data: unknown): FluctuatedPayload {
@@ -171,7 +187,7 @@ export function coatQueueJob(data: unknown) {
     data && typeof data === "object"
       ? {
           ...(data as Record<string, unknown>),
-          prompt_payload: normalizePromptPayload(
+          prompt_payload: coercePayload(
             (data as { prompt_payload?: unknown }).prompt_payload,
           ),
         }
@@ -186,5 +202,6 @@ export const PipelineFluxCoating = {
   coatFluctuated,
   coatEndGate,
   coatQueueJob,
+  coercePayload,
   normalizePromptPayload,
 };

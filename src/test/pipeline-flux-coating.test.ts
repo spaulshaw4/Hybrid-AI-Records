@@ -20,6 +20,11 @@ describe("PipelineFluxCoating", () => {
     const coated = coatInGate(JSON.stringify(payload));
     expect(coated.prompt).toContain("neon rain");
     expect(coated.instrumental).toBe(true);
+
+    // Double-encoded TEXT column (JSON string of a JSON string).
+    const doubleEncoded = JSON.stringify(JSON.stringify(payload));
+    const coatedTwice = coatInGate(doubleEncoded);
+    expect(coatedTwice.title).toBe("Chrome Rain");
   });
 
   it("rejects contaminated In-Gate prompts", () => {
