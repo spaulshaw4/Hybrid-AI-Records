@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { generateSchema } from "@/lib/apiframe-music.functions";
+import { generateSchema } from "@/lib/generate-schema";
 
 const uuidSchema = z.string().uuid("Invalid UUID format.");
 
@@ -118,30 +118,33 @@ export class FluxRejectionError extends Error {
 }
 
 /**
- * Universal Flux Shield Utility: cleans, validates, and coats data between gates.
+ * Module-level coat helper — avoids class TDZ if importers evaluate mid-init.
  */
-export class PipelineFluxCoating {
-  static coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
-    const result = schema.safeParse(data);
-    if (!result.success) {
-      throw new FluxRejectionError(result.error.issues.map((i) => i.message));
-    }
-    return result.data;
+function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    throw new FluxRejectionError(result.error.issues.map((i) => i.message));
   }
+  return result.data;
+}
+
+/** Universal Flux Shield: cleans, validates, and coats data between gates. */
+export class PipelineFluxCoating {
+  static coatAndVerify = coatAndVerify;
 
   static coatInGate(data: unknown) {
-    return PipelineFluxCoating.coatAndVerify(InGateSchema, data);
+    return coatAndVerify(InGateSchema, data);
   }
 
   static coatFluctuated(data: unknown): FluctuatedPayload {
-    return PipelineFluxCoating.coatAndVerify(FluctuatedPayloadSchema, data);
+    return coatAndVerify(FluctuatedPayloadSchema, data);
   }
 
   static coatEndGate(data: unknown): EndGateDeliveryFlux {
-    return PipelineFluxCoating.coatAndVerify(EndGateDeliverySchema, data);
+    return coatAndVerify(EndGateDeliverySchema, data);
   }
 
   static coatQueueJob(data: unknown) {
-    return PipelineFluxCoating.coatAndVerify(GenerationQueueJobFluxSchema, data);
+    return coatAndVerify(GenerationQueueJobFluxSchema, data);
   }
 }
