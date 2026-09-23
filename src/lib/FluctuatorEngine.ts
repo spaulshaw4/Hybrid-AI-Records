@@ -6,7 +6,7 @@
  */
 
 import { newCorrelationId } from "@/lib/engine-log.server";
-import { PipelineFluxCoating } from "@/lib/PipelineFluxCoating";
+import { coatFluctuated } from "@/lib/PipelineFluxCoating";
 import { DynamicLogicEngine } from "@/lib/DynamicLogicEngine";
 import { InterpretiveLogic } from "@/lib/InterpretiveLogic";
 import { FormulaBasedIntuition } from "@/lib/FormulaBasedIntuition";
@@ -193,7 +193,7 @@ export class FluctuatorEngine {
     };
 
     // Flux Coating — reject impure envelopes before provider dispatch.
-    const coated = PipelineFluxCoating.coatFluctuated(modulatedPayload);
+    const coated = coatFluctuated(modulatedPayload);
 
     return coated as ModulatedGenerationEnvelope;
   }

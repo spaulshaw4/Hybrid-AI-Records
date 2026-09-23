@@ -302,10 +302,10 @@ async function cortexGate1IdentityAndTokens(input: {
 
   let data: GenerateEngineTrackInput;
   try {
-    const { PipelineFluxCoating, FluxRejectionError } = await import(
+    const { coatInGate, FluxRejectionError } = await import(
       "@/lib/PipelineFluxCoating"
     );
-    data = PipelineFluxCoating.coatInGate(input.promptPayload);
+    data = coatInGate(input.promptPayload);
   } catch (error) {
     const { FluxRejectionError } = await import("@/lib/PipelineFluxCoating");
     if (error instanceof FluxRejectionError) {

@@ -12,7 +12,7 @@ import {
   type ModulatedGenerationEnvelope,
 } from "@/lib/FluctuatorEngine";
 import { IntuitiveStateFluctuator } from "@/lib/IntuitiveStateFluctuator";
-import { PipelineFluxCoating } from "@/lib/PipelineFluxCoating";
+import { coatFluctuated } from "@/lib/PipelineFluxCoating";
 
 export type ModulatedOutput = {
   modulatedPrompt: string;
@@ -117,7 +117,7 @@ export class CtxFluctuatorEngine {
     };
 
     // 3. Re-coat after chaotic drift so End-Gate / provider always see flux-clean params.
-    const coated = PipelineFluxCoating.coatFluctuated(driftedEnvelope) as ModulatedGenerationEnvelope;
+    const coated = coatFluctuated(driftedEnvelope) as ModulatedGenerationEnvelope;
 
     return {
       modulatedPrompt: coated.prompt,

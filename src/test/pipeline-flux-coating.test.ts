@@ -99,10 +99,11 @@ describe("PipelineFluxCoating", () => {
     );
     const endGate = readFileSync(join(process.cwd(), "src/lib/EndGateDispatcher.ts"), "utf8");
 
-    expect(cortex).toContain("PipelineFluxCoating.coatInGate");
-    expect(fluctuator).toContain("PipelineFluxCoating.coatFluctuated");
-    expect(worker).toContain("PipelineFluxCoating.coatQueueJob");
-    expect(worker).toContain("PipelineFluxCoating.coatEndGate");
-    expect(endGate).toContain("PipelineFluxCoating.coatEndGate");
+    expect(cortex).toMatch(/coatInGate\(/);
+    expect(fluctuator).toMatch(/coatFluctuated\(/);
+    expect(worker).toMatch(/coatQueueJob\(/);
+    expect(worker).toMatch(/coatEndGate\(/);
+    expect(endGate).toMatch(/coatEndGate\(/);
+    expect(fluctuator).toContain('from "@/lib/PipelineFluxCoating"');
   });
 });

@@ -217,12 +217,14 @@ async function processClaimedJob(
   job: GenerationQueueRow,
   queueLoadFactor = 0,
 ): Promise<void> {
-  const { PipelineFluxCoating, FluxRejectionError } = await import("@/lib/PipelineFluxCoating");
+  const { coatQueueJob, coatInGate, coatFluctuated, FluxRejectionError } = await import(
+    "@/lib/PipelineFluxCoating",
+  );
 
   // Flux Coating: reject contaminated queue rows before any side effects.
-  let coatedJob: ReturnType<typeof PipelineFluxCoating.coatQueueJob>;
+  let coatedJob: ReturnType<typeof coatQueueJob>;
   try {
-    coatedJob = PipelineFluxCoating.coatQueueJob(job);
+    coatedJob = coatQueueJob(job);
   } catch (error) {
     console.error(
       "[generation-jobs-worker] flux rejected queue row",
@@ -373,7 +375,7 @@ async function processClaimedJob(
     const { GenerationFactory } = await import("@/lib/generation-providers/GenerationFactory");
 
     // Flux Coating: re-verify In-Gate studio payload from the *isolated* queue blob.
-    const coatedStudio = PipelineFluxCoating.coatInGate(isolatedPromptPayload);
+    const coatedStudio = coatInGate(isolatedPromptPayload);
     // Defense in depth: ensure coatInGate output is also reference-decoupled from queue row.
     const isolatedStudio = BinaryEntanglementSuppressor.suppressCrossTalk(
       ctx,
@@ -453,7 +455,7 @@ async function processClaimedJob(
       title: studioPayload.title,
       style: genre,
     });
-    const coatedModulation = PipelineFluxCoating.coatFluctuated(modulated.envelope);
+    const coatedModulation = coatFluctuated(modulated.envelope);
     ContextFactory.assertOwner(ctx, coatedModulation.parameters.targetUserUuid);
 
     // Dispatch Alignment — seal core modulation into strict provider schema.
@@ -969,10 +971,10 @@ async function processClaimedJob(
     // 4. PASS CTX INTO END-GATE — delivery owner = CTX.userId only.
     //    On success → Ledger Settlement Gate; on fault → Isolated Ground (catch).
     ContextFactory.assertOwner(ctx, ctx.userId);
-    const { PipelineFluxCoating } = await import("@/lib/PipelineFluxCoating");
+    const { coatEndGate } = await import("@/lib/PipelineFluxCoating");
     const { EndGateDispatcher } = await import("@/lib/EndGateDispatcher");
     const delivery = await EndGateDispatcher.deliverToUserVault({
-      ...PipelineFluxCoating.coatEndGate({
+      ...coatEndGate({
         jobId: coatedJob.id,
         userId: ctx.userId,
         audioUrl: result.audioUrl,

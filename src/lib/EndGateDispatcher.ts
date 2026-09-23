@@ -61,9 +61,9 @@ export class EndGateDispatcher {
     const generationCost = payload.generationCost;
     let coated: Omit<EndGateDeliveryPayload, "executionContext" | "generationCost">;
     try {
-      const { PipelineFluxCoating } = await import("@/lib/PipelineFluxCoating");
+      const { coatEndGate } = await import("@/lib/PipelineFluxCoating");
       const { executionContext: _ctx, generationCost: _cost, ...fluxSafe } = payload;
-      coated = PipelineFluxCoating.coatEndGate(fluxSafe) as Omit<
+      coated = coatEndGate(fluxSafe) as Omit<
         EndGateDeliveryPayload,
         "executionContext" | "generationCost"
       >;

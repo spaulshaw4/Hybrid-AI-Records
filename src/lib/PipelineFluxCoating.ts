@@ -3,6 +3,11 @@
  *
  * Coats every input/output crossing In-Gate → Fluctuator → Worker → End-Gate
  * so malformed types flux away before they contaminate the queue or vault.
+ *
+ * Prefer the named `coat*` functions. The PipelineFluxCoating object is a thin
+ * facade kept for call-site compatibility — never import it for side effects
+ * from modules that FluctuatorEngine / generate-schema may pull into the same
+ * Vite SSR chunk (class TDZ under circular chunk init).
  */
 
 import { z } from "zod";
@@ -117,10 +122,8 @@ export class FluxRejectionError extends Error {
   }
 }
 
-/**
- * Module-level coat helper — avoids class TDZ if importers evaluate mid-init.
- */
-function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
+/** Module-level coat helpers — safe under Vite SSR circular chunk init. */
+export function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
   const result = schema.safeParse(data);
   if (!result.success) {
     throw new FluxRejectionError(result.error.issues.map((i) => i.message));
@@ -128,23 +131,27 @@ function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
   return result.data;
 }
 
-/** Universal Flux Shield: cleans, validates, and coats data between gates. */
-export class PipelineFluxCoating {
-  static coatAndVerify = coatAndVerify;
-
-  static coatInGate(data: unknown) {
-    return coatAndVerify(InGateSchema, data);
-  }
-
-  static coatFluctuated(data: unknown): FluctuatedPayload {
-    return coatAndVerify(FluctuatedPayloadSchema, data);
-  }
-
-  static coatEndGate(data: unknown): EndGateDeliveryFlux {
-    return coatAndVerify(EndGateDeliverySchema, data);
-  }
-
-  static coatQueueJob(data: unknown) {
-    return coatAndVerify(GenerationQueueJobFluxSchema, data);
-  }
+export function coatInGate(data: unknown) {
+  return coatAndVerify(InGateSchema, data);
 }
+
+export function coatFluctuated(data: unknown): FluctuatedPayload {
+  return coatAndVerify(FluctuatedPayloadSchema, data);
+}
+
+export function coatEndGate(data: unknown): EndGateDeliveryFlux {
+  return coatAndVerify(EndGateDeliverySchema, data);
+}
+
+export function coatQueueJob(data: unknown) {
+  return coatAndVerify(GenerationQueueJobFluxSchema, data);
+}
+
+/** Compatibility facade — prefer named coat* imports in hot paths. */
+export const PipelineFluxCoating = {
+  coatAndVerify,
+  coatInGate,
+  coatFluctuated,
+  coatEndGate,
+  coatQueueJob,
+};
