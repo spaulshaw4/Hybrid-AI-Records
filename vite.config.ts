@@ -15,6 +15,12 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: 8080,
       host: true,
+      // Same-origin UI (8080) → FastAPI :8880.
+      proxy: {
+        "/generate": { target: "http://127.0.0.1:8880", changeOrigin: true },
+        "/api/tracks": { target: "http://127.0.0.1:8880", changeOrigin: true },
+        "/api/stream": { target: "http://127.0.0.1:8880", changeOrigin: true },
+      },
       // FMA / large data trees are often locked or huge on Windows; watching them
       // crashes the watcher with EBUSY and is never useful for HMR.
       watch: {

@@ -107,6 +107,20 @@ deployment — a public model rejects a hardware SKU with 422),
 `FISH_AUDIO_MODEL_TIER`, `FISH_AUDIO_REFERENCE_ID`, `REPLICATE_GEMINI_MODEL`,
 `COPRODUCER_REPLICATE_MODEL`, `LOCAL_VAULT_ORIGIN`.
 
+### Local-first worker (laptop FastAPI)
+
+The Railway container listens on port 3000. `127.0.0.1:8880` inside that
+container is the cloud host, not the workstation. To keep composition on the
+laptop (SQLite + `C:\staging_slices`):
+
+1. Keep `uvicorn main:app --host 127.0.0.1 --port 8880 --reload` running locally.
+2. Run `start_worker_tunnel.bat` (Cloudflare quick tunnel to :8880).
+3. Set Railway **runtime** `HYBRID_WORKER_URL` to the printed `https://*.trycloudflare.com` URL.
+4. Optionally set the same `HYBRID_WORKER_TOKEN` on the laptop process and on Railway.
+
+Do not set `VITE_HYBRID_WORKER_URL` to the tunnel. The browser must keep posting
+to `/api/studio/generate-queue` on the Railway origin; only the server hops the tunnel.
+
 ### Do not set
 
 `LOCAL_VAULT_ORIGIN` is a development convenience. In production, configure

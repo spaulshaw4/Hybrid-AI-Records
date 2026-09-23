@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     const payloadPath = path.join(PAYLOAD_DIR, `job_${sessionId}.json`);
     fs.writeFileSync(payloadPath, JSON.stringify(jobPayload, null, 2));
 
-    const worker = (process.env.HYBRID_WORKER_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+    const worker = (process.env.HYBRID_WORKER_URL || "http://127.0.0.1:8880").replace(/\/$/, "");
     const workerRes = await fetch(`${worker}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

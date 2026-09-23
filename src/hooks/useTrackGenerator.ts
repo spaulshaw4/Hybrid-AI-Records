@@ -4,7 +4,7 @@ const API_BASE = (
   (typeof import.meta !== "undefined" &&
     (import.meta as ImportMeta & { env?: { VITE_HYBRID_WORKER_URL?: string } }).env
       ?.VITE_HYBRID_WORKER_URL) ||
-  "http://127.0.0.1:8000"
+  "http://127.0.0.1:8880"
 ).replace(/\/$/, "");
 const POLL_MS = 2000;
 
@@ -131,7 +131,7 @@ export function useTrackGenerator() {
         }, POLL_MS);
       } catch {
         setStatus("failed");
-        setError("Headless API is not reachable at 127.0.0.1:8000.");
+        setError("Headless API is not reachable at 127.0.0.1:8880.");
       }
     },
     [pollStatus, stopPolling],

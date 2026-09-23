@@ -42,13 +42,13 @@ describe("CreateTrackForm retry control", () => {
 
   it("names the retry control and alerts the failure without nesting interactives", async () => {
     hook.status = "failed";
-    hook.error = "Headless API is not reachable at 127.0.0.1:8000.";
+    hook.error = "Headless API is not reachable at 127.0.0.1:8880.";
     hook.sessionId = "sess-1";
 
     const { container } = render(<CreateTrackForm />);
 
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Headless API is not reachable at 127.0.0.1:8000.");
+    expect(alert).toHaveTextContent("Headless API is not reachable at 127.0.0.1:8880.");
 
     const retry = screen.getByRole("button", { name: "Retry generation" });
     expect(retry).toHaveAttribute("aria-label", "Retry generation");

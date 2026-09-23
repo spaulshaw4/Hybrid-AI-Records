@@ -1,14 +1,38 @@
 /**
- * Local CPU Worker (api/headless_job_runner.py on 127.0.0.1:8000).
+ * Local CPU Worker (api/headless_job_runner.py on 127.0.0.1:8880).
  *
  * AudioStudio Gate 1 otherwise posts to AIMusicAPI. When this URL is set
  * (default in non-production), create/poll/stream stay on the workstation.
  */
 
-export const DEFAULT_HYBRID_WORKER_URL = "http://127.0.0.1:8000";
+export const HYBRID_WORKER_PORT = 8880;
+export const DEFAULT_HYBRID_WORKER_URL = `http://127.0.0.1:${HYBRID_WORKER_PORT}`;
+/** Vite / leftover Next / old worker ports — never the live Python listener. */
+export const FRONTEND_DEV_PORTS = new Set(["3000", "8000", "8080", "8082", "5173"]);
 /** Headless generate + optional master can exceed the 120s AIMusicAPI poll. */
 export const LOCAL_WORKER_TIMEOUT_MS = 8 * 60_000;
 const POLL_MS = 2_000;
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+/** Map a UI / legacy worker origin back to the FastAPI listener on :8880. */
+export function canonicalizeWorkerUrl(raw: string): string {
+  const trimmed = raw.replace(/\/$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+  if (isLoopbackHost(parsed.hostname) && FRONTEND_DEV_PORTS.has(parsed.port)) {
+    parsed.port = String(HYBRID_WORKER_PORT);
+    return parsed.toString().replace(/\/$/, "");
+  }
+  return trimmed;
+}
 
 export type HybridWorkerTrack = {
   sessionId: string;
@@ -20,7 +44,7 @@ export type HybridWorkerTrack = {
 function trimUrl(value: string | undefined): string | null {
   const next = (value || "").trim().replace(/\/$/, "");
   if (!next || next === "0" || next.toLowerCase() === "off") return null;
-  return next;
+  return canonicalizeWorkerUrl(next);
 }
 
 export function hybridWorkerUrl(): string | null {
@@ -35,6 +59,13 @@ export function hybridWorkerUrl(): string | null {
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
+}
+
+function workerAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = (process.env.HYBRID_WORKER_TOKEN || "").trim();
+  if (token) headers["X-Hybrid-Worker-Token"] = token;
+  return headers;
 }
 
 export async function generateFromHybridWorker(input: {
@@ -63,7 +94,7 @@ export async function generateFromHybridWorker(input: {
     try {
       created = await fetch(`${base}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: workerAuthHeaders(),
         body: payload,
       });
       if (created.status !== 404) {
@@ -102,7 +133,9 @@ export async function generateFromHybridWorker(input: {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     let statusRes: Response;
     try {
-      statusRes = await fetch(`${base}/api/tracks/status/${encodeURIComponent(sessionId)}`);
+      statusRes = await fetch(`${base}/api/tracks/status/${encodeURIComponent(sessionId)}`, {
+        headers: workerAuthHeaders(),
+      });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       console.error("[HYBRID_WORKER] status fetch failed", sessionId, detail);
@@ -131,7 +164,7 @@ export async function generateFromHybridWorker(input: {
   const audioUrl = `${base}/api/stream/${encodeURIComponent(filename)}`;
   let audioRes: Response;
   try {
-    audioRes = await fetch(audioUrl);
+    audioRes = await fetch(audioUrl, { headers: workerAuthHeaders() });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     console.error("[HYBRID_WORKER] stream fetch failed", audioUrl, detail);

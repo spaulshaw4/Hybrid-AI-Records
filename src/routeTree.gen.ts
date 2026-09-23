@@ -22,6 +22,7 @@ import { Route as PortalRouteImport } from './routes/portal'
 import { Route as OrderStatusRouteImport } from './routes/order-status'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LicensingRouteImport } from './routes/licensing'
+import { Route as GenerateRouteImport } from './routes/generate'
 import { Route as EngineRouteImport } from './routes/engine'
 import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
 import { Route as DevRouteImport } from './routes/dev'
@@ -47,10 +48,12 @@ import { Route as AccountDownloadsRouteImport } from './routes/account.downloads
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRouteImport } from './routes/[.well-known]/assetlinks[.]json'
 import { Route as Char91DotmcpChar93ListToolsRouteImport } from './routes/[.mcp]/list-tools'
+import { Route as ApiTracksCreateRouteImport } from './routes/api/tracks/create'
 import { Route as ApiSystemActuatorRouteImport } from './routes/api/system/actuator'
 import { Route as ApiStudioVocalCloneRouteImport } from './routes/api/studio/vocal-clone'
 import { Route as ApiStudioGenerateStreamRouteImport } from './routes/api/studio/generate-stream'
 import { Route as ApiStudioGenerateQueueRouteImport } from './routes/api/studio/generate-queue'
+import { Route as ApiStreamFilenameRouteImport } from './routes/api/stream.$filename'
 import { Route as ApiPublicTrackDownloadRouteImport } from './routes/api/public/track-download'
 import { Route as ApiPublicSupportReportsRouteImport } from './routes/api/public/support-reports'
 import { Route as ApiPublicMetricsRouteImport } from './routes/api/public/metrics'
@@ -72,6 +75,7 @@ import { Route as AuthenticatedAdminFunnelRouteImport } from './routes/_authenti
 import { Route as AuthenticatedAdminApplicationsRouteImport } from './routes/_authenticated/admin.applications'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
+import { Route as ApiTracksStatusSessionIdRouteImport } from './routes/api/tracks/status.$sessionId'
 import { Route as ApiStudioVaultTracksRouteImport } from './routes/api/studio/vault/tracks'
 import { Route as ApiStudioGenerateQueueJobIdRouteImport } from './routes/api/studio/generate-queue.$jobId'
 import { Route as ApiPublicHooksRefreshFxRouteImport } from './routes/api/public/hooks/refresh-fx'
@@ -140,6 +144,11 @@ const McpRoute = McpRouteImport.update({
 const LicensingRoute = LicensingRouteImport.update({
   id: '/licensing',
   path: '/licensing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GenerateRoute = GenerateRouteImport.update({
+  id: '/generate',
+  path: '/generate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EngineRoute = EngineRouteImport.update({
@@ -269,6 +278,11 @@ const Char91DotmcpChar93ListToolsRoute =
     path: '/.mcp/list-tools',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiTracksCreateRoute = ApiTracksCreateRouteImport.update({
+  id: '/api/tracks/create',
+  path: '/api/tracks/create',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSystemActuatorRoute = ApiSystemActuatorRouteImport.update({
   id: '/api/system/actuator',
   path: '/api/system/actuator',
@@ -287,6 +301,11 @@ const ApiStudioGenerateStreamRoute = ApiStudioGenerateStreamRouteImport.update({
 const ApiStudioGenerateQueueRoute = ApiStudioGenerateQueueRouteImport.update({
   id: '/api/studio/generate-queue',
   path: '/api/studio/generate-queue',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStreamFilenameRoute = ApiStreamFilenameRouteImport.update({
+  id: '/api/stream/$filename',
+  path: '/api/stream/$filename',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicTrackDownloadRoute = ApiPublicTrackDownloadRouteImport.update({
@@ -406,6 +425,12 @@ const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
   path: '/.lovable/oauth/consent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTracksStatusSessionIdRoute =
+  ApiTracksStatusSessionIdRouteImport.update({
+    id: '/api/tracks/status/$sessionId',
+    path: '/api/tracks/status/$sessionId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiStudioVaultTracksRoute = ApiStudioVaultTracksRouteImport.update({
   id: '/api/studio/vault/tracks',
   path: '/api/studio/vault/tracks',
@@ -438,6 +463,7 @@ export interface FileRoutesByFullPath {
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
   '/engine': typeof EngineRoute
+  '/generate': typeof GenerateRoute
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
@@ -488,13 +514,16 @@ export interface FileRoutesByFullPath {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/stream/$filename': typeof ApiStreamFilenameRoute
   '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/system/actuator': typeof ApiSystemActuatorRoute
+  '/api/tracks/create': typeof ApiTracksCreateRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
+  '/api/tracks/status/$sessionId': typeof ApiTracksStatusSessionIdRoute
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
 export interface FileRoutesByTo {
@@ -506,6 +535,7 @@ export interface FileRoutesByTo {
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
   '/engine': typeof EngineRoute
+  '/generate': typeof GenerateRoute
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
@@ -556,13 +586,16 @@ export interface FileRoutesByTo {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/stream/$filename': typeof ApiStreamFilenameRoute
   '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/system/actuator': typeof ApiSystemActuatorRoute
+  '/api/tracks/create': typeof ApiTracksCreateRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
+  '/api/tracks/status/$sessionId': typeof ApiTracksStatusSessionIdRoute
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
 export interface FileRoutesById {
@@ -576,6 +609,7 @@ export interface FileRoutesById {
   '/dev': typeof DevRouteWithChildren
   '/diagnostics': typeof DiagnosticsRoute
   '/engine': typeof EngineRoute
+  '/generate': typeof GenerateRoute
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
@@ -626,13 +660,16 @@ export interface FileRoutesById {
   '/api/public/metrics': typeof ApiPublicMetricsRoute
   '/api/public/support-reports': typeof ApiPublicSupportReportsRoute
   '/api/public/track-download': typeof ApiPublicTrackDownloadRoute
+  '/api/stream/$filename': typeof ApiStreamFilenameRoute
   '/api/studio/generate-queue': typeof ApiStudioGenerateQueueRouteWithChildren
   '/api/studio/generate-stream': typeof ApiStudioGenerateStreamRoute
   '/api/studio/vocal-clone': typeof ApiStudioVocalCloneRoute
   '/api/system/actuator': typeof ApiSystemActuatorRoute
+  '/api/tracks/create': typeof ApiTracksCreateRoute
   '/api/public/hooks/refresh-fx': typeof ApiPublicHooksRefreshFxRoute
   '/api/studio/generate-queue/$jobId': typeof ApiStudioGenerateQueueJobIdRoute
   '/api/studio/vault/tracks': typeof ApiStudioVaultTracksRouteWithChildren
+  '/api/tracks/status/$sessionId': typeof ApiTracksStatusSessionIdRoute
   '/api/studio/vault/tracks/$trackId': typeof ApiStudioVaultTracksTrackIdRoute
 }
 export interface FileRouteTypes {
@@ -646,6 +683,7 @@ export interface FileRouteTypes {
     | '/dev'
     | '/diagnostics'
     | '/engine'
+    | '/generate'
     | '/licensing'
     | '/mcp'
     | '/order-status'
@@ -696,13 +734,16 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/stream/$filename'
     | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/system/actuator'
+    | '/api/tracks/create'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
+    | '/api/tracks/status/$sessionId'
     | '/api/studio/vault/tracks/$trackId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -714,6 +755,7 @@ export interface FileRouteTypes {
     | '/dev'
     | '/diagnostics'
     | '/engine'
+    | '/generate'
     | '/licensing'
     | '/mcp'
     | '/order-status'
@@ -764,13 +806,16 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/stream/$filename'
     | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/system/actuator'
+    | '/api/tracks/create'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
+    | '/api/tracks/status/$sessionId'
     | '/api/studio/vault/tracks/$trackId'
   id:
     | '__root__'
@@ -783,6 +828,7 @@ export interface FileRouteTypes {
     | '/dev'
     | '/diagnostics'
     | '/engine'
+    | '/generate'
     | '/licensing'
     | '/mcp'
     | '/order-status'
@@ -833,13 +879,16 @@ export interface FileRouteTypes {
     | '/api/public/metrics'
     | '/api/public/support-reports'
     | '/api/public/track-download'
+    | '/api/stream/$filename'
     | '/api/studio/generate-queue'
     | '/api/studio/generate-stream'
     | '/api/studio/vocal-clone'
     | '/api/system/actuator'
+    | '/api/tracks/create'
     | '/api/public/hooks/refresh-fx'
     | '/api/studio/generate-queue/$jobId'
     | '/api/studio/vault/tracks'
+    | '/api/tracks/status/$sessionId'
     | '/api/studio/vault/tracks/$trackId'
   fileRoutesById: FileRoutesById
 }
@@ -853,6 +902,7 @@ export interface RootRouteChildren {
   DevRoute: typeof DevRouteWithChildren
   DiagnosticsRoute: typeof DiagnosticsRoute
   EngineRoute: typeof EngineRoute
+  GenerateRoute: typeof GenerateRoute
   LicensingRoute: typeof LicensingRoute
   McpRoute: typeof McpRoute
   OrderStatusRoute: typeof OrderStatusRoute
@@ -884,12 +934,15 @@ export interface RootRouteChildren {
   ApiPublicMetricsRoute: typeof ApiPublicMetricsRoute
   ApiPublicSupportReportsRoute: typeof ApiPublicSupportReportsRoute
   ApiPublicTrackDownloadRoute: typeof ApiPublicTrackDownloadRoute
+  ApiStreamFilenameRoute: typeof ApiStreamFilenameRoute
   ApiStudioGenerateQueueRoute: typeof ApiStudioGenerateQueueRouteWithChildren
   ApiStudioGenerateStreamRoute: typeof ApiStudioGenerateStreamRoute
   ApiStudioVocalCloneRoute: typeof ApiStudioVocalCloneRoute
   ApiSystemActuatorRoute: typeof ApiSystemActuatorRoute
+  ApiTracksCreateRoute: typeof ApiTracksCreateRoute
   ApiPublicHooksRefreshFxRoute: typeof ApiPublicHooksRefreshFxRoute
   ApiStudioVaultTracksRoute: typeof ApiStudioVaultTracksRouteWithChildren
+  ApiTracksStatusSessionIdRoute: typeof ApiTracksStatusSessionIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -983,6 +1036,13 @@ declare module '@tanstack/react-router' {
       path: '/licensing'
       fullPath: '/licensing'
       preLoaderRoute: typeof LicensingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/generate': {
+      id: '/generate'
+      path: '/generate'
+      fullPath: '/generate'
+      preLoaderRoute: typeof GenerateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/engine': {
@@ -1160,6 +1220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char91DotmcpChar93ListToolsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/tracks/create': {
+      id: '/api/tracks/create'
+      path: '/api/tracks/create'
+      fullPath: '/api/tracks/create'
+      preLoaderRoute: typeof ApiTracksCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/system/actuator': {
       id: '/api/system/actuator'
       path: '/api/system/actuator'
@@ -1186,6 +1253,13 @@ declare module '@tanstack/react-router' {
       path: '/api/studio/generate-queue'
       fullPath: '/api/studio/generate-queue'
       preLoaderRoute: typeof ApiStudioGenerateQueueRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stream/$filename': {
+      id: '/api/stream/$filename'
+      path: '/api/stream/$filename'
+      fullPath: '/api/stream/$filename'
+      preLoaderRoute: typeof ApiStreamFilenameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/track-download': {
@@ -1335,6 +1409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotlovableOauthConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/tracks/status/$sessionId': {
+      id: '/api/tracks/status/$sessionId'
+      path: '/api/tracks/status/$sessionId'
+      fullPath: '/api/tracks/status/$sessionId'
+      preLoaderRoute: typeof ApiTracksStatusSessionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/studio/vault/tracks': {
       id: '/api/studio/vault/tracks'
       path: '/api/studio/vault/tracks'
@@ -1473,6 +1554,7 @@ const rootRouteChildren: RootRouteChildren = {
   DevRoute: DevRouteWithChildren,
   DiagnosticsRoute: DiagnosticsRoute,
   EngineRoute: EngineRoute,
+  GenerateRoute: GenerateRoute,
   LicensingRoute: LicensingRoute,
   McpRoute: McpRoute,
   OrderStatusRoute: OrderStatusRoute,
@@ -1506,12 +1588,15 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicMetricsRoute: ApiPublicMetricsRoute,
   ApiPublicSupportReportsRoute: ApiPublicSupportReportsRoute,
   ApiPublicTrackDownloadRoute: ApiPublicTrackDownloadRoute,
+  ApiStreamFilenameRoute: ApiStreamFilenameRoute,
   ApiStudioGenerateQueueRoute: ApiStudioGenerateQueueRouteWithChildren,
   ApiStudioGenerateStreamRoute: ApiStudioGenerateStreamRoute,
   ApiStudioVocalCloneRoute: ApiStudioVocalCloneRoute,
   ApiSystemActuatorRoute: ApiSystemActuatorRoute,
+  ApiTracksCreateRoute: ApiTracksCreateRoute,
   ApiPublicHooksRefreshFxRoute: ApiPublicHooksRefreshFxRoute,
   ApiStudioVaultTracksRoute: ApiStudioVaultTracksRouteWithChildren,
+  ApiTracksStatusSessionIdRoute: ApiTracksStatusSessionIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
