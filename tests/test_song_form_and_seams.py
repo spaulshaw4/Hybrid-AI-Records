@@ -95,9 +95,11 @@ def test_grid_loop_seam_has_no_step():
 
 def test_short_chant_is_classified_as_adlib():
     bar = samples_per_bar(SR, BPM)
-    assert is_adlib_vocal("vocal_phrase_001.wav", bar, SR, BPM)
+    assert is_adlib_vocal("vocal_phrase_001.wav", bar // 2, SR, BPM)
     assert is_adlib_vocal("oh_yeah_adlib_4bar.wav", 8 * bar, SR, BPM)
     assert not is_adlib_vocal("lead_verse_take.wav", 4 * bar, SR, BPM)
+    # A 4.0 s corpus_4s vocal slice at 110 BPM (~1.83 bars) stays a looped line.
+    assert not is_adlib_vocal("vocals_s4_00041.wav", int(4.0 * SR), SR, BPM)
 
 
 def test_adlibs_are_one_shots_not_a_loop():

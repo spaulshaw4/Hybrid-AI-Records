@@ -559,7 +559,8 @@ ADLIB_NAME_TOKENS = (
     "_oh_", "chop", "vox_fx", "vocal_fx", "scream",
 )
 # A vocal phrase shorter than this is treated as an ad-lib, not a topline.
-ADLIB_MAX_BARS = 2.0
+# corpus_4s vocal slices are 4.0 s (~1.8 bars at 110 BPM) and must stay looped.
+ADLIB_MAX_BARS = 1.0
 ADLIB_SPACING_BARS = 4
 # Where ad-libs may sit. With lyrics expected they are restricted to
 # transitions and chorus drops; without lyrics they may also dress verses.
@@ -1108,6 +1109,12 @@ def _render_arranged_bus(
                 cache[path] = loop
                 if mode:
                     adlib[path] = is_adlib_vocal(path, int(loop.shape[0]), sr, bpm)
+                    if adlib[path]:
+                        print(
+                            f"[VOCAL] ad-lib one-shot {os.path.basename(path)} "
+                            f"({loop.shape[0] / float(sr):.2f}s) sections="
+                            f"{'transitions/chorus' if mode == 'lead' else 'open'}"
+                        )
             start = cursor + int(offset)
             if start >= out.shape[0]:
                 continue
