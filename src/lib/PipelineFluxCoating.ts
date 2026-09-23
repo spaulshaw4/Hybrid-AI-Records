@@ -116,23 +116,46 @@ export class FluxRejectionError extends Error {
   readonly issues: string[];
 
   constructor(issues: string[]) {
-    super(`Flux Rejection: Schema contamination detected -> ${issues.join(", ")}`);
+    super(`Flux Rejection: Schema contamination detected -> ${issues.join("; ")}`);
     this.name = "FluxRejectionError";
     this.issues = issues;
   }
+}
+
+/** Coerce double-encoded jsonb / text prompt_payload into a plain object. */
+export function normalizePromptPayload(raw: unknown): unknown {
+  if (raw == null) return raw;
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return raw;
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      return parsed;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
 }
 
 /** Module-level coat helpers — safe under Vite SSR circular chunk init. */
 export function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
   const result = schema.safeParse(data);
   if (!result.success) {
-    throw new FluxRejectionError(result.error.issues.map((i) => i.message));
+    throw new FluxRejectionError(
+      result.error.issues.map((i) => {
+        const path = i.path.length ? `${i.path.join(".")}: ` : "";
+        return `${path}${i.message}`;
+      }),
+    );
   }
   return result.data;
 }
 
 export function coatInGate(data: unknown) {
-  return coatAndVerify(InGateSchema, data);
+  return coatAndVerify(InGateSchema, normalizePromptPayload(data));
 }
 
 export function coatFluctuated(data: unknown): FluctuatedPayload {
@@ -144,7 +167,16 @@ export function coatEndGate(data: unknown): EndGateDeliveryFlux {
 }
 
 export function coatQueueJob(data: unknown) {
-  return coatAndVerify(GenerationQueueJobFluxSchema, data);
+  const row =
+    data && typeof data === "object"
+      ? {
+          ...(data as Record<string, unknown>),
+          prompt_payload: normalizePromptPayload(
+            (data as { prompt_payload?: unknown }).prompt_payload,
+          ),
+        }
+      : data;
+  return coatAndVerify(GenerationQueueJobFluxSchema, row);
 }
 
 /** Compatibility facade — prefer named coat* imports in hot paths. */
@@ -154,4 +186,5 @@ export const PipelineFluxCoating = {
   coatFluctuated,
   coatEndGate,
   coatQueueJob,
+  normalizePromptPayload,
 };

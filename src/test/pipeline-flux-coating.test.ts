@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   PipelineFluxCoating,
+  coatInGate,
   FluxRejectionError,
   InGateLiteSchema,
   FluctuatedPayloadSchema,
@@ -10,12 +11,13 @@ import {
 } from "@/lib/PipelineFluxCoating";
 
 describe("PipelineFluxCoating", () => {
-  it("coats a valid In-Gate studio payload", () => {
-    const coated = PipelineFluxCoating.coatInGate({
+  it("parses stringified prompt_payload for In-Gate coating", () => {
+    const payload = {
       prompt: "neon rain over chrome streets",
       title: "Chrome Rain",
       instrumental: true,
-    });
+    };
+    const coated = coatInGate(JSON.stringify(payload));
     expect(coated.prompt).toContain("neon rain");
     expect(coated.instrumental).toBe(true);
   });
