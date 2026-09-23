@@ -578,6 +578,63 @@ def is_adlib_vocal(path: str, phrase_samples: int, sr: int, bpm: float) -> bool:
     return bar > 0 and float(phrase_samples) < ADLIB_MAX_BARS * float(bar)
 
 
+# Buses that follow the harmonic roadmap (loops are staged in the song key).
+CHORD_FOLLOW_BUSES = frozenset({"harmonic", "bass"})
+_PITCH_CLASS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+
+def chord_root_pc(symbol: str | None) -> int | None:
+    """Pitch class of a chord symbol's root (``"F#m7"`` -> 6), or ``None``."""
+    text = str(symbol or "").strip()
+    if not text or text[0].upper() not in _PITCH_CLASS:
+        return None
+    pc = _PITCH_CLASS[text[0].upper()]
+    if len(text) > 1 and text[1] in "#b":
+        pc += 1 if text[1] == "#" else -1
+    return pc % 12
+
+
+def section_chord_offsets(
+    chords: list[str] | None,
+    bars: int,
+    bars_per_chord: int,
+    key: str | None,
+) -> list[int] | None:
+    """Per-bar semitone shift from the song key to each bar's chord root.
+
+    Shortest wrap onto [-6, +5] so no loop is shifted more than a tritone.
+    ``None`` when the section has no chords or the key cannot be parsed.
+    """
+    key_pc = chord_root_pc(key)
+    if key_pc is None or not chords:
+        return None
+    roots = [chord_root_pc(c) for c in chords]
+    if any(r is None for r in roots):
+        return None
+    per = max(1, int(bars_per_chord))
+    out: list[int] = []
+    for bar in range(max(0, int(bars))):
+        root = roots[(bar // per) % len(roots)]
+        out.append((int(root) - key_pc + 6) % 12 - 6)
+    return out
+
+
+def _chord_spans(bar_shifts: list[int], first_bar: int, length: int, bar: int) -> list[tuple[int, int, int]]:
+    """``(start, end, semitones)`` runs inside a segment starting at ``first_bar``."""
+    spans: list[tuple[int, int, int]] = []
+    start = 0
+    while start < length:
+        index = min(len(bar_shifts) - 1, first_bar + start // bar)
+        shift = int(bar_shifts[index])
+        end = min(length, (start // bar + 1) * bar)
+        if spans and spans[-1][2] == shift and spans[-1][1] == start:
+            spans[-1] = (spans[-1][0], end, shift)
+        else:
+            spans.append((start, end, shift))
+        start = end
+    return spans
+
+
 def _section_role(section: dict) -> str:
     role = str(section.get("role") or "").strip().lower()
     if role:
@@ -1066,6 +1123,7 @@ def _render_arranged_bus(
     target_bpm: float | None,
     fade: int,
     vocal_mode: str | None = None,
+    chord_shifts: list[list[int] | None] | None = None,
 ) -> tuple[np.ndarray, dict[str, str]]:
     """Tile one loop per section (steady within the phrase), vary across sections.
 
@@ -1076,6 +1134,10 @@ def _render_arranged_bus(
 
     With a ``vocal_mode`` set, short ad-lib vocal phrases are placed as
     one-shots (never looped) and only in sections the mode allows.
+
+    ``chord_shifts`` (one per-bar semitone list per plan section) makes the
+    harmonic and bass buses follow the chord roadmap: the loop is pitch-shifted
+    per chord span, loop phase stays continuous, and chord changes crossfade.
     """
     out = np.zeros((int(total_samples), int(channels)), dtype=np.float64)
     used: dict[str, str] = {}
@@ -1091,7 +1153,14 @@ def _render_arranged_bus(
     pending: np.ndarray | None = None
     pending_at = -1
     cursor = 0
-    for section, bars, n in plan:
+    follow_chords = bus in CHORD_FOLLOW_BUSES and bool(chord_shifts)
+    shifted_cache: dict[tuple[str, int], np.ndarray] = {}
+    for section_index, (section, bars, n) in enumerate(plan):
+        bar_shifts = (
+            chord_shifts[section_index]
+            if follow_chords and chord_shifts is not None and section_index < len(chord_shifts)
+            else None
+        )
         variants = section.get("bus_variant") or {}
         index = int(variants.get(bus, 0)) % len(variant_paths)
         segments = _section_segments(
@@ -1127,7 +1196,13 @@ def _render_arranged_bus(
                 out[start:end] += body[: end - start]
                 used[os.path.basename(path)] = path
                 continue
-            tiled = tile_loop_on_grid(loop, int(length) + fade_n, sr, bpm)
+            if bar_shifts and any(bar_shifts) and bar_samples > 0:
+                tiled = _render_chord_spans(
+                    loop, path, int(length), start - cursor, bar_shifts, bar_samples,
+                    sr, bpm, fade_n, shifted_cache,
+                )
+            else:
+                tiled = tile_loop_on_grid(loop, int(length) + fade_n, sr, bpm)
             body = tiled[: int(length)].copy()
             if pending is not None and pending_at == start and fade_n > 0:
                 k = min(fade_n, body.shape[0], pending.shape[0])
@@ -1140,6 +1215,50 @@ def _render_arranged_bus(
             used[os.path.basename(path)] = path
         cursor += int(n)
     return out, used
+
+
+def _render_chord_spans(
+    loop: np.ndarray,
+    path: str,
+    length: int,
+    section_offset: int,
+    bar_shifts: list[int],
+    bar_samples: int,
+    sr: int,
+    bpm: float,
+    fade: int,
+    shifted_cache: dict[tuple[str, int], np.ndarray],
+) -> np.ndarray:
+    """``length + fade`` samples: the loop pitch-shifted onto each chord span.
+
+    Every shifted version is tiled on the same grid, so switching between them
+    keeps loop phase; each chord change is a ``fade``-sample equal-power blend.
+    """
+    from dsp.pitch_key_aligner import pitch_shift_slice
+
+    spans = _chord_spans(bar_shifts, int(section_offset) // int(bar_samples), int(length), int(bar_samples))
+    total = int(length) + int(fade)
+    full: dict[int, np.ndarray] = {}
+    for _a, _e, semis in spans:
+        if semis in full:
+            continue
+        key = (path, int(semis))
+        shifted = shifted_cache.get(key)
+        if shifted is None:
+            shifted = loop if semis == 0 else pitch_shift_slice(loop, float(semis), sr=int(sr))
+            shifted_cache[key] = shifted
+        full[semis] = tile_loop_on_grid(shifted, total, sr, bpm)
+    out = np.zeros_like(full[spans[0][2]])
+    previous: int | None = None
+    for a, e, semis in spans:
+        out[a:e] = full[semis][a:e]
+        if previous is not None and previous != semis and fade > 0:
+            k = min(int(fade), e - a)
+            theta = np.linspace(0.0, 0.5 * np.pi, k, dtype=np.float64)[:, np.newaxis]
+            out[a : a + k] = full[previous][a : a + k] * np.cos(theta) + full[semis][a : a + k] * np.sin(theta)
+        previous = semis
+    out[int(length):] = full[spans[-1][2]][int(length):]
+    return out
 
 
 def _stage_bus_to_target(
@@ -1314,6 +1433,7 @@ def assemble_arranged_buses(
     section_plan: dict | None = None,
     song_plan_sections: list[dict] | None = None,
     vocal_mode: str | None = None,
+    chord_key: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Render the four buses from a per-section activation map.
 
@@ -1340,6 +1460,28 @@ def assemble_arranged_buses(
     if mode == "none":
         pools["vocal"] = []
         print("[VOCAL] instrumental: vocal bus muted")
+    chord_shifts: list[list[int] | None] | None = None
+    if chord_key and song_plan_sections and len(song_plan_sections) == len(plan):
+        chord_shifts = [
+            section_chord_offsets(
+                list(sp.get("chord_progression") or []),
+                int(bars),
+                int(sp.get("bars_per_chord") or 1),
+                chord_key,
+            )
+            for sp, (_section, bars, _n) in zip(song_plan_sections, plan)
+        ]
+        if any(chord_shifts):
+            print(
+                "[HARMONY] "
+                + " | ".join(
+                    f"{sp.get('name', '?')}: {'-'.join(sp.get('chord_progression') or [])}"
+                    f" x{int(sp.get('bars_per_chord') or 1)}bar"
+                    for sp in song_plan_sections
+                )
+            )
+        else:
+            chord_shifts = None
     envelopes: dict[str, np.ndarray] = {}
     raw: dict[str, np.ndarray] = {}
     sources: dict[str, dict[str, str]] = {}
@@ -1348,6 +1490,7 @@ def assemble_arranged_buses(
             bus, pools[bus], plan, total_samples, sr, bpm, channels,
             target_key, target_bpm, fade,
             vocal_mode=mode if bus == "vocal" else None,
+            chord_shifts=chord_shifts if bus in CHORD_FOLLOW_BUSES else None,
         )
         env = _activation_envelope(plan, bus, total_samples, sr)
         envelopes[bus] = env
@@ -1577,6 +1720,10 @@ def assemble_from_blueprint(
                     list(song_plan.get("sections") or []) if isinstance(song_plan, dict) else None
                 ),
                 vocal_mode=meta.get("vocal_mode"),
+                chord_key=(
+                    (song_plan.get("key") if isinstance(song_plan, dict) else None)
+                    or meta.get("root_key")
+                ),
             )
         finally:
             if index_conn is not None:

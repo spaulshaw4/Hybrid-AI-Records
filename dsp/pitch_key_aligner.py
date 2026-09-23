@@ -166,6 +166,24 @@ def _pitch_shift_resample(channel: np.ndarray, semitones: float) -> np.ndarray:
     return resample(shifted, len(channel))
 
 
+def _pitch_shift_resample_wsola(channel: np.ndarray, semitones: float) -> np.ndarray:
+    """Exact pitch: resample by the frequency ratio, WSOLA back to the original length.
+
+    The STFT bin-shift below rounds every partial to a ~10 Hz bin (2048-point
+    frames), which detunes low notes by most of a semitone.
+    """
+    from scipy.signal import resample
+
+    from dsp.tempo_time_stretch import _wsola_channel
+
+    ratio = 2.0 ** (float(semitones) / 12.0)
+    resampled = resample(channel, max(1, int(round(len(channel) / ratio))))
+    stretched = _wsola_channel(np.asarray(resampled, dtype=np.float64), 1.0 / ratio)
+    if len(stretched) < len(channel):
+        stretched = np.pad(stretched, (0, len(channel) - len(stretched)))
+    return stretched[: len(channel)]
+
+
 def _pitch_shift_phase_vocoder(channel: np.ndarray, semitones: float, sr: int) -> np.ndarray:
     """STFT bin-shift phase vocoder; pad/trim to the original length."""
     from scipy.signal import istft, stft
@@ -201,9 +219,12 @@ def pitch_shift_slice(audio: np.ndarray, semitones: float, sr: int = 44100) -> n
                 shifted = None
         if shifted is None:
             try:
-                shifted = _pitch_shift_phase_vocoder(y, semitones, sr)
+                shifted = _pitch_shift_resample_wsola(y, semitones)
             except Exception:
-                shifted = _pitch_shift_resample(y, semitones)
+                try:
+                    shifted = _pitch_shift_phase_vocoder(y, semitones, sr)
+                except Exception:
+                    shifted = _pitch_shift_resample(y, semitones)
         if len(shifted) < len(y):
             shifted = np.pad(shifted, (0, len(y) - len(shifted)), mode="edge")
         else:

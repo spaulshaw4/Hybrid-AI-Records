@@ -46,6 +46,57 @@ _PROGRESSIONS: dict[str, list[str]] = {
 
 _MINOR_ROMAN = {"i", "ii", "iii", "iv", "v", "vi", "vii", "ii°", "vii°"}
 
+# Functional progressions per section role. Verses sit on tension degrees,
+# pre-choruses climb to the dominant, choruses resolve to the tonic, bridges
+# move away from both. Modes outside these families use their scale template.
+_ROLE_PROGRESSIONS: dict[str, dict[str, list[str]]] = {
+    "major": {
+        "intro": ["I", "IV"],
+        "verse": ["vi", "IV", "I", "V"],
+        "pre_chorus": ["ii", "IV", "V", "V"],
+        "build": ["IV", "V"],
+        "chorus": ["I", "V", "vi", "IV"],
+        "drop": ["I", "V", "vi", "IV"],
+        "bridge": ["IV", "V", "iii", "vi"],
+        "breakdown": ["vi", "IV"],
+        "solo": ["I", "V", "vi", "IV"],
+        "outro": ["IV", "V", "I", "I"],
+    },
+    "minor": {
+        "intro": ["i", "VI"],
+        "verse": ["i", "VI", "III", "VII"],
+        "pre_chorus": ["iv", "VI", "VII", "VII"],
+        "build": ["VI", "VII"],
+        "chorus": ["VI", "VII", "i", "i"],
+        "drop": ["i", "VI", "III", "VII"],
+        "bridge": ["iv", "VI", "VII", "v"],
+        "breakdown": ["VI", "iv"],
+        "solo": ["i", "VI", "III", "VII"],
+        "outro": ["VI", "VII", "i", "i"],
+    },
+}
+_ROLE_PROGRESSION_FAMILY = {
+    "major": "major",
+    "ionian": "major",
+    "minor": "minor",
+    "natural_minor": "minor",
+    "aeolian": "minor",
+}
+
+
+def bars_per_chord_for(bars: int) -> int:
+    """Two-bar harmonic rhythm in full sections, one bar in short ones."""
+    return 2 if int(bars) >= 8 else 1
+
+
+def role_progression(scale: str, role: str, density: float) -> list[str]:
+    family = _ROLE_PROGRESSION_FAMILY.get(str(scale).lower())
+    if family:
+        table = _ROLE_PROGRESSIONS[family]
+        romans = table.get(normalise_section_role(role)) or table["verse"]
+        return list(romans)
+    return _progression_for(scale, density)
+
 # Role -> stems that typically play in that section (assembler bus names).
 _ROLE_STEMS: dict[str, list[str]] = {
     "intro": ["drums", "pads", "rhythm_guitar"],
@@ -121,6 +172,8 @@ class SectionPlan(BaseModel):
     chord_progression: List[str]  # e.g., ["Em", "C", "G", "D"]
     active_stems: List[str]  # e.g., ["drums", "bass", "rhythm_guitar"]
     frequency_reservations: Dict[str, str]  # e.g., {"lead_vocal": "1kHz-3kHz"}
+    # Harmonic rhythm: each chord lasts this many bars, cycling across the section.
+    bars_per_chord: int = Field(1, ge=1, le=8)
 
 
 class GlobalSongPlan(BaseModel):
@@ -233,14 +286,15 @@ def _roman_to_chord(root: str, scale: str, roman: str, density: float) -> str:
     root_pc = NOTE_NAMES.index(root) if root in NOTE_NAMES else 4
     pc = (root_pc + pcs[deg % len(pcs)] - (1 if flat else 0)) % 12
     name = NOTE_NAMES[pc]
-    is_minor = token_clean.lower() in _MINOR_ROMAN or (
-        token_clean.islower() and not diminished
-    )
+    # Case carries quality: lowercase numerals are minor, uppercase major.
+    is_minor = token_clean in _MINOR_ROMAN and not diminished
     quality = "dim" if diminished else ("m" if is_minor else "")
     if density >= 0.75:
         quality = ("m9" if is_minor else "maj9") if not diminished else "dim7"
     elif density >= 0.45:
-        quality = ("m7" if is_minor else "7") if not diminished else "dim7"
+        dominant = token_clean.upper() == "V" and not is_minor
+        seventh = "7" if dominant else "maj7"
+        quality = ("m7" if is_minor else seventh) if not diminished else "dim7"
     elif is_minor:
         quality = "m"
     else:
@@ -360,18 +414,19 @@ def build_song_plan(
             bars = max(1, int(raw.get("bars") or raw.get("slice_count") or 4))
             energy = clamp01(float(raw.get("energy") or raw.get("energy_level") or 0.5))
             activation = raw.get("bus_activation") if isinstance(raw.get("bus_activation"), dict) else None
+            section_romans = role_progression(scale_mode, role, density)
             chords = [
-                _roman_to_chord(root, scale_mode, roman, density) for roman in romans
+                _roman_to_chord(root, scale_mode, roman, density) for roman in section_romans
             ]
+            per_chord = bars_per_chord_for(bars)
             # Cycle chords across bars for the harmonic roadmap.
             for offset in range(bars):
-                roman = romans[offset % len(romans)]
-                chord = chords[offset % len(chords)]
+                step = (offset // per_chord) % len(chords)
                 roadmap.append(
                     {
                         "bar": cursor + offset,
-                        "roman": roman,
-                        "chord": chord,
+                        "roman": section_romans[step],
+                        "chord": chords[step],
                         "density": round(density, 3),
                         "section": name,
                     }
@@ -386,6 +441,7 @@ def build_song_plan(
                     chord_progression=chords,
                     active_stems=stems,
                     frequency_reservations=_frequency_reservations_for(stems),
+                    bars_per_chord=per_chord,
                 )
             )
             cursor += bars
