@@ -453,7 +453,7 @@ def tile_loop_equal_power(
     step = n - fade
     if step < 1:
         reps = int(np.ceil(target / float(n)))
-        tiled = np.tile(arr, (reps, 1))
+        tiled = np.tile(apply_slice_crossfade(arr, fade_ms=2.0, sr=int(sr)), (reps, 1))
         return tiled[:target]
 
     n_tiles = max(2, int(np.ceil((target - fade) / float(step))))
@@ -461,6 +461,162 @@ def tile_loop_equal_power(
     while out.shape[0] < target:
         out = apply_equal_power_crossfade(out, arr, fade)
     return out[:target]
+
+
+SLICE_EDGE_FADE_MS = 20.0
+
+
+def apply_slice_crossfade(
+    slice_audio: np.ndarray,
+    fade_ms: float = SLICE_EDGE_FADE_MS,
+    sr: int = 44100,
+    *,
+    fade_in: bool = True,
+    fade_out: bool = True,
+) -> np.ndarray:
+    """Equal-power (sin/cos) fade-in and release on a slice's buffer edges."""
+    audio = np.array(slice_audio, dtype=np.float64, copy=True)
+    n = int(audio.shape[0]) if audio.ndim else 0
+    fade = int(round(float(fade_ms) / 1000.0 * float(sr)))
+    if fade < 1 or n < fade * 2:
+        return audio
+    t = np.linspace(0.0, np.pi / 2.0, fade, dtype=np.float64)
+    gain_in = np.sin(t)
+    gain_out = np.cos(t)
+    if audio.ndim == 2:
+        gain_in = gain_in[:, np.newaxis]
+        gain_out = gain_out[:, np.newaxis]
+    if fade_in:
+        audio[:fade] *= gain_in
+    if fade_out:
+        audio[-fade:] *= gain_out
+    return audio
+
+
+def loop_period_samples(loop_samples: int, sr: int, bpm: float) -> int:
+    """Whole-bar period (>= 1 bar) nearest to the loop's natural length."""
+    bar = samples_per_bar(int(sr), float(bpm))
+    if bar < 1:
+        return max(1, int(loop_samples))
+    return max(1, int(round(float(loop_samples) / float(bar)))) * bar
+
+
+def make_grid_loop(
+    loop: np.ndarray,
+    period: int,
+    sr: int,
+    fade_ms: float = LOOP_BOUNDARY_FADE_MS,
+) -> np.ndarray:
+    """Exactly ``period`` samples that repeat seamlessly on the bar grid.
+
+    When the source runs past ``period``, the overhang is equal-power blended
+    into the head, so the wrap point continues the audio instead of cutting it.
+    A short source is released with an edge fade and padded with silence.
+    """
+    arr = np.asarray(loop, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    period = max(1, int(period))
+    channels = int(arr.shape[1])
+    fade = min(fade_samples(int(sr), fade_ms=float(fade_ms), target=period), period // 2)
+    if arr.shape[0] >= period + fade and fade > 0:
+        out = arr[:period].copy()
+        theta = np.linspace(0.0, 0.5 * np.pi, fade, dtype=np.float64)[:, np.newaxis]
+        out[:fade] = arr[period : period + fade] * np.cos(theta) + out[:fade] * np.sin(theta)
+        return out
+    body = arr[: min(arr.shape[0], period)]
+    body = apply_slice_crossfade(body, fade_ms=float(fade_ms), sr=int(sr), fade_in=False)
+    if body.shape[0] < period:
+        body = np.concatenate(
+            (body, np.zeros((period - body.shape[0], channels), dtype=np.float64)), axis=0
+        )
+    return body
+
+
+def tile_loop_on_grid(
+    loop: np.ndarray,
+    target_samples: int,
+    sr: int,
+    bpm: float,
+    fade_ms: float = LOOP_BOUNDARY_FADE_MS,
+) -> np.ndarray:
+    """Repeat a loop with a whole-bar period so every repeat lands on a barline."""
+    arr = np.asarray(loop, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    target = max(0, int(target_samples))
+    if target == 0 or arr.shape[0] == 0:
+        return np.zeros((target, int(arr.shape[1]) if arr.ndim == 2 else 1), dtype=np.float64)
+    period = loop_period_samples(int(arr.shape[0]), int(sr), float(bpm))
+    unit = make_grid_loop(arr, period, int(sr), fade_ms=fade_ms)
+    reps = int(np.ceil(target / float(period)))
+    return np.tile(unit, (reps, 1))[:target]
+
+
+# Filename hints for background ad-lib / chant chops ("oh-oh", "yeah", shouts).
+ADLIB_NAME_TOKENS = (
+    "adlib", "ad_lib", "ad-lib", "chant", "shout", "yeah", "hey", "ooh", "ohh",
+    "_oh_", "chop", "vox_fx", "vocal_fx", "scream",
+)
+# A vocal phrase shorter than this is treated as an ad-lib, not a topline.
+ADLIB_MAX_BARS = 2.0
+ADLIB_SPACING_BARS = 4
+# Where ad-libs may sit. With lyrics expected they are restricted to
+# transitions and chorus drops; without lyrics they may also dress verses.
+ADLIB_SECTIONS_LEAD = frozenset({"chorus", "drop", "pre_drop", "build", "pre_chorus"})
+ADLIB_SECTIONS_OPEN = ADLIB_SECTIONS_LEAD | frozenset({"verse", "bridge", "breakdown"})
+VOCAL_MODES = frozenset({"lead", "adlib", "none"})
+
+
+def is_adlib_vocal(path: str, phrase_samples: int, sr: int, bpm: float) -> bool:
+    """Short or ad-lib-named vocal phrases are background chops, not a lead line."""
+    name = os.path.basename(str(path or "")).lower()
+    if any(token in name for token in ADLIB_NAME_TOKENS):
+        return True
+    bar = samples_per_bar(int(sr), float(bpm))
+    return bar > 0 and float(phrase_samples) < ADLIB_MAX_BARS * float(bar)
+
+
+def _section_role(section: dict) -> str:
+    role = str(section.get("role") or "").strip().lower()
+    if role:
+        return role
+    name = str(section.get("name") or "").strip().lower()
+    for known in ("pre_drop", "pre_chorus", "chorus", "drop", "build", "verse",
+                  "bridge", "breakdown", "intro", "outro"):
+        if name.startswith(known):
+            return known
+    return name
+
+
+def place_adlib_phrases(
+    phrase: np.ndarray,
+    length: int,
+    sr: int,
+    bpm: float,
+    spacing_bars: int = ADLIB_SPACING_BARS,
+) -> np.ndarray:
+    """One-shot ad-lib at the last bar of each ``spacing_bars`` phrase (no looping)."""
+    arr = np.asarray(phrase, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    out = np.zeros((max(0, int(length)), int(arr.shape[1])), dtype=np.float64)
+    bar = samples_per_bar(int(sr), float(bpm))
+    if bar < 1 or out.shape[0] == 0 or arr.shape[0] == 0:
+        return out
+    hit = apply_slice_crossfade(arr, fade_ms=SLICE_EDGE_FADE_MS, sr=int(sr))
+    spacing = max(1, int(spacing_bars))
+    start = (spacing - 1) * bar
+    if start >= out.shape[0]:
+        start = 0
+    while start < out.shape[0]:
+        end = min(out.shape[0], start + hit.shape[0])
+        piece = hit[: end - start]
+        if end - start < hit.shape[0]:
+            piece = apply_slice_crossfade(piece, sr=int(sr), fade_in=False)
+        out[start:end] += piece
+        start += spacing * bar
+    return out
 
 
 def snap_cut_to_zc_or_silence(
@@ -908,15 +1064,31 @@ def _render_arranged_bus(
     target_key: str | None,
     target_bpm: float | None,
     fade: int,
+    vocal_mode: str | None = None,
 ) -> tuple[np.ndarray, dict[str, str]]:
-    """Tile one loop per section (steady within the phrase), vary across sections."""
+    """Tile one loop per section (steady within the phrase), vary across sections.
+
+    Loops repeat on a whole-bar period (``tile_loop_on_grid``) so the buses
+    never drift off the grid. Each segment renders ``fade`` samples past its
+    end; the next segment's head is equal-power blended against that overhang
+    at the barline, so seams neither hard-cut nor replay the head.
+
+    With a ``vocal_mode`` set, short ad-lib vocal phrases are placed as
+    one-shots (never looped) and only in sections the mode allows.
+    """
     out = np.zeros((int(total_samples), int(channels)), dtype=np.float64)
     used: dict[str, str] = {}
     if not variant_paths:
         return out, used
     cache: dict[str, np.ndarray] = {}
+    adlib: dict[str, bool] = {}
     bar_samples = samples_per_bar(sr, bpm)
     allow_fills = bus == "rhythm"
+    mode = (vocal_mode or "").strip().lower() if bus == "vocal" else ""
+    allowed_adlib = ADLIB_SECTIONS_LEAD if mode == "lead" else ADLIB_SECTIONS_OPEN
+    fade_n = max(0, int(fade))
+    pending: np.ndarray | None = None
+    pending_at = -1
     cursor = 0
     for section, bars, n in plan:
         variants = section.get("bus_variant") or {}
@@ -934,8 +1106,30 @@ def _render_arranged_bus(
                 loop = _maybe_align_lock(loop, sr, int(loop.shape[0]), target_key, target_bpm)
                 loop = _as_channels(loop, channels)
                 cache[path] = loop
-            tiled = tile_loop_equal_power(loop, int(length), sr)
-            _write_section(out, cursor + offset, tiled, fade)
+                if mode:
+                    adlib[path] = is_adlib_vocal(path, int(loop.shape[0]), sr, bpm)
+            start = cursor + int(offset)
+            if start >= out.shape[0]:
+                continue
+            if mode and adlib.get(path):
+                pending = None
+                if _section_role(section) not in allowed_adlib:
+                    continue
+                body = place_adlib_phrases(loop, int(length), sr, bpm)
+                end = min(out.shape[0], start + body.shape[0])
+                out[start:end] += body[: end - start]
+                used[os.path.basename(path)] = path
+                continue
+            tiled = tile_loop_on_grid(loop, int(length) + fade_n, sr, bpm)
+            body = tiled[: int(length)].copy()
+            if pending is not None and pending_at == start and fade_n > 0:
+                k = min(fade_n, body.shape[0], pending.shape[0])
+                theta = np.linspace(0.0, 0.5 * np.pi, k, dtype=np.float64)[:, np.newaxis]
+                body[:k] = pending[:k] * np.cos(theta) + body[:k] * np.sin(theta)
+            end = min(out.shape[0], start + body.shape[0])
+            out[start:end] = body[: end - start]
+            pending = tiled[int(length) : int(length) + fade_n]
+            pending_at = start + int(length)
             used[os.path.basename(path)] = path
         cursor += int(n)
     return out, used
@@ -947,6 +1141,7 @@ def _stage_bus_to_target(
     envelope: np.ndarray,
     target_dbfs: float,
     peak_cap: float = ARRANGED_BUS_PEAK_CAP,
+    ignore_silence: bool = False,
 ) -> tuple[np.ndarray, float, float]:
     """Scale a bus so its RMS *over the bars where it is active* hits the target.
 
@@ -958,6 +1153,9 @@ def _stage_bus_to_target(
     if arr.size == 0:
         return arr, -120.0, 0.0
     active = np.asarray(envelope, dtype=np.float64)[:, 0] > ACTIVATION_FLOOR
+    if ignore_silence:
+        frames = arr if arr.ndim == 2 else arr[:, np.newaxis]
+        active = active & (np.max(np.abs(frames), axis=1) > 1e-5)
     region = arr[active] if bool(np.any(active)) else arr
     measured = _bus_rms_dbfs(region)
     if measured <= -119.0:
@@ -1108,8 +1306,13 @@ def assemble_arranged_buses(
     mix_intents: dict | None = None,
     section_plan: dict | None = None,
     song_plan_sections: list[dict] | None = None,
+    vocal_mode: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Render the four buses from a per-section activation map.
+
+    ``vocal_mode``: ``none`` mutes the vocal bus; ``lead`` / ``adlib`` place
+    short ad-lib chops as one-shots (``lead`` limits them to transitions and
+    chorus drops) instead of looping them like a synth.
 
     Loops stay steady inside a section (one loop per bus per phrase — the
     8-bar lock), vary across sections via ``bus_variant``, and are gated by a
@@ -1123,7 +1326,13 @@ def assemble_arranged_buses(
     targets = dict(DEFAULT_BUS_TARGET_RMS)
     targets.update({k: float(v) for k, v in (bus_targets or {}).items() if k in targets})
 
+    mode = (vocal_mode or "").strip().lower() or None
+    if mode is not None and mode not in VOCAL_MODES:
+        mode = None
     pools = _arranged_bus_pools(rotators, plan)
+    if mode == "none":
+        pools["vocal"] = []
+        print("[VOCAL] instrumental: vocal bus muted")
     envelopes: dict[str, np.ndarray] = {}
     raw: dict[str, np.ndarray] = {}
     sources: dict[str, dict[str, str]] = {}
@@ -1131,6 +1340,7 @@ def assemble_arranged_buses(
         audio, used = _render_arranged_bus(
             bus, pools[bus], plan, total_samples, sr, bpm, channels,
             target_key, target_bpm, fade,
+            vocal_mode=mode if bus == "vocal" else None,
         )
         env = _activation_envelope(plan, bus, total_samples, sr)
         envelopes[bus] = env
@@ -1144,7 +1354,8 @@ def assemble_arranged_buses(
     staged: dict[str, np.ndarray] = {}
     for bus in ARRANGE_BUSES:
         staged[bus], measured, gain_db = _stage_bus_to_target(
-            bus, raw[bus], envelopes[bus], targets[bus]
+            bus, raw[bus], envelopes[bus], targets[bus],
+            ignore_silence=bus == "vocal" and mode is not None,
         )
         if source_trace is not None:
             source_trace.setdefault("_buses", {})[bus] = {
@@ -1358,6 +1569,7 @@ def assemble_from_blueprint(
                 song_plan_sections=(
                     list(song_plan.get("sections") or []) if isinstance(song_plan, dict) else None
                 ),
+                vocal_mode=meta.get("vocal_mode"),
             )
         finally:
             if index_conn is not None:

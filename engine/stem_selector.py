@@ -92,6 +92,8 @@ _ROLE_PREFIXES = {
 _BANNED_PREFIXES = ("mixture",)
 # Filename / tag tokens that mark a bass slice on an index with no bass stem_type.
 BASS_NAME_TOKENS = ("bass", "808")
+# Directory names that cannot hold a vocal slice regardless of stem_type.
+VOCAL_EXCLUDED_FOLDERS = ("harmonic", "rhythm", "drums", "bass")
 BASS_CENTROID_FALLBACK_HZ = 450.0
 
 
@@ -412,6 +414,12 @@ def fetch_candidate_rows(
         params.append(stem)
         if role in {"harmonic", "lead"}:
             where.append("si.filename NOT LIKE 'bass%'")
+        if role == "vocal":
+            # The live index labels ~480k corpus_4s\harmonic\ phrases (NULL bpm,
+            # NULL duration) as vocal; the folder is the more reliable label.
+            for folder in VOCAL_EXCLUDED_FOLDERS:
+                where.append("lower(replace(si.file_path, '/', '\\')) NOT LIKE ?")
+                params.append(f"%\\{folder}\\%")
     cleaned = [str(t).strip() for t in (tags or []) if str(t).strip()]
     if cleaned:
         like = " OR ".join("si.tags LIKE ?" for _ in cleaned)

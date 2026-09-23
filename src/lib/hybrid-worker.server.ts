@@ -68,9 +68,24 @@ function workerAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+/** Default render length when the studio sends no duration (3:30). */
+export const DEFAULT_WORKER_DURATION_SECONDS = 210;
+export const DEFAULT_WORKER_BPM = 110;
+
+/** 4/4 bars for a target length: bars = round(seconds * bpm / 240). */
+export function barsForDuration(seconds: number, bpm: number): number {
+  return Math.max(4, Math.min(256, Math.round((seconds * bpm) / 240)));
+}
+
+export type HybridVocalMode = "lead" | "adlib" | "none";
+
 export async function generateFromHybridWorker(input: {
   prompt: string;
   genreHint?: string;
+  durationSeconds?: number;
+  bpm?: number;
+  instrumental?: boolean;
+  lyrics?: string;
 }): Promise<HybridWorkerTrack> {
   const base = hybridWorkerUrl();
   if (!base) {
@@ -84,9 +99,26 @@ export async function generateFromHybridWorker(input: {
   }
   console.log("[HYBRID_WORKER] routing Gate 1 to", base);
 
+  const bpmRaw = Number(input.bpm);
+  const bpm = Number.isFinite(bpmRaw) && bpmRaw >= 60 && bpmRaw <= 200 ? bpmRaw : DEFAULT_WORKER_BPM;
+  const secondsRaw = Number(input.durationSeconds);
+  const durationSeconds =
+    Number.isFinite(secondsRaw) && secondsRaw >= 10 ? secondsRaw : DEFAULT_WORKER_DURATION_SECONDS;
+  const bars = barsForDuration(durationSeconds, bpm);
+  const vocalMode: HybridVocalMode = input.instrumental
+    ? "none"
+    : (input.lyrics || "").trim()
+      ? "lead"
+      : "adlib";
+  console.log("[HYBRID_WORKER] length", { durationSeconds, bpm, bars, vocalMode });
+
   const payload = JSON.stringify({
     prompt: prompt.slice(0, 2000),
     genre_hint: (input.genreHint || "").trim() || undefined,
+    bpm,
+    bars,
+    duration_sec: durationSeconds,
+    vocal_mode: vocalMode,
   });
   let created: Response | undefined;
   let lastFetchError = "";

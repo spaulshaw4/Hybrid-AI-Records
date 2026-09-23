@@ -111,7 +111,7 @@ export function sanitizeCompositionInput(
       ? { ...(sanitized.controls as Record<string, unknown>) }
       : {};
   const bpmCandidate = Number(sanitized.bpm ?? controlsRaw.bpm);
-  const bpm = Number.isFinite(bpmCandidate) && bpmCandidate > 0 ? bpmCandidate : 120;
+  const bpm = Number.isFinite(bpmCandidate) && bpmCandidate > 0 ? bpmCandidate : 110;
   sanitized.bpm = bpm;
   if (controlsRaw.bpm === undefined) controlsRaw.bpm = bpm;
   if (Object.keys(controlsRaw).length > 0) sanitized.controls = controlsRaw;
@@ -122,8 +122,15 @@ export function sanitizeCompositionInput(
     "C";
   sanitized.keySignature = keySignature;
 
+  // bars = round(seconds * bpm / 240) in 4/4; default length is 3:30.
+  const secondsCandidate = Number(sanitized.durationSeconds);
+  const targetSeconds =
+    Number.isFinite(secondsCandidate) && secondsCandidate >= 10 ? secondsCandidate : 210;
   const barsCandidate = Number(sanitized.bars);
-  sanitized.bars = Number.isFinite(barsCandidate) && barsCandidate > 0 ? barsCandidate : 32;
+  sanitized.bars =
+    Number.isFinite(barsCandidate) && barsCandidate > 0
+      ? barsCandidate
+      : Math.max(4, Math.min(256, Math.round((targetSeconds * bpm) / 240)));
 
   if (typeof sanitized.prompt !== "string" || !sanitized.prompt.trim()) {
     if (genre) sanitized.prompt = genre;

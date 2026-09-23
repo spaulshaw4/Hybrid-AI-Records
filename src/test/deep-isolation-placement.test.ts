@@ -228,7 +228,9 @@ describe("DeepIsolationPlacement", () => {
     expect(cleaned.genre).toBe("techno");
     expect(cleaned.bpm).toBe(128);
     expect(cleaned.keySignature).toBe("C");
-    expect(cleaned.bars).toBe(32);
+    // 210 s default at 128 BPM -> round(210 * 128 / 240) = 112 bars
+    expect(cleaned.bars).toBe(112);
+    expect(sanitizeCompositionInput({ prompt: "x", bpm: 110, durationSeconds: 210 }).bars).toBe(96);
     expect(cleaned.spend_idempotency_key).toBeUndefined();
     expect(cleaned.vault_id).toBeUndefined();
     expect(cleaned.__entanglementState).toBeUndefined();

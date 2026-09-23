@@ -381,6 +381,9 @@ export async function executePipeline(
             generateFromHybridWorker({
               prompt: input.prompt || input.style || "",
               genreHint: input.style || input.prompt || "",
+              durationSeconds: input.durationSeconds,
+              instrumental: input.instrumental,
+              lyrics: input.instrumental ? "" : input.lyrics,
             }),
             LOCAL_WORKER_TIMEOUT_MS,
             "Gate 1 (local Hybrid worker)",

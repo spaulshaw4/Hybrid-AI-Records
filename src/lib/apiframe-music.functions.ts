@@ -267,6 +267,10 @@ export async function runGenerateEngineTrack(
         generateFromHybridWorker({
           prompt: payload.prompt || genre,
           genreHint: genre,
+          durationSeconds,
+          bpm,
+          instrumental: payload.instrumental,
+          lyrics: lyricContent,
         }),
         LOCAL_WORKER_TIMEOUT_MS,
         "Gate 1 (local Hybrid worker)",

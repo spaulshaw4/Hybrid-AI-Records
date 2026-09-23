@@ -703,6 +703,8 @@ def _run_headless(
         cmd += ["--bpm", f"{float(opts['bpm']):.3f}"]
     if opts.get("duration_sec"):
         cmd += ["--duration", f"{float(opts['duration_sec']):.3f}"]
+    if opts.get("vocal_mode"):
+        cmd += ["--vocal-mode", str(opts["vocal_mode"])]
     if not _replicate_token_set():
         cmd.append("--offline")
     result = _run(cmd, cwd=_REPO_ROOT)
@@ -1084,6 +1086,15 @@ class CreateTrackBody(BaseModel):
     # Optional arrangement length: bars (quarter-note 4/4 bars) at ``bpm``.
     bars: int | None = Field(default=None, ge=4, le=256)
     bpm: float | None = Field(default=None, ge=60.0, le=200.0)
+    # Target length in seconds; used when ``bars`` is absent.
+    duration_sec: float | None = Field(default=None, ge=10.0, le=420.0)
+    # lead = lyrics expected, adlib = no lyrics, none = instrumental.
+    vocal_mode: str | None = Field(default=None, max_length=16)
+
+
+DEFAULT_RENDER_SECONDS = 210.0
+DEFAULT_RENDER_BPM = 110.0
+VOCAL_MODES = frozenset({"lead", "adlib", "none"})
 
 
 def _boot_production_brain() -> dict[str, Any]:
@@ -1186,10 +1197,22 @@ def create_app() -> Any:
         if body.bars is not None and body.bpm is None:
             raise HTTPException(status_code=400, detail="bars requires bpm")
         render_opts: dict[str, Any] = {}
-        if body.bpm is not None:
-            render_opts["bpm"] = float(body.bpm)
+        bpm = float(body.bpm) if body.bpm is not None else DEFAULT_RENDER_BPM
+        render_opts["bpm"] = bpm
         if body.bars is not None:
-            render_opts["duration_sec"] = float(body.bars) * 4.0 * 60.0 / float(body.bpm)
+            render_opts["duration_sec"] = float(body.bars) * 4.0 * 60.0 / bpm
+        elif body.duration_sec is not None:
+            render_opts["duration_sec"] = float(body.duration_sec)
+        else:
+            render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
+        vocal_mode = (body.vocal_mode or "").strip().lower()
+        if vocal_mode in VOCAL_MODES:
+            render_opts["vocal_mode"] = vocal_mode
+        _log(
+            f"[API_LENGTH] bpm={bpm:.1f} duration_sec={render_opts['duration_sec']:.1f} "
+            f"bars={round(render_opts['duration_sec'] * bpm / 240.0)} "
+            f"vocal_mode={render_opts.get('vocal_mode', 'auto')}"
+        )
         session_id = "ht_" + uuid.uuid4().hex[:12]
         job = {
             "session_id": session_id,

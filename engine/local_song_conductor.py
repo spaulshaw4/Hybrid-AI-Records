@@ -139,6 +139,22 @@ CONDUCTOR_ARCHETYPES: list[list[tuple[str, tuple[int, ...]]]] = [
     ],
 ]
 
+# Full-length song form for long renders (3:30 @ 110 BPM = 96 bars):
+# Intro 8 + Verse 8 | Chorus 16 | Verse 16 | Chorus 16 | Bridge 16 |
+# Final Chorus 8 + Outro 8. ``_fit_to_bars`` scales it to other lengths.
+FULL_SONG_ARCHETYPE: list[tuple[str, tuple[int, ...]]] = [
+    ("intro", (8,)),
+    ("verse", (8,)),
+    ("chorus", (16,)),
+    ("verse", (16,)),
+    ("chorus", (16,)),
+    ("bridge", (16,)),
+    ("chorus", (8,)),
+    ("outro", (8,)),
+]
+FULL_SONG_MIN_SECONDS = 150.0
+FULL_SONG_SKELETON = "intro_verse_chorus_verse_chorus_bridge_outro"
+
 INDEX_HONESTY = (
     "stem_type has no bass (harmonic 27944, rhythm 13126, vocal 10811, lead 844). "
     "Bass from filename/tags (bass_s4, 808, sub) or harmonic low-centroid fallback. "
@@ -248,8 +264,17 @@ def conduct_arrangement(
     key: str | None = None,
     scale: str | None = None,
 ) -> dict[str, Any]:
-    """Build a seeded Intro→Verse→Build→Drop map with per-section bus gains."""
+    """Build a seeded Intro→Verse→Build→Drop map with per-section bus gains.
+
+    Long renders (``duration_sec >= FULL_SONG_MIN_SECONDS``) use the full
+    verse/chorus/bridge form instead, scaled to the requested bar count.
+    """
     profile = conduct_profile(genre)
+    full_song = bool(duration_sec and float(duration_sec) >= FULL_SONG_MIN_SECONDS)
+    if full_song:
+        profile["archetypes"] = [list(FULL_SONG_ARCHETYPE)]
+        # Pre-drops steal bars from verses; the full form already has contrast.
+        profile["predrop_probability"] = 0.0
     arrangement = build_arrangement(
         prompt,
         genre,
@@ -261,8 +286,10 @@ def conduct_arrangement(
         profile=profile,
     )
     arrangement["conductor"] = CONDUCTOR_NAME
-    arrangement["skeleton"] = SKELETON_NAME
+    arrangement["skeleton"] = FULL_SONG_SKELETON if full_song else SKELETON_NAME
     arrangement["index_honesty"] = INDEX_HONESTY
+    if full_song:
+        shape_full_song_dynamics(arrangement)
     # Global Song Plan is built BEFORE any SQLite stem query. Section bar
     # lengths follow the arrangement brain so the assembler stays aligned.
     song_plan = build_song_plan(
@@ -297,6 +324,53 @@ def conduct_arrangement(
         f"aggression={song_plan.genre_blend.spectral_aggression:.2f}"
     )
     return arrangement
+
+
+def shape_full_song_dynamics(arrangement: dict[str, Any]) -> None:
+    """Section contrast for the full form (mutates ``arrangement['sections']``).
+
+    Intro: drums out, bass out, harmonic only. Verse 1: light drums, simplified
+    bass. Verse 2 swaps loop variants so it is not a copy of verse 1. The last
+    chorus is pushed to full level. Bridge: beat drops out, bass thinned.
+    Outro: strips down toward the tail.
+    """
+    sections = arrangement.get("sections") or []
+    pool = arrangement.get("variant_pool") or {}
+    choruses = [s for s in sections if s.get("role") == "chorus"]
+    verses = [s for s in sections if s.get("role") == "verse"]
+    for section in sections:
+        role = section.get("role")
+        act = section.setdefault("bus_activation", {})
+        if role == "intro":
+            act["rhythm"] = 0.0
+            act["bass"] = 0.0
+            act["vocal"] = 0.0
+            section["fill_bars"] = []
+        elif role == "bridge":
+            act["rhythm"] = 0.0
+            act["bass"] = round(min(float(act.get("bass", 0.0)), 0.30), 3)
+            section["fill_bars"] = []
+        elif role == "outro":
+            act["rhythm"] = round(min(float(act.get("rhythm", 0.0)), 0.30), 3)
+            act["bass"] = round(min(float(act.get("bass", 0.0)), 0.25), 3)
+            act["vocal"] = 0.0
+    if verses:
+        act = verses[0].setdefault("bus_activation", {})
+        act["rhythm"] = round(min(float(act.get("rhythm", 0.0)), 0.55), 3)
+        act["bass"] = round(min(float(act.get("bass", 0.0)), 0.55), 3)
+    if len(verses) >= 2:
+        first = verses[0].get("bus_variant") or {}
+        second = verses[1].setdefault("bus_variant", {})
+        for bus in ("rhythm", "vocal", "harmonic"):
+            size = max(1, int(pool.get(bus, 1)))
+            if size > 1:
+                second[bus] = (int(first.get(bus, 0)) + 1) % size
+    if choruses:
+        last = choruses[-1]
+        last["energy"] = max(float(last.get("energy") or 0.0), 1.0)
+        act = last.setdefault("bus_activation", {})
+        for bus in ("rhythm", "bass", "harmonic"):
+            act[bus] = 1.0
 
 
 def describe_conducted(arrangement: dict[str, Any]) -> str:

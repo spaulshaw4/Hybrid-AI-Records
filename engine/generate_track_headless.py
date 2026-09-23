@@ -559,6 +559,7 @@ def execute_prompt_pipeline(
     seed: int | None = None,
     request_id: str | None = None,
     arrange: bool = True,
+    vocal_mode: str | None = None,
 ) -> dict[str, Any]:
     session_dir = session_scratch_dir(scratch_dir, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -670,6 +671,10 @@ def execute_prompt_pipeline(
     elif duration_sec is not None and duration_sec > 0:
         _fit_blueprint_duration(blueprint, float(duration_sec))
         blueprint = validate_blueprint(blueprint, enforce_section_span=True)
+
+    if vocal_mode:
+        blueprint.setdefault("track_metadata", {})["vocal_mode"] = str(vocal_mode)
+        print(f"[VOCAL] mode={vocal_mode}")
 
     write_blueprint(blueprint, blueprint_path)
     meta = blueprint["track_metadata"]
@@ -933,6 +938,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip the local song conductor and use the legacy flat blueprint path",
     )
+    parser.add_argument(
+        "--vocal-mode",
+        choices=("lead", "adlib", "none"),
+        default=None,
+        help=(
+            "lead = lyrics expected (short ad-lib chops only on chorus/transition "
+            "sections), adlib = no lyrics, none = instrumental (vocal bus muted)"
+        ),
+    )
     args = parser.parse_args(argv)
     corpus = args.corpus
     if not corpus:
@@ -981,6 +995,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             request_id=args.request_id,
             arrange=not args.no_arrange,
+            vocal_mode=args.vocal_mode,
         )
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)
