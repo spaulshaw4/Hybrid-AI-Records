@@ -544,6 +544,8 @@ def build_song_plan(
         "bpm": bpm_i,
         "key": f"{root}_{scale_mode}",
         "time_signature": "4/4",
+        "genre": str(genre_hint or ""),
+        "genre_hint": str(genre_hint or ""),
     }
 
     return GlobalSongPlan(

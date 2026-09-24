@@ -5,7 +5,7 @@ section development come from ``get_arrangement_blueprint(genre, total_bars)``.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from engine.genre_arrangement_profiles import (
     ARRANGEMENT_FAMILIES,
@@ -13,6 +13,47 @@ from engine.genre_arrangement_profiles import (
     family_for_genre,
     normalise_section_role,
 )
+
+# Prompt-book structural maps → Hybrid 1.0 DSP console commands.
+# Catalog ids: prompt-book `cyberpunkdarks` / `electroswing`.
+GENRE_BLUEPRINTS: dict[str, dict[str, dict[str, Any]]] = {
+    "cyberpunk_darksynth": {
+        # neon-cold arpeggios & glitches → adrenalized sub drops / industrial kick
+        "intro":      {"drums_muted": True,  "bass_muted": True,  "sidechain_pump": 0.0, "lowpass_freq": 800,  "stereo_width": 0.8},
+        "verse_1":    {"drums_muted": False, "bass_muted": True,  "sidechain_pump": 0.4, "lowpass_freq": 2000, "stereo_width": 1.0},
+        "pre_chorus": {"drums_muted": False, "bass_muted": False, "sidechain_pump": 0.7, "lowpass_freq": 5000, "stereo_width": 1.1},
+        "chorus_1":   {"drums_muted": False, "bass_muted": False, "sidechain_pump": 1.0, "lowpass_freq": None, "stereo_width": 1.3},
+        "bridge":     {"drums_muted": True,  "bass_muted": False, "sidechain_pump": 0.2, "lowpass_freq": 1000, "stereo_width": 0.6},
+        "outro":      {"drums_muted": False, "bass_muted": True,  "sidechain_pump": 0.0, "lowpass_freq": 600,  "stereo_width": 0.8},
+    },
+    "electroswing": {
+        # speakeasy 78rpm / upright bass → roaring four-on-the-floor + brass
+        "intro":      {"drums_muted": True,  "bass_muted": False, "sidechain_pump": 0.0, "lowpass_freq": 1000, "stereo_width": 0.5},
+        "verse_1":    {"drums_muted": False, "bass_muted": False, "sidechain_pump": 0.2, "lowpass_freq": None, "stereo_width": 1.0},
+        "pre_chorus": {"drums_muted": True,  "bass_muted": False, "sidechain_pump": 0.0, "lowpass_freq": None, "stereo_width": 1.1},
+        "chorus_1":   {"drums_muted": False, "bass_muted": False, "sidechain_pump": 0.5, "lowpass_freq": None, "stereo_width": 1.25},
+        "bridge":     {"drums_muted": False, "bass_muted": True,  "sidechain_pump": 0.0, "lowpass_freq": 3000, "stereo_width": 0.8},
+        "outro":      {"drums_muted": True,  "bass_muted": True,  "sidechain_pump": 0.0, "lowpass_freq": 400,  "stereo_width": 0.5},
+    },
+}
+
+_GENRE_ALIASES: dict[str, str] = {
+    "cyberpunk_darksynth": "cyberpunk_darksynth",
+    "cyberpunkdarksynth": "cyberpunk_darksynth",
+    "cyberpunkdarks": "cyberpunk_darksynth",
+    "cyberpunk": "cyberpunk_darksynth",
+    "darksynth": "cyberpunk_darksynth",
+    "electroswing": "electroswing",
+    "electro_swing": "electroswing",
+}
+
+_CATALOG_FALLBACK: dict[str, Any] = {
+    "drums_muted": False,
+    "bass_muted": False,
+    "sidechain_pump": 0.0,
+    "lowpass_freq": None,
+    "stereo_width": 1.0,
+}
 
 # Development style per arrangement family.
 FAMILY_STYLE: dict[str, str] = {
@@ -343,7 +384,7 @@ def get_arrangement_blueprint(genre: str | None, total_bars: int) -> dict[str, A
     cursor = 0
     for role, bars in layout:
         role_n = normalise_section_role(role)
-        state = section_console_state(family, role_n)
+        state = get_section_blueprint(str(genre or ""), role_n)
         sections.append(
             {
                 "name": role_n,
@@ -379,6 +420,192 @@ def rules_for_bar(blueprint: Mapping[str, Any], bar: int) -> dict[str, Any]:
     return dict(sections[-1])
 
 
+def _plan_section_span(section: Any) -> tuple[str | None, int, int]:
+    if isinstance(section, Mapping):
+        name = section.get("name")
+        start = int(section.get("start_bar") or 0)
+        bars = int(section.get("bars") or 1)
+    else:
+        name = getattr(section, "name", None)
+        start = int(getattr(section, "start_bar", 0) or 0)
+        bars = int(getattr(section, "bars", 1) or 1)
+    return name, start, max(1, bars)
+
+
+def _normalize_genre_key(genre: str | None) -> str:
+    """Fold prompt-book / UI labels onto ``GENRE_BLUEPRINTS`` keys."""
+    clean = str(genre or "").lower().replace(" ", "_").replace("/", "").replace("-", "_")
+    while "__" in clean:
+        clean = clean.replace("__", "_")
+    clean = clean.strip("_")
+    if clean in GENRE_BLUEPRINTS:
+        return clean
+    if clean in _GENRE_ALIASES:
+        return _GENRE_ALIASES[clean]
+    if "darksynth" in clean or "cyberpunk" in clean:
+        return "cyberpunk_darksynth"
+    if "electroswing" in clean or "electro_swing" in clean:
+        return "electroswing"
+    return clean
+
+
+def _catalog_section_key(section_name: str) -> str:
+    """Map verse_2 / chorus_final onto the catalog slots (not the global clock)."""
+    name = str(section_name or "").lower()
+    if "intro" in name:
+        return "intro"
+    # Check pre-chorus before chorus — "pre_chorus" contains "chorus".
+    if "pre" in name and "chorus" in name:
+        return "pre_chorus"
+    if "verse" in name:
+        return "verse_1"
+    if "chorus" in name:
+        return "chorus_1"
+    if "bridge" in name or "break" in name:
+        return "bridge"
+    if "outro" in name:
+        return "outro"
+    role = normalise_section_role(section_name)
+    return {
+        "intro": "intro",
+        "verse": "verse_1",
+        "pre_chorus": "pre_chorus",
+        "build": "pre_chorus",
+        "chorus": "chorus_1",
+        "drop": "chorus_1",
+        "solo": "chorus_1",
+        "bridge": "bridge",
+        "breakdown": "bridge",
+        "outro": "outro",
+    }.get(role, name or "verse_1")
+
+
+def _family_as_catalog(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate family console rows into Hybrid 1.0 catalog commands."""
+    token = state.get("rhythm_filter")
+    cutoff: float | None = None
+    if isinstance(token, (int, float)):
+        cutoff = float(token)
+    elif isinstance(token, str) and token.startswith("lowpass_"):
+        digits = "".join(ch for ch in token if ch.isdigit())
+        cutoff = float(digits) if digits else None
+    drums_muted = not bool(state.get("drums_active", True))
+    return {
+        "drums_muted": drums_muted,
+        "bass_muted": not bool(state.get("bass_active", True)),
+        "sidechain_pump": (
+            0.8 if state.get("rhythm_swell") else (0.0 if drums_muted else 0.3)
+        ),
+        "lowpass_freq": cutoff,
+        "stereo_width": float(state.get("stereo_width") or 1.0),
+        "kick_muted": bool(state.get("kick_muted")),
+        "lead_active": bool(state.get("lead_active")),
+        "breakdown": bool(state.get("breakdown")),
+        "rhythm_swell": bool(state.get("rhythm_swell")),
+        "volume": dict(state.get("volume") or {}),
+    }
+
+
+def _hydrate_console(raw: Mapping[str, Any], *, role: str, genre: str) -> dict[str, Any]:
+    """Expand catalog commands into the keys ``apply_bar_dsp`` / mixer read."""
+    drums_muted = bool(raw.get("drums_muted", False))
+    bass_muted = bool(raw.get("bass_muted", False))
+    lowpass = raw.get("lowpass_freq")
+    cutoff = float(lowpass) if lowpass is not None else None
+    pump = float(raw.get("sidechain_pump") or 0.0)
+    width = float(raw.get("stereo_width") or 1.0)
+    rhythm_filter = f"lowpass_{int(round(cutoff))}Hz" if cutoff else None
+    return {
+        "drums_muted": drums_muted,
+        "bass_muted": bass_muted,
+        "drums_active": not drums_muted,
+        "bass_active": not bass_muted,
+        "kick_muted": bool(raw.get("kick_muted", drums_muted)),
+        "lead_active": bool(
+            raw.get(
+                "lead_active",
+                role in {"chorus", "pre_chorus", "bridge", "solo", "drop", "build"},
+            )
+        ),
+        "sidechain_pump": pump,
+        "lowpass_freq": cutoff,
+        "rhythm_filter": rhythm_filter,
+        "stereo_width": width,
+        "rhythm_swell": bool(raw.get("rhythm_swell")) or pump >= 0.8,
+        "breakdown": bool(raw.get("breakdown")) or (drums_muted and role == "bridge"),
+        "volume": dict(raw.get("volume") or {}),
+        "role": role,
+        "genre": genre,
+    }
+
+
+def genre_from_plan(plan: Any) -> str:
+    """Genre string the mixer / assembler must use — picker never supplies this."""
+    if plan is None:
+        return ""
+    meta: Any = {}
+    sources: Any = []
+    if isinstance(plan, Mapping):
+        meta = plan.get("core_metadata") or {}
+        sources = plan.get("source_genres") or []
+        direct = str(plan.get("genre") or plan.get("genre_hint") or "").strip()
+        if direct:
+            return direct
+    else:
+        meta = getattr(plan, "core_metadata", None) or {}
+        sources = getattr(plan, "source_genres", None) or []
+    if isinstance(meta, Mapping):
+        for key in ("genre", "genre_hint", "genre_lock"):
+            val = str(meta.get(key) or "").strip()
+            if val:
+                return val
+    if sources:
+        first = sources[0]
+        if isinstance(first, Mapping):
+            val = str(first.get("genre") or first.get("slug") or "").strip()
+            if val:
+                return val
+        else:
+            val = str(first or "").strip()
+            if val:
+                return val
+    return ""
+
+
+def get_section_blueprint(genre: str, section_name: str) -> dict[str, Any]:
+    """Fetch DSP rules based on the specific genre and section being rendered."""
+    clean_genre = _normalize_genre_key(genre)
+    # Fallback to electroswing if the specific genre is not yet mapped
+    resolved = clean_genre if clean_genre in GENRE_BLUEPRINTS else "electroswing"
+    blueprint_map = GENRE_BLUEPRINTS[resolved]
+
+    name = str(section_name or "")
+    base_section = _catalog_section_key(name)
+    raw = dict(blueprint_map.get(base_section) or _CATALOG_FALLBACK)
+    return _hydrate_console(
+        raw,
+        role=normalise_section_role(section_name),
+        genre=resolved,
+    )
+
+
+def rules_for_plan_bar(
+    blueprint: Mapping[str, Any],
+    bar: int,
+    plan_sections: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """Planner DSP for a bar: the song plan names the section, the rulebook mixes it."""
+    genre = str(blueprint.get("genre") or blueprint.get("family") or "")
+    if plan_sections:
+        idx = max(0, int(bar))
+        for section in plan_sections:
+            name, start, bars = _plan_section_span(section)
+            if start <= idx < start + bars:
+                return get_section_blueprint(genre, str(name or "verse"))
+    planned = rules_for_bar(blueprint, bar)
+    return get_section_blueprint(genre, str(planned.get("role") or planned.get("name") or "verse"))
+
+
 def dsp_rules_from_section(state: Mapping[str, Any]) -> dict[str, Any]:
     """Shape consumed by ``apply_bar_dsp`` / the relational mixer."""
     width = state.get("stereo_width", 1.0)
@@ -391,10 +618,14 @@ def dsp_rules_from_section(state: Mapping[str, Any]) -> dict[str, Any]:
     bass = bool(state.get("bass_active", True)) and not breakdown
     return {
         "drums_active": drums,
+        "drums_muted": not drums,
         "kick_muted": bool(state.get("kick_muted")),
         "bass_active": bass,
+        "bass_muted": not bass,
         "lead_active": bool(state.get("lead_active")),
         "rhythm_filter": state.get("rhythm_filter"),
+        "lowpass_freq": state.get("lowpass_freq"),
+        "sidechain_pump": float(state.get("sidechain_pump") or 0.0),
         "stereo_width": float(width or 1.0),
         "rhythm_swell": bool(state.get("rhythm_swell")),
         "breakdown": breakdown,
@@ -424,9 +655,5 @@ def rules_for_named_section(
     total_bars: int = 32,
 ) -> dict[str, Any]:
     """Look up executive rules from a section name (mixer path)."""
-    blueprint = get_arrangement_blueprint(genre, total_bars)
-    role = normalise_section_role(section_name)
-    for section in blueprint.get("sections") or []:
-        if section.get("role") == role:
-            return dsp_rules_from_section(section)
-    return dsp_rules_from_section(section_console_state(family_for_genre(genre), role))
+    _ = total_bars
+    return get_section_blueprint(str(genre or ""), str(section_name or ""))

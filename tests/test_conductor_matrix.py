@@ -14,6 +14,7 @@ if _REPO not in sys.path:
 from engine.conductor_matrix import (  # noqa: E402
     apply_bar_dsp,
     apply_dsp_rules,
+    apply_stereo_width,
     generate_energy_arc,
     mute_kick_on_beat_one,
     rhythm_filter_hz,
@@ -94,3 +95,21 @@ def test_bar_dsp_filters_harmonic_and_mutes_bass():
     assert float(np.max(np.abs(out["bass"]))) == 0.0
     # 2 kHz tone through 400 Hz LPF should collapse.
     assert float(np.max(np.abs(out["harmonic"]))) < 0.05
+
+
+def test_stereo_width_upmixes_mono_then_applies_midside():
+    mono = np.linspace(-0.4, 0.4, 64)
+    unchanged = apply_stereo_width(mono, 1.0)
+    assert unchanged.ndim == 1
+    assert np.allclose(unchanged, mono)
+
+    wide = apply_stereo_width(mono, 1.25)
+    assert wide.ndim == 2 and wide.shape[1] == 2
+    # Dual-mono has no side; mid/side leaves L == R.
+    assert np.allclose(wide[:, 0], wide[:, 1])
+
+    stereo = np.column_stack((mono, np.flip(mono)))
+    widened = apply_stereo_width(stereo, 1.5)
+    dry_side = (stereo[:, 0] - stereo[:, 1]) / 2.0
+    wide_side = (widened[:, 0] - widened[:, 1]) / 2.0
+    assert float(np.sqrt(np.mean(wide_side**2))) > float(np.sqrt(np.mean(dry_side**2)))

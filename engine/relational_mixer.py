@@ -282,10 +282,12 @@ class RelationalMixer:
         mix_intents: MixIntents | Mapping[str, Any] | None = None,
         section: SectionPlan | Mapping[str, Any] | None = None,
         impulse: np.ndarray | None = None,
+        genre: str | None = None,
     ) -> None:
         self.sr = int(sr)
         self.mix_intents = _mix_intents_from_mapping(mix_intents)
         self.section = section
+        self.genre = str(genre or "")
         self._impulse = (
             np.asarray(impulse, dtype=np.float64)
             if impulse is not None
@@ -507,25 +509,35 @@ class RelationalMixer:
             "reverb_n_stems": 0,
         }
 
-        from engine.genre_planner import apply_executive_mix, rules_for_named_section
+        from engine.genre_planner import apply_executive_mix, get_section_blueprint
 
         section_name = None
-        genre = None
+        genre = self.genre or None
         bpm = 120.0
         if isinstance(section, SectionPlan):
             section_name = section.name
         elif isinstance(section, Mapping):
             section_name = section.get("name")
-            genre = section.get("genre")
+            genre = section.get("genre") or genre
             try:
                 bpm = float(section.get("bpm") or bpm)
             except (TypeError, ValueError):
                 pass
-        planner_rules = rules_for_named_section(genre, section_name)
-        working = apply_executive_mix(working, planner_rules, self.sr, bpm)
+        planner_rules = get_section_blueprint(str(genre or ""), str(section_name or ""))
+        # Assembler already applied LPF/volume. Mixer re-asserts mutes + Mid/Side
+        # so a named intro is never mixed like a chorus.
+        mix_rules = dict(planner_rules)
+        mix_rules["rhythm_filter"] = None
+        mix_rules["lowpass_freq"] = None
+        mix_rules["volume"] = {}
+        mix_rules["rhythm_swell"] = False
+        working = apply_executive_mix(working, mix_rules, self.sr, bpm)
+        meters["planner_genre"] = planner_rules.get("genre")
         meters["planner_role"] = planner_rules.get("role")
         meters["planner_kick_muted"] = bool(planner_rules.get("kick_muted"))
         meters["planner_width"] = planner_rules.get("stereo_width")
+        meters["planner_drums_muted"] = bool(planner_rules.get("drums_muted"))
+        meters["planner_bass_muted"] = bool(planner_rules.get("bass_muted"))
 
         rhythm = working.get("rhythm")
         bass = working.get("bass")
@@ -538,10 +550,23 @@ class RelationalMixer:
             aligned, align_meta = self.align_bass_to_kick(bass, rhythm)
             working["bass"] = aligned
             meters.update(align_meta)
-            # Duck after snap so the envelope rides the locked pocket.
-            working["bass"] = self.sidechain_duck_bass(working["bass"], rhythm)
-            meters["sidechain_applied"] = True
-            meters["sidechain_db"] = self._sidechain_db()
+            # Duck after snap. Planner sidechain_pump (0..1) owns depth;
+            # 0.0 leaves the pocket dry (speakeasy intro / neon-cold pad).
+            pump = float(planner_rules.get("sidechain_pump") or 0.0)
+            if pump > 1e-6:
+                lo, hi = DEFAULT_SIDECHAIN_DB
+                duck_db = lo + (hi - lo) * min(1.0, pump)
+                if pump >= 1.0:
+                    duck_db = hi + 4.0  # adrenalized chorus — aggressive pump
+                working["bass"] = self.sidechain_duck_bass(
+                    working["bass"], rhythm, duck_db=duck_db
+                )
+                meters["sidechain_applied"] = True
+                meters["sidechain_db"] = duck_db
+                meters["sidechain_pump"] = pump
+            else:
+                meters["sidechain_applied"] = False
+                meters["sidechain_pump"] = 0.0
 
         harmonic = working.get("harmonic")
         # Pocket detector: every present vocal / lead bus with real signal.
@@ -653,9 +678,10 @@ def apply_relational_mix(
     *,
     mix_intents: MixIntents | Mapping[str, Any] | None = None,
     section: SectionPlan | Mapping[str, Any] | None = None,
+    genre: str | None = None,
 ) -> RelationalMixResult:
     """Convenience entry used by the assembler / conductor orchestration."""
-    mixer = RelationalMixer(sr, mix_intents=mix_intents, section=section)
+    mixer = RelationalMixer(sr, mix_intents=mix_intents, section=section, genre=genre)
     return mixer.process(stems, section=section)
 
 
@@ -670,6 +696,7 @@ def apply_sectioned_relational_mix(
     mix_intents: MixIntents | Mapping[str, Any] | None = None,
     xfade_ms: float = SECTION_XFADE_MS,
     warmup_ms: float = SECTION_WARMUP_MS,
+    genre: str | None = None,
 ) -> RelationalMixResult:
     """Relational mix applied per section window instead of one peak section.
 
@@ -686,7 +713,7 @@ def apply_sectioned_relational_mix(
     Windows are clamped to the buffer; the first starts at 0 and the last
     ends at the buffer length.
     """
-    mixer = RelationalMixer(sr, mix_intents=mix_intents)
+    mixer = RelationalMixer(sr, mix_intents=mix_intents, genre=genre)
     buses = [b for b in MIX_BUSES if b in stems and np.asarray(stems[b]).size]
     if not buses or not windows:
         return mixer.process(stems, section=windows[0][0] if windows else None)
@@ -729,7 +756,15 @@ def apply_sectioned_relational_mix(
             gain[-ramp:] *= 1.0 - (np.linspace(0.0, 1.0, ramp, endpoint=False) + 0.5 / ramp)
         for bus in buses:
             processed = as_frames(np.asarray(result.stems[bus], dtype=np.float64))[0]
-            out[bus][lo:hi] += processed[lo - wlo : hi - wlo] * gain[:, np.newaxis]
+            chunk = processed[lo - wlo : hi - wlo]
+            dest = out[bus]
+            if chunk.shape[1] > dest.shape[1]:
+                out[bus] = np.repeat(dest, chunk.shape[1], axis=1)[:, : chunk.shape[1]]
+                dest = out[bus]
+                was_1d[bus] = False
+            elif dest.shape[1] > chunk.shape[1] and chunk.shape[1] > 0:
+                chunk = np.repeat(chunk, dest.shape[1], axis=1)[:, : dest.shape[1]]
+            dest[lo:hi] += chunk * gain[:, np.newaxis]
         name = section.get("name") if isinstance(section, Mapping) else getattr(section, "name", None)
         section_meters.append(
             {

@@ -18,9 +18,9 @@ import soundfile as sf
 
 from engine.conductor_matrix import apply_bar_dsp, blend_bar_into
 from engine.genre_planner import (
-    dsp_rules_from_section,
+    genre_from_plan,
     get_arrangement_blueprint,
-    rules_for_bar,
+    get_section_blueprint,
 )
 from engine.hybrid_conductor import AdaptiveConductor
 from engine.stem_adapter import StemAdapter, section_sample_count, tile_loop_on_grid
@@ -113,6 +113,41 @@ def _ensure_2d(audio: np.ndarray, channels: int = 1) -> np.ndarray:
     elif data.shape[1] > channels:
         data = data[:, :channels]
     return data
+
+
+def _split_samples(total: int, parts: int) -> list[int]:
+    """Cumulative edges ``[0, …, total]`` of length ``parts + 1``."""
+    count = max(1, int(parts))
+    size = max(0, int(total))
+    base, rem = divmod(size, count)
+    edges = [0]
+    for i in range(count):
+        edges.append(edges[-1] + base + (1 if i < rem else 0))
+    return edges
+
+
+def _bar_sample_edges(
+    plan: GlobalSongPlan,
+    bpm: float,
+    sr: int,
+    bpb: float,
+    total_bars: int,
+    total_n: int,
+) -> list[int]:
+    """Bar boundaries that land on each plan section's rounded length."""
+    if plan.sections:
+        edges = [0]
+        for section in plan.sections:
+            sec_n = section_sample_count(
+                int(section.bars), bpm, sr, beats_per_bar=bpb
+            )
+            local = _split_samples(sec_n, int(section.bars))
+            start = edges[-1]
+            edges.extend(start + offset for offset in local[1:])
+        if edges[-1] != total_n:
+            edges[-1] = total_n
+        return edges
+    return _split_samples(total_n, total_bars)
 
 
 def _sum_tracks(tracks: Mapping[str, np.ndarray]) -> np.ndarray:
@@ -238,7 +273,18 @@ class ArrangementAssembler:
             1,
             int(plan.total_bars or 0) or sum(int(s.bars) for s in plan.sections) or 1,
         )
-        total_n = section_sample_count(total_bars, bpm, self.sr, beats_per_bar=bpb)
+        section_lengths = [
+            section_sample_count(int(s.bars), bpm, self.sr, beats_per_bar=bpb)
+            for s in plan.sections
+        ]
+        total_n = (
+            sum(section_lengths)
+            if section_lengths
+            else section_sample_count(total_bars, bpm, self.sr, beats_per_bar=bpb)
+        )
+        bar_edges = _bar_sample_edges(
+            plan, bpm, self.sr, bpb, total_bars, total_n
+        )
         zc = max(1, int(round(self.sr * 0.015)))
 
         trace: dict[str, Any] = {
@@ -259,15 +305,7 @@ class ArrangementAssembler:
             band_meta, dry = self._lock_band(
                 plan, adapter, genre, bpm, key, total_n, fade, zc, trace
             )
-            genre_name = ""
-            if isinstance(plan.core_metadata, dict):
-                genre_name = str(
-                    plan.core_metadata.get("genre") or plan.core_metadata.get("genre_hint") or ""
-                )
-            if not genre_name and plan.source_genres:
-                first = plan.source_genres[0]
-                if isinstance(first, dict):
-                    genre_name = str(first.get("genre") or first.get("slug") or "")
+            genre_name = genre_from_plan(plan)
             # Executive planner owns arrangement. Picker already locked the band.
             blueprint = get_arrangement_blueprint(genre_name or None, total_bars)
             conductor = AdaptiveConductor(total_bars, genre_name)
@@ -278,26 +316,43 @@ class ArrangementAssembler:
             }
             last_rules: dict[str, Any] | None = None
             for bar in range(total_bars):
-                start = 0 if bar == 0 else section_sample_count(
-                    bar, bpm, self.sr, beats_per_bar=bpb
-                )
-                end = min(
-                    total_n,
-                    section_sample_count(bar + 1, bpm, self.sr, beats_per_bar=bpb),
+                start = bar_edges[bar] if bar < len(bar_edges) else total_n
+                end = (
+                    min(total_n, bar_edges[bar + 1])
+                    if bar + 1 < len(bar_edges)
+                    else total_n
                 )
                 if end <= start:
                     continue
-                energy = float(tension[bar])
-                planned = rules_for_bar(blueprint, bar)
-                rules = dsp_rules_from_section(planned)
+                energy = float(tension[min(bar, len(tension) - 1)])
+                section_name = "verse"
+                for section in plan.sections:
+                    start_bar = int(section.start_bar)
+                    if start_bar <= bar < start_bar + int(section.bars):
+                        section_name = str(section.name)
+                        break
+                else:
+                    planned = next(
+                        (
+                            s
+                            for s in (blueprint.get("sections") or [])
+                            if int(s.get("start_bar") or 0)
+                            <= bar
+                            < int(s.get("start_bar") or 0) + int(s.get("bars") or 1)
+                        ),
+                        None,
+                    )
+                    if planned:
+                        section_name = str(planned.get("name") or planned.get("role") or "verse")
+                rules = get_section_blueprint(genre_name or "", section_name)
                 rules["tension"] = energy
                 if rules != last_rules:
                     print(
                         f"[COMPOSITION] Arranging section {rules.get('role', bar)} "
                         f"with anchor {self._anchor_slug or '-'}... "
                         f"kick_muted={rules['kick_muted']} "
-                        f"filter={rules['rhythm_filter'] or '-'} "
-                        f"width={rules.get('stereo_width')}",
+                        f"filter={rules.get('lowpass_freq') or rules.get('rhythm_filter') or '-'} "
+                        f"width={rules.get('stereo_width')} pump={rules.get('sidechain_pump')}",
                         flush=True,
                     )
                     last_rules = dict(rules)
@@ -408,11 +463,11 @@ class ArrangementAssembler:
             active_stems=["drums", "bass", "rhythm_guitar"],
             frequency_reservations={},
         )
-        wanted = set(BAND_FAMILIES)
+        wanted: set[str] = set()
         for section in plan.sections:
-            for family in self._families_for_section(section):
-                if family in {"vocal", "lead_guitar", "synth_lead"}:
-                    wanted.add(family)
+            wanted.update(self._families_for_section(section))
+        if not wanted:
+            wanted = set(BAND_FAMILIES)
         families = [name for name in BAND_FAMILIES if name in wanted]
         families.extend(sorted(wanted - set(BAND_FAMILIES)))
 

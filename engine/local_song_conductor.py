@@ -428,22 +428,29 @@ def mix_conducted_stems(
     song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
     mix_intents = None
     section = None
+    genre = ""
     if isinstance(song_plan, dict):
+        from engine.genre_planner import genre_from_plan
+
+        genre = genre_from_plan(song_plan)
         mix_intents = song_plan.get("mix_intents")
         n = max((np.asarray(a).shape[0] for a in stems.values() if np.asarray(a).size), default=0)
-        windows = section_windows(song_plan, n, int(sr))
+        windows = section_windows(song_plan, n, int(sr), genre=genre)
         if windows:
             return apply_sectioned_relational_mix(
-                stems, int(sr), windows, mix_intents=mix_intents
+                stems, int(sr), windows, mix_intents=mix_intents, genre=genre
             )
         sections = song_plan.get("sections") or []
         if sections:
             section = max(sections, key=lambda s: float(s.get("energy_level") or 0.0))
+            if isinstance(section, dict) and genre and not section.get("genre"):
+                section = {**section, "genre": genre, "bpm": song_plan.get("bpm")}
     return apply_relational_mix(
         stems,
         int(sr),
         mix_intents=mix_intents,
         section=section,
+        genre=genre or None,
     )
 
 
@@ -451,6 +458,8 @@ def section_windows(
     song_plan: dict[str, Any],
     n_samples: int,
     sr: int,
+    *,
+    genre: str | None = None,
 ) -> list[tuple[dict[str, Any], int, int]] | None:
     """``(section, start_sample, end_sample)`` per plan section, or ``None``.
 
@@ -464,11 +473,19 @@ def section_windows(
     if any(not isinstance(s, dict) or not s.get("bars") for s in sections):
         return None
     bpb = beats_per_bar(song_plan.get("time_signature"))
+    if not genre:
+        from engine.genre_planner import genre_from_plan
+
+        genre = genre_from_plan(song_plan)
     windows: list[tuple[dict[str, Any], int, int]] = []
     cursor = 0
     for section in sections:
         length = section_sample_count(int(section["bars"]), bpm, int(sr), beats_per_bar=bpb)
-        windows.append((section, cursor, min(n_samples, cursor + length)))
+        payload = dict(section)
+        if genre and not payload.get("genre"):
+            payload["genre"] = genre
+        payload["bpm"] = bpm
+        windows.append((payload, cursor, min(n_samples, cursor + length)))
         cursor += length
     return windows
 

@@ -272,3 +272,33 @@ def test_conductor_mix_helper_uses_song_plan_intents():
     assert result.meters["sidechain_applied"] is True
     # Silent vocal -> pocket not applied (non-destructive fallback).
     assert result.meters["vocal_pocket_applied"] is False
+
+
+def test_mixer_applies_genre_planner_mutes_width_and_pump():
+    n = SR // 4
+    t = np.arange(n) / SR
+    harmonic = np.column_stack(
+        (0.3 * np.sin(2 * np.pi * 440.0 * t), 0.3 * np.sin(2 * np.pi * 554.0 * t))
+    )
+    intro = apply_relational_mix(
+        {"rhythm": _kick_pulse(n, [0]), "bass": _bass_tone(n), "harmonic": harmonic},
+        SR,
+        section={"name": "intro", "active_stems": ["rhythm_guitar"], "energy_level": 0.3},
+        genre="cyberpunk_darksynth",
+    )
+    assert intro.meters["planner_genre"] == "cyberpunk_darksynth"
+    assert intro.meters["planner_drums_muted"] is True
+    assert intro.meters["planner_bass_muted"] is True
+    assert float(np.max(np.abs(intro.stems["rhythm"]))) == 0.0
+    assert float(np.max(np.abs(intro.stems["bass"]))) == 0.0
+    assert intro.meters["sidechain_applied"] is False
+
+    chorus = apply_relational_mix(
+        {"rhythm": _kick_pulse(n, [0]), "bass": _bass_tone(n), "harmonic": harmonic},
+        SR,
+        section={"name": "chorus_1", "active_stems": ["drums", "bass"], "energy_level": 0.95},
+        genre="Cyberpunk / Darksynth",
+    )
+    assert chorus.meters["planner_width"] == 1.3
+    assert chorus.meters["sidechain_pump"] == 1.0
+    assert chorus.meters["sidechain_applied"] is True

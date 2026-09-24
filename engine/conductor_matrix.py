@@ -113,12 +113,22 @@ def energy_to_unit(energy_10: float) -> float:
 
 
 def rhythm_filter_hz(rules: Mapping[str, Any]) -> float | None:
+    freq = rules.get("lowpass_freq")
+    if freq is not None:
+        try:
+            return float(freq)
+        except (TypeError, ValueError):
+            pass
     token = rules.get("rhythm_filter")
     if not token:
         return None
     if isinstance(token, (int, float)):
         return float(token)
-    return RHYTHM_FILTER_HZ.get(str(token))
+    known = RHYTHM_FILTER_HZ.get(str(token))
+    if known:
+        return known
+    digits = "".join(ch for ch in str(token) if ch.isdigit())
+    return float(digits) if digits else None
 
 
 def mute_kick_on_beat_one(
@@ -164,20 +174,39 @@ def mute_kick_on_beat_one(
     return restore_shape(out, was_1d, frames.dtype)
 
 
-def apply_stereo_width(audio: np.ndarray, width: float) -> np.ndarray:
-    """Mid/side width. ``1.0`` is unchanged; ``<1`` narrows; ``>1`` widens."""
-    frames, was_1d = as_frames(np.asarray(audio, dtype=np.float64))
-    if frames.size == 0:
-        return restore_shape(frames, was_1d)
+def apply_stereo_width(audio_array: np.ndarray, width_factor: float) -> np.ndarray:
+    """Mid/side width. Mono upmixes to dual-mono when ``width_factor != 1``."""
+    audio_array = np.asarray(audio_array, dtype=np.float64)
+    width_factor = float(width_factor)
+    if audio_array.size == 0:
+        return audio_array
+
+    # Channel-first (ch, n) from the executive snippet.
+    if audio_array.ndim == 2 and audio_array.shape[0] in (1, 2) and audio_array.shape[1] > 2:
+        if audio_array.shape[0] == 1:
+            if width_factor == 1.0:
+                return audio_array
+            audio_array = np.vstack((audio_array, audio_array))
+        left, right = audio_array[0], audio_array[1]
+        mid = (left + right) / 2.0
+        side = (left - right) / 2.0
+        return np.array(
+            [mid + (side * width_factor), mid - (side * width_factor)]
+        )
+
+    frames, was_1d = as_frames(audio_array)
+    # 1. Catch mono stems and upmix to dual-mono safely
     if frames.shape[1] < 2:
+        if width_factor == 1.0:
+            return restore_shape(frames, was_1d)
         frames = np.repeat(frames, 2, axis=1)
-        was_1d = False
-    mid = (frames[:, 0] + frames[:, 1]) * 0.5
-    side = (frames[:, 0] - frames[:, 1]) * 0.5
-    scale = float(width)
-    left = mid + side * scale
-    right = mid - side * scale
-    return np.column_stack((left, right))
+    # 2. Apply Mid/Side widening to the stereo matrix
+    left, right = frames[:, 0], frames[:, 1]
+    mid = (left + right) / 2.0
+    side = (left - right) / 2.0
+    new_left = mid + (side * width_factor)
+    new_right = mid - (side * width_factor)
+    return np.column_stack((new_left, new_right))
 
 
 def _bus_rms(audio: np.ndarray) -> float:
@@ -229,20 +258,22 @@ def apply_bar_dsp(
     """Apply one bar of console rules to dry (unlocked) band stems."""
     out: dict[str, np.ndarray] = {}
     cutoff = rhythm_filter_hz(rules)
+    drums_active = bool(rules.get("drums_active", True)) and not rules.get("drums_muted")
+    bass_active = bool(rules.get("bass_active", True)) and not rules.get("bass_muted")
 
     for bus, audio in dry.items():
         frames, was_1d = as_frames(np.asarray(audio, dtype=np.float64))
         processed = restore_shape(frames, False)
 
         if bus == "rhythm":
-            if rules.get("kick_muted") and rules.get("drums_active"):
+            if rules.get("kick_muted") and drums_active:
                 processed = mute_kick_on_beat_one(
                     processed, sr, bpm, beats_per_bar=beats_per_bar
                 )
-            if not rules.get("drums_active", True):
+            if not drums_active:
                 processed = np.zeros_like(np.asarray(processed, dtype=np.float64))
         elif bus == "bass":
-            if not rules.get("bass_active", True):
+            if not bass_active:
                 processed = np.zeros_like(np.asarray(processed, dtype=np.float64))
         elif bus == "harmonic":
             if cutoff:
@@ -254,9 +285,9 @@ def apply_bar_dsp(
                 processed = np.zeros_like(np.asarray(processed, dtype=np.float64))
 
         gain = float((rules.get("volume") or {}).get(bus, 1.0))
-        if bus == "rhythm" and not rules.get("drums_active", True):
+        if bus == "rhythm" and not drums_active:
             gain = 0.0
-        if bus == "bass" and not rules.get("bass_active", True):
+        if bus == "bass" and not bass_active:
             gain = 0.0
         processed = np.asarray(processed, dtype=np.float64) * float(np.clip(gain, 0.0, 2.0))
         frames_out, _ = as_frames(processed)
