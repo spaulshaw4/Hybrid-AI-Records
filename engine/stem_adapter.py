@@ -231,6 +231,9 @@ class StemAdapter:
             shift = int(meta["pitch_shift_semitones"])
 
         target_n = self.target_length(int(bars), float(target_bpm))
+        # Rate-lock to the UI BPM (112-native → 89). Do not pad to target_n
+        # here — lock_slice_to_tempo zero-pads, which would tile silence.
+        # enforce_length below loops the stretched audio onto the bar grid.
         stretched = stretch_to_bpm(
             audio,
             source_bpm=float(src_bpm) if src_bpm else None,

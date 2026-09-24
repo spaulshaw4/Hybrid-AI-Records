@@ -14,7 +14,7 @@ export type CatalogPlaybackState = {
   playing: boolean;
   currentTime: number;
   duration: number;
-  owner: "artists" | "radio" | "album" | null;
+  owner: "artists" | "radio" | "album" | "vault" | null;
 };
 
 type Listener = () => void;

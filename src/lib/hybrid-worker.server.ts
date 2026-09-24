@@ -61,11 +61,39 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
-function workerAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function workerAuthHeaders(json = true): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers["Content-Type"] = "application/json";
   const token = (process.env.HYBRID_WORKER_TOKEN || "").trim();
   if (token) headers["X-Hybrid-Worker-Token"] = token;
   return headers;
+}
+
+async function vocalBytesFromInput(input: {
+  vocalFile?: Buffer | Uint8Array;
+  vocalAudioBase64?: string;
+  referenceAudioUrl?: string;
+}): Promise<{ bytes: Buffer; fileName: string } | null> {
+  if (input.vocalFile && input.vocalFile.byteLength > 64) {
+    return { bytes: Buffer.from(input.vocalFile), fileName: "vocal.webm" };
+  }
+  const b64 = (input.vocalAudioBase64 || "").trim();
+  if (b64) {
+    const bytes = Buffer.from(b64, "base64");
+    if (bytes.byteLength > 64) return { bytes, fileName: "mic_take.webm" };
+  }
+  const url = (input.referenceAudioUrl || "").trim();
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.byteLength < 64) return null;
+    const name = url.split("/").pop()?.split("?")[0] || "vocal.webm";
+    return { bytes, fileName: name };
+  } catch {
+    return null;
+  }
 }
 
 /** Default render length when the studio sends no duration (3:30). */
@@ -86,6 +114,11 @@ export async function generateFromHybridWorker(input: {
   bpm?: number;
   instrumental?: boolean;
   lyrics?: string;
+  key?: string;
+  vocalFile?: Buffer | Uint8Array;
+  vocalAudioBase64?: string;
+  vocalFileName?: string;
+  referenceAudioUrl?: string;
 }): Promise<HybridWorkerTrack> {
   const base = hybridWorkerUrl();
   if (!base) {
@@ -110,24 +143,41 @@ export async function generateFromHybridWorker(input: {
     : (input.lyrics || "").trim()
       ? "lead"
       : "adlib";
-  console.log("[HYBRID_WORKER] length", { durationSeconds, bpm, bars, vocalMode });
-
-  const payload = JSON.stringify({
-    prompt: prompt.slice(0, 2000),
-    genre_hint: (input.genreHint || "").trim() || undefined,
+  const vocal = input.instrumental ? null : await vocalBytesFromInput(input);
+  console.log("[HYBRID_WORKER] length", {
+    durationSeconds,
     bpm,
     bars,
-    duration_sec: durationSeconds,
-    vocal_mode: vocalMode,
+    vocalMode,
+    vocalBytes: vocal?.bytes.byteLength ?? 0,
   });
+
+  // Multipart — do NOT set Content-Type; fetch supplies the boundary.
+  const form = new FormData();
+  form.append("prompt", prompt.slice(0, 2000));
+  form.append("title", prompt.slice(0, 120));
+  form.append("genre", (input.genreHint || "").trim());
+  form.append("genre_hint", (input.genreHint || "").trim());
+  form.append("bpm", String(bpm));
+  form.append("bars", String(bars));
+  form.append("duration_sec", String(durationSeconds));
+  form.append("vocal_mode", vocalMode);
+  form.append("key", (input.key || "").trim() || "G");
+  if (vocal) {
+    const name = input.vocalFileName || vocal.fileName || "mic_take.webm";
+    form.append("vocal_file", new Blob([new Uint8Array(vocal.bytes)]), name);
+    console.log("[HYBRID_WORKER] appended vocal_file", name, vocal.bytes.byteLength);
+  } else {
+    console.log("[HYBRID_WORKER] no vocal_file on this generate");
+  }
   let created: Response | undefined;
   let lastFetchError = "";
   for (const path of ["/generate", "/api/tracks/create"]) {
     try {
       created = await fetch(`${base}${path}`, {
         method: "POST",
-        headers: workerAuthHeaders(),
-        body: payload,
+        headers: workerAuthHeaders(false),
+        body: form,
       });
       if (created.status !== 404) {
         console.log("[HYBRID_WORKER] posted", `${base}${path}`, created.status);

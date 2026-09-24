@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sqlite3
+from pathlib import Path
 from random import Random
 from typing import Any, Iterable
 
@@ -95,6 +97,78 @@ BASS_NAME_TOKENS = ("bass", "808")
 # Directory names that cannot hold a vocal slice regardless of stem_type.
 VOCAL_EXCLUDED_FOLDERS = ("harmonic", "rhythm", "drums", "bass")
 BASS_CENTROID_FALLBACK_HZ = 450.0
+
+# slice_index has no pack_id column. Session identity is the parent folder
+# (``001 - ANiMAL - Clinic A``) or, when files sit under a role directory
+# (``corpus_4s/rhythm/...``), the filename prefix before ``__``.
+ROLE_PACK_DIRS = frozenset({
+    "rhythm", "harmonic", "vocal", "vocals", "lead", "bass", "drums", "drum",
+    "other", "stems", "slices", "oneshots", "fx",
+})
+AFFINITY_BONUS = 100.0
+# Same root (1.0), relative maj/min (0.85), or neighbouring fifth (0.72).
+AFFINITY_KEY_MIN = 0.72
+_PHRASE_TAIL_RE = re.compile(r"_(phrase|s4|loop|oneshot)_\d+$", re.IGNORECASE)
+
+
+def slug_pack_token(raw: str | None) -> str:
+    """``001 - ANiMAL - Clinic A`` → ``001_animal_clinic_a``."""
+    return re.sub(r"[^a-z0-9]+", "_", str(raw or "").lower()).strip("_")
+
+
+def extract_session_slug(file_path: str | None) -> str:
+    """Session slug from ``name__role.wav`` or the parent folder.
+
+    ``vintage_funk_kit_01__drums.wav`` → ``vintage_funk_kit_01``
+    ``stems/indie_groove_120/drums.wav`` → ``indie_groove_120``
+    Role folders (``rhythm/``, ``harmonic/``) fall back to the filename
+    prefix so they still cluster with the session directory of the same name.
+    """
+    if not file_path:
+        return ""
+    path = Path(str(file_path))
+    stem_name = path.stem
+    if "__" in stem_name:
+        return stem_name.split("__", 1)[0]
+    parent = path.parent.name
+    if parent.lower() in ROLE_PACK_DIRS:
+        stripped = _PHRASE_TAIL_RE.sub("", stem_name)
+        return stripped or parent
+    return parent
+
+
+def pack_id_from_path(file_path: str | None) -> str:
+    """Normalized pack id for scoring (``slice_index`` has no pack column)."""
+    return slug_pack_token(extract_session_slug(file_path))
+
+
+def apply_pack_affinity(
+    ranked: list[dict[str, Any]],
+    anchor_pack_id: str | None,
+) -> list[dict[str, Any]]:
+    """+100 to same-pack rows. Foreign packs only if no key-compatible same-pack hit."""
+    if not ranked:
+        return ranked
+    anchor = slug_pack_token(anchor_pack_id) if anchor_pack_id else ""
+    if not anchor:
+        for item in ranked:
+            item.setdefault("pack_id", pack_id_from_path(item.get("file_path")))
+            item.setdefault("affinity_score", 0.0)
+        return ranked
+    for item in ranked:
+        pid = pack_id_from_path(item.get("file_path"))
+        item["pack_id"] = pid
+        bonus = AFFINITY_BONUS if pid == anchor else 0.0
+        item["affinity_score"] = bonus
+        item["rank_key"] = float(item.get("rank_key") or item.get("score") or 0.0) + bonus
+    ranked.sort(key=lambda item: (-float(item["rank_key"]), str(item.get("file_path") or "")))
+    same_key = [
+        item
+        for item in ranked
+        if float(item.get("affinity_score") or 0.0) >= AFFINITY_BONUS
+        and float((item.get("score_detail") or {}).get("key") or 0.0) >= AFFINITY_KEY_MIN
+    ]
+    return same_key or ranked
 
 
 def note_to_semitone(note: str | None) -> int | None:
@@ -245,6 +319,178 @@ BPM_INDEX_NAME = "idx_slice_index_bpm"
 BPM_INDEX_DDL = (
     f"CREATE INDEX IF NOT EXISTS {BPM_INDEX_NAME} ON slice_index (stem_type, estimated_bpm)"
 )
+INDEXED_POOL_LIMIT = 200
+BPM_ABS_WINDOW = 8.0
+
+
+def _pitch_class(key: str | None) -> str:
+    """``D_minor`` / ``D minor`` / ``Dm`` → ``D`` for ``detected_key`` equality."""
+    semi = note_to_semitone(key)
+    if semi is None:
+        return ""
+    return NOTE_NAMES[semi]
+
+
+def _row_is_bass(row: dict[str, Any]) -> bool:
+    name = os.path.basename(str(row.get("filename") or row.get("file_path") or "")).lower()
+    tags = str(row.get("tags") or "").lower()
+    if name.startswith("mixture"):
+        return False
+    if name.startswith("sub_") or "_sub_" in name or " sub " in f" {tags} ":
+        return True
+    return any(token in name or token in tags for token in BASS_NAME_TOKENS)
+
+
+def fetch_indexed_pool(
+    conn: sqlite3.Connection,
+    stem_type: str,
+    target_key: str | None,
+    target_bpm: float | None,
+    *,
+    limit: int = INDEXED_POOL_LIMIT,
+) -> list[dict[str, Any]]:
+    """Indexed ``stem_type`` + key + ``ABS(bpm - target) <= 8`` pool.
+
+    Maps the requested ``audio_slices(slice_id, bpm, key)`` shape onto
+    ``slice_index(id, estimated_bpm, detected_key)``. Never ``LIKE '%slug%'``
+    or ``ORDER BY RANDOM()`` — those scan the full 542k-row catalog.
+    """
+    stem = str(stem_type or "").strip().lower()
+    if not stem:
+        return []
+    where = ["si.stem_type = ?"]
+    params: list[Any] = [stem]
+    key = _pitch_class(target_key)
+    if key:
+        where.append("si.detected_key = ?")
+        params.append(key)
+    if target_bpm is not None:
+        bpm = float(target_bpm)
+        # Equivalent to ABS(estimated_bpm - :bpm) <= 8.0; BETWEEN uses the
+        # (stem_type, estimated_bpm) index instead of a full-table scan.
+        where.append("si.estimated_bpm BETWEEN ? AND ?")
+        params.extend([bpm - BPM_ABS_WINDOW, bpm + BPM_ABS_WINDOW])
+    sql = (
+        "SELECT si.id AS slice_id, si.file_path, si.estimated_bpm AS bpm, "
+        "si.detected_key AS key, si.filename, si.stem_type, si.rms_db, "
+        "si.spectral_centroid, si.duration_sec, si.tags, si.estimated_bpm, "
+        "si.detected_key "
+        "FROM slice_index AS si "
+        f"WHERE {' AND '.join(where)} "
+        "LIMIT ?"
+    )
+    params.append(max(1, int(limit)))
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error:
+        return []
+    keys = (
+        "slice_id", "file_path", "bpm", "key", "filename", "stem_type",
+        "rms_db", "spectral_centroid", "duration_sec", "tags",
+        "estimated_bpm", "detected_key",
+    )
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def _attach_history(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Cooldown counts for the already-fetched pool only (never a catalog scan)."""
+    paths = [str(row.get("file_path") or "") for row in rows if row.get("file_path")]
+    if not paths:
+        return
+    placeholders = ",".join("?" * len(paths))
+    try:
+        hist = conn.execute(
+            "SELECT file_path, last_used, COALESCE(use_count, 0) "
+            f"FROM slice_history WHERE file_path IN ({placeholders})",
+            paths,
+        ).fetchall()
+    except sqlite3.Error:
+        return
+    by_path = {str(path): (last_used, int(count or 0)) for path, last_used, count in hist}
+    for row in rows:
+        last_used, count = by_path.get(str(row.get("file_path") or ""), (None, 0))
+        row["last_used"] = last_used
+        row["use_count"] = count
+
+
+def _python_role_filter(rows: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    """Drop mixtures / wrong-role filenames after the indexed fetch."""
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        name = str(row.get("filename") or "").lower()
+        if name.startswith("mixture"):
+            continue
+        if role == "bass":
+            if _row_is_bass(row):
+                kept.append(row)
+            continue
+        if role == "harmonic" and name.startswith("bass"):
+            continue
+        kept.append(row)
+    if role == "bass" and not kept:
+        kept = [
+            row
+            for row in rows
+            if not str(row.get("filename") or "").lower().startswith("mixture")
+            and 1.0 < float(row.get("spectral_centroid") or 0.0) < BASS_CENTROID_FALLBACK_HZ
+        ]
+    return kept
+
+
+def _merge_unique(
+    primary: list[dict[str, Any]],
+    extra: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    seen = {str(row.get("file_path") or "") for row in primary}
+    merged = list(primary)
+    for row in extra:
+        path = str(row.get("file_path") or "")
+        if path and path not in seen:
+            seen.add(path)
+            merged.append(row)
+    return merged
+
+
+def _indexed_candidates(
+    conn: sqlite3.Connection,
+    role: str,
+    target_key: str | None,
+    target_bpm: float | None,
+    *,
+    limit: int = INDEXED_POOL_LIMIT,
+    min_rows: int = 1,
+    use_cooldown: bool = False,
+) -> list[dict[str, Any]]:
+    """Stem + key + ±8 BPM, then widen key / BPM if the tight pool is short."""
+    stem = _stem_type_for_role(role) or "harmonic"
+    need = max(1, int(min_rows))
+    rows = _python_role_filter(
+        fetch_indexed_pool(conn, stem, target_key, target_bpm, limit=limit),
+        role,
+    )
+    if len(rows) < need:
+        rows = _merge_unique(
+            rows,
+            _python_role_filter(
+                fetch_indexed_pool(conn, stem, None, target_bpm, limit=limit),
+                role,
+            ),
+        )
+    if len(rows) < need:
+        rows = _merge_unique(
+            rows,
+            _python_role_filter(
+                fetch_indexed_pool(conn, stem, None, None, limit=limit),
+                role,
+            ),
+        )
+    if use_cooldown:
+        _attach_history(conn, rows)
+    else:
+        for row in rows:
+            row.setdefault("last_used", None)
+            row.setdefault("use_count", 0)
+    return rows
 
 
 def bpm_window_sql(
@@ -559,38 +805,23 @@ def select_for_role(
     top_k: int = 12,
     require_on_disk: bool = True,
     use_cooldown: bool = True,
+    anchor_pack_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch, score, and seeded-pick ``count`` slices for one role."""
-    rows = fetch_candidate_rows(
-        conn, role, tags=tags, limit=fetch_limit, use_cooldown=use_cooldown
-    )
-    if role == "bass" and not rows:
-        rows = fetch_candidate_rows(
+    """Fetch, score, and seeded-pick ``count`` slices for one role.
+
+    Candidates come from the indexed stem + key + ±8 BPM pool (LIMIT 200),
+    not a catalog-wide ``LIKE`` / ``RANDOM()`` scan.
+    """
+    _ = (tags, fetch_limit)  # tags are filename tokens; the indexed pool is the source.
+    try:
+        rows = _indexed_candidates(
             conn,
             role,
-            tags=None,
-            limit=fetch_limit,
+            target_key,
+            target_bpm,
+            limit=INDEXED_POOL_LIMIT,
+            min_rows=max(int(count), int(top_k), 12),
             use_cooldown=use_cooldown,
-            bass_source="low_centroid",
-        )
-    ranked = rank_candidates(
-        rows,
-        role,
-        target_key,
-        target_bpm,
-        centroid_target_hz=centroid_target_hz,
-        energy_level=energy_level,
-        require_on_disk=require_on_disk,
-        use_cooldown=use_cooldown,
-    )
-    if role == "bass" and not ranked:
-        rows = fetch_candidate_rows(
-            conn,
-            role,
-            tags=None,
-            limit=fetch_limit,
-            use_cooldown=use_cooldown,
-            bass_source="low_centroid",
         )
         ranked = rank_candidates(
             rows,
@@ -602,23 +833,87 @@ def select_for_role(
             require_on_disk=require_on_disk,
             use_cooldown=use_cooldown,
         )
-    if not ranked and tags:
-        # Tags in this corpus are filename tokens, not descriptors. Retry
-        # without them rather than returning an empty bus.
-        rows = fetch_candidate_rows(
-            conn, role, tags=None, limit=fetch_limit, use_cooldown=use_cooldown
+    except Exception as exc:
+        print(
+            f"[SELECT] {role} picker failed ({type(exc).__name__}: {exc}) — empty",
+            flush=True,
         )
-        ranked = rank_candidates(
-            rows,
-            role,
-            target_key,
-            target_bpm,
-            centroid_target_hz=centroid_target_hz,
-            energy_level=energy_level,
-            require_on_disk=require_on_disk,
-            use_cooldown=use_cooldown,
-        )
+        return []
+    if role != "rhythm":
+        ranked = apply_pack_affinity(ranked, anchor_pack_id)
+    else:
+        for item in ranked:
+            item.setdefault("pack_id", pack_id_from_path(item.get("file_path")))
+            item.setdefault("affinity_score", 0.0)
     return pick_variants(ranked, count, rng, top_k=top_k)
+
+
+def fetch_stem_with_pack_affinity(
+    conn: sqlite3.Connection,
+    stem_type: str,
+    anchor_slug: str,
+    target_key: str,
+    target_bpm: float,
+    *,
+    require_on_disk: bool = True,
+    use_cooldown: bool = False,
+) -> tuple[dict[str, Any] | None, str]:
+    """One indexed pool (stem + key + ±8 BPM, LIMIT 200), then slug-match in Python.
+
+    Never ``LIKE '%slug%'`` or ``ORDER BY RANDOM()`` on the 542k-row catalog.
+    Zero matches return ``(None, "empty")`` — never raise.
+    """
+    family = str(stem_type or "").strip().lower()
+    role = {
+        "drums": "rhythm",
+        "drum": "rhythm",
+        "rhythm": "rhythm",
+        "bass": "bass",
+        "guitar": "harmonic",
+        "rhythm_guitar": "harmonic",
+        "keys": "harmonic",
+        "synth": "harmonic",
+        "harmonic": "harmonic",
+        "vocal": "vocal",
+        "vocals": "vocal",
+    }.get(family, family or "harmonic")
+    try:
+        rows = _indexed_candidates(
+            conn,
+            role,
+            target_key,
+            target_bpm,
+            limit=INDEXED_POOL_LIMIT,
+            use_cooldown=use_cooldown,
+        )
+        ranked = rank_candidates(
+            rows,
+            role,
+            target_key,
+            target_bpm,
+            require_on_disk=require_on_disk,
+            use_cooldown=use_cooldown,
+        )
+        pool = ranked or rows
+    except Exception as exc:
+        print(
+            f"[AFFINITY] picker failed ({type(exc).__name__}: {exc}) — empty",
+            flush=True,
+        )
+        return None, "empty"
+    if not pool:
+        return None, "empty"
+    want = str(anchor_slug or "")
+    locked = [
+        row
+        for row in pool
+        if extract_session_slug(row.get("file_path")) == want
+        or pack_id_from_path(row.get("file_path")) == slug_pack_token(want)
+    ]
+    chosen = locked[0] if locked else pool[0]
+    chosen["affinity_source"] = "session_locked" if locked else "global_fallback"
+    chosen["pack_id"] = pack_id_from_path(chosen.get("file_path"))
+    return chosen, chosen["affinity_source"]
 
 
 def describe_selection(role: str, picks: list[dict[str, Any]]) -> str:

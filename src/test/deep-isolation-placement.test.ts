@@ -227,10 +227,21 @@ describe("DeepIsolationPlacement", () => {
     expect(cleaned.prompt).toBe("neon bass");
     expect(cleaned.genre).toBe("techno");
     expect(cleaned.bpm).toBe(128);
-    expect(cleaned.keySignature).toBe("C");
+    // Techno maps to the dark minor pool (E / D / F# minor), not a flat "C".
+    expect(["E minor", "D minor", "F# minor"]).toContain(cleaned.keySignature);
     // 210 s default at 128 BPM -> round(210 * 128 / 240) = 112 bars
     expect(cleaned.bars).toBe(112);
     expect(sanitizeCompositionInput({ prompt: "x", bpm: 110, durationSeconds: 210 }).bars).toBe(96);
+    expect(
+      sanitizeCompositionInput({ prompt: "upbeat summer hit", genre: "pop" }).keySignature,
+    ).toMatch(/major$/i);
+    expect(
+      sanitizeCompositionInput({
+        prompt: "moody",
+        genre: "pop",
+        keySignature: "E minor",
+      }).keySignature,
+    ).toBe("E minor");
     expect(cleaned.spend_idempotency_key).toBeUndefined();
     expect(cleaned.vault_id).toBeUndefined();
     expect(cleaned.__entanglementState).toBeUndefined();

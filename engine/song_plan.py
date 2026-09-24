@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+import numpy as np
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from engine.genre_arrangement_profiles import normalise_section_role
@@ -391,6 +393,12 @@ def build_song_plan(
     nudges = arrangement_nudges_from_vector(blended)
     mix_intents = _mix_intents_from_vector(blended)
 
+    # Genre-aware default when the user did not lock a key (avoids universal E minor).
+    if not key:
+        from engine.genre_key_defaults import resolve_genre_default_key
+
+        key = resolve_genre_default_key(genre_hint, prompt, seed=seed)
+
     root, scale_mode = parse_key_scale(key)
     if scale:
         scale_mode = str(scale).strip().lower() or scale_mode
@@ -407,12 +415,35 @@ def build_song_plan(
     roadmap: list[dict[str, Any]] = []
     cursor = 0
 
+    from engine.conductor_matrix import apply_dsp_rules, filter_stems_for_rules
+    from engine.hybrid_conductor import AdaptiveConductor
+
+    planned_default = 44
+    if arrangement_sections:
+        planned_default = sum(
+            max(1, int(raw.get("bars") or raw.get("slice_count") or 4))
+            for raw in arrangement_sections
+        )
+    else:
+        planned_default = 44
+    conductor = AdaptiveConductor(
+        int(total_bars) if total_bars and int(total_bars) > 0 else planned_default,
+        str(genre_hint or ""),
+    )
+    bar_arc = conductor.generate_tension_map()
+
     if arrangement_sections:
         for raw in arrangement_sections:
             role = normalise_section_role(raw.get("role") or raw.get("name") or "verse")
             name = str(raw.get("name") or role)
             bars = max(1, int(raw.get("bars") or raw.get("slice_count") or 4))
-            energy = clamp01(float(raw.get("energy") or raw.get("energy_level") or 0.5))
+            if raw.get("energy") is None and raw.get("energy_level") is None:
+                slice_arc = bar_arc[cursor : cursor + bars]
+                energy = conductor.tension_to_unit(
+                    float(np.mean(slice_arc)) if slice_arc.size else 50.0
+                )
+            else:
+                energy = clamp01(float(raw.get("energy") or raw.get("energy_level") or 0.5))
             activation = raw.get("bus_activation") if isinstance(raw.get("bus_activation"), dict) else None
             section_romans = role_progression(scale_mode, role, density)
             chords = [
@@ -431,7 +462,10 @@ def build_song_plan(
                         "section": name,
                     }
                 )
-            stems = _active_stems_for(role, energy, activation)
+            stems = filter_stems_for_rules(
+                _active_stems_for(role, energy, activation),
+                conductor.evaluate_dsp_rules(float(energy) * 100.0),
+            )
             sections_out.append(
                 SectionPlan(
                     name=name,
@@ -455,8 +489,11 @@ def build_song_plan(
             ("bridge", 4, 0.55),
             ("outro", 4, 0.30),
         ]
-        for name, bars, energy in default_skeleton:
+        for name, bars, _legacy_energy in default_skeleton:
             role = normalise_section_role(name)
+            slice_arc = bar_arc[cursor : cursor + bars]
+            energy_10 = float(np.mean(slice_arc)) if slice_arc.size else 50.0
+            energy = conductor.tension_to_unit(energy_10)
             chords = [
                 _roman_to_chord(root, scale_mode, roman, density) for roman in romans
             ]
@@ -471,7 +508,10 @@ def build_song_plan(
                         "section": name,
                     }
                 )
-            stems = _active_stems_for(role, energy)
+            stems = filter_stems_for_rules(
+                _active_stems_for(role, energy),
+                conductor.evaluate_dsp_rules(energy_10),
+            )
             sections_out.append(
                 SectionPlan(
                     name=name,
@@ -490,7 +530,16 @@ def build_song_plan(
         total = cursor
 
     structural = [s.name for s in sections_out]
-    energy_arc = [{"section": s.name, "energy": s.energy_level} for s in sections_out]
+    energy_arc = [
+        {
+            "section": s.name,
+            "energy": s.energy_level,
+            "energy_10": round(float(s.energy_level) * 10.0, 2),
+            "tension": round(float(s.energy_level) * 100.0, 2),
+            "dsp": apply_dsp_rules(float(s.energy_level) * 100.0),
+        }
+        for s in sections_out
+    ]
     core_metadata = {
         "bpm": bpm_i,
         "key": f"{root}_{scale_mode}",

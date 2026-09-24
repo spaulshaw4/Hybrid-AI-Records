@@ -3,6 +3,7 @@
 Replaces blind stem summing with relational rules driven by ``SectionPlan`` /
 ``MixIntents`` from the Global Song Plan:
 
+* Kick → bass transient onset snap (rhythmic pocket)
 * Kick -> bass low-end ducking (< 120 Hz)
 * Vocal / solo pocketing (1.0-3.5 kHz dip on harmonic competitors)
 * Shared-room reverb (one IR, per-bus wet returns — no cross-stem bleed)
@@ -22,6 +23,7 @@ from engine.dsp_utils import (
     convolve_reverb,
     db_to_lin,
     envelope_follower,
+    lowpass,
     peak_dbfs,
     restore_shape,
     rms_dbfs,
@@ -57,6 +59,11 @@ SIDECHAIN_RELEASE_MS = 80.0
 POCKET_ATTACK_MS = 8.0
 POCKET_RELEASE_MS = 120.0
 VOCAL_GATE = 1e-3
+# Kick–bass onset snap: max shift to lock slap / phase masking.
+KICK_BASS_SNAP_MS = 32.0
+KICK_BASS_MIN_SEP_MS = 80.0
+KICK_BASS_ONSET_THRESH = 0.35
+KICK_BASS_XFADE_MS = 4.0
 
 
 @dataclass
@@ -74,6 +81,161 @@ def _empty_like(ref: np.ndarray) -> np.ndarray:
 
 def _clip(value: float, lo: float, hi: float) -> float:
     return float(max(lo, min(hi, value)))
+
+
+def detect_low_onsets(
+    audio: np.ndarray,
+    sr: int,
+    *,
+    lp_hz: float = SIDECHAIN_LP_HZ,
+    thresh: float = KICK_BASS_ONSET_THRESH,
+    min_sep_ms: float = KICK_BASS_MIN_SEP_MS,
+) -> np.ndarray:
+    """Peak-pick low-band energy bursts (kick / sub onsets). Returns sample indices.
+
+    Uses a 40–``lp_hz`` bandpass + absolute value + short boxcar smooth — faster
+    than a release-heavy envelope follower so millisecond-scale slap is visible.
+    """
+    if audio is None or np.asarray(audio).size == 0 or sr <= 0:
+        return np.zeros(0, dtype=np.int64)
+    mono = to_mono(np.asarray(audio, dtype=np.float64))
+    # Kick / sub body; bandpass avoids DC and hat bleed.
+    band = bandpass(mono, sr, 35.0, max(60.0, float(lp_hz)))
+    mag = np.abs(band)
+    # ~3 ms boxcar to tame sample noise without burying the transient.
+    win = max(3, int(round(0.003 * float(sr))))
+    if win % 2 == 0:
+        win += 1
+    kernel = np.ones(win, dtype=np.float64) / float(win)
+    smooth = np.convolve(mag, kernel, mode="same")
+    peak = float(np.max(smooth)) if smooth.size else 0.0
+    if peak < EPS:
+        return np.zeros(0, dtype=np.int64)
+    norm = smooth / (peak + EPS)
+    # Local maxima above threshold with a refractory gap.
+    min_sep = max(1, int(round(float(min_sep_ms) * float(sr) / 1000.0)))
+    floor = float(thresh)
+    candidates: list[int] = []
+    i = 1
+    n = int(norm.size)
+    while i < n - 1:
+        if norm[i] >= floor and norm[i] >= norm[i - 1] and norm[i] >= norm[i + 1]:
+            candidates.append(i)
+            i += min_sep
+            continue
+        i += 1
+    if not candidates:
+        # Fallback: rising-edge crossings when peaks are plateaus.
+        delta = np.diff(norm, prepend=norm[0])
+        raw = np.flatnonzero((delta > 0.01) & (norm >= floor * 0.7))
+        last = -min_sep
+        for idx in raw.tolist():
+            if idx - last >= min_sep:
+                candidates.append(int(idx))
+                last = int(idx)
+    return np.asarray(candidates, dtype=np.int64)
+
+
+def align_bass_to_kick_onsets(
+    bass: np.ndarray,
+    rhythm: np.ndarray,
+    sr: int,
+    *,
+    max_snap_ms: float = KICK_BASS_SNAP_MS,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Snap bass onsets onto the kick transient grid within ±``max_snap_ms``.
+
+    Removes slap (loose low-end) and phase masking from bass that starts a few
+    milliseconds early/late relative to the kick. Uses segment-wise sample
+    shifts with a short crossfade so boundaries stay click-free.
+    """
+    meta: dict[str, Any] = {
+        "kick_bass_aligned": False,
+        "kick_onsets": 0,
+        "bass_onsets": 0,
+        "snaps": 0,
+        "median_shift_ms": 0.0,
+    }
+    if bass is None or rhythm is None:
+        return bass, meta
+    bass_arr = np.asarray(bass)
+    rhythm_arr = np.asarray(rhythm)
+    if bass_arr.size == 0 or rhythm_arr.size == 0 or sr <= 0:
+        return bass, meta
+
+    frames, was_1d = as_frames(bass_arr)
+    n = frames.shape[0]
+    rhythm_a = align_length(rhythm_arr, n)
+
+    kick_onsets = detect_low_onsets(rhythm_a, sr)
+    bass_onsets = detect_low_onsets(to_mono(bass_arr), sr)
+    meta["kick_onsets"] = int(kick_onsets.size)
+    meta["bass_onsets"] = int(bass_onsets.size)
+    if kick_onsets.size == 0 or bass_onsets.size == 0:
+        return restore_shape(frames, was_1d, frames.dtype), meta
+
+    max_snap = max(1, int(round(float(max_snap_ms) * float(sr) / 1000.0)))
+    shifts: list[int] = []
+    pairs: list[tuple[int, int]] = []  # (bass_onset, kick_onset)
+    for b_on in bass_onsets.tolist():
+        nearest = int(kick_onsets[np.argmin(np.abs(kick_onsets - b_on))])
+        delta = nearest - int(b_on)
+        if abs(delta) <= max_snap and delta != 0:
+            shifts.append(delta)
+            pairs.append((int(b_on), nearest))
+
+    if not pairs:
+        return restore_shape(frames, was_1d, frames.dtype), meta
+
+    # Build output by relocating each snapped bass onset region.
+    out = frames.copy()
+    xfade = max(1, int(round(KICK_BASS_XFADE_MS * float(sr) / 1000.0)))
+    # Sort by destination to keep deterministic overwrite order.
+    pairs.sort(key=lambda p: p[1])
+    for b_on, k_on in pairs:
+        delta = k_on - b_on
+        # Segment spans midpoint to previous/next bass onset.
+        # Use a local window around the onset (± half min separation).
+        half = max(max_snap * 2, int(0.04 * sr))
+        src_lo = max(0, b_on - half)
+        src_hi = min(n, b_on + half)
+        dst_lo = src_lo + delta
+        dst_hi = src_hi + delta
+        if dst_lo < 0:
+            src_lo -= dst_lo
+            dst_lo = 0
+        if dst_hi > n:
+            overflow = dst_hi - n
+            src_hi -= overflow
+            dst_hi = n
+        if src_hi <= src_lo or dst_hi <= dst_lo:
+            continue
+        length = min(src_hi - src_lo, dst_hi - dst_lo)
+        src_hi = src_lo + length
+        dst_hi = dst_lo + length
+        chunk = frames[src_lo:src_hi].copy()
+        # Clear the old onset region (avoid double hits).
+        clear_lo = max(0, b_on - xfade)
+        clear_hi = min(n, b_on + half)
+        out[clear_lo:clear_hi] *= 0.0
+        # Equal-power-ish linear crossfade into destination.
+        fade = min(xfade, length // 2)
+        if fade > 0:
+            ramp = np.linspace(0.0, 1.0, fade, dtype=np.float64)[:, np.newaxis]
+            existing = out[dst_lo:dst_hi].copy()
+            chunk[:fade] = chunk[:fade] * ramp + existing[:fade] * (1.0 - ramp)
+            chunk[-fade:] = chunk[-fade:] * ramp[::-1] + existing[-fade:] * (1.0 - ramp[::-1])
+        out[dst_lo:dst_hi] = chunk
+
+    median_shift = float(np.median(shifts)) if shifts else 0.0
+    meta.update(
+        {
+            "kick_bass_aligned": True,
+            "snaps": len(pairs),
+            "median_shift_ms": round(1000.0 * median_shift / float(sr), 3),
+        }
+    )
+    return restore_shape(out, was_1d, frames.dtype), meta
 
 
 def _mix_intents_from_mapping(raw: Mapping[str, Any] | MixIntents | None) -> MixIntents:
@@ -128,6 +290,18 @@ class RelationalMixer:
             np.asarray(impulse, dtype=np.float64)
             if impulse is not None
             else synthesize_impulse(self.sr, decay_sec=1.15)
+        )
+
+    def align_bass_to_kick(
+        self,
+        bass: np.ndarray,
+        rhythm: np.ndarray,
+        *,
+        max_snap_ms: float = KICK_BASS_SNAP_MS,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Snap bass slice onsets onto kick transients (rhythmic pocket)."""
+        return align_bass_to_kick_onsets(
+            bass, rhythm, self.sr, max_snap_ms=max_snap_ms
         )
 
     def sidechain_duck_bass(
@@ -286,9 +460,9 @@ class RelationalMixer:
     ) -> RelationalMixResult:
         """Apply relational rules and return processed stems + summed master.
 
-        Order: kick→bass duck, 1.0-3.5 kHz pocket on the harmonic bed (keyed
-        by vocal and/or lead bus), carve make-up gain, then (optionally) the
-        shared-room reverb.
+        Order: kick→bass onset snap, kick→bass duck, 1.0-3.5 kHz pocket on the
+        harmonic bed (keyed by vocal and/or lead bus), carve make-up gain, then
+        (optionally) the shared-room reverb.
         """
         section = section if section is not None else self.section
         energy = _section_energy(section)
@@ -326,11 +500,32 @@ class RelationalMixer:
 
         meters: dict[str, Any] = {
             "sidechain_applied": False,
+            "kick_bass_aligned": False,
             "vocal_pocket_applied": False,
             "reverb_send": 0.0,
             "section_energy": energy,
             "reverb_n_stems": 0,
         }
+
+        from engine.genre_planner import apply_executive_mix, rules_for_named_section
+
+        section_name = None
+        genre = None
+        bpm = 120.0
+        if isinstance(section, SectionPlan):
+            section_name = section.name
+        elif isinstance(section, Mapping):
+            section_name = section.get("name")
+            genre = section.get("genre")
+            try:
+                bpm = float(section.get("bpm") or bpm)
+            except (TypeError, ValueError):
+                pass
+        planner_rules = rules_for_named_section(genre, section_name)
+        working = apply_executive_mix(working, planner_rules, self.sr, bpm)
+        meters["planner_role"] = planner_rules.get("role")
+        meters["planner_kick_muted"] = bool(planner_rules.get("kick_muted"))
+        meters["planner_width"] = planner_rules.get("stereo_width")
 
         rhythm = working.get("rhythm")
         bass = working.get("bass")
@@ -340,8 +535,11 @@ class RelationalMixer:
             and np.asarray(rhythm).size
             and np.asarray(bass).size
         ):
-            # Always try sidechain when both buses exist; section may omit names.
-            working["bass"] = self.sidechain_duck_bass(bass, rhythm)
+            aligned, align_meta = self.align_bass_to_kick(bass, rhythm)
+            working["bass"] = aligned
+            meters.update(align_meta)
+            # Duck after snap so the envelope rides the locked pocket.
+            working["bass"] = self.sidechain_duck_bass(working["bass"], rhythm)
             meters["sidechain_applied"] = True
             meters["sidechain_db"] = self._sidechain_db()
 
@@ -539,6 +737,9 @@ def apply_sectioned_relational_mix(
                 "start_sample": s,
                 "end_sample": e,
                 "sidechain_applied": bool(result.meters.get("sidechain_applied")),
+                "kick_bass_aligned": bool(result.meters.get("kick_bass_aligned")),
+                "snaps": int(result.meters.get("snaps") or 0),
+                "median_shift_ms": float(result.meters.get("median_shift_ms") or 0.0),
                 "vocal_pocket_applied": bool(result.meters.get("vocal_pocket_applied")),
                 "pocket_keyed_by": result.meters.get("pocket_keyed_by", []),
                 "makeup_gains": {
@@ -560,6 +761,15 @@ def apply_sectioned_relational_mix(
         "sectioned": True,
         "sections": section_meters,
         "sidechain_applied": any(m["sidechain_applied"] for m in section_meters),
+        "kick_bass_aligned": any(m["kick_bass_aligned"] for m in section_meters),
+        "snaps": int(sum(int(m.get("snaps") or 0) for m in section_meters)),
+        "median_shift_ms": float(
+            np.median(
+                [float(m["median_shift_ms"]) for m in section_meters if m.get("median_shift_ms")]
+            )
+            if any(m.get("median_shift_ms") for m in section_meters)
+            else 0.0
+        ),
         "vocal_pocket_applied": any(m["vocal_pocket_applied"] for m in section_meters),
         "reverb_send": send,
         "reverb_n_stems": sum(

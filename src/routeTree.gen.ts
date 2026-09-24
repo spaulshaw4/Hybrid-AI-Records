@@ -43,6 +43,7 @@ import { Route as DevSyncBadgeRouteImport } from './routes/dev.sync-badge'
 import { Route as DevBackgroundReportRouteImport } from './routes/dev.background-report'
 import { Route as CheckoutReturnRouteImport } from './routes/checkout.return'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
+import { Route as ApiLocalReleasesRouteImport } from './routes/api/local-releases'
 import { Route as AccountLedgerRouteImport } from './routes/account.ledger'
 import { Route as AccountDownloadsRouteImport } from './routes/account.downloads'
 import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
@@ -249,6 +250,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/callback',
   path: '/callback',
   getParentRoute: () => AuthRoute,
+} as any)
+const ApiLocalReleasesRoute = ApiLocalReleasesRouteImport.update({
+  id: '/api/local-releases',
+  path: '/api/local-releases',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AccountLedgerRoute = AccountLedgerRouteImport.update({
   id: '/ledger',
@@ -482,6 +488,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/api/local-releases': typeof ApiLocalReleasesRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
@@ -554,6 +561,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/api/local-releases': typeof ApiLocalReleasesRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
@@ -628,6 +636,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account/downloads': typeof AccountDownloadsRoute
   '/account/ledger': typeof AccountLedgerRoute
+  '/api/local-releases': typeof ApiLocalReleasesRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/checkout/return': typeof CheckoutReturnRoute
   '/dev/background-report': typeof DevBackgroundReportRoute
@@ -702,6 +711,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/api/local-releases'
     | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
@@ -774,6 +784,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/api/local-releases'
     | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
@@ -847,6 +858,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-protected-resource'
     | '/account/downloads'
     | '/account/ledger'
+    | '/api/local-releases'
     | '/auth/callback'
     | '/checkout/return'
     | '/dev/background-report'
@@ -919,6 +931,7 @@ export interface RootRouteChildren {
   Char91DotmcpChar93ListToolsRoute: typeof Char91DotmcpChar93ListToolsRoute
   Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute: typeof Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute
   Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
+  ApiLocalReleasesRoute: typeof ApiLocalReleasesRoute
   CheckoutReturnRoute: typeof CheckoutReturnRoute
   StartPackageRoute: typeof StartPackageRoute
   StartOnboardingRoute: typeof StartOnboardingRoute
@@ -1184,6 +1197,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth/callback'
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof AuthRoute
+    }
+    '/api/local-releases': {
+      id: '/api/local-releases'
+      path: '/api/local-releases'
+      fullPath: '/api/local-releases'
+      preLoaderRoute: typeof ApiLocalReleasesRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/account/ledger': {
       id: '/account/ledger'
@@ -1573,6 +1593,7 @@ const rootRouteChildren: RootRouteChildren = {
     Char91DotwellKnownChar93AssetlinksChar91DotChar93jsonRoute,
   Char91DotwellKnownChar93OauthProtectedResourceRoute:
     Char91DotwellKnownChar93OauthProtectedResourceRoute,
+  ApiLocalReleasesRoute: ApiLocalReleasesRoute,
   CheckoutReturnRoute: CheckoutReturnRoute,
   StartPackageRoute: StartPackageRoute,
   StartOnboardingRoute: StartOnboardingRoute,

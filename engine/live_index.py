@@ -222,16 +222,32 @@ def refresh_live_index_replica(*, force: bool = False) -> str:
     return dest
 
 
+def get_db_connection(path: str | None = None) -> sqlite3.Connection:
+    """Worker read path for the live corpus index.
+
+    Always opens ``mode=ro`` with a 30s busy timeout so ingest/refresh writers
+    on D: or replica maintenance never take a write lock from the API process.
+    """
+    dest = path or live_index_path()
+    if not os.path.isfile(dest):
+        raise FileNotFoundError(f"Live replica missing: {dest}")
+    conn = sqlite3.connect(_as_uri(dest, mode="ro"), uri=True, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA query_only = ON")
+    return conn
+
+
 def open_live_index(*, into_memory: bool = True) -> tuple[sqlite3.Connection, dict[str, Any]]:
     """Open the C: replica. Default: clone into :memory: so SELECT never hits disk."""
     path = refresh_live_index_replica()
-    disk = sqlite3.connect(_as_uri(path, mode="ro"), uri=True, timeout=5)
-    disk.execute("PRAGMA query_only=ON")
+    disk = get_db_connection(path)
     info: dict[str, Any] = {
         "path": path,
         "bytes": os.path.getsize(path) if os.path.isfile(path) else 0,
         "memory": bool(into_memory),
         "wal": True,
+        "busy_timeout_ms": 30000,
+        "mode": "ro",
     }
     if not into_memory:
         return disk, info

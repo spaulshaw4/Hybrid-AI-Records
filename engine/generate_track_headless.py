@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 import sys
+import time
+import traceback
 from random import Random
 from typing import Any
 
@@ -217,7 +219,13 @@ def _rms_dbfs(audio: Any) -> float:
     return float(20.0 * np.log10(rms))
 
 
-def _keep_if_not_gutted(processed: Any, previous: Any, label: str) -> Any:
+def _keep_if_not_gutted(
+    processed: Any,
+    previous: Any,
+    label: str,
+    *,
+    allow_level_drop: bool = False,
+) -> Any:
     """Reject an alignment stage that silenced or badly gutted the slice.
 
     Guard against a DSP stage returning near-silence from usable audio. A
@@ -228,7 +236,9 @@ def _keep_if_not_gutted(processed: Any, previous: Any, label: str) -> Any:
     after = _rms_dbfs(processed)
     if before <= -119.0:
         return processed
-    if after <= -119.0 or (before - after) > ALIGN_LOSS_TOLERANCE_DB:
+    if after <= -119.0 or (
+        not allow_level_drop and (before - after) > ALIGN_LOSS_TOLERANCE_DB
+    ):
         print(
             f"[STAGE] {label} dropped level {before:.1f} -> {after:.1f} dBFS; "
             "keeping the unprocessed audio"
@@ -258,9 +268,15 @@ def _stage_aligned_copy(
         from dsp.tempo_time_stretch import lock_slice_to_tempo
 
         audio = _keep_if_not_gutted(
-            lock_slice_to_tempo(audio, target_bpm=float(target_bpm), sr=int(sr)),
+            lock_slice_to_tempo(
+                audio,
+                target_bpm=float(target_bpm),
+                sr=int(sr),
+                original_bpm=None,
+            ),
             audio,
-            f"tempo lock {os.path.basename(src_path)}",
+            f"tempo lock {os.path.basename(src_path)} -> {float(target_bpm):.3f} BPM",
+            allow_level_drop=True,
         )
     except Exception:
         pass
@@ -323,7 +339,7 @@ def stage_scored_session_cache(
     import sqlite3
 
     from engine.slice_rotator import mark_slices_used
-    from engine.stem_selector import describe_selection, select_for_role
+    from engine.stem_selector import describe_selection, pack_id_from_path, select_for_role
 
     os.makedirs(session_corpus_dir, exist_ok=True)
     # Reusing a session id with a new seed must not leave last render's stems
@@ -392,13 +408,24 @@ def stage_scored_session_cache(
 
     staged = 0
     staged_by: dict[str, int] = {role: 0 for role in STAGE_STEMS}
+    anchor_pack_id = ""
+    motif: dict[str, list[str]] = {}
     try:
         for role in SELECTOR_ROLES:
             if staged >= max_stage:
                 break
             # One spare beyond the variant pool so a drum fill has somewhere to go.
             want = min(int(max_per_stem), max(2, int(pool.get(role, 2)) + 1))
-            print(f"[SELECT] scoring {role} want={want} db={db_path}", flush=True)
+            print(
+                f"[COMPOSITION] Arranging section {role} with anchor "
+                f"{anchor_pack_id or '-'}...",
+                flush=True,
+            )
+            print(
+                f"[SELECT] scoring {role} want={want} "
+                f"anchor={anchor_pack_id or '-'} db={db_path}",
+                flush=True,
+            )
             picks = select_for_role(
                 conn,
                 role,
@@ -409,11 +436,15 @@ def stage_scored_session_cache(
                 centroid_target_hz=centroid_targets.get(role),
                 energy_level=plan_energy,
                 use_cooldown=not reproducible,
+                anchor_pack_id=anchor_pack_id or None,
             )
             if not picks:
                 print(f"[SELECT] {role}: no scored candidates in {os.path.basename(db_path)}")
                 continue
             print(describe_selection(role, picks))
+            if role == "rhythm" and picks:
+                anchor_pack_id = pack_id_from_path(str(picks[0].get("file_path") or ""))
+                print(f"[AFFINITY] drum_anchor_pack={anchor_pack_id or '-'}", flush=True)
             chosen_paths: list[str] = []
             for item in picks:
                 if staged >= max_stage:
@@ -427,6 +458,8 @@ def stage_scored_session_cache(
                     staged += 1
                     staged_by[role] = staged_by.get(role, 0) + 1
                     chosen_paths.append(src_path)
+            if chosen_paths:
+                motif[role] = list(chosen_paths)
             if chosen_paths and not reproducible:
                 try:
                     mark_slices_used(conn, chosen_paths)
@@ -435,10 +468,15 @@ def stage_scored_session_cache(
     finally:
         conn.close()
 
+    if isinstance(arrangement, dict):
+        arrangement["pack_affinity"] = {
+            "anchor_pack_id": anchor_pack_id,
+            "slices": motif,
+        }
     print(
         "[STAGE] scored per-stem "
         + " ".join(f"{role}={staged_by.get(role, 0)}" for role in SELECTOR_ROLES)
-        + f" total={staged}"
+        + f" total={staged} anchor={anchor_pack_id or '-'}"
     )
     return staged
 
@@ -560,6 +598,7 @@ def execute_prompt_pipeline(
     request_id: str | None = None,
     arrange: bool = True,
     vocal_mode: str | None = None,
+    vocal_file: str | None = None,
 ) -> dict[str, Any]:
     session_dir = session_scratch_dir(scratch_dir, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -604,6 +643,17 @@ def execute_prompt_pipeline(
             blueprint["track_metadata"]["scale"] = cli_scale
     meta = blueprint["track_metadata"]
     bpm_val = float(meta.get("bpm") or DEFAULT_BPM)
+    if vocal_file and os.path.isfile(vocal_file):
+        from engine.vocal_ingest import duration_from_vocal_file, song_length_from_vocal
+
+        vocal_sec = duration_from_vocal_file(vocal_file)
+        if vocal_sec > 0:
+            duration_sec = song_length_from_vocal(vocal_sec, bpm_val)
+            print(
+                f"[API_LENGTH] vocal_sec={vocal_sec:.1f} duration_sec={duration_sec:.1f} "
+                f"bars={round(duration_sec * bpm_val / 240.0)} (vocal + 8-bar outro)",
+                flush=True,
+            )
 
     resolved_seed, resolved_request = derive_seed(prompt, request_id, seed)
     arrangement: dict[str, Any] | None = None
@@ -675,6 +725,15 @@ def execute_prompt_pipeline(
     if vocal_mode:
         blueprint.setdefault("track_metadata", {})["vocal_mode"] = str(vocal_mode)
         print(f"[VOCAL] mode={vocal_mode}")
+    if vocal_file and os.path.isfile(vocal_file):
+        from engine.vocal_tuner import tune_if_possible
+
+        locked = blueprint.get("track_metadata") or {}
+        root = str(locked.get("root_key") or "G")
+        mode = str(locked.get("scale") or "major")
+        vocal_file = tune_if_possible(vocal_file, root_key=root, mode=mode)
+        blueprint.setdefault("track_metadata", {})["vocal_file"] = str(vocal_file)
+        print(f"[VOCAL] file={vocal_file} key={root}_{mode}", flush=True)
 
     write_blueprint(blueprint, blueprint_path)
     meta = blueprint["track_metadata"]
@@ -692,51 +751,71 @@ def execute_prompt_pipeline(
         print(f"    {sec.get('name', '?')}: {bars} bars ({bars_to_seconds(bars, bpm_val):.3f}s)")
 
     stage_rng = Random(resolved_seed ^ 0x5F3759DF)
+    compose_t0 = time.perf_counter()
     staged = 0
-    if arrangement is not None:
-        staged = stage_scored_session_cache(
-            blueprint,
-            db_path,
-            session_corpus,
-            corpus_dir,
-            stage_rng,
-            arrangement,
-            max_per_stem=max_per_stem,
-            max_stage=max_stage,
-            reproducible=seed is not None,
-        )
-    if staged < 6:
-        staged = stage_session_cache(
-            blueprint,
-            db_path,
-            session_corpus,
-            corpus_dir,
-            max_per_stem=max_per_stem,
-            max_stage=max_stage,
-        )
-    if staged < 6:
-        raise RuntimeError(
-            f"Need at least 6 staged slices to assemble; got {staged}. "
-            f"Check {corpus_dir} or run a smoke index first."
-        )
-
     source_trace: dict[str, Any] = {}
-    assemble_from_blueprint(
-        blueprint_path,
-        session_corpus,
-        unmastered_named,
-        sr=sr,
-        seed=resolved_seed,
-        target_key=None,
-        target_bpm=None,
-        index_db=None,
-        use_index=False,
-        # Session context makes the assembler write bus_stems/ next to the
-        # session mix; Module 5 refuses to package without them.
-        session_id=session_id,
-        scratch_root=os.path.dirname(os.path.abspath(session_dir)),
-        source_trace=source_trace,
-    )
+    try:
+        print(
+            f"[COMPOSITION] Arranging section staging with anchor "
+            f"{(arrangement or {}).get('pack_affinity', {}).get('anchor_pack_id') or '-'}...",
+            flush=True,
+        )
+        if arrangement is not None:
+            staged = stage_scored_session_cache(
+                blueprint,
+                db_path,
+                session_corpus,
+                corpus_dir,
+                stage_rng,
+                arrangement,
+                max_per_stem=max_per_stem,
+                max_stage=max_stage,
+                reproducible=seed is not None,
+            )
+        if staged < 6:
+            staged = stage_session_cache(
+                blueprint,
+                db_path,
+                session_corpus,
+                corpus_dir,
+                max_per_stem=max_per_stem,
+                max_stage=max_stage,
+            )
+        if staged < 6:
+            raise RuntimeError(
+                f"Need at least 6 staged slices to assemble; got {staged}. "
+                f"Check {corpus_dir} or run a smoke index first."
+            )
+
+        print(f"[BPM] locked={bpm_val:.3f} (UI / CLI wins over stem native tempo)", flush=True)
+        assemble_from_blueprint(
+            blueprint_path,
+            session_corpus,
+            unmastered_named,
+            sr=sr,
+            seed=resolved_seed,
+            target_key=None,
+            target_bpm=float(bpm_val),
+            index_db=None,
+            use_index=False,
+            # Session context makes the assembler write bus_stems/ next to the
+            # session mix; Module 5 refuses to package without them.
+            session_id=session_id,
+            scratch_root=os.path.dirname(os.path.abspath(session_dir)),
+            source_trace=source_trace,
+        )
+        print(
+            f"[COMPOSITION] elapsed_sec={time.perf_counter() - compose_t0:.2f} "
+            f"staged={staged}",
+            flush=True,
+        )
+    except Exception:
+        print(
+            f"[COMPOSITION] failed after {time.perf_counter() - compose_t0:.2f}s\n"
+            f"{traceback.format_exc()}",
+            flush=True,
+        )
+        raise
     if os.path.abspath(unmastered_named) != os.path.abspath(unmastered_mix):
         shutil.copy2(unmastered_named, unmastered_mix)
     mix_bytes = os.path.getsize(unmastered_mix) if os.path.isfile(unmastered_mix) else 0
@@ -755,6 +834,12 @@ def execute_prompt_pipeline(
             "Composition has nothing to give: unmastered mix is missing or empty. "
             f"bytes={mix_bytes} slices={slice_count} corpus={corpus_dir}"
         )
+    if vocal_file and os.path.isfile(vocal_file):
+        from engine.vocal_ingest import mix_recorded_vocal_onto_master
+
+        mix_recorded_vocal_onto_master(unmastered_mix, vocal_file, sr=sr)
+        if os.path.abspath(unmastered_named) != os.path.abspath(unmastered_mix):
+            shutil.copy2(unmastered_mix, unmastered_named)
     exported = unmastered_mix
     r128_meta: dict[str, float] | None = None
     if output_path:
@@ -947,6 +1032,11 @@ def main(argv: list[str] | None = None) -> int:
             "sections), adlib = no lyrics, none = instrumental (vocal bus muted)"
         ),
     )
+    parser.add_argument(
+        "--vocal-file",
+        default=None,
+        help="Tuned 44.1 kHz PCM WAV of the recorded take, mixed onto the master bus",
+    )
     args = parser.parse_args(argv)
     corpus = args.corpus
     if not corpus:
@@ -996,6 +1086,7 @@ def main(argv: list[str] | None = None) -> int:
             request_id=args.request_id,
             arrange=not args.no_arrange,
             vocal_mode=args.vocal_mode,
+            vocal_file=args.vocal_file,
         )
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)

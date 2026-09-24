@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
+import { Slider } from '@/components/ui/slider';
 
 interface HybridStemMixerProps {
   sessionId: string;
@@ -35,12 +36,11 @@ export default function HybridStemMixer({ sessionId }: HybridStemMixerProps) {
     });
   };
 
-  const handleVolumeChange = (stem: string, value: string) => {
-    const newVol = parseFloat(value);
-    setVolumes((prev) => ({ ...prev, [stem]: newVol }));
+  const handleVolumeChange = (stem: string, value: number) => {
+    setVolumes((prev) => ({ ...prev, [stem]: value }));
     const audio = audioRefs.current[stem];
     if (audio) {
-      audio.volume = newVol;
+      audio.volume = value;
     }
   };
 
@@ -86,14 +86,14 @@ export default function HybridStemMixer({ sessionId }: HybridStemMixerProps) {
             <span className="w-36 uppercase text-xs font-black tracking-wider text-gray-300">
               {stem.replace('_', ' ')}
             </span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={volumes[stem]}
-              onChange={(e) => handleVolumeChange(stem, e.target.value)}
-              className="flex-grow mx-6 accent-red-600 cursor-pointer"
+            <Slider
+              min={0}
+              max={1}
+              step={0.01}
+              value={[volumes[stem] ?? 0.8]}
+              onValueChange={(next) => handleVolumeChange(stem, next[0] ?? 0.8)}
+              className="mx-6 flex-grow"
+              aria-label={`${stem.replaceAll("_", " ")} volume`}
             />
             <button
               onClick={() => downloadStem(stem)}

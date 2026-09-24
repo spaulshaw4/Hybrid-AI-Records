@@ -31,6 +31,29 @@ describe("sanitizeVaultTracks", () => {
     expect(row?.style).toBe("Synthwave");
     expect(row?.artist_name).toBe(VAULT_DEFAULT_ARTIST);
     expect(row?.album_name).toBe(VAULT_DEFAULT_ALBUM);
+    expect(row?.musical_key).toBeNull();
+    expect(row?.duration_sec).toBeNull();
+  });
+
+  it("keeps catalog key, duration, and zip on a completed master", () => {
+    const [row] = sanitizeVaultTracks([
+      {
+        id: "ht_abc123456789",
+        title: "Pocket Funk",
+        style: "Funk",
+        status: "completed",
+        master_url: "/api/stream/ht_abc123456789_master.wav",
+        mp3_url: "/api/stream/ht_abc123456789_master.mp3",
+        zip_url: "/api/stream/ht_abc123456789_stems_bundle.zip",
+        musical_key: "G_major",
+        duration_sec: 210,
+        created_at: "2026-09-23T00:00:00.000Z",
+      },
+    ]);
+    expect(row?.musical_key).toBe("G_major");
+    expect(row?.duration_sec).toBe(210);
+    expect(row?.mp3_url).toBe("/api/stream/ht_abc123456789_master.mp3");
+    expect(row?.zip_url).toBe("/api/stream/ht_abc123456789_stems_bundle.zip");
   });
 
   it("resolves artist/album from PostgREST embeds", () => {

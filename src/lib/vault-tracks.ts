@@ -21,6 +21,12 @@ export type SanitizedVaultTrack = {
   artist_name: string;
   /** Resolved from albums(*) join or denormalized album_name. */
   album_name: string;
+  /** Display key when the engine or worker persisted one (e.g. G Major). */
+  musical_key?: string | null;
+  /** Finished length in seconds; vault UI falls back to 210s (96 bars @ 110 BPM). */
+  duration_sec?: number | null;
+  mp3_url?: string | null;
+  zip_url?: string | null;
 };
 
 export type VaultAlbumGroup = {
@@ -113,6 +119,12 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
         ? "failed"
         : status;
 
+    const musicalKeyRaw = row.musical_key ?? row.musicalKey ?? row.key;
+    const durationRaw = row.duration_sec ?? row.durationSec ?? row.duration_seconds;
+    const mp3Url = playableOrNull(row.mp3_url ?? row.mp3Url);
+    const zipRaw = row.zip_url ?? row.zipUrl ?? row.stems_zip_url;
+    const zipUrl = typeof zipRaw === "string" && zipRaw.trim() ? zipRaw.trim() : null;
+
     out.push({
       id,
       title: typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Untitled Track",
@@ -125,6 +137,14 @@ export function sanitizeVaultTracks(input: unknown): SanitizedVaultTrack[] {
       created_at: createdAt,
       artist_name: resolveArtistName(row),
       album_name: resolveAlbumName(row),
+      musical_key:
+        typeof musicalKeyRaw === "string" && musicalKeyRaw.trim() ? musicalKeyRaw.trim() : null,
+      duration_sec:
+        typeof durationRaw === "number" && Number.isFinite(durationRaw) && durationRaw > 0
+          ? Math.round(durationRaw)
+          : null,
+      mp3_url: nextStatus === "completed" ? mp3Url : null,
+      zip_url: nextStatus === "completed" && zipUrl ? zipUrl : null,
     });
   }
   return out;

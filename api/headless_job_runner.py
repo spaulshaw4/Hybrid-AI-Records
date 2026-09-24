@@ -102,8 +102,10 @@ BUS_STEM_NAMES = ("rhythm", "bass", "harmonic", "vocal")
 _RENDER_SLOTS = threading.BoundedSemaphore(
     value=max(1, int(os.environ.get("HYBRID_MAX_RENDERS", "2") or 2))
 )
-# Per subprocess step (generate, master). Observed full jobs: 85-126 s.
-_STEP_TIMEOUT_SEC = max(30, int(os.environ.get("HYBRID_STEP_TIMEOUT_SEC", "300") or 300))
+# Per subprocess step (generate, master). 96-bar + ~500k RAM clone
+# routinely exceeds 5 minutes while D: ingest is hot (300s killed
+# generate_track_headless mid-[SELECT] and skipped [RELATIONAL]).
+_STEP_TIMEOUT_SEC = max(30, int(os.environ.get("HYBRID_STEP_TIMEOUT_SEC", "900") or 900))
 _SECRET_RE = re.compile(
     r"(?i)((?:replicate|gemini|google|lyric|api)[_-]?.*?(?:token|key|secret|password)|authorization)\s*[=:]\s*\S+"
 )
@@ -273,11 +275,21 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "scratch_purged_bytes",
         "requested_bars",
         "requested_bpm",
+        "master_duration_sec",
     )
     out: dict[str, Any] = {}
     for key in keys:
         if key in job:
             out[key] = job.get(key)
+    if out.get("master_duration_sec") is None:
+        plan = out.get("song_plan") if isinstance(out.get("song_plan"), dict) else {}
+        bars = plan.get("total_bars") if isinstance(plan, dict) else None
+        bpm = (plan.get("bpm") if isinstance(plan, dict) else None) or out.get("requested_bpm")
+        try:
+            if bars and bpm:
+                out["master_duration_sec"] = round(float(bars) * 240.0 / float(bpm), 3)
+        except (TypeError, ValueError):
+            pass
     return out
 
 
@@ -705,6 +717,10 @@ def _run_headless(
         cmd += ["--duration", f"{float(opts['duration_sec']):.3f}"]
     if opts.get("vocal_mode"):
         cmd += ["--vocal-mode", str(opts["vocal_mode"])]
+    if opts.get("key"):
+        cmd += ["--key", str(opts["key"])]
+    if opts.get("vocal_file"):
+        cmd += ["--vocal-file", str(opts["vocal_file"])]
     if not _replicate_token_set():
         cmd.append("--offline")
     result = _run(cmd, cwd=_REPO_ROOT)
@@ -1090,11 +1106,147 @@ class CreateTrackBody(BaseModel):
     duration_sec: float | None = Field(default=None, ge=10.0, le=420.0)
     # lead = lyrics expected, adlib = no lyrics, none = instrumental.
     vocal_mode: str | None = Field(default=None, max_length=16)
+    key: str | None = Field(default=None, max_length=24)
 
 
 DEFAULT_RENDER_SECONDS = 210.0
 DEFAULT_RENDER_BPM = 110.0
 VOCAL_MODES = frozenset({"lead", "adlib", "none"})
+_VOCAL_CACHE_PREFERRED = r"D:\audio_cache\vocals"
+
+
+def _vocal_cache_dir() -> str:
+    try:
+        os.makedirs(_VOCAL_CACHE_PREFERRED, exist_ok=True)
+        return _VOCAL_CACHE_PREFERRED
+    except OSError:
+        path = os.path.join(SCRATCH_ROOT, "temp_vocals")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+
+def _form_text(form: Any, *keys: str, default: str = "") -> str:
+    for key in keys:
+        raw = form.get(key)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if text:
+            return text
+    return default
+
+
+def _form_float(form: Any, key: str, default: float | None = None) -> float | None:
+    raw = form.get(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _form_int(form: Any, key: str, default: int | None = None) -> int | None:
+    raw = form.get(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return default
+
+
+async def _read_upload_bytes(upload: Any) -> bytes:
+    if upload is None:
+        return b""
+    reader = getattr(upload, "read", None)
+    if reader is None:
+        handle = getattr(upload, "file", None)
+        return handle.read() if handle is not None else b""
+    data = reader()
+    if hasattr(data, "__await__"):
+        data = await data
+    return data or b""
+
+
+async def _ingest_vocal_upload(upload: Any, root_key: str) -> tuple[str | None, float]:
+    """Save browser blob → FFmpeg PCM WAV. Pitch snap waits for the conductor.
+
+    Returns ``(pcm_wav_path, duration_sec)``. Logs ``[VOICE]`` whether a file
+    arrived so Generate clicks are auditable. ``root_key`` is the form hint
+    only — ``generate_track_headless`` retunes to the locked key + mode.
+    """
+    filename = getattr(upload, "filename", None) if upload is not None else None
+    if not upload or not filename:
+        _log("[VOICE] Upload received: None")
+        _log("[VOICE INGEST] No vocal payload received on /generate.")
+        return None, 0.0
+    content_type = getattr(upload, "content_type", "") or ""
+    _log(f"[VOICE] Upload received: {filename}")
+    _log(f"[VOICE INGEST] Received voice take: {filename}, Content-Type: {content_type}")
+    raw = await _read_upload_bytes(upload)
+    if len(raw) < 64:
+        _log("[VOICE INGEST] vocal_file was empty after read")
+        return None, 0.0
+    try:
+        from engine.vocal_ingest import duration_from_vocal_file, persist_uploaded_vocal
+
+        pcm = persist_uploaded_vocal(raw, str(filename), _vocal_cache_dir())
+        vocal_sec = duration_from_vocal_file(pcm)
+        _log(
+            f"[VOICE INGEST] pcm={pcm} vocal_sec={vocal_sec:.2f} "
+            f"key_hint={root_key or 'G'} (tune deferred until conductor lock)"
+        )
+        return pcm, vocal_sec
+    except Exception as exc:
+        _log(f"[VOICE INGEST] failed: {type(exc).__name__}: {exc}")
+        return None, 0.0
+
+
+def _enqueue_generate(
+    prompt: str,
+    genre: str,
+    *,
+    dry_run: bool,
+    render_opts: dict[str, Any],
+    requested_bars: int | None,
+    requested_bpm: float | None,
+) -> dict[str, Any]:
+    session_id = "ht_" + uuid.uuid4().hex[:12]
+    job = {
+        "session_id": session_id,
+        "status": "queued",
+        "genre_hint": genre or None,
+        "error": None,
+        "note": None,
+        "audio_filename": None,
+        "audio_mime": None,
+        "created_at": _utc_now(),
+        "updated_at": _utc_now(),
+        "requested_bars": requested_bars,
+        "requested_bpm": requested_bpm,
+        "master_duration_sec": render_opts.get("duration_sec"),
+        "vocal_present": bool(render_opts.get("vocal_file")),
+    }
+    with _registry_lock:
+        _jobs[session_id] = job
+    try:
+        _persist_job(job)
+    except OSError as exc:
+        _log(f"[create] persist failed: {exc}")
+        raise HTTPException(status_code=500, detail="could not persist job") from exc
+    thread = threading.Thread(
+        target=_worker,
+        args=(session_id, prompt, genre, bool(dry_run), render_opts),
+        name=f"headless-{session_id}",
+        daemon=True,
+    )
+    thread.start()
+    return {
+        "session_id": session_id,
+        "status": "queued",
+        "vocal_present": bool(render_opts.get("vocal_file")),
+    }
 
 
 def _boot_production_brain() -> dict[str, Any]:
@@ -1164,8 +1316,14 @@ def create_app() -> Any:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
+        with _registry_lock:
+            busy = any(
+                str(job.get("status") or "") in {"queued", "running"}
+                for job in _jobs.values()
+            )
         return {
             "status": "ok" if _brain_health.get("loaded") else "degraded",
+            "is_busy": busy,
             "device": "cpu",
             "role": "live-api",
             "brain_loaded": bool(_brain_health.get("loaded")),
@@ -1178,70 +1336,91 @@ def create_app() -> Any:
     @app.post("/generate")
     @app.post("/api/generate")
     @app.post("/api/tracks/create")
-    def create_track(body: CreateTrackBody, request: Request) -> dict[str, Any]:
+    async def create_track(request: Request) -> dict[str, Any]:
+        """JSON body *or* multipart/form-data with ``vocal_file``.
+
+        Chrome MediaRecorder sends WebM/Opus. A Pydantic JSON body would drop
+        that blob; multipart is required so FFmpeg can transcode it to WAV.
+        """
         _require_worker_token(request)
-        prompt = (body.prompt or body.title or body.style or "").strip()
+        content_type = (request.headers.get("content-type") or "").lower()
+        vocal_path: str | None = None
+        vocal_sec = 0.0
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            prompt = _form_text(form, "prompt", "title", "style")
+            genre = _form_text(form, "genre_hint", "genre", "genre_lock", "style")
+            title = _form_text(form, "title")
+            if title and not prompt:
+                prompt = title
+            bpm = _form_float(form, "bpm", DEFAULT_RENDER_BPM) or DEFAULT_RENDER_BPM
+            duration_sec = _form_float(form, "duration_sec")
+            bars = _form_int(form, "bars")
+            vocal_mode = _form_text(form, "vocal_mode").lower()
+            key = _form_text(form, "key", default="G")
+            dry_run = _form_text(form, "dry_run").lower() in {"1", "true", "yes"}
+            upload = form.get("vocal_file") or form.get("vocal_audio.wav")
+            vocal_path, vocal_sec = await _ingest_vocal_upload(upload, key)
+        else:
+            try:
+                payload = await request.json()
+            except Exception:
+                raise HTTPException(status_code=400, detail="prompt is required")
+            body = CreateTrackBody.model_validate(payload)
+            prompt = (body.prompt or body.title or body.style or "").strip()
+            genre = (
+                body.genre_hint or body.genre or body.genre_lock or body.style or ""
+            ).strip()
+            bpm = float(body.bpm) if body.bpm is not None else DEFAULT_RENDER_BPM
+            duration_sec = body.duration_sec
+            bars = body.bars
+            vocal_mode = (body.vocal_mode or "").strip().lower()
+            key = (body.key or "G").strip() or "G"
+            dry_run = bool(body.dry_run)
+            _log("[VOICE] Upload received: None")
+            _log("[VOICE INGEST] No vocal payload received on /generate.")
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt is required")
         if len(prompt) > MAX_PROMPT:
             raise HTTPException(status_code=400, detail=f"prompt exceeds {MAX_PROMPT} characters")
-        genre = (
-            body.genre_hint or body.genre or body.genre_lock or body.style or ""
-        ).strip()
         _log(
             f"[API_PAYLOAD] prompt_chars={len(prompt)} genre={genre!r} "
-            f"brain_loaded={_brain_health.get('loaded')}"
+            f"brain_loaded={_brain_health.get('loaded')} vocal_file={bool(vocal_path)}"
         )
         if not genre and not prompt:
             raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
-        if body.bars is not None and body.bpm is None:
+        if bars is not None and bpm is None:
             raise HTTPException(status_code=400, detail="bars requires bpm")
-        render_opts: dict[str, Any] = {}
-        bpm = float(body.bpm) if body.bpm is not None else DEFAULT_RENDER_BPM
-        render_opts["bpm"] = bpm
-        if body.bars is not None:
-            render_opts["duration_sec"] = float(body.bars) * 4.0 * 60.0 / bpm
-        elif body.duration_sec is not None:
-            render_opts["duration_sec"] = float(body.duration_sec)
+        render_opts: dict[str, Any] = {"bpm": float(bpm), "key": key}
+        if vocal_path and vocal_sec > 0:
+            from engine.vocal_ingest import song_length_from_vocal
+
+            render_opts["duration_sec"] = song_length_from_vocal(vocal_sec, float(bpm))
+            render_opts["vocal_file"] = vocal_path
+            render_opts["vocal_mode"] = "lead"
+        elif bars is not None:
+            render_opts["duration_sec"] = float(bars) * 4.0 * 60.0 / float(bpm)
+        elif duration_sec is not None:
+            render_opts["duration_sec"] = float(duration_sec)
         else:
             render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
-        vocal_mode = (body.vocal_mode or "").strip().lower()
-        if vocal_mode in VOCAL_MODES:
+        if vocal_mode in VOCAL_MODES and "vocal_mode" not in render_opts:
             render_opts["vocal_mode"] = vocal_mode
         _log(
-            f"[API_LENGTH] bpm={bpm:.1f} duration_sec={render_opts['duration_sec']:.1f} "
-            f"bars={round(render_opts['duration_sec'] * bpm / 240.0)} "
-            f"vocal_mode={render_opts.get('vocal_mode', 'auto')}"
+            f"[API_LENGTH] bpm={float(bpm):.1f} duration_sec={render_opts['duration_sec']:.1f} "
+            f"bars={round(render_opts['duration_sec'] * float(bpm) / 240.0)} "
+            f"vocal_mode={render_opts.get('vocal_mode', 'auto')} "
+            f"vocal_present={bool(vocal_path)}"
         )
-        session_id = "ht_" + uuid.uuid4().hex[:12]
-        job = {
-            "session_id": session_id,
-            "status": "queued",
-            "genre_hint": genre or None,
-            "error": None,
-            "note": None,
-            "audio_filename": None,
-            "audio_mime": None,
-            "created_at": _utc_now(),
-            "updated_at": _utc_now(),
-            "requested_bars": body.bars,
-            "requested_bpm": body.bpm,
-        }
-        with _registry_lock:
-            _jobs[session_id] = job
-        try:
-            _persist_job(job)
-        except OSError as exc:
-            _log(f"[create] persist failed: {exc}")
-            raise HTTPException(status_code=500, detail="could not persist job") from exc
-        thread = threading.Thread(
-            target=_worker,
-            args=(session_id, prompt, genre, bool(body.dry_run), render_opts),
-            name=f"headless-{session_id}",
-            daemon=True,
+        computed_bars = round(render_opts["duration_sec"] * float(bpm) / 240.0)
+        return _enqueue_generate(
+            prompt,
+            genre,
+            dry_run=dry_run,
+            render_opts=render_opts,
+            requested_bars=bars if bars is not None else computed_bars,
+            requested_bpm=float(bpm) if bpm is not None else None,
         )
-        thread.start()
-        return {"session_id": session_id, "status": "queued"}
 
     @app.get("/api/tracks/status/{session_id}")
     @app.get("/api/jobs/{session_id}")

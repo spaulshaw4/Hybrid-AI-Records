@@ -18,11 +18,15 @@ from engine.stem_selector import (  # noqa: E402
     STRETCH_RATE_MIN,
     bpm_compatibility,
     centroid_fit,
+    extract_session_slug,
     fetch_candidate_rows,
+    fetch_indexed_pool,
+    fetch_stem_with_pack_affinity,
     fold_bpm,
     key_compatibility,
     level_fit,
     note_to_semitone,
+    pack_id_from_path,
     pick_variants,
     rank_candidates,
     required_stretch_rate,
@@ -398,3 +402,77 @@ def test_bass_falls_back_to_low_centroid_harmonic(tmp_path):
     picks = select_for_role(conn, "bass", "D", 140.0, 1, Random(3), centroid_target_hz=250.0)
     assert picks
     assert picks[0]["filename"] == "other_low_00001.wav"
+
+
+def test_extract_session_slug_from_filename_prefix_and_parent_folder():
+    assert (
+        extract_session_slug(r"C:\stems\vintage_funk_kit_01__drums.wav")
+        == "vintage_funk_kit_01"
+    )
+    assert extract_session_slug("stems/indie_groove_120/drums.wav") == "indie_groove_120"
+    assert pack_id_from_path(
+        r"D:\MusicDatasets\corpus_4s\001 - ANiMAL - Clinic A\bass_s4_00002.wav"
+    ) == pack_id_from_path(
+        r"D:\MusicDatasets\corpus_4s\rhythm\001_animal_clinic_a__drums_phrase_0000.wav"
+    )
+
+
+def test_pack_affinity_locks_same_session_then_falls_back(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(SCHEMA)
+    rows = []
+    packs = (
+        (tmp_path / "vintage_funk_kit_01", "vintage_funk_kit_01", "D"),
+        (tmp_path / "foreign_pad_pack", "foreign_pad_pack", "A"),
+    )
+    for folder, slug, key in packs:
+        folder.mkdir()
+        for role, stem, centroid, name in (
+            ("drums", "rhythm", 3400.0, f"{slug}__drums.wav"),
+            ("bass", "harmonic", 240.0, f"{slug}__bass.wav"),
+        ):
+            path = folder / name
+            path.write_bytes(b"")
+            rows.append(
+                (str(path), name, stem, key, 110.0, -22.0, centroid, role, 4.0)
+            )
+    conn.executemany(
+        "INSERT INTO slice_index (file_path, filename, stem_type, detected_key, "
+        "estimated_bpm, rms_db, spectral_centroid, tags, duration_sec) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    hit, source = fetch_stem_with_pack_affinity(
+        conn, "bass", "vintage_funk_kit_01", "D", 110.0, require_on_disk=True
+    )
+    assert source == "session_locked"
+    assert hit is not None
+    assert "vintage_funk_kit_01" in hit["file_path"]
+    miss, fallback = fetch_stem_with_pack_affinity(
+        conn, "bass", "missing_pack", "A", 110.0, require_on_disk=True
+    )
+    assert fallback == "global_fallback"
+    assert miss is not None
+
+
+def test_indexed_pool_uses_stem_key_bpm_not_slug_like():
+    import inspect
+
+    source = inspect.getsource(fetch_indexed_pool)
+    body = source.split('"""', 2)[-1]
+    assert "file_path LIKE" not in body
+    assert "ORDER BY RANDOM" not in body.upper()
+    assert "BETWEEN" in body
+    assert "LIMIT" in body
+
+
+def test_empty_index_returns_none_instead_of_raising():
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(SCHEMA)
+    hit, source = fetch_stem_with_pack_affinity(
+        conn, "bass", "missing", "D", 110.0, require_on_disk=False
+    )
+    assert hit is None
+    assert source == "empty"
+    assert select_for_role(conn, "rhythm", "D", 120.0, 2, Random(1), require_on_disk=False) == []

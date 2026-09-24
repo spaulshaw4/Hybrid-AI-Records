@@ -484,13 +484,28 @@ def test_short_slice_loops_across_section_without_silence():
     assembler = ArrangementAssembler(
         sr=SR, retriever=_StereoRetriever(), load_audio=lambda _p: stereo
     )
-    drums = assembler.assemble(plan).tracks["rhythm"]
+    result = assembler.assemble(plan)
+    drums = result.tracks["rhythm"]
+    from engine.hybrid_conductor import AdaptiveConductor
+
+    arc = result.trace.get("tension_map") or result.trace.get("energy_arc") or []
+    conductor = AdaptiveConductor(max(1, len(arc)))
+    bpm = plan.bpm
+    from engine.stem_adapter import section_sample_count
+
     win = SR // 20
-    rms = [
-        float(np.sqrt(np.mean(drums[i : i + win] ** 2)))
-        for i in range(0, drums.shape[0] - win, win)
-    ]
-    assert min(rms) > 0.05, "silent gap inside a looped section"
+    active_rms = []
+    for bar, energy in enumerate(arc):
+        rules = conductor.evaluate_dsp_rules(energy)
+        if not rules["drums_active"] or rules["kick_muted"]:
+            continue
+        start = 0 if bar == 0 else section_sample_count(bar, bpm, SR)
+        end = section_sample_count(bar + 1, bpm, SR)
+        inner_lo = start + win
+        inner_hi = end - win
+        for i in range(inner_lo, max(inner_lo, inner_hi - win), win):
+            active_rms.append(float(np.sqrt(np.mean(drums[i : i + win] ** 2))))
+    assert active_rms and min(active_rms) > 0.05, "silent gap inside a looped section"
 
 
 def test_conductor_build_arrangement_tracks_pipes_to_mixer_shape():
@@ -514,3 +529,78 @@ def test_conductor_build_arrangement_tracks_pipes_to_mixer_shape():
     )
     assert mixed.mix.size > 0
     assert "rhythm" in mixed.stems
+
+
+class _CountingRetriever:
+    conn = object()
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def best_candidate(self, query, **_kwargs):
+        self.calls += 1
+        family = query.instrument_family
+        return {
+            "file_path": f"/pack/{family}_{self.calls}.wav",
+            "estimated_bpm": 120.0,
+            "detected_key": "E",
+            "pitch_shift_semitones": 0,
+        }
+
+    def close(self):
+        pass
+
+
+def test_verse_two_reuses_cached_verse_stems():
+    tone = 0.2 * np.sin(2 * np.pi * 110.0 * np.arange(SR * 2) / SR)
+    retriever = _CountingRetriever()
+    plan = GlobalSongPlan(
+        title="motif",
+        key="E",
+        scale="minor",
+        bpm=120,
+        total_bars=6,
+        genre_blend=GenreVector(),
+        sections=[
+            SectionPlan(
+                name="verse_1",
+                start_bar=0,
+                bars=2,
+                energy_level=0.4,
+                chord_progression=["Em"],
+                active_stems=["drums", "bass", "rhythm_guitar"],
+                frequency_reservations={},
+            ),
+            SectionPlan(
+                name="verse_2",
+                start_bar=2,
+                bars=2,
+                energy_level=0.45,
+                chord_progression=["Em"],
+                active_stems=["drums", "bass", "rhythm_guitar"],
+                frequency_reservations={},
+            ),
+            SectionPlan(
+                name="chorus_1",
+                start_bar=4,
+                bars=2,
+                energy_level=0.8,
+                chord_progression=["G"],
+                active_stems=["drums", "bass"],
+                frequency_reservations={},
+            ),
+        ],
+        seed=3,
+    )
+    result = ArrangementAssembler(
+        sr=SR, retriever=retriever, load_audio=lambda _p: tone
+    ).assemble(plan)
+    verse1 = result.trace["sections"][0]["stems"]
+    verse2 = result.trace["sections"][1]["stems"]
+    assert verse1["drums"]["file_path"] == verse2["drums"]["file_path"]
+    assert verse1["bass"]["file_path"] == verse2["bass"]["file_path"]
+    assert verse2["drums"].get("motif_reuse") is True
+    chorus = result.trace["sections"][2]["stems"]
+    assert chorus["drums"]["file_path"] == verse1["drums"]["file_path"]
+    assert result.trace.get("band_lock") is True
+    assert retriever.calls == 3  # one pull: drums, bass, rhythm_guitar

@@ -384,6 +384,7 @@ export async function executePipeline(
               durationSeconds: input.durationSeconds,
               instrumental: input.instrumental,
               lyrics: input.instrumental ? "" : input.lyrics,
+              referenceAudioUrl: input.referenceSampleUrl,
             }),
             LOCAL_WORKER_TIMEOUT_MS,
             "Gate 1 (local Hybrid worker)",

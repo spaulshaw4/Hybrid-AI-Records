@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { ChevronDown, Download, Loader2, Trash2 } from "lucide-react";
+import { Download, Loader2, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Accordion,
@@ -11,33 +12,22 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { VaultMasterDock } from "@/components/VaultMasterDock";
 import { masterWavFromUrl } from "@/lib/audio-mixdown";
 import {
-  deleteUserVaultTrack,
-  listUserVaultTracks,
-  type UserVaultRow,
-} from "@/lib/user-vault.functions";
+  playCatalogTrack,
+  useCatalogPlayback,
+} from "@/lib/catalog-player";
+import { listUserVaultTracks, type UserVaultRow } from "@/lib/user-vault.functions";
 import {
-  deleteVaultTrackApi,
   fetchVaultTracksResult,
-  isPersistedVaultId,
   VAULT_NEW_GENERATION_EVENT,
   VAULT_POLL_MAX_MS,
   VAULT_POLL_MS,
@@ -49,12 +39,16 @@ import {
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
 } from "@/lib/vault-tracks";
+import { guestTrackToPayload, listGuestVaultTracks } from "@/lib/guest-vault";
 import {
-  deleteGuestVaultTrack,
-  guestTrackToPayload,
-  listGuestVaultTracks,
-} from "@/lib/guest-vault";
-import { safeReleaseMediaElement } from "@/lib/safe-media";
+  DEFAULT_CATALOG_DURATION_SEC,
+  fetchWorkerVaultPayloads,
+  formatDurationSeconds,
+  resolveCatalogDurationSec,
+  resolveCatalogGenre,
+  resolveCatalogKey,
+  vaultMasterUrls,
+} from "@/lib/vault-catalog";
 
 type Props = {
   /** Bump after Generate starts or finishes so the list refreshes immediately. */
@@ -62,16 +56,6 @@ type Props = {
   signedIn: boolean;
   onDownload: (url: string, title: string) => void;
 };
-
-type StemKind = "master" | "raw" | "acapella" | "instrumental";
-
-/** Export rows, in the order they appear under the player. */
-const EXPORT_ROWS: Array<{ kind: StemKind; label: string }> = [
-  { kind: "master", label: "Master Track" },
-  { kind: "raw", label: "Raw Pre-Master" },
-  { kind: "acapella", label: "Clean Vocal Stem" },
-  { kind: "instrumental", label: "Instrumental Stem" },
-];
 
 function relativeStamp(iso: string): string {
   const at = new Date(iso).getTime();
@@ -88,25 +72,6 @@ function fileSlug(title: string): string {
   return title.replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "") || "Track";
 }
 
-function stemFileName(title: string, stem: StemKind, ext: "mp3" | "wav"): string {
-  const suffix =
-    stem === "master"
-      ? "Full_Master"
-      : stem === "raw"
-        ? "Raw_Pre_Master"
-        : stem === "acapella"
-          ? "Acapella"
-          : "Instrumental";
-  return `${fileSlug(title)}_${suffix}.${ext}`;
-}
-
-function stemUrl(row: UserVaultRow, stem: StemKind): string {
-  if (stem === "master") return row.masterUrl;
-  if (stem === "raw") return row.rawAudioUrl;
-  if (stem === "acapella") return row.vocalUrl;
-  return row.instrumentalUrl;
-}
-
 function fromApi(track: VaultTrackPayload): UserVaultRow {
   const [clean] = sanitizeVaultTracks([track]);
   return {
@@ -121,6 +86,10 @@ function fromApi(track: VaultTrackPayload): UserVaultRow {
     createdAt: clean?.created_at ?? track.created_at,
     artistName: clean?.artist_name ?? track.artist_name ?? "Unknown Artist",
     albumName: clean?.album_name ?? track.album_name ?? "Singles",
+    musicalKey: clean?.musical_key ?? undefined,
+    durationSec: clean?.duration_sec ?? undefined,
+    mp3Url: clean?.mp3_url ?? undefined,
+    zipUrl: clean?.zip_url ?? undefined,
   };
 }
 
@@ -150,26 +119,36 @@ function upsertProcessing(previous: UserVaultRow[], incoming: UserVaultRow): Use
   return [incoming, ...withoutTemps];
 }
 
-function triggerBlobDownload(url: string, fileName: string) {
-  void import("@/lib/download-track").then(({ downloadTrack }) => {
-    void downloadTrack(url, fileName);
-  });
+function toPlayable(row: UserVaultRow, src: string) {
+  return {
+    id: row.id,
+    title: row.title,
+    artist: row.artistName,
+    src,
+    audio_url: src,
+    album: row.albumName,
+    genre: row.style,
+  };
 }
 
 export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const loadVault = useServerFn(listUserVaultTracks);
-  const removeVault = useServerFn(deleteUserVaultTrack);
   const [rows, setRows] = useState<UserVaultRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<UserVaultRow | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
+  const playback = useCatalogPlayback();
 
   const refresh = useCallback(async () => {
     if (!signedIn) {
       try {
         const guest = await listGuestVaultTracks();
-        setRows(guest.map((track) => fromApi(guestTrackToPayload(track))));
+        const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
+        setRows((prev) =>
+          mergeVaultRows(
+            [...workerRows, ...guest.map((track) => guestTrackToPayload(track))].map(fromApi),
+            prev,
+          ),
+        );
       } catch {
         setRows([]);
       }
@@ -184,11 +163,15 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           statusCode: catalog.status,
         });
       }
-      setRows((prev) => mergeVaultRows(catalog.tracks.map(fromApi), prev));
+      const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
+      setRows((prev) =>
+        mergeVaultRows([...workerRows, ...catalog.tracks].map(fromApi), prev),
+      );
     } catch {
       try {
         const fallback = await loadVault({ data: undefined });
-        setRows((prev) => mergeVaultRows(fallback, prev));
+        const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
+        setRows((prev) => mergeVaultRows([...workerRows.map(fromApi), ...fallback], prev));
       } catch (error) {
         logTransientPollDisconnect({
           source: "vault_catalog",
@@ -255,7 +238,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
         if (timer) window.clearInterval(timer);
         return;
       }
-      // Cloud vault only — guest rows update via generation events, not polling.
       if (signedIn) void refresh();
     };
 
@@ -272,20 +254,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     };
   }, [processing, signedIn, refresh]);
 
-  // Release any in-list <audio> elements on unmount so WebKit drops buffers.
-  useEffect(() => {
-    return () => {
-      try {
-        const nodes = document.querySelectorAll<HTMLAudioElement>("#vault-track-list audio");
-        nodes.forEach((node) => safeReleaseMediaElement(node));
-      } catch {
-        /* ignore */
-      }
-    };
-  }, []);
-
   const [openAlbums, setOpenAlbums] = useState<string[]>([]);
-  const deleteLockRef = useRef(false);
 
   const grouped = useMemo(
     () =>
@@ -302,6 +271,9 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           created_at: row.createdAt,
           artist_name: row.artistName,
           album_name: row.albumName,
+          musical_key: row.musicalKey ?? null,
+          duration_sec: row.durationSec ?? null,
+          mp3_url: row.mp3Url ?? null,
         })),
       ),
     [rows],
@@ -319,70 +291,50 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     setOpenAlbums(defaultOpenAlbums);
   }, [defaultOpenAlbums]);
 
-  async function downloadWav(url: string, title: string, stem: StemKind) {
-    const key = `${title}:${stem}:wav`;
-    setWavBusy(key);
+  function playRow(row: UserVaultRow) {
+    const urls = vaultMasterUrls(row);
+    if (!isPlayableVaultAudioUrl(urls.streamUrl)) return;
+    void playCatalogTrack(toPlayable(row, urls.streamUrl), "vault").then(() => {
+      const el = document.getElementById("hybrid-catalog-audio");
+      if (!(el instanceof HTMLAudioElement)) return;
+      const retry = () => {
+        if (!urls.fallbackUrl || urls.fallbackUrl === urls.streamUrl) return;
+        void playCatalogTrack(toPlayable(row, urls.fallbackUrl), "vault");
+      };
+      el.addEventListener("error", retry, { once: true });
+    });
+  }
+
+  async function downloadMasterWav(row: UserVaultRow) {
+    const urls = vaultMasterUrls(row);
+    const fileName = `${fileSlug(row.title)}_master.wav`;
+    if (/\.wav(\?|$)/i.test(urls.wavUrl)) {
+      onDownload(urls.wavUrl, fileName);
+      return;
+    }
+    if (!urls.wavUrl && !urls.streamUrl) {
+      toast.error("Master WAV is not available for this track.");
+      return;
+    }
+    setWavBusy(row.id);
     try {
-      const wav = await masterWavFromUrl(url, { title });
-      triggerBlobDownload(wav.url, stemFileName(title, stem, "wav"));
+      const wav = await masterWavFromUrl(urls.streamUrl || urls.wavUrl, { title: row.title });
+      void import("@/lib/download-track").then(({ downloadTrack }) => {
+        void downloadTrack(wav.url, fileName);
+      });
       window.setTimeout(() => URL.revokeObjectURL(wav.url), 2_000);
     } catch {
-      toast.error("Could not prepare the WAV. Try the MP3 download instead.");
+      toast.error("Could not prepare the master WAV.");
     } finally {
       setWavBusy(null);
     }
   }
 
-  async function confirmDelete() {
-    if (deleteLockRef.current) return;
-    const target = pendingDelete;
-    if (!target) return;
-    deleteLockRef.current = true;
-    setPendingDelete(null);
-
-    // Optimistic removal — restore on failure so the UI never feels stuck on iOS.
-    const snapshot = rows;
-    setRows((prev) => prev.filter((row) => row.id !== target.id));
-    setDeletingId(target.id);
-
-    if (target.id.startsWith("temp-")) {
-      setDeletingId(null);
-      deleteLockRef.current = false;
-      toast.success("Track deleted.");
-      return;
-    }
-
-    try {
-      if (!signedIn || !isPersistedVaultId(target.id)) {
-        await deleteGuestVaultTrack(target.id);
-      } else if (isPersistedVaultId(target.id)) {
-        try {
-          await deleteVaultTrackApi(target.id);
-        } catch {
-          await removeVault({ data: { id: target.id } });
-        }
-      } else {
-        await removeVault({ data: { id: target.id } });
-      }
-      toast.success("Track deleted.");
-    } catch {
-      setRows(snapshot);
-      toast.error("Could not delete that track. Please try again.");
-    } finally {
-      setDeletingId(null);
-      deleteLockRef.current = false;
-    }
-  }
-
-  function requestDelete(row: UserVaultRow) {
-    setPendingDelete(row);
-  }
-
   return (
-    <div className="vault-container bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 p-6 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55">
+    <div className="vault-container mb-24 bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 p-6 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55">
       <div className="mb-1 flex items-center justify-between gap-3 pb-4">
         <h3 className="text-lg font-bold text-zinc-100">Your Audio Vault</h3>
-        <span className="text-xs text-zinc-400">Manage, stream, and export stems</span>
+        <span className="text-xs text-zinc-400">Finished masters only</span>
       </div>
 
       <div id="vault-track-list" className="divide-y divide-zinc-800/50">
@@ -430,154 +382,145 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                           </span>
                         </AccordionTrigger>
                         <AccordionContent className="pb-3">
-                          <div className="divide-y divide-zinc-800/50">
-                            {album.tracks.map((track) => {
-                              const row =
-                                rows.find((r) => r.id === track.id) ??
-                                fromApi({
-                                  ...track,
-                                  master_url: track.master_url,
-                                  instrumental_url: track.instrumental_url,
-                                  vocal_url: track.vocal_url,
-                                  raw_audio_url: track.raw_audio_url,
-                                });
-                              return (
-                                <div
-                                  key={row.id}
-                                  id={`vault-track-${row.id}`}
-                                  className="track-row flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-zinc-100">
-                                      {row.title}
-                                    </p>
-                                    <p className="text-xs text-zinc-400">
-                                      Generated: {relativeStamp(row.createdAt)} • Status:{" "}
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="border-zinc-800/80 hover:bg-transparent">
+                                <TableHead className="pl-4 text-left text-zinc-400">
+                                  Title
+                                </TableHead>
+                                <TableHead className="hidden text-zinc-400 sm:table-cell">
+                                  Genre
+                                </TableHead>
+                                <TableHead className="hidden text-zinc-400 md:table-cell">
+                                  Key
+                                </TableHead>
+                                <TableHead className="hidden text-zinc-400 md:table-cell">
+                                  Duration
+                                </TableHead>
+                                <TableHead className="text-zinc-400">Status</TableHead>
+                                <TableHead className="w-[5.5rem] text-end text-zinc-400">
+                                  Actions
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {album.tracks.map((track) => {
+                                const row =
+                                  rows.find((r) => r.id === track.id) ??
+                                  fromApi({
+                                    ...track,
+                                    master_url: track.master_url,
+                                    instrumental_url: track.instrumental_url,
+                                    vocal_url: track.vocal_url,
+                                    raw_audio_url: track.raw_audio_url,
+                                  });
+                                const genre = resolveCatalogGenre(row.style);
+                                const keyLabel = resolveCatalogKey(
+                                  row.style,
+                                  row.title,
+                                  row.musicalKey,
+                                );
+                                const durationSec = resolveCatalogDurationSec(
+                                  row.durationSec,
+                                  DEFAULT_CATALOG_DURATION_SEC,
+                                );
+                                const urls = vaultMasterUrls(row);
+                                const ready = isPlayableVaultAudioUrl(urls.streamUrl);
+                                const active =
+                                  playback.owner === "vault" && playback.currentTrack?.id === row.id;
+                                const playing = active && playback.playing;
+                                return (
+                                  <TableRow
+                                    key={row.id}
+                                    id={`vault-track-${row.id}`}
+                                    className="track-row border-zinc-800/60"
+                                  >
+                                    <TableCell className="min-w-[8rem] pl-4 text-left font-medium text-zinc-100">
+                                      <div className="min-w-0">
+                                        <p className="truncate">{row.title}</p>
+                                        <p className="text-[11px] font-normal text-zinc-500">
+                                          {relativeStamp(row.createdAt)}
+                                        </p>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="hidden text-zinc-300 sm:table-cell">
+                                      {genre}
+                                    </TableCell>
+                                    <TableCell className="hidden font-mono text-xs text-zinc-300 md:table-cell">
+                                      {keyLabel}
+                                    </TableCell>
+                                    <TableCell className="hidden tabular-nums text-zinc-300 md:table-cell">
+                                      {formatDurationSeconds(durationSec)}
+                                    </TableCell>
+                                    <TableCell>
                                       {row.status === "processing" ? (
-                                        <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
-                                          <span
-                                            className="size-1.5 animate-pulse rounded-full bg-amber-400"
+                                        <Badge
+                                          variant="outline"
+                                          className="border-amber-400/40 bg-amber-400/10 text-amber-300"
+                                        >
+                                          Processing
+                                        </Badge>
+                                      ) : row.status === "failed" ? (
+                                        <Badge variant="destructive">Failed</Badge>
+                                      ) : (
+                                        <Badge className="border-transparent bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20">
+                                          Ready
+                                        </Badge>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="w-[5.5rem] text-end">
+                                      <div className="inline-flex items-center justify-end gap-0.5">
+                                        {row.status === "processing" ? (
+                                          <Loader2
+                                            className="size-3.5 animate-spin text-muted-foreground"
                                             aria-hidden
                                           />
-                                          Processing...
-                                        </span>
-                                      ) : row.status === "failed" ? (
-                                        <span className="font-semibold text-destructive">Failed</span>
-                                      ) : (
-                                        <span className="font-semibold text-emerald-400">Ready</span>
-                                      )}
-                                    </p>
-                                  </div>
-
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    {isPlayableVaultAudioUrl(row.masterUrl) ? (
-                                      <>
-                                        <audio
-                                          controls
-                                          playsInline
-                                          preload="none"
-                                          className="h-8 max-w-[200px]"
-                                          src={row.masterUrl}
-                                          onError={(event) => {
-                                            try {
-                                              safeReleaseMediaElement(event.currentTarget);
-                                            } catch {
-                                              /* ignore */
-                                            }
-                                          }}
-                                        >
-                                          <track kind="captions" />
-                                        </audio>
-                                        <DropdownMenu>
-                                          <DropdownMenuTrigger asChild>
-                                            <Button type="button" size="sm" className="h-8 px-3 text-xs">
-                                              <Download className="size-3.5" aria-hidden />
-                                              Download
-                                              <ChevronDown className="size-3.5" aria-hidden />
-                                            </Button>
-                                          </DropdownMenuTrigger>
-                                          <DropdownMenuContent align="end" className="min-w-64">
-                                            {EXPORT_ROWS.map(({ kind, label }, index) => {
-                                              const url = stemUrl(row, kind);
-                                              return (
-                                                <div key={kind}>
-                                                  {index > 0 ? <DropdownMenuSeparator /> : null}
-                                                  <DropdownMenuLabel className="flex items-center justify-between gap-2">
-                                                    <span>{label}</span>
-                                                    {url ? null : (
-                                                      <span className="text-[10px] font-normal text-muted-foreground">
-                                                        unavailable
-                                                      </span>
-                                                    )}
-                                                  </DropdownMenuLabel>
-                                                  <div className="flex gap-1 px-1 pb-1">
-                                                    <DropdownMenuItem
-                                                      className="flex-1 justify-center rounded border border-border/60 text-xs"
-                                                      disabled={!url || wavBusy !== null}
-                                                      onSelect={() =>
-                                                        void downloadWav(url, row.title, kind)
-                                                      }
-                                                    >
-                                                      WAV
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                      className="flex-1 justify-center rounded border border-border/60 text-xs"
-                                                      disabled={!url}
-                                                      onSelect={() =>
-                                                        onDownload(
-                                                          url,
-                                                          stemFileName(row.title, kind, "mp3"),
-                                                        )
-                                                      }
-                                                    >
-                                                      MP3
-                                                    </DropdownMenuItem>
-                                                  </div>
-                                                </div>
-                                              );
-                                            })}
-                                          </DropdownMenuContent>
-                                        </DropdownMenu>
-                                      </>
-                                    ) : row.status === "processing" ? (
-                                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                                        Rendering in the background
-                                      </span>
-                                    ) : null}
-
-                                    {row.status !== "processing" ? (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        className="relative z-20 h-11 min-w-[5.5rem] touch-manipulation px-3 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive pointer-events-auto"
-                                        disabled={deletingId === row.id}
-                                        onClick={(event) => {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          requestDelete(row);
-                                        }}
-                                        onTouchEnd={(event) => {
-                                          // Prevent 300ms ghost-click + Accordion steal on iOS.
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          requestDelete(row);
-                                        }}
-                                      >
-                                        {deletingId === row.id ? (
-                                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
                                         ) : (
-                                          <Trash2 className="size-3.5" aria-hidden />
+                                          <>
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="ghost"
+                                              className="size-8"
+                                              disabled={!ready}
+                                              aria-label={
+                                                playing ? `Pause ${row.title}` : `Play ${row.title}`
+                                              }
+                                              onClick={() => playRow(row)}
+                                            >
+                                              {playing ? (
+                                                <Pause className="size-3.5" aria-hidden />
+                                              ) : (
+                                                <Play className="size-3.5" aria-hidden />
+                                              )}
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="ghost"
+                                              className="size-8"
+                                              disabled={!urls.wavUrl && !urls.streamUrl}
+                                              aria-label={`Download master WAV for ${row.title}`}
+                                              onClick={() => void downloadMasterWav(row)}
+                                            >
+                                              {wavBusy === row.id ? (
+                                                <Loader2
+                                                  className="size-3.5 animate-spin"
+                                                  aria-hidden
+                                                />
+                                              ) : (
+                                                <Download className="size-3.5" aria-hidden />
+                                              )}
+                                            </Button>
+                                          </>
                                         )}
-                                        Delete
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
                         </AccordionContent>
                       </AccordionItem>
                     );
@@ -588,35 +531,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           </div>
         )}
       </div>
-
-      <AlertDialog
-        open={pendingDelete !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingDelete(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this track?</AlertDialogTitle>
-            <AlertDialogDescription>
-              “{pendingDelete?.title ?? "This track"}” and its master and stem files are removed
-              permanently. This can’t be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep track</AlertDialogCancel>
-            <AlertDialogAction
-              className="min-h-11 touch-manipulation"
-              onClick={(event) => {
-                event.preventDefault();
-                void confirmDelete();
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <VaultMasterDock />
     </div>
   );
 }

@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 import soundfile as sf
 
-from engine.stem_adapter import StemAdapter, section_sample_count
+from engine.conductor_matrix import apply_bar_dsp, blend_bar_into
+from engine.genre_planner import (
+    dsp_rules_from_section,
+    get_arrangement_blueprint,
+    rules_for_bar,
+)
+from engine.hybrid_conductor import AdaptiveConductor
+from engine.stem_adapter import StemAdapter, section_sample_count, tile_loop_on_grid
 from engine.stem_retriever import (
     SQLiteStemRetriever,
     StemCandidateQuery,
@@ -26,6 +35,10 @@ from engine.song_plan import (
     beats_per_bar,
     song_plan_from_dict,
 )
+from engine.stem_selector import extract_session_slug, pack_id_from_path
+
+# One pull: drums (anchor) + bass + rhythm guitar. Optional vocal/lead once.
+BAND_FAMILIES = ("drums", "bass", "rhythm_guitar")
 
 # Core mixer buses (Module 2).
 ARRANGE_BUSES = ("rhythm", "bass", "harmonic", "vocal")
@@ -178,6 +191,8 @@ class ArrangementAssembler:
         self.synthesize_fn = synthesize_fn
         self.load_audio = load_audio or self._default_load
         self.seed = int(seed)
+        self._motif_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        self._anchor_slug = ""
         self._retriever = retriever
         self._owned_retriever = False
         if self._retriever is None:
@@ -219,102 +234,264 @@ class ArrangementAssembler:
             if self._custom_adapter
             else StemAdapter(self.sr, beats_per_bar=bpb)
         )
+        total_bars = max(
+            1,
+            int(plan.total_bars or 0) or sum(int(s.bars) for s in plan.sections) or 1,
+        )
+        total_n = section_sample_count(total_bars, bpm, self.sr, beats_per_bar=bpb)
+        zc = max(1, int(round(self.sr * 0.015)))
 
-        # Per-bus list of section buffers (pre-xfade).
-        section_buffers: dict[str, list[np.ndarray]] = {bus: [] for bus in ASSEMBLY_BUSES}
         trace: dict[str, Any] = {
             "sections": [],
             "xfade_ms": self.xfade_ms,
             "sr": self.sr,
             "time_signature": plan.time_signature,
             "beats_per_bar": bpb,
+            "band_lock": True,
         }
-
-        last_idx = len(plan.sections) - 1
-        grid_start = 0
-        for idx, section in enumerate(plan.sections):
-            n = section_sample_count(int(section.bars), bpm, self.sr, beats_per_bar=bpb)
-            # The seam crossfade consumes this tail, so every section onset
-            # stays on the bar grid (sum of preceding section lengths).
-            extra = fade if idx < last_idx else 0
-            families = self._families_for_section(section)
-            chosen: dict[str, Any] = {}
-            # Accumulate into bus buckets (multiple families may share harmonic).
-            bus_acc: dict[str, np.ndarray] = {
-                bus: np.zeros((n + extra, self.channels), dtype=np.float64)
+        compose_t0 = time.perf_counter()
+        print(
+            f"[COMPOSITION] Arranging section band_lock with anchor "
+            f"{self._anchor_slug or '-'}...",
+            flush=True,
+        )
+        try:
+            band_meta, dry = self._lock_band(
+                plan, adapter, genre, bpm, key, total_n, fade, zc, trace
+            )
+            genre_name = ""
+            if isinstance(plan.core_metadata, dict):
+                genre_name = str(
+                    plan.core_metadata.get("genre") or plan.core_metadata.get("genre_hint") or ""
+                )
+            if not genre_name and plan.source_genres:
+                first = plan.source_genres[0]
+                if isinstance(first, dict):
+                    genre_name = str(first.get("genre") or first.get("slug") or "")
+            # Executive planner owns arrangement. Picker already locked the band.
+            blueprint = get_arrangement_blueprint(genre_name or None, total_bars)
+            conductor = AdaptiveConductor(total_bars, genre_name)
+            tension = conductor.generate_tension_map()
+            tracks: dict[str, np.ndarray] = {
+                bus: np.zeros((total_n, self.channels), dtype=np.float64)
                 for bus in ASSEMBLY_BUSES
             }
-            for family in families:
-                query = StemCandidateQuery(
-                    instrument_family=family,
-                    target_bpm=int(round(bpm)),
-                    target_key=key,
-                    target_chord=(section.chord_progression[0] if section.chord_progression else key),
-                    energy_tier=float(section.energy_level),
-                    genre_vector=genre,
-                    scale=str(plan.scale),
-                    time_signature=str(plan.time_signature),
+            last_rules: dict[str, Any] | None = None
+            for bar in range(total_bars):
+                start = 0 if bar == 0 else section_sample_count(
+                    bar, bpm, self.sr, beats_per_bar=bpb
                 )
-                audio, meta = self._retrieve_or_synthesize(query, section, n + extra)
-                adapted, info = adapter.adapt(
-                    audio,
-                    bars=int(section.bars),
-                    target_bpm=bpm,
-                    target_key=key,
-                    source_bpm=meta.get("estimated_bpm"),
-                    source_key=meta.get("detected_key"),
-                    pitch_shift_semitones=meta.get("pitch_shift_semitones"),
-                    metadata=meta,
-                    extra_samples=extra,
+                end = min(
+                    total_n,
+                    section_sample_count(bar + 1, bpm, self.sr, beats_per_bar=bpb),
                 )
-                bus = query.bus()
-                bus_acc[bus] += _ensure_2d(adapted, self.channels)[: n + extra]
-                chosen[family] = {
-                    "file_path": meta.get("file_path"),
-                    "bus": bus,
-                    "synthetic": bool(meta.get("synthetic")),
-                    "silenced": bool(meta.get("silenced")),
-                    "synthetic_reason": meta.get("synthetic_reason"),
-                    **info,
-                }
-                if meta.get("synthetic") or meta.get("silenced"):
-                    trace.setdefault("non_corpus_stems", []).append(
-                        {
-                            "section": section.name,
-                            "family": family,
-                            "synthetic": bool(meta.get("synthetic")),
-                            "reason": meta.get("synthetic_reason"),
-                        }
+                if end <= start:
+                    continue
+                energy = float(tension[bar])
+                planned = rules_for_bar(blueprint, bar)
+                rules = dsp_rules_from_section(planned)
+                rules["tension"] = energy
+                if rules != last_rules:
+                    print(
+                        f"[COMPOSITION] Arranging section {rules.get('role', bar)} "
+                        f"with anchor {self._anchor_slug or '-'}... "
+                        f"kick_muted={rules['kick_muted']} "
+                        f"filter={rules['rhythm_filter'] or '-'} "
+                        f"width={rules.get('stereo_width')}",
+                        flush=True,
                     )
-            for bus in ASSEMBLY_BUSES:
-                section_buffers[bus].append(bus_acc[bus])
-            trace["sections"].append(
-                {
-                    "name": section.name,
-                    "bars": section.bars,
-                    "samples": n,
-                    "start_sample": grid_start,
-                    "stems": chosen,
+                    last_rules = dict(rules)
+                sliced = {
+                    bus: np.asarray(audio)[start:end]
+                    for bus, audio in dry.items()
+                    if np.asarray(audio).size
                 }
+                processed = apply_bar_dsp(
+                    sliced, rules, self.sr, bpm, beats_per_bar=bpb
+                )
+                blend_bar_into(tracks, processed, start, end, sr=self.sr)
+
+            grid_start = 0
+            for section in plan.sections:
+                n = section_sample_count(
+                    int(section.bars), bpm, self.sr, beats_per_bar=bpb
+                )
+                chosen = {
+                    family: {
+                        **dict(meta),
+                        "band_lock": True,
+                        "motif_reuse": True,
+                    }
+                    for family, meta in band_meta.items()
+                }
+                if plan.sections and section is plan.sections[0]:
+                    for item in chosen.values():
+                        item["motif_reuse"] = False
+                trace["sections"].append(
+                    {
+                        "name": section.name,
+                        "bars": section.bars,
+                        "samples": n,
+                        "start_sample": grid_start,
+                        "stems": chosen,
+                        "energy_arc": [
+                            float(tension[i])
+                            for i in range(
+                                int(section.start_bar),
+                                min(total_bars, int(section.start_bar) + int(section.bars)),
+                            )
+                        ],
+                    }
+                )
+                grid_start += n
+        except Exception:
+            print(
+                f"[COMPOSITION] failed after {time.perf_counter() - compose_t0:.2f}s\n"
+                f"{traceback.format_exc()}",
+                flush=True,
             )
-            grid_start += n
+            raise
 
-        tracks: dict[str, np.ndarray] = {}
-        for bus in ASSEMBLY_BUSES:
-            tracks[bus] = self._stitch(section_buffers[bus], fade)
-
-        # Align all buses to the longest track length.
-        max_len = max((t.shape[0] for t in tracks.values()), default=0)
-        for bus in ASSEMBLY_BUSES:
-            arr = tracks[bus]
-            if arr.shape[0] < max_len:
-                pad = ((0, max_len - arr.shape[0]),) + ((0, 0),) * (arr.ndim - 1)
-                tracks[bus] = np.pad(arr, pad)
-            elif arr.shape[0] > max_len:
-                tracks[bus] = arr[:max_len]
-
+        print(
+            f"[COMPOSITION] elapsed_sec={time.perf_counter() - compose_t0:.2f} "
+            f"bars={total_bars} anchor={self._anchor_slug or '-'}",
+            flush=True,
+        )
         mix = _sum_tracks(tracks)
+        trace["anchor_slug"] = self._anchor_slug
+        trace["motifs"] = {
+            family: {
+                "file_path": meta.get("file_path"),
+                "affinity_source": meta.get("affinity_source"),
+            }
+            for family, meta in band_meta.items()
+        }
+        trace["energy_arc"] = [float(x) for x in tension]
+        trace["tension_map"] = trace["energy_arc"]
+        trace["arrangement_blueprint"] = {
+            "family": blueprint.get("family"),
+            "style": blueprint.get("style"),
+            "authority": "genre_planner",
+            "sections": [
+                {
+                    "name": s.get("name"),
+                    "start_bar": s.get("start_bar"),
+                    "bars": s.get("bars"),
+                    "kick_muted": s.get("kick_muted"),
+                    "breakdown": s.get("breakdown"),
+                    "stereo_width": s.get("stereo_width"),
+                }
+                for s in blueprint.get("sections") or []
+            ],
+        }
         return AssemblyResult(tracks=tracks, mix=mix, trace=trace)
+
+    def _lock_band(
+        self,
+        plan: GlobalSongPlan,
+        adapter: StemAdapter,
+        genre: GenreVector,
+        bpm: float,
+        key: str,
+        total_n: int,
+        fade: int,
+        zc: int,
+        trace: dict[str, Any],
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, np.ndarray]]:
+        """One corpus pull for the band. Later bars reuse these buffers."""
+        lock_section = plan.sections[0] if plan.sections else SectionPlan(
+            name="lock",
+            start_bar=0,
+            bars=4,
+            energy_level=0.5,
+            chord_progression=[key],
+            active_stems=["drums", "bass", "rhythm_guitar"],
+            frequency_reservations={},
+        )
+        wanted = set(BAND_FAMILIES)
+        for section in plan.sections:
+            for family in self._families_for_section(section):
+                if family in {"vocal", "lead_guitar", "synth_lead"}:
+                    wanted.add(family)
+        families = [name for name in BAND_FAMILIES if name in wanted]
+        families.extend(sorted(wanted - set(BAND_FAMILIES)))
+
+        loop_bars = 4
+        loop_n = section_sample_count(
+            loop_bars, bpm, self.sr, beats_per_bar=beats_per_bar(plan.time_signature)
+        )
+        band_meta: dict[str, dict[str, Any]] = {}
+        dry: dict[str, np.ndarray] = {
+            bus: np.zeros((total_n, self.channels), dtype=np.float64)
+            for bus in ASSEMBLY_BUSES
+        }
+        for family in families:
+            query = StemCandidateQuery(
+                instrument_family=family,
+                target_bpm=int(round(bpm)),
+                target_key=key,
+                target_chord=(
+                    lock_section.chord_progression[0]
+                    if lock_section.chord_progression
+                    else key
+                ),
+                energy_tier=float(lock_section.energy_level),
+                genre_vector=genre,
+                scale=str(plan.scale),
+                time_signature=str(plan.time_signature),
+            )
+            audio, meta = self._retrieve_or_synthesize(
+                query,
+                lock_section,
+                loop_n,
+                anchor_slug=self._anchor_slug or None,
+            )
+            if family == "drums" and meta.get("file_path") and not self._anchor_slug:
+                self._anchor_slug = pack_id_from_path(str(meta["file_path"])) or extract_session_slug(
+                    str(meta["file_path"])
+                )
+                print(f"[AFFINITY] drum_anchor_slug={self._anchor_slug or '-'}", flush=True)
+            adapted, info = adapter.adapt(
+                audio,
+                bars=loop_bars,
+                target_bpm=bpm,
+                target_key=key,
+                source_bpm=meta.get("estimated_bpm"),
+                source_key=meta.get("detected_key"),
+                pitch_shift_semitones=meta.get("pitch_shift_semitones"),
+                metadata=meta,
+            )
+            looped = tile_loop_on_grid(
+                _ensure_2d(adapted, self.channels),
+                total_n,
+                period=max(1, loop_n),
+                fade=fade,
+                zc_radius=zc,
+            )
+            bus = query.bus()
+            dry[bus] = _ensure_2d(looped, self.channels)[:total_n]
+            chosen = {
+                "file_path": meta.get("file_path"),
+                "bus": bus,
+                "synthetic": bool(meta.get("synthetic")),
+                "silenced": bool(meta.get("silenced")),
+                "synthetic_reason": meta.get("synthetic_reason"),
+                "motif_reuse": False,
+                "affinity_source": meta.get("affinity_source"),
+                "band_lock": True,
+                **info,
+            }
+            band_meta[family] = chosen
+            if meta.get("synthetic") or meta.get("silenced"):
+                trace.setdefault("non_corpus_stems", []).append(
+                    {
+                        "section": "band_lock",
+                        "family": family,
+                        "synthetic": bool(meta.get("synthetic")),
+                        "reason": meta.get("synthetic_reason"),
+                    }
+                )
+        return band_meta, dry
 
     def _families_for_section(self, section: SectionPlan) -> list[str]:
         families: list[str] = []
@@ -325,6 +502,8 @@ class ArrangementAssembler:
                 families.append(family)
         if not families:
             families = ["drums", "bass", "rhythm_guitar"]
+        if "drums" in families:
+            families = ["drums"] + [item for item in families if item != "drums"]
         return families
 
     def _retrieve_or_synthesize(
@@ -332,14 +511,30 @@ class ArrangementAssembler:
         query: StemCandidateQuery,
         section: SectionPlan,
         n: int,
+        *,
+        cached: dict[str, Any] | None = None,
+        anchor_slug: str | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         family = query.instrument_family
+        if cached and cached.get("file_path") and self.load_audio is not None:
+            try:
+                audio = self.load_audio(str(cached["file_path"]))
+                reused = dict(cached)
+                reused["motif_reuse"] = True
+                return np.asarray(audio, dtype=np.float64), reused
+            except Exception:
+                pass
         load_error: str
         if self._retriever is None or self._retriever.conn is None:
             load_error = "no_index: corpus index unavailable"
         else:
             try:
-                candidate = self._retriever.best_candidate(query)
+                try:
+                    candidate = self._retriever.best_candidate(
+                        query, anchor_slug=anchor_slug if family != "drums" else None
+                    )
+                except TypeError:
+                    candidate = self._retriever.best_candidate(query)
             except Exception as exc:
                 candidate = None
                 load_error = f"query_failed: {type(exc).__name__}: {exc}"

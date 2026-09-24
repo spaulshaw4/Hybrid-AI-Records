@@ -16,6 +16,10 @@ export type UserVaultRow = {
   createdAt: string;
   artistName: string;
   albumName: string;
+  musicalKey?: string;
+  durationSec?: number;
+  mp3Url?: string;
+  zipUrl?: string;
 };
 
 const createSchema = z.object({

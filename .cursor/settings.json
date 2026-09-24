@@ -17,6 +17,12 @@
     },
     "encore": {
       "enabled": true
+    },
+    "shadcn": {
+      "enabled": true
+    },
+    "devtools-for-agents": {
+      "enabled": true
     }
   }
 }

@@ -52,6 +52,52 @@ def _harmonic_mid(n: int) -> np.ndarray:
     return 0.25 * np.sin(2 * np.pi * 1800.0 * t) + 0.15 * np.sin(2 * np.pi * 900.0 * t)
 
 
+def _bass_hits(n: int, hits: list[int], width: int = 80, hz: float = 55.0) -> np.ndarray:
+    """Bass note attacks (gated sine bursts) for onset-snap tests."""
+    x = np.zeros(n, dtype=np.float64)
+    for hit in hits:
+        end = min(n, hit + width)
+        t = np.arange(end - hit, dtype=np.float64)
+        burst = 0.5 * np.sin(2 * np.pi * hz * t / SR) * np.exp(-t / 40.0)
+        x[hit:end] += burst
+    return x
+
+
+def test_kick_bass_onset_snap_shifts_early_bass():
+    """Bass that starts ~15 ms early should lock onto the kick transient."""
+    n = SR  # 1 s
+    kick_at = SR // 4
+    early_ms = 15.0
+    bass_at = kick_at - int(early_ms * SR / 1000.0)
+    rhythm = _kick_pulse(n, [kick_at, kick_at + SR // 2])
+    bass = _bass_hits(n, [bass_at, bass_at + SR // 2])
+    mixer = RelationalMixer(SR, mix_intents=MixIntents(sidechain_kick_bass=0.5))
+    aligned, meta = mixer.align_bass_to_kick(bass, rhythm)
+    assert meta["kick_bass_aligned"] is True
+    assert meta["snaps"] >= 1
+    # After snap, bass energy near the kick sample should exceed energy at the early slot.
+    window = int(0.008 * SR)
+    early_energy = float(np.sum(np.abs(aligned[bass_at : bass_at + window])))
+    kick_energy = float(np.sum(np.abs(aligned[kick_at : kick_at + window])))
+    assert kick_energy > early_energy * 1.2
+
+
+def test_process_reports_kick_bass_aligned():
+    n = SR // 2
+    kick_at = 2000
+    bass_at = kick_at - int(0.012 * SR)
+    stems = {
+        "rhythm": _kick_pulse(n, [kick_at]),
+        "bass": _bass_hits(n, [bass_at]),
+        "harmonic": _harmonic_mid(n),
+        "vocal": np.zeros(n),
+    }
+    mixer = RelationalMixer(SR)
+    result = mixer.process(stems)
+    assert result.meters.get("kick_bass_aligned") is True
+    assert result.meters.get("sidechain_applied") is True
+
+
 def test_sidechain_attenuates_bass_low_end_on_kick():
     n = SR  # 1 second
     rhythm = _kick_pulse(n, [0, SR // 2])

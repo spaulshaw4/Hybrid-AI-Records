@@ -60,6 +60,10 @@ from engine.genre_arrangement_profiles import (  # noqa: E402
     load_dsp_matrix,
     slugify_genre,
 )
+from engine.genre_key_defaults import (  # noqa: E402
+    DEFAULT_KEY_SPEC,
+    resolve_genre_default_key,
+)
 from engine.arrangement_assembler import (  # noqa: E402
     ArrangementAssembler,
     AssemblyResult,
@@ -201,16 +205,16 @@ def conduct_profile(genre: str | None) -> dict[str, Any]:
     return _documented_default_profile(genre)
 
 
-DEFAULT_KEY_SPEC = "E_minor"
-
-
 def resolve_final_key(
     cli_key: str | None,
     plan: GlobalSongPlan | dict[str, Any] | None = None,
     *,
-    default: str = DEFAULT_KEY_SPEC,
+    default: str | None = None,
+    genre: str | None = None,
+    prompt: str | None = None,
+    seed: int | None = None,
 ) -> tuple[str, str]:
-    """CLI key wins; else plan key/scale; else ``E_minor``.
+    """CLI key wins; else plan key/scale; else genre-aware major/minor default.
 
     Returns ``(root, scale)`` suitable for ``GlobalSongPlan`` / blueprint meta.
     """
@@ -227,25 +231,34 @@ def resolve_final_key(
     if plan_key:
         combined = f"{plan_key}_{plan_scale}" if plan_scale else str(plan_key)
         return parse_key_scale(combined)
-    return parse_key_scale(default)
+    fallback = default or resolve_genre_default_key(genre, prompt, seed=seed)
+    return parse_key_scale(fallback)
 
 
 def apply_key_override(
     song_plan: GlobalSongPlan,
     cli_key: str | None,
+    *,
+    genre: str | None = None,
+    prompt: str | None = None,
+    seed: int | None = None,
 ) -> GlobalSongPlan:
     """Lock ``song_plan`` to the resolved key (frozen model → ``model_copy``).
 
-    Equivalent to the intended::
-
-        final_key = cli_key or (plan.key if plan.key else \"E_minor\")
-        song_plan.key = final_key
+    Without an explicit CLI key, keeps the plan key (already genre-mapped in
+    ``build_song_plan``) or falls back to a genre default — never a hard-coded
+    universal E minor.
     """
-    final_key = cli_key or (
-        f"{song_plan.key}_{song_plan.scale}"
-        if getattr(song_plan, "key", None)
-        else DEFAULT_KEY_SPEC
-    )
+    if cli_key:
+        final_key = cli_key
+    elif getattr(song_plan, "key", None):
+        final_key = f"{song_plan.key}_{song_plan.scale}"
+    else:
+        final_key = resolve_genre_default_key(
+            genre,
+            prompt,
+            seed=seed if seed is not None else int(getattr(song_plan, "seed", 0) or 0),
+        )
     root, scale_mode = parse_key_scale(str(final_key))
     core = dict(song_plan.core_metadata or {})
     core["key"] = f"{root}_{scale_mode}"
@@ -303,8 +316,14 @@ def conduct_arrangement(
         arrangement_sections=arrangement.get("sections") or [],
         total_bars=int(arrangement.get("total_bars") or 0) or None,
     )
-    # CLI key (or plan key, or E_minor) is the single source of truth.
-    song_plan = apply_key_override(song_plan, key)
+    # CLI key (or plan/genre default) is the single source of truth.
+    song_plan = apply_key_override(
+        song_plan,
+        key,
+        genre=genre,
+        prompt=prompt,
+        seed=int(arrangement.get("seed") or 0),
+    )
     if scale and not key:
         # Explicit scale-only override when no CLI key was provided.
         song_plan = song_plan.model_copy(
@@ -677,10 +696,10 @@ if __name__ == "__main__":  # pragma: no cover - manual inspection helper
     parser.add_argument(
         "--key",
         default=None,
-        help="Explicit key override (e.g. Dmin, E_minor). Wins over plan default.",
+        help="Explicit key override (e.g. Dmin, G_major). Wins over genre default.",
     )
     args = parser.parse_args()
-    # final_key = cli key or plan key or E_minor — applied inside conduct_arrangement
+    # final_key = cli key or plan/genre default — applied inside conduct_arrangement
     plan = conduct_arrangement(
         args.prompt,
         args.genre,

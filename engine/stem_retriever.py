@@ -385,7 +385,11 @@ class SQLiteStemRetriever:
         if not path or not os.path.isfile(path):
             return None
         try:
-            conn = sqlite3.connect(path)
+            from engine.live_index import get_db_connection, is_source_index
+
+            if is_source_index(path):
+                return None
+            conn = get_db_connection(path)
             row = conn.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='slice_index'"
             ).fetchone()
@@ -393,7 +397,7 @@ class SQLiteStemRetriever:
                 conn.close()
                 return None
             return conn
-        except sqlite3.Error:
+        except (sqlite3.Error, FileNotFoundError, OSError):
             return None
 
     def close(self) -> None:
@@ -467,6 +471,31 @@ class SQLiteStemRetriever:
         query: StemCandidateQuery,
         *,
         tags: Iterable[str] | None = None,
+        anchor_slug: str | None = None,
     ) -> dict[str, Any] | None:
+        if anchor_slug:
+            hit, source = self.fetch_with_affinity(query, anchor_slug)
+            if hit:
+                hit["affinity_source"] = source
+                return hit
         hits = self.retrieve(query, limit=1, tags=tags)
         return hits[0] if hits else None
+
+    def fetch_with_affinity(
+        self,
+        query: StemCandidateQuery,
+        anchor_slug: str,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Session-locked pick, then global key/BPM fallback."""
+        if self.conn is None:
+            return None, "empty"
+        from engine.stem_selector import fetch_stem_with_pack_affinity
+
+        return fetch_stem_with_pack_affinity(
+            self.conn,
+            query.instrument_family,
+            anchor_slug,
+            query.target_key,
+            float(query.target_bpm),
+            require_on_disk=self.require_on_disk,
+        )

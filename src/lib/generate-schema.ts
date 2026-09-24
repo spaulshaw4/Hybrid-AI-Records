@@ -82,6 +82,9 @@ export const generateSchema = z.object({
   vocalStyle: z.string().trim().max(400).optional(),
   /** Direct sample URL when the client already resolved the cloned take. */
   referenceAudioUrl: z.string().trim().max(2000).optional(),
+  /** Browser MediaRecorder blob as base64 (WebM/Opus). Worker transcodes to WAV. */
+  vocalAudioBase64: z.string().trim().max(12_000_000).optional(),
+  vocalFileName: z.string().trim().max(180).optional(),
   /**
    * Artist RVC v2 model zip (HTTPS). Gate 5 uses this with
    * zsxkib/realistic-voice-cloning for pitch-preserving voice conversion.

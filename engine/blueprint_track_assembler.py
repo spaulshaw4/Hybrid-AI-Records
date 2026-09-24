@@ -767,7 +767,11 @@ def _open_slice_index(index_db: str | None) -> sqlite3.Connection | None:
     if not path or not os.path.isfile(path):
         return None
     try:
-        conn = sqlite3.connect(path)
+        from engine.live_index import get_db_connection, is_source_index
+
+        if is_source_index(path):
+            return None
+        conn = get_db_connection(path)
         row = conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='slice_index'"
         ).fetchone()
@@ -779,7 +783,7 @@ def _open_slice_index(index_db: str | None) -> sqlite3.Connection | None:
             conn.close()
             return None
         return conn
-    except sqlite3.Error:
+    except (sqlite3.Error, FileNotFoundError, OSError):
         return None
 
 
@@ -1557,6 +1561,9 @@ def assemble_arranged_buses(
             "[RELATIONAL] "
             f"sections={len(meters.get('sections') or []) or 'single'} "
             f"sidechain={'yes' if meters.get('sidechain_applied') else 'no'} "
+            f"kick_bass_aligned={bool(meters.get('kick_bass_aligned'))} "
+            f"snaps={int(meters.get('snaps') or 0)} "
+            f"median_shift_ms={float(meters.get('median_shift_ms') or 0):.3f} "
             f"pocket={'yes' if meters.get('vocal_pocket_applied') else 'no'} "
             f"reverb_send={float(meters.get('reverb_send') or 0):.2f} "
             f"mix_peak={float(meters.get('mix_peak_dbfs') or -120):.1f} dBFS"

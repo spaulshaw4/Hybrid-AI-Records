@@ -42,10 +42,10 @@ export const TRACK_LENGTHS: TrackLengthOption[] = [
 export const DEFAULT_TRACK_LENGTH: TrackLengthId = "extended";
 
 /** Numeric target duration constraints (seconds). */
-export const MIN_TARGET_DURATION_SECONDS = 150; // 2:30
+export const MIN_TARGET_DURATION_SECONDS = 60; // 1:00
 export const MAX_TARGET_DURATION_SECONDS = 420; // 7:00
 export const TARGET_DURATION_STEP_SECONDS = 15;
-export const DEFAULT_TARGET_DURATION_SECONDS = 240; // 4:00
+export const DEFAULT_TARGET_DURATION_SECONDS = 210; // 3:30
 
 export function trackLengthOption(id: TrackLengthId): TrackLengthOption {
   return TRACK_LENGTHS.find((o) => o.id === id) ?? TRACK_LENGTHS[1]!;

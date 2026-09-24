@@ -37,6 +37,46 @@ export type SecureCoreDispatch = {
 
 const SYSTEM_ACTOR = "00000000-0000-0000-0000-000000000000";
 
+/** Bright major defaults for pop / country / reggae / funk. */
+const MAJOR_KEYS = ["C major", "G major", "A major"] as const;
+/** Rock / outlaw / blues pocket. */
+const ROCK_KEYS = ["E major", "A minor"] as const;
+/** Dark minor defaults for hip-hop / industrial / metal. */
+const MINOR_KEYS = ["E minor", "D minor", "F# minor"] as const;
+
+const GENRE_KEY_RULES: ReadonlyArray<{ re: RegExp; pool: readonly string[] }> = [
+  { re: /\b(outlaw\s*country|rock|punk|blues|outlaw|indie)\b/i, pool: ROCK_KEYS },
+  {
+    re: /\b(hip[\s-]?hop|hiphop|trap|rap|metal|industrial|techno|dubstep|ambient|cinematic)\b/i,
+    pool: MINOR_KEYS,
+  },
+  {
+    re: /\b(pop|country|reggae|funk|disco|dance|house|soul|r&?b|folk)\b/i,
+    pool: MAJOR_KEYS,
+  },
+];
+
+function hashSeed(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Genre → mode when the user did not lock a keySignature. */
+export function defaultKeyForGenre(genre: string, prompt = ""): string {
+  const haystack = `${genre} ${prompt}`.trim() || "pop";
+  const seed = hashSeed(haystack.toLowerCase());
+  for (const rule of GENRE_KEY_RULES) {
+    if (rule.re.test(haystack)) {
+      return rule.pool[seed % rule.pool.length]!;
+    }
+  }
+  return MAJOR_KEYS[seed % MAJOR_KEYS.length]!;
+}
+
 /**
  * Musical / prompt keys the audio reactor may see.
  * Queue-row metadata (spend keys, vault ids, timestamps, isolation stamps) is excluded.
@@ -116,11 +156,16 @@ export function sanitizeCompositionInput(
   if (controlsRaw.bpm === undefined) controlsRaw.bpm = bpm;
   if (Object.keys(controlsRaw).length > 0) sanitized.controls = controlsRaw;
 
-  const keySignature =
+  const explicitKey =
     (typeof sanitized.keySignature === "string" && sanitized.keySignature.trim()) ||
     (typeof sanitized.key_signature === "string" && sanitized.key_signature.trim()) ||
-    "C";
-  sanitized.keySignature = keySignature;
+    "";
+  sanitized.keySignature =
+    explicitKey ||
+    defaultKeyForGenre(
+      genre,
+      typeof sanitized.prompt === "string" ? sanitized.prompt : "",
+    );
 
   // bars = round(seconds * bpm / 240) in 4/4; default length is 3:30.
   const secondsCandidate = Number(sanitized.durationSeconds);

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Check, ChevronDown, CloudCheck, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CloudCheck, Download, HelpCircle, Loader2, Minus, Pause, Play, Plus, RefreshCw, Search, Share2, Sparkles, Trash2, Volume2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
@@ -15,6 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
+import { ConductorTelemetryCard } from "@/components/ConductorTelemetryCard";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useReturnFocus } from "@/hooks/use-return-focus";
 
@@ -22,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { TokenStore } from "@/components/TokenStore";
 import { QuickVocalRecorder } from "@/components/QuickVocalRecorder";
 import { AudioVault } from "@/components/AudioVault";
+import { fetchLocalReleaseSessionIds, rememberWorkerSession } from "@/lib/vault-catalog";
 
 import { supabase } from "@/integrations/supabase/client";
 import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
@@ -337,12 +340,6 @@ const GENRE_OPTIONS = [
   },
 ] as const;
 
-
-/** Inline `--fill` percentage that drives the fiery slider active track. */
-function sliderFill(value: number, min: number, max: number): CSSProperties {
-  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
-  return { "--fill": `${Math.min(100, Math.max(0, pct))}%` } as CSSProperties;
-}
 
 /** Gender presets are mutually exclusive in the vocals picker. */
 const GENDER_PRESETS = ["Male Vocal", "Female Vocal"] as const;
@@ -843,6 +840,17 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const chunks: string[] = [];
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + step)));
+  }
+  return btoa(chunks.join(""));
+}
+
 /** Lightweight synthetic waveform + scrubber driven by a single <audio> element. */
 function WaveformPlayer({
   src,
@@ -864,6 +872,8 @@ function WaveformPlayer({
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.9);
+  const scrubbingRef = useRef(false);
   // Live URL for this track — swapped automatically when the original expires.
   const [activeSrc, setActiveSrc] = useState(src);
   // Never hand the <audio> element a source the browser cannot stream.
@@ -1054,6 +1064,18 @@ function WaveformPlayer({
     audio.currentTime = Math.max(0, Math.min(1, ratio)) * audio.duration;
   }, []);
 
+  const seekSeconds = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    audio.currentTime = Math.max(0, Math.min(audio.duration, seconds));
+    setCurrent(audio.currentTime);
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = volume;
+  }, [volume]);
+
 
   return (
     <div className="space-y-3">
@@ -1104,7 +1126,9 @@ function WaveformPlayer({
         }}
 
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
-        onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          if (!scrubbingRef.current) setCurrent(e.currentTarget.currentTime);
+        }}
         onPlay={() => {
           setAutoplayBlocked(false);
           setErrorCause(null);
@@ -1171,6 +1195,44 @@ function WaveformPlayer({
         <span className="w-20 text-right font-mono text-xs text-muted-foreground">
           {formatTime(current)} / {formatTime(duration)}
         </span>
+      </div>
+
+      <div className="space-y-2">
+        <Slider
+          min={0}
+          max={Math.max(duration, 0.001)}
+          step={0.05}
+          value={[current]}
+          disabled={!(duration > 0)}
+          onValueChange={(next) => {
+            scrubbingRef.current = true;
+            const seconds = next[0] ?? 0;
+            setCurrent(seconds);
+            seekSeconds(seconds);
+          }}
+          onValueCommit={() => {
+            scrubbingRef.current = false;
+          }}
+          aria-label="Seek track"
+          className="w-full"
+        />
+        <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+          <span className="font-mono tabular-nums">
+            {formatTime(current)} / {formatTime(duration)}
+          </span>
+          <label className="flex min-w-[10rem] items-center gap-2">
+            <Volume2 className="size-3.5 shrink-0" aria-hidden />
+            <Slider
+              min={0}
+              max={1}
+              step={0.01}
+              value={[volume]}
+              onValueChange={(next) => setVolume(next[0] ?? 0)}
+              aria-label="Volume"
+              className="w-28"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Precise playback error cause shown directly beneath the play button. */}
@@ -1408,6 +1470,13 @@ export function AudioStudio() {
   const [playbackKind, setPlaybackKind] = useState<StemKind>("mastered");
   const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [conductorSession, setConductorSession] = useState<string | null>(null);
+  useEffect(() => {
+    void fetchLocalReleaseSessionIds().then((ids) => {
+      const latest = ids[0];
+      if (latest) setConductorSession(latest);
+    });
+  }, []);
   const [exportingUrl, setExportingUrl] = useState<string | null>(null);
   const exporting = exportingUrl !== null;
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -2658,6 +2727,15 @@ export function AudioStudio() {
             Math.max(10, Math.round(targetDuration)),
           ),
           ...(audioVaultId ? { vaultId: audioVaultId } : {}),
+          ...(withVocals && recordedVoiceBlob && recordedVoiceBlob.size > 64
+            ? {
+                vocalAudioBase64: await blobToBase64(recordedVoiceBlob),
+                vocalFileName:
+                  recordedVoiceBlob instanceof File
+                    ? recordedVoiceBlob.name
+                    : "mic_take.webm",
+              }
+            : {}),
 
           controls: {
             bpm: clampBpm(bpm),
@@ -2841,6 +2919,8 @@ export function AudioStudio() {
       // a locked phone or a tab switch can pick the same render back up
       // instead of stranding it and forcing the artist to start over.
       if (started.taskId) {
+        rememberWorkerSession(started.taskId);
+        setConductorSession(started.taskId);
         savePendingJob({
           taskId: started.taskId,
           runId,
@@ -3751,6 +3831,22 @@ export function AudioStudio() {
                   : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
               }
             />
+            {busy || result || conductorSession ? (
+              <ConductorTelemetryCard
+                busy={busy}
+                stage={
+                  pipelineState?.currentStep === "music" ||
+                  pipelineState?.currentStep === "composition"
+                    ? "composition"
+                    : pipelineState?.currentStep ?? "idle"
+                }
+                progress={pipelineState?.progress ?? (result ? 100 : 0)}
+                statusText={statusText}
+                genre={styles.join(", ")}
+                title={title}
+                sessionId={result?.taskId ?? conductorSession}
+              />
+            ) : null}
             {busy ? (
               <div
                 className="flex flex-wrap gap-1.5"
@@ -4172,7 +4268,7 @@ export function AudioStudio() {
 
             <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="target-duration"><span className="inline-flex items-center gap-1.5">Song Length <InlineTip label="Song length">Total duration of the finished track. Longer tracks cost 1 token but take more time to generate.</InlineTip></span></Label>
+                <Label htmlFor="target-duration"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">Finished length from 1:00 to 7:00. A recorded vocal take sizes the track to the take plus an 8-bar outro.</InlineTip></span></Label>
                 <span className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground">
                   {formatDuration(targetDuration)} min
                 </span>
@@ -4189,23 +4285,16 @@ export function AudioStudio() {
                   − 15s
                 </button>
 
-                <input
+                <Slider
                   id="target-duration"
-                  type="range"
                   min={MIN_TARGET_DURATION_SECONDS}
                   max={MAX_TARGET_DURATION_SECONDS}
                   step={TARGET_DURATION_STEP_SECONDS}
-                  value={targetDuration}
-                  onChange={(e) => setTargetDuration(snapTargetDuration(Number(e.target.value)))}
-                  className="fx-slider flex-1"
-                  style={sliderFill(
-                    targetDuration,
-                    MIN_TARGET_DURATION_SECONDS,
-                    MAX_TARGET_DURATION_SECONDS,
-                  )}
-                  aria-valuemin={MIN_TARGET_DURATION_SECONDS}
-                  aria-valuemax={MAX_TARGET_DURATION_SECONDS}
-                  aria-valuenow={targetDuration}
+                  value={[targetDuration]}
+                  onValueChange={(next) =>
+                    setTargetDuration(snapTargetDuration(next[0] ?? targetDuration))
+                  }
+                  className="flex-1"
                   aria-label="Target duration in seconds"
                 />
 
@@ -4224,6 +4313,14 @@ export function AudioStudio() {
                 <span>{formatDuration(MIN_TARGET_DURATION_SECONDS)}</span>
                 <span>{formatDuration(MAX_TARGET_DURATION_SECONDS)}</span>
               </div>
+              {recordedVoiceBlob && recordedVoiceBlob.size > 64 ? (
+                <p
+                  className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300"
+                  role="status"
+                >
+                  Voice detected — the arrangement will follow your take, then an 8-bar outro.
+                </p>
+              ) : null}
             </div>
             </div>
           </section>
@@ -4290,18 +4387,15 @@ export function AudioStudio() {
                     <span className="text-xs text-muted-foreground">BPM</span>
                   </div>
                 </div>
-                <input
-                  type="range"
+                <Slider
                   min={MIN_BPM}
                   max={MAX_BPM}
                   step={1}
-                  value={bpm}
-                  onChange={(e) => {
+                  value={[bpm]}
+                  onValueChange={(next) => {
                     markEngineControlsTouched();
-                    setBpm(clampBpm(Number(e.target.value)));
+                    setBpm(clampBpm(next[0] ?? bpm));
                   }}
-                  className="fx-slider"
-                  style={sliderFill(bpm, MIN_BPM, MAX_BPM)}
                   aria-label="Tempo slider"
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
@@ -4322,21 +4416,17 @@ export function AudioStudio() {
                     {audioInfluence}%
                   </span>
                 </div>
-                <input
+                <Slider
                   id="engine-influence"
-                  type="range"
                   min={MIN_INFLUENCE}
                   max={MAX_INFLUENCE}
                   step={5}
-                  value={audioInfluence}
-                  onChange={(e) => {
+                  value={[audioInfluence]}
+                  onValueChange={(next) => {
                     markEngineControlsTouched();
-                    setAudioInfluence(clampInfluence(Number(e.target.value)));
+                    setAudioInfluence(clampInfluence(next[0] ?? audioInfluence));
                   }}
-                  className="fx-slider"
-                  style={sliderFill(audioInfluence, MIN_INFLUENCE, MAX_INFLUENCE)}
                   aria-label="Audio influence"
-                  aria-invalid={audioInfluence < MIN_INFLUENCE || audioInfluence > MAX_INFLUENCE}
                 />
                 {(audioInfluence < MIN_INFLUENCE || audioInfluence > MAX_INFLUENCE) && (
                   <p className="text-xs text-destructive" role="alert">
@@ -4355,19 +4445,16 @@ export function AudioStudio() {
                     {styleInfluence}%
                   </span>
                 </div>
-                <input
+                <Slider
                   id="engine-style-influence"
-                  type="range"
                   min={MIN_STYLE_INFLUENCE}
                   max={MAX_STYLE_INFLUENCE}
                   step={5}
-                  value={styleInfluence}
-                  onChange={(e) => {
+                  value={[styleInfluence]}
+                  onValueChange={(next) => {
                     markEngineControlsTouched();
-                    setStyleInfluence(clampStyleInfluence(Number(e.target.value)));
+                    setStyleInfluence(clampStyleInfluence(next[0] ?? styleInfluence));
                   }}
-                  className="fx-slider"
-                  style={sliderFill(styleInfluence, MIN_STYLE_INFLUENCE, MAX_STYLE_INFLUENCE)}
                   aria-label="Style influence"
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
@@ -4389,21 +4476,17 @@ export function AudioStudio() {
                     {weirdness}%
                   </span>
                 </div>
-                <input
+                <Slider
                   id="engine-weirdness"
-                  type="range"
                   min={MIN_WEIRDNESS}
                   max={MAX_WEIRDNESS}
                   step={5}
-                  value={weirdness}
-                  onChange={(e) => {
+                  value={[weirdness]}
+                  onValueChange={(next) => {
                     markEngineControlsTouched();
-                    setWeirdness(clampWeirdness(Number(e.target.value)));
+                    setWeirdness(clampWeirdness(next[0] ?? weirdness));
                   }}
-                  className="fx-slider"
-                  style={sliderFill(weirdness, MIN_WEIRDNESS, MAX_WEIRDNESS)}
                   aria-label="Weirdness"
-                  aria-invalid={weirdness < MIN_WEIRDNESS || weirdness > MAX_WEIRDNESS}
                 />
                 {(weirdness < MIN_WEIRDNESS || weirdness > MAX_WEIRDNESS) && (
                   <p className="text-xs text-destructive" role="alert">
