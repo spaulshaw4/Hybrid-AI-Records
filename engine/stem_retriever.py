@@ -301,7 +301,15 @@ def filter_candidates(
     bpm_tolerance: float = BPM_TOLERANCE,
     key_semitones: int = KEY_SEMITONE_TOLERANCE,
 ) -> list[dict[str, Any]]:
-    """Apply BPM ±tol, key ±N, and energy_tier filters; attach pitch-shift meta."""
+    """Apply BPM ±tol, key ±N, and energy_tier filters; attach pitch-shift meta.
+
+    When the query names a chord, rows are decorated with measured chroma so
+    scoring can weigh the slice's actual pitch content against it.
+    """
+    if getattr(query, "target_chord", None):
+        from engine.musical_index import decorate_rows
+
+        rows = decorate_rows([dict(r) for r in rows])
     out: list[dict[str, Any]] = []
     for row in rows:
         bpm_ok = bpm_within_tolerance(
@@ -336,6 +344,7 @@ def filter_candidates(
             query.target_key,
             float(query.target_bpm),
             energy_level=query.energy_tier,
+            target_chord=getattr(query, "target_chord", None) or None,
         )
         # Soft genre bias: aggression prefers brighter centroids.
         aggression = float(query.genre_vector.spectral_aggression)

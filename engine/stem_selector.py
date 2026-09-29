@@ -83,6 +83,20 @@ SCORE_WEIGHTS = {
     "level": 0.14,
 }
 
+# Used instead of SCORE_WEIGHTS once the caller supplies harmonic or rhythmic
+# context (``target_chord`` / ``groove_target``). ``detected_key`` is a single
+# root label per slice; ``chord`` measures the slice's actual pitch content
+# against the chord the roadmap asked for, so weight moves from the label to
+# the content. Without context the original four weights are used unchanged.
+SCORE_WEIGHTS_MUSICAL = {
+    "key": 0.18,
+    "chord": 0.22,
+    "bpm": 0.24,
+    "centroid": 0.16,
+    "level": 0.10,
+    "groove": 0.10,
+}
+
 # Filename prefixes in the MUSDB-style corpus. ``mixture`` is a full mix and is
 # never a usable layer.
 _ROLE_PREFIXES = {
@@ -535,6 +549,9 @@ def score_candidate(
     *,
     centroid_target_hz: float | None = None,
     energy_level: float | None = None,
+    target_chord: str | None = None,
+    groove_target: Any = None,
+    pitch_weights: Any = None,
 ) -> dict[str, float]:
     """Weighted musical fit for one ``slice_index`` row.
 
@@ -543,6 +560,13 @@ def score_candidate(
 
     ``energy_level`` (0..1 from ``SectionPlan``) softly biases level fit so
     sparse sections prefer quieter slices and climax sections prefer denser ones.
+
+    ``target_chord`` (e.g. ``"Fmaj7"``) scores the slice's measured chroma
+    against that chord's tones, and ``groove_target`` scores its accent pattern
+    against a 16-step template. Both need ``row`` to carry the columns from
+    ``slice_musical`` (see ``engine.musical_index.decorate_rows``); an
+    unmeasured slice scores a neutral 0.5 rather than a penalty. Supplying
+    either switches the weighting to ``SCORE_WEIGHTS_MUSICAL``.
     """
     level = level_fit(row.get("rms_db"), role)
     if level <= 0.0:
@@ -568,18 +592,62 @@ def score_candidate(
             rms_f = -20.0
         loudness = max(0.0, min(1.0, (rms_f + 40.0) / 34.0))
         energy = 1.0 - abs(loudness - target)
+
+    if target_chord is None and groove_target is None and pitch_weights is None:
+        score = (
+            SCORE_WEIGHTS["key"] * key
+            + SCORE_WEIGHTS["bpm"] * bpm
+            + SCORE_WEIGHTS["centroid"] * centroid
+            + SCORE_WEIGHTS["level"] * level * (0.65 + 0.35 * energy)
+        )
+        return {
+            "key": round(key, 4),
+            "bpm": round(bpm, 4),
+            "centroid": round(centroid, 4),
+            "level": round(level, 4),
+            "energy": round(float(energy), 4),
+            "score": round(float(score), 4),
+        }
+
+    from engine.musical_features import (
+        GRID_STEPS,
+        chord_fit,
+        groove_fit,
+        harmonic_fit,
+        unpack_floats,
+    )
+
+    chord = 0.5
+    if target_chord:
+        chord = chord_fit(unpack_floats(row.get("chroma"), 12), str(target_chord))
+    elif pitch_weights is not None:
+        # Whole-progression fit: one staged stem has to work across every bar.
+        chord = harmonic_fit(unpack_floats(row.get("chroma"), 12), pitch_weights)
+    groove = 0.5
+    if groove_target is not None:
+        groove = groove_fit(
+            unpack_floats(row.get("onset_grid"), GRID_STEPS),
+            unpack_floats(groove_target, GRID_STEPS)
+            if isinstance(groove_target, str)
+            else groove_target,
+        )
+    w = SCORE_WEIGHTS_MUSICAL
     score = (
-        SCORE_WEIGHTS["key"] * key
-        + SCORE_WEIGHTS["bpm"] * bpm
-        + SCORE_WEIGHTS["centroid"] * centroid
-        + SCORE_WEIGHTS["level"] * level * (0.65 + 0.35 * energy)
+        w["key"] * key
+        + w["chord"] * chord
+        + w["bpm"] * bpm
+        + w["centroid"] * centroid
+        + w["level"] * level * (0.65 + 0.35 * energy)
+        + w["groove"] * groove
     )
     return {
         "key": round(key, 4),
+        "chord": round(float(chord), 4),
         "bpm": round(bpm, 4),
         "centroid": round(centroid, 4),
         "level": round(level, 4),
         "energy": round(float(energy), 4),
+        "groove": round(float(groove), 4),
         "score": round(float(score), 4),
     }
 
@@ -721,8 +789,21 @@ def rank_candidates(
     energy_level: float | None = None,
     require_on_disk: bool = True,
     use_cooldown: bool = True,
+    target_chord: str | None = None,
+    groove_target: Any = None,
+    pitch_weights: Any = None,
 ) -> list[dict[str, Any]]:
-    """Score every row and return them best-first. Zero-scoring rows are dropped."""
+    """Score every row and return them best-first. Zero-scoring rows are dropped.
+
+    With ``target_chord`` / ``pitch_weights`` / ``groove_target`` the rows are
+    first decorated with measured chroma and accent patterns, so scoring
+    reflects what the audio actually contains rather than its ``detected_key``
+    label.
+    """
+    if target_chord is not None or groove_target is not None or pitch_weights is not None:
+        from engine.musical_index import decorate_rows
+
+        rows = decorate_rows(rows)
     scored: list[dict[str, Any]] = []
     for row in rows:
         path = str(row.get("file_path") or "")
@@ -735,6 +816,9 @@ def rank_candidates(
             target_bpm,
             centroid_target_hz=centroid_target_hz,
             energy_level=energy_level,
+            target_chord=target_chord,
+            groove_target=groove_target,
+            pitch_weights=pitch_weights,
         )
         if detail["score"] <= 0.0:
             continue
@@ -806,11 +890,16 @@ def select_for_role(
     require_on_disk: bool = True,
     use_cooldown: bool = True,
     anchor_pack_id: str | None = None,
+    pitch_weights: Any = None,
 ) -> list[dict[str, Any]]:
     """Fetch, score, and seeded-pick ``count`` slices for one role.
 
     Candidates come from the indexed stem + key + ±8 BPM pool (LIMIT 200),
     not a catalog-wide ``LIKE`` / ``RANDOM()`` scan.
+
+    ``pitch_weights`` (from ``musical_features.plan_pitch_weights``) scores each
+    candidate's measured chroma against the song's whole chord progression, so
+    a stem is chosen for the notes it contains and not only its key label.
     """
     _ = (tags, fetch_limit)  # tags are filename tokens; the indexed pool is the source.
     try:
@@ -832,6 +921,7 @@ def select_for_role(
             energy_level=energy_level,
             require_on_disk=require_on_disk,
             use_cooldown=use_cooldown,
+            pitch_weights=pitch_weights,
         )
     except Exception as exc:
         print(

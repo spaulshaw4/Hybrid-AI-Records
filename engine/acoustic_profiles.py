@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS stem_features (
 CREATE INDEX IF NOT EXISTS idx_stem_centroid ON stem_features(spectral_centroid);
 CREATE INDEX IF NOT EXISTS idx_stem_transient ON stem_features(transient_density);
 CREATE INDEX IF NOT EXISTS idx_stem_rms ON stem_features(rms_energy);
+
+-- Harmonic + rhythmic content, keyed on slice_index.file_path so the join
+-- back to the live corpus index is exact and needs no path guessing.
+CREATE TABLE IF NOT EXISTS slice_musical (
+    file_path TEXT PRIMARY KEY,
+    chroma TEXT,
+    chroma_root INTEGER,
+    chroma_is_minor INTEGER,
+    chroma_confidence REAL,
+    onset_grid TEXT,
+    downbeat_phase REAL,
+    transient_density REAL,
+    analyzed_bpm REAL,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_musical_root ON slice_musical(chroma_root);
 """
 
 

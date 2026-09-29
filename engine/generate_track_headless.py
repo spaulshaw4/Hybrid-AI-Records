@@ -366,6 +366,7 @@ def stage_scored_session_cache(
     # Global Song Plan constraints (built before this SQLite pass).
     song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
     plan_energy = 0.55
+    pitch_weights = None
     if isinstance(song_plan, dict):
         sections = song_plan.get("sections") or []
         energies = [
@@ -384,6 +385,29 @@ def stage_scored_session_cache(
             f"energy={plan_energy:.2f} sections={len(sections)}",
             flush=True,
         )
+        # Score candidates on the notes they contain, against the chords this
+        # song actually holds, rather than on a single detected_key label.
+        try:
+            from engine.musical_features import plan_pitch_weights
+            from engine.musical_index import coverage
+
+            chords = [
+                str(step.get("chord"))
+                for step in (song_plan.get("harmonic_roadmap") or [])
+                if isinstance(step, dict) and step.get("chord")
+            ]
+            if chords:
+                weights = plan_pitch_weights(chords)
+                if float(weights.sum()) > 0.0:
+                    pitch_weights = weights
+                    rows = coverage().get("musical_rows", 0)
+                    print(
+                        f"[HARMONY] progression={len(set(chords))} distinct chords; "
+                        f"chroma available for {rows} slices",
+                        flush=True,
+                    )
+        except Exception as exc:
+            print(f"[HARMONY] chord-aware selection unavailable ({exc})", flush=True)
 
     if not db_path or not os.path.isfile(db_path):
         return 0
@@ -437,6 +461,7 @@ def stage_scored_session_cache(
                 energy_level=plan_energy,
                 use_cooldown=not reproducible,
                 anchor_pack_id=anchor_pack_id or None,
+                pitch_weights=pitch_weights,
             )
             if not picks:
                 print(f"[SELECT] {role}: no scored candidates in {os.path.basename(db_path)}")
