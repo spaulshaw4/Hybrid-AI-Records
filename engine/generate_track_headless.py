@@ -367,6 +367,7 @@ def stage_scored_session_cache(
     song_plan = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
     plan_energy = 0.55
     pitch_weights = None
+    plan_chords: list[str] = []
     if isinstance(song_plan, dict):
         sections = song_plan.get("sections") or []
         energies = [
@@ -391,18 +392,18 @@ def stage_scored_session_cache(
             from engine.musical_features import plan_pitch_weights
             from engine.musical_index import coverage
 
-            chords = [
+            plan_chords = [
                 str(step.get("chord"))
                 for step in (song_plan.get("harmonic_roadmap") or [])
                 if isinstance(step, dict) and step.get("chord")
             ]
-            if chords:
-                weights = plan_pitch_weights(chords)
+            if plan_chords:
+                weights = plan_pitch_weights(plan_chords)
                 if float(weights.sum()) > 0.0:
                     pitch_weights = weights
                     rows = coverage().get("musical_rows", 0)
                     print(
-                        f"[HARMONY] progression={len(set(chords))} distinct chords; "
+                        f"[HARMONY] progression={len(set(plan_chords))} distinct chords; "
                         f"chroma available for {rows} slices",
                         flush=True,
                     )
@@ -434,6 +435,33 @@ def stage_scored_session_cache(
     staged_by: dict[str, int] = {role: 0 for role in STAGE_STEMS}
     anchor_pack_id = ""
     motif: dict[str, list[str]] = {}
+    # Ledger of what was offered and what won. Written now because delivery
+    # purges the scratch tree, so none of this is recoverable later.
+    # The session corpus lives at <scratch>/<session_id>/session_slices.
+    session_id = os.path.basename(os.path.dirname(os.path.abspath(session_corpus_dir)))
+    ledger = None
+    if session_id:
+        try:
+            from engine import mix_history
+
+            ledger = mix_history.open_ledger()
+            mix_history.record_session(
+                ledger,
+                session_id,
+                prompt=str((arrangement or {}).get("prompt") or meta.get("title") or ""),
+                genre=str(meta.get("genre") or ""),
+                song_key=target_key,
+                scale=target_scale or "",
+                bpm=target_bpm,
+                total_bars=int(meta.get("total_bars") or 0),
+                seed=(arrangement or {}).get("seed"),
+                progression=plan_chords,
+                pitch_weights=pitch_weights,
+                scorer="musical" if pitch_weights is not None else "legacy",
+            )
+        except Exception as exc:
+            print(f"[LEDGER] disabled ({exc})", flush=True)
+            ledger = None
     try:
         for role in SELECTOR_ROLES:
             if staged >= max_stage:
@@ -450,6 +478,7 @@ def stage_scored_session_cache(
                 f"anchor={anchor_pack_id or '-'} db={db_path}",
                 flush=True,
             )
+            trace: dict[str, Any] = {}
             picks = select_for_role(
                 conn,
                 role,
@@ -462,6 +491,7 @@ def stage_scored_session_cache(
                 use_cooldown=not reproducible,
                 anchor_pack_id=anchor_pack_id or None,
                 pitch_weights=pitch_weights,
+                trace=trace if ledger is not None else None,
             )
             if not picks:
                 print(f"[SELECT] {role}: no scored candidates in {os.path.basename(db_path)}")
@@ -490,8 +520,27 @@ def stage_scored_session_cache(
                     mark_slices_used(conn, chosen_paths)
                 except Exception:
                     pass
+            if ledger is not None and trace.get("ranked"):
+                try:
+                    from engine import mix_history
+
+                    n = mix_history.record_decisions(
+                        ledger, session_id, role, trace["ranked"], chosen_paths
+                    )
+                    print(
+                        f"[LEDGER] {role}: logged {n} candidates, "
+                        f"{len(chosen_paths)} staged",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(f"[LEDGER] {role} write failed ({exc})", flush=True)
     finally:
         conn.close()
+        if ledger is not None:
+            try:
+                ledger.close()
+            except Exception:
+                pass
 
     if isinstance(arrangement, dict):
         arrangement["pack_affinity"] = {

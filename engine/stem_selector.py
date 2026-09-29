@@ -88,12 +88,18 @@ SCORE_WEIGHTS = {
 # root label per slice; ``chord`` measures the slice's actual pitch content
 # against the chord the roadmap asked for, so weight moves from the label to
 # the content. Without context the original four weights are used unchanged.
+#
+# ``level`` stays at its original 0.14: lowering it let quieter stems win and
+# the mix lost enough density that mastering could not reach -14 LUFS inside
+# its 8.5 dB push limit (a 70 s render died at -15.33). Harmonic accuracy is
+# not worth a master that fails compliance, so the weight for ``chord`` comes
+# out of ``key`` -- the label it replaces -- rather than out of loudness.
 SCORE_WEIGHTS_MUSICAL = {
-    "key": 0.18,
+    "key": 0.16,
     "chord": 0.22,
-    "bpm": 0.24,
+    "bpm": 0.22,
     "centroid": 0.16,
-    "level": 0.10,
+    "level": 0.14,
     "groove": 0.10,
 }
 
@@ -891,6 +897,7 @@ def select_for_role(
     use_cooldown: bool = True,
     anchor_pack_id: str | None = None,
     pitch_weights: Any = None,
+    trace: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch, score, and seeded-pick ``count`` slices for one role.
 
@@ -900,6 +907,9 @@ def select_for_role(
     ``pitch_weights`` (from ``musical_features.plan_pitch_weights``) scores each
     candidate's measured chroma against the song's whole chord progression, so
     a stem is chosen for the notes it contains and not only its key label.
+
+    ``trace`` receives the full ranked pool under ``"ranked"``. The stems that
+    lost are what make a pick informative, so the mix ledger needs them too.
     """
     _ = (tags, fetch_limit)  # tags are filename tokens; the indexed pool is the source.
     try:
@@ -935,7 +945,11 @@ def select_for_role(
         for item in ranked:
             item.setdefault("pack_id", pack_id_from_path(item.get("file_path")))
             item.setdefault("affinity_score", 0.0)
-    return pick_variants(ranked, count, rng, top_k=top_k)
+    picks = pick_variants(ranked, count, rng, top_k=top_k)
+    if trace is not None:
+        trace["ranked"] = ranked
+        trace["picks"] = picks
+    return picks
 
 
 def fetch_stem_with_pack_affinity(
