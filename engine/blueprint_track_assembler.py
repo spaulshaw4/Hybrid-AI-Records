@@ -1438,6 +1438,7 @@ def assemble_arranged_buses(
     song_plan_sections: list[dict] | None = None,
     vocal_mode: str | None = None,
     chord_key: str | None = None,
+    genre: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Render the four buses from a per-section activation map.
 
@@ -1527,15 +1528,21 @@ def assemble_arranged_buses(
         )
 
         bus_inputs = {bus: staged[bus] for bus in ARRANGE_BUSES}
+        plan_genre = str(genre or "").strip()
         if song_plan_sections and len(song_plan_sections) == len(plan):
             # Per-section rules on this map's own sample grid.
             windows = []
             cursor = 0
             for sp_section, (_section, _bars, n) in zip(song_plan_sections, plan):
-                windows.append((sp_section, cursor, cursor + int(n)))
+                payload = dict(sp_section) if isinstance(sp_section, dict) else {"name": str(sp_section)}
+                if plan_genre and not payload.get("genre"):
+                    payload["genre"] = plan_genre
+                if bpm and not payload.get("bpm"):
+                    payload["bpm"] = bpm
+                windows.append((payload, cursor, cursor + int(n)))
                 cursor += int(n)
             mixed = apply_sectioned_relational_mix(
-                bus_inputs, int(sr), windows, mix_intents=mix_intents
+                bus_inputs, int(sr), windows, mix_intents=mix_intents, genre=plan_genre or None
             )
         else:
             active_section = section_plan
@@ -1547,11 +1554,14 @@ def assemble_arranged_buses(
                     key=lambda s: float(s.get("energy") or 0.0),
                     default=sections[0],
                 )
+            if isinstance(active_section, dict) and plan_genre and not active_section.get("genre"):
+                active_section = {**active_section, "genre": plan_genre, "bpm": bpm}
             mixed = apply_relational_mix(
                 bus_inputs,
                 int(sr),
                 mix_intents=mix_intents,
                 section=active_section,
+                genre=plan_genre or None,
             )
         for bus in ARRANGE_BUSES:
             if bus in mixed.stems:
@@ -1695,8 +1705,12 @@ def assemble_from_blueprint(
         song_plan = arrange_meta.get("song_plan") if isinstance(arrange_meta, dict) else None
         mix_intents = None
         peak_section = None
+        plan_genre = str(arrange_meta.get("genre") or "")
         if isinstance(song_plan, dict):
+            from engine.genre_planner import genre_from_plan
+
             mix_intents = song_plan.get("mix_intents")
+            plan_genre = genre_from_plan(song_plan) or plan_genre
             sections = song_plan.get("sections") or []
             if sections:
                 peak_section = max(
@@ -1731,6 +1745,7 @@ def assemble_from_blueprint(
                     (song_plan.get("key") if isinstance(song_plan, dict) else None)
                     or meta.get("root_key")
                 ),
+                genre=plan_genre or None,
             )
         finally:
             if index_conn is not None:
