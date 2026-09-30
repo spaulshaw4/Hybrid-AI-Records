@@ -1431,6 +1431,57 @@ def create_app() -> Any:
             raise HTTPException(status_code=404, detail="unknown session")
         return _public_job(job)
 
+    @app.post("/api/tracks/feedback")
+    async def track_feedback(request: Request) -> dict[str, Any]:
+        """Implicit verdict on a finished render -- no rating UI.
+
+        ``export`` is a positive on its own. ``play`` is scored by how much was
+        heard: a skip inside the first third is the negative example the
+        weight-fitting needs, and a full playthrough is a positive. The render
+        already logged which stems it offered and staged, so this closes the
+        loop by session id.
+        """
+        _require_worker_token(request)
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="json body required")
+        session_id = str(payload.get("session_id") or "").strip()
+        event = str(payload.get("event") or "").strip().lower()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        if event not in {"export", "play"}:
+            raise HTTPException(status_code=400, detail="event must be 'export' or 'play'")
+        try:
+            position = float(payload.get("position_sec") or 0.0)
+            duration = float(payload.get("duration_sec") or 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="position_sec/duration_sec must be numbers")
+        try:
+            from engine import mix_history
+
+            conn = mix_history.open_ledger()
+            try:
+                label = mix_history.record_verdict(
+                    conn,
+                    session_id,
+                    event,
+                    position_sec=position,
+                    duration_sec=duration,
+                )
+            finally:
+                conn.close()
+        except Exception as exc:
+            # Feedback is telemetry: never fail a user action because it could
+            # not be recorded.
+            _log(f"[FEEDBACK] {session_id} {event} not recorded ({exc})")
+            return {"recorded": False, "session_id": session_id, "event": event}
+        _log(
+            f"[FEEDBACK] {session_id} {event} heard={position:.1f}/{duration:.1f}s "
+            f"label={label:+.3f}"
+        )
+        return {"recorded": True, "session_id": session_id, "event": event, "label": label}
+
     @app.get("/api/stream/{filename}")
     def stream_audio(filename: str, request: Request) -> Any:
         _require_worker_token(request)

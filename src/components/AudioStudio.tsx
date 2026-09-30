@@ -113,6 +113,7 @@ import {
   VAULT_POLL_MS,
 } from "@/lib/vault-client";
 import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
+import { createPlayReporter, reportEngineExport } from "@/lib/engine-feedback";
 import {
   ENGINE_BUSY_REFUNDED_MESSAGE,
   isEngineBusyRefundedError,
@@ -855,18 +856,36 @@ async function blobToBase64(blob: Blob): Promise<string> {
 function WaveformPlayer({
   src,
   title,
+  sessionId,
   onUrlRepaired,
   onRegenerate,
   regenerating,
 }: {
   src: string;
   title: string;
+  /** Worker session for this render; lets playback feed the selection weights. */
+  sessionId?: string | null;
   onUrlRepaired?: (oldUrl: string, newUrl: string) => void;
   /** Re-renders the track with the current studio settings when the link is dead. */
   onRegenerate?: () => void;
   regenerating?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // One verdict per listen: how much was heard trains the picker.
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const playReporter = useRef(createPlayReporter(() => sessionIdRef.current)).current;
+  // Report on unmount and when the tab goes away mid-listen.
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") playReporter.flush();
+    };
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", onHidden);
+      playReporter.flush();
+    };
+  }, [playReporter]);
   const wantPlayRef = useRef(false);
   const repairedRef = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -1128,6 +1147,7 @@ function WaveformPlayer({
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
         onTimeUpdate={(e) => {
           if (!scrubbingRef.current) setCurrent(e.currentTarget.currentTime);
+          playReporter.observe(e.currentTarget.currentTime, e.currentTarget.duration || 0);
         }}
         onPlay={() => {
           setAutoplayBlocked(false);
@@ -1138,9 +1158,10 @@ function WaveformPlayer({
 
 
         onPause={() => setPlaying(false)}
-        onEnded={() => {
+        onEnded={(e) => {
           wantPlayRef.current = false;
           setPlaying(false);
+          playReporter.complete(e.currentTarget.duration || 0);
         }}
       />
 
@@ -5193,6 +5214,7 @@ export function AudioStudio() {
               key={playbackSrc ?? result.audioUrl}
               src={playbackSrc ?? result.audioUrl}
               title={result.title}
+              sessionId={result.taskId}
               onUrlRepaired={applyRepairedUrl}
               onRegenerate={() => void handleGenerate()}
               regenerating={busy && !result}
@@ -5205,6 +5227,7 @@ export function AudioStudio() {
                   download={hybridTrackDownloadFileName(result.title)}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => reportEngineExport(result.taskId)}
                   className={cn(
                     buttonVariants({ variant: "default", size: "sm" }),
                     "inline-flex w-fit items-center gap-2",
