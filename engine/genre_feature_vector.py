@@ -189,6 +189,15 @@ def blend_vectors(
 
 
 def _match_family_token(token: str) -> str | None:
+    """Family this token names, or ``None`` when it carries no genre signal.
+
+    Returning ``DEFAULT_FAMILY`` here would be a lie: ``family_for_genre``
+    answers "other" both for a genre it cannot place and for a word that is
+    not a genre at all. Every descriptive chunk of a prompt ("industrial
+    percussion", "120 BPM") would then vote with a flat 0.5 vector and drag
+    the real genre token toward neutral — a cyberpunk prompt averaged down to
+    aggression 0.56. A token with no signal gets no vote.
+    """
     slug = slugify_genre(token)
     if not slug:
         return None
@@ -202,7 +211,7 @@ def _match_family_token(token: str) -> str | None:
     for needle, fam in _PROMPT_FAMILY_HINTS:
         if needle in lowered:
             return fam
-    return family if family else None
+    return None
 
 
 def parse_hybrid_genre_weights(
@@ -230,7 +239,10 @@ def parse_hybrid_genre_weights(
 
     hint = str(genre_hint or "").strip()
     if hint:
-        _add(_match_family_token(hint) or family_for_genre(hint), 1.0, hint)
+        # No ``or family_for_genre(hint)`` fallback: an unplaceable hint is a
+        # neutral vote, and the trailing default below already covers the case
+        # where nothing in prompt or hint resolves.
+        _add(_match_family_token(hint), 1.0, hint)
 
     text = str(prompt or "").strip()
     if text:

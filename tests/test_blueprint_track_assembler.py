@@ -11,6 +11,10 @@ if REPO not in sys.path:
 
 from engine.blueprint_track_assembler import (  # noqa: E402
     DynamicSliceRotator,
+    _arranged_bus_pools,
+    _exclude_full_mixtures,
+    _is_full_mixture,
+    _order_preferring_name,
     apply_equal_power_crossfade,
     assemble_from_blueprint,
     default_cooldown,
@@ -493,6 +497,103 @@ class TestBarLock(unittest.TestCase):
         self.assertLess(abs(float(buf[cut_s])), 1e-6)
         self.assertGreaterEqual(cut_s, len(tone))
         self.assertLess(cut_s, len(tone) + 2000)
+
+
+class TestFullMixtureGuard(unittest.TestCase):
+    """Reject the unseparated pack mix; keep phrase loops cut from one."""
+
+    def test_pack_full_mix_is_excluded(self):
+        for name in (
+            "mixture.wav",
+            "mixture_s4_00000.wav",
+            "mixture_s4_00000_acoustic_locked_phrase_0000.wav",
+            "harmonic_mixture_s4_00000.wav",
+            "bass_mixture_s4_00031.wav",
+            "rhythm_mixture_s4_00007.wav",
+        ):
+            self.assertTrue(_is_full_mixture(os.path.join("pack", name)), name)
+
+    def test_phrase_cut_from_a_mixture_is_kept(self):
+        # Real staged names from C:\live_web_outputs\scratch\*\session_slices.
+        for name in (
+            "harmonic_020_james_may_dont_let_go__mixture_phrase_0048.wav",
+            "harmonic_093_tim_taler_stalker__mixture_phrase_0013.wav",
+            "harmonic_028_motor_tapes_shore__mixture_phrase_0029.wav",
+            "vocal_085_side_effects_project_sing_with_me__mixture_phrase_0007.wav",
+            "harmonic_other_s4_00007.wav",
+        ):
+            self.assertFalse(_is_full_mixture(os.path.join("sess", name)), name)
+
+    def test_live_harmonic_pool_survives_the_guard(self):
+        pool = [
+            "harmonic_020_james_may_dont_let_go__mixture_phrase_0039.wav",
+            "harmonic_093_tim_taler_stalker__mixture_phrase_0014.wav",
+            "harmonic_066_flags_54__other_phrase_0057.wav",
+            "harmonic_1027904_phrase_0068.wav",
+            "harmonic_mixture_s4_00000.wav",
+        ]
+        kept = _exclude_full_mixtures(pool)
+        self.assertEqual(len(kept), 4)
+        self.assertNotIn("harmonic_mixture_s4_00000.wav", kept)
+
+    def test_name_preference_orders_without_shrinking(self):
+        pool = [
+            "harmonic_020_james_may__mixture_phrase_0039.wav",
+            "harmonic_066_flags_54__other_phrase_0057.wav",
+            "harmonic_1027904_phrase_0068.wav",
+        ]
+        ordered = _order_preferring_name(pool, "other")
+        self.assertEqual(len(ordered), len(pool))
+        self.assertEqual(sorted(ordered), sorted(pool))
+        self.assertIn("other", ordered[0])
+        # No match is not an empty pool either.
+        self.assertEqual(_order_preferring_name(pool, "zzz"), pool)
+
+
+class TestPoolShortfallWarning(unittest.TestCase):
+    def _plan(self, harmonic_variant: int):
+        section = {
+            "name": "verse",
+            "bus_activation": {"rhythm": 1.0, "harmonic": 1.0, "bass": 1.0, "vocal": 0.0},
+            "bus_variant": {"harmonic": harmonic_variant},
+        }
+        return [(section, 8, 8)]
+
+    def _rotators(self, harmonic_pool):
+        rng = random.Random(3)
+        return {
+            "rhythm": DynamicSliceRotator(["r0.wav"], rng=rng),
+            "harmonic": DynamicSliceRotator(list(harmonic_pool), rng=rng),
+            "lead": DynamicSliceRotator([], rng=rng),
+            "vocal": DynamicSliceRotator([], rng=rng),
+            "bass": DynamicSliceRotator(["b0.wav"], rng=rng),
+        }
+
+    def test_short_pool_warns_with_bus_requested_and_delivered(self):
+        import io
+        import contextlib
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pools = _arranged_bus_pools(self._rotators(["h0.wav"]), self._plan(3))
+        out = buf.getvalue()
+        self.assertEqual(len(pools["harmonic"]), 1)
+        self.assertIn("[ARRANGE][WARN]", out)
+        self.assertIn("harmonic pool short", out)
+        self.assertIn("needs 4 variants", out)
+        self.assertIn("delivered 1", out)
+
+    def test_satisfied_pool_is_silent(self):
+        import io
+        import contextlib
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pools = _arranged_bus_pools(
+                self._rotators(["h0.wav", "h1.wav", "h2.wav", "h3.wav"]), self._plan(3)
+            )
+        self.assertEqual(len(pools["harmonic"]), 4)
+        self.assertNotIn("harmonic pool short", buf.getvalue())
 
 
 if __name__ == "__main__":

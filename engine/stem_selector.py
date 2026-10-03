@@ -103,6 +103,20 @@ SCORE_WEIGHTS_MUSICAL = {
     "groove": 0.10,
 }
 
+# What to do with the chord weight when a candidate's chroma is too uncertain
+# to score (``musical_features.CONFIDENCE_BYPASS``). Redistributing it over the
+# surviving components is the intuitive "judge it on what we did measure", but
+# it is measurably not neutral: the survivors average ~0.88 while real chord
+# fits average ~0.55, so dividing by (1 - 0.22) hands every bypassed candidate
+# a bonus and it beats any harmonically scored rival whose fit is under ~0.88.
+# scripts/ab_harmonic_fit.py: redistributing drops overall fit to 0.531 (-1.1%
+# vs legacy) and leaves *zero* confidently-measured slices in the picks, while
+# holding the component at its neutral 0.5 gives 0.577 (+7.6%) and stages six
+# of eight harmonic stems from trusted measurements. Imputing the neutral is
+# also what an un-analysed slice has always got, so bypassed and unmeasured
+# behave identically. Flip to True to get the redistributing behaviour back.
+BYPASS_REDISTRIBUTES_CHORD_WEIGHT = False
+
 # Filename prefixes in the MUSDB-style corpus. ``mixture`` is a full mix and is
 # never a usable layer.
 _ROLE_PREFIXES = {
@@ -571,8 +585,9 @@ def score_candidate(
     against that chord's tones, and ``groove_target`` scores its accent pattern
     against a 16-step template. Both need ``row`` to carry the columns from
     ``slice_musical`` (see ``engine.musical_index.decorate_rows``); an
-    unmeasured slice scores a neutral 0.5 rather than a penalty. Supplying
-    either switches the weighting to ``SCORE_WEIGHTS_MUSICAL``.
+    unmeasured slice scores a neutral 0.5 rather than a penalty, and a slice
+    whose ``chroma_confidence`` is low scores partway toward that neutral.
+    Supplying either switches the weighting to ``SCORE_WEIGHTS_MUSICAL``.
     """
     level = level_fit(row.get("rms_db"), role)
     if level <= 0.0:
@@ -619,16 +634,25 @@ def score_candidate(
         GRID_STEPS,
         chord_fit,
         groove_fit,
+        harmonic_bypass,
         harmonic_fit,
         unpack_floats,
     )
 
     chord = 0.5
+    # Chroma detection confidence varies hugely across the corpus, so a fit
+    # measured off barely-detectable pitch content is blended toward neutral
+    # rather than being trusted like a clean reading; below CONFIDENCE_BYPASS
+    # the measurement is withheld altogether and the candidate is ranked on
+    # its groove/role components (see BYPASS_REDISTRIBUTES_CHORD_WEIGHT).
+    confidence = row.get("chroma_confidence")
+    harmonic_context = bool(target_chord) or pitch_weights is not None
+    chord_bypassed = harmonic_context and harmonic_bypass(confidence)
     if target_chord:
-        chord = chord_fit(unpack_floats(row.get("chroma"), 12), str(target_chord))
+        chord = chord_fit(unpack_floats(row.get("chroma"), 12), str(target_chord), confidence)
     elif pitch_weights is not None:
         # Whole-progression fit: one staged stem has to work across every bar.
-        chord = harmonic_fit(unpack_floats(row.get("chroma"), 12), pitch_weights)
+        chord = harmonic_fit(unpack_floats(row.get("chroma"), 12), pitch_weights, confidence)
     groove = 0.5
     if groove_target is not None:
         groove = groove_fit(
@@ -638,17 +662,30 @@ def score_candidate(
             else groove_target,
         )
     w = SCORE_WEIGHTS_MUSICAL
-    score = (
-        w["key"] * key
-        + w["chord"] * chord
-        + w["bpm"] * bpm
-        + w["centroid"] * centroid
-        + w["level"] * level * (0.65 + 0.35 * energy)
-        + w["groove"] * groove
-    )
+    if chord_bypassed and BYPASS_REDISTRIBUTES_CHORD_WEIGHT:
+        # Drop the component and renormalise the rest. Never scores it 0 --
+        # that would punish a slice for an unreliable reading -- but it does
+        # flatter bypassed candidates; see the constant's note.
+        score = (
+            w["key"] * key
+            + w["bpm"] * bpm
+            + w["centroid"] * centroid
+            + w["level"] * level * (0.65 + 0.35 * energy)
+            + w["groove"] * groove
+        ) / (1.0 - w["chord"])
+    else:
+        score = (
+            w["key"] * key
+            + w["chord"] * chord
+            + w["bpm"] * bpm
+            + w["centroid"] * centroid
+            + w["level"] * level * (0.65 + 0.35 * energy)
+            + w["groove"] * groove
+        )
     return {
         "key": round(key, 4),
         "chord": round(float(chord), 4),
+        "chord_bypassed": bool(chord_bypassed),
         "bpm": round(bpm, 4),
         "centroid": round(centroid, 4),
         "level": round(level, 4),

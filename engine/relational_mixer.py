@@ -672,6 +672,32 @@ class RelationalMixer:
         return _clip(raw, lo, hi)
 
 
+def _print_planner_line(name: Any, meters: Mapping[str, Any]) -> None:
+    """One transcript line for the per-section planner console.
+
+    The planner decides mutes, width and pump per section but was the only
+    stage with no line in the render log, so its decisions could not be
+    audited after the fact. One line per section keeps a nine-section render
+    readable.
+    """
+    mutes = [
+        bus
+        for bus, key in (("drums", "planner_drums_muted"), ("bass", "planner_bass_muted"))
+        if meters.get(key)
+    ]
+    if meters.get("planner_kick_muted") and "drums" not in mutes:
+        mutes.append("kick")
+    print(
+        f"[PLANNER] {str(name or '-')} "
+        f"genre={meters.get('planner_genre') or '-'} "
+        f"role={meters.get('planner_role') or '-'} "
+        f"width={float(meters.get('planner_width') or 1.0):.2f} "
+        f"pump={float(meters.get('sidechain_pump') or 0.0):.2f} "
+        f"muted={','.join(mutes) if mutes else 'none'}",
+        flush=True,
+    )
+
+
 def apply_relational_mix(
     stems: Mapping[str, np.ndarray],
     sr: int,
@@ -682,7 +708,10 @@ def apply_relational_mix(
 ) -> RelationalMixResult:
     """Convenience entry used by the assembler / conductor orchestration."""
     mixer = RelationalMixer(sr, mix_intents=mix_intents, section=section, genre=genre)
-    return mixer.process(stems, section=section)
+    result = mixer.process(stems, section=section)
+    name = section.get("name") if isinstance(section, Mapping) else getattr(section, "name", None)
+    _print_planner_line(name, result.meters)
+    return result
 
 
 SectionWindow = tuple[Any, int, int]  # (section, start_sample, end_sample)
@@ -766,11 +795,18 @@ def apply_sectioned_relational_mix(
                 chunk = np.repeat(chunk, dest.shape[1], axis=1)[:, : dest.shape[1]]
             dest[lo:hi] += chunk * gain[:, np.newaxis]
         name = section.get("name") if isinstance(section, Mapping) else getattr(section, "name", None)
+        _print_planner_line(name, result.meters)
         section_meters.append(
             {
                 "section": name,
                 "start_sample": s,
                 "end_sample": e,
+                "planner_genre": result.meters.get("planner_genre"),
+                "planner_role": result.meters.get("planner_role"),
+                "planner_width": result.meters.get("planner_width"),
+                "planner_drums_muted": bool(result.meters.get("planner_drums_muted")),
+                "planner_bass_muted": bool(result.meters.get("planner_bass_muted")),
+                "sidechain_pump": float(result.meters.get("sidechain_pump") or 0.0),
                 "sidechain_applied": bool(result.meters.get("sidechain_applied")),
                 "kick_bass_aligned": bool(result.meters.get("kick_bass_aligned")),
                 "snaps": int(result.meters.get("snaps") or 0),

@@ -157,12 +157,84 @@ def chord_pitch_classes(chord: str) -> tuple[int, ...]:
     return tuple((root + i) % 12 for i in intervals)
 
 
-def chord_fit(chroma: np.ndarray, chord: str) -> float:
+NEUTRAL_FIT = 0.5
+
+# Below this confidence the pitch reading is not worth scoring on at all: the
+# winning key profile barely beat the runner-up, so the "fit" it reports is as
+# likely to be noise as signal. Callers withhold the harmonic opinion entirely
+# for such a slice (see ``engine.stem_selector.score_candidate``) instead of
+# ranking it on a measurement they cannot trust. Named because it is set above
+# the corpus mean (0.212) and so bypasses most of it: 280,202 of 1,385,549
+# slices clear it (20.2%), and per role 20.6% of harmonic / 16.6% of vocal /
+# 11.6% of rhythm candidates do. Retune here if that proves too aggressive.
+CONFIDENCE_BYPASS = 0.35
+
+# Confidence at which a surviving reading is trusted outright. ``estimate_root``
+# returns a margin between the winning and runner-up key profile, not a
+# probability, and across the 1,385,549-slice corpus it is squashed low: mean
+# 0.212, median 0.176, p90 0.452, p99 0.662, max 0.930. Scaling against the p90
+# keeps the decisively-measured top decile at full strength while still
+# separating the band that clears the bypass (trust runs 0.78 -> 1.0 from 0.35
+# to 0.45). Using the raw confidence as trust would leave even the best-read
+# slice in the corpus 55% neutral and flatten the component out of existence.
+CONFIDENCE_REFERENCE = 0.45
+
+
+def harmonic_bypass(confidence: float | None) -> bool:
+    """True when a reading is too uncertain to let it move a ranking.
+
+    ``None`` is not a bypass: the only rows that reach a fit function without a
+    confidence measured their chroma somewhere other than ``slice_musical``
+    (staged audio, fixtures). A slice simply absent from ``slice_musical``
+    carries no chroma either, so it already returns the neutral fit.
+    """
+    if confidence is None:
+        return False
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError):
+        return False
+    return not np.isfinite(value) or value < CONFIDENCE_BYPASS
+
+
+def confidence_trust(confidence: float | None) -> float:
+    """Map raw ``chroma_confidence`` onto 0..1 trust in the measurement."""
+    if harmonic_bypass(confidence):
+        return 0.0
+    if confidence is None:
+        return 1.0
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError):
+        return 1.0
+    return float(min(1.0, value / CONFIDENCE_REFERENCE))
+
+
+def _blend_toward_neutral(fit: float, confidence: float | None) -> float:
+    """Pull a fit toward neutral in proportion to how trustworthy it is.
+
+    Blending rather than multiplying: at zero trust the slice scores the same
+    0.5 an unmeasured slice gets, so "unmeasurable" and "unmeasured" behave
+    identically. Multiplying by a mean-0.212 confidence would instead drag
+    every candidate toward zero and delete the component.
+    """
+    trust = confidence_trust(confidence)
+    if trust >= 1.0:
+        return float(fit)
+    return float(NEUTRAL_FIT + (float(fit) - NEUTRAL_FIT) * trust)
+
+
+def chord_fit(chroma: np.ndarray, chord: str, confidence: float | None = None) -> float:
     """Fraction of a slice's pitch energy that lands on the chord's tones.
 
     1.0 = every partial belongs to the chord, 0.0 = none of it does. Returns
     the neutral 0.5 when either side is unknown, so a missing measurement never
     looks worse than a genuine clash.
+
+    ``confidence`` is the slice's ``chroma_confidence``. A weak reading is
+    blended toward neutral so it can neither win on noise nor be punished for
+    a clash it may not actually have, and one under ``CONFIDENCE_BYPASS``
+    returns the neutral value outright.
     """
     tones = chord_pitch_classes(chord)
     arr = np.asarray(chroma, dtype=np.float64)
@@ -171,7 +243,7 @@ def chord_fit(chroma: np.ndarray, chord: str) -> float:
     total = float(arr.sum())
     if total <= EPS:
         return 0.5
-    return float(sum(arr[t] for t in tones) / total)
+    return _blend_toward_neutral(float(sum(arr[t] for t in tones) / total), confidence)
 
 
 def plan_pitch_weights(chords) -> np.ndarray:
@@ -197,11 +269,15 @@ def plan_pitch_weights(chords) -> np.ndarray:
     return weights / total
 
 
-def harmonic_fit(chroma: np.ndarray, weights: np.ndarray) -> float:
+def harmonic_fit(
+    chroma: np.ndarray, weights: np.ndarray, confidence: float | None = None
+) -> float:
     """How much of a slice's pitch energy lands on a progression's tones.
 
     Neutral 0.5 when either side is unmeasured, so an un-analysed slice is
-    never ranked below one that genuinely clashes.
+    never ranked below one that genuinely clashes. ``confidence`` blends the
+    result toward that same neutral as the chroma reading gets less reliable,
+    and returns it outright below ``CONFIDENCE_BYPASS``.
     """
     c = np.asarray(chroma, dtype=np.float64)
     w = np.asarray(weights, dtype=np.float64)
@@ -215,7 +291,7 @@ def harmonic_fit(chroma: np.ndarray, weights: np.ndarray) -> float:
     best = float(np.max(w))
     if best <= EPS:
         return 0.5
-    return float(max(0.0, min(1.0, overlap / best)))
+    return _blend_toward_neutral(max(0.0, min(1.0, overlap / best)), confidence)
 
 
 def onset_grid(mono: np.ndarray, sr: int, bpm: float, steps: int = GRID_STEPS) -> np.ndarray:

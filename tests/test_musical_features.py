@@ -12,16 +12,22 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from engine.musical_features import (  # noqa: E402
+    CONFIDENCE_BYPASS,
+    CONFIDENCE_REFERENCE,
     GRID_STEPS,
     PITCH_CLASSES,
     chord_fit,
     chord_pitch_classes,
     chroma_vector,
+    confidence_trust,
     downbeat_phase,
     estimate_root,
     groove_fit,
+    harmonic_bypass,
+    harmonic_fit,
     onset_grid,
     pack_floats,
+    plan_pitch_weights,
     unpack_floats,
 )
 from ml.audio_features import TARGET_SR  # noqa: E402
@@ -91,6 +97,91 @@ class TestChroma(unittest.TestCase):
 
     def test_flat_and_sharp_spellings_agree(self):
         self.assertEqual(set(chord_pitch_classes("Bb")), set(chord_pitch_classes("A#")))
+
+
+class TestChromaConfidence(unittest.TestCase):
+    """A fit is only as good as the chroma it was measured from."""
+
+    def setUp(self):
+        self.fit_chroma = chroma_vector(_chord_tone(chord_pitch_classes("Fmaj7")), TARGET_SR)
+        self.clash_chroma = chroma_vector(_chord_tone(chord_pitch_classes("F#")), TARGET_SR)
+        self.weights = plan_pitch_weights(["Fmaj7", "Fmaj7"])
+        # Both clear CONFIDENCE_BYPASS, so the difference is the weighting
+        # rather than one of them being dropped.
+        self.high = 0.9
+        self.low = CONFIDENCE_BYPASS
+
+    def test_identical_chroma_scores_differently_when_confidence_diverges(self):
+        """The whole point: same pitch vector, different certainty, different score."""
+        self.assertNotEqual(
+            chord_fit(self.fit_chroma, "Fmaj7", self.high),
+            chord_fit(self.fit_chroma, "Fmaj7", self.low),
+        )
+        self.assertNotEqual(
+            harmonic_fit(self.fit_chroma, self.weights, self.high),
+            harmonic_fit(self.fit_chroma, self.weights, self.low),
+        )
+
+    def test_confident_good_match_outscores_the_same_match_measured_weakly(self):
+        self.assertGreater(
+            chord_fit(self.fit_chroma, "Fmaj7", self.high),
+            chord_fit(self.fit_chroma, "Fmaj7", self.low),
+        )
+        self.assertGreater(
+            harmonic_fit(self.fit_chroma, self.weights, self.high),
+            harmonic_fit(self.fit_chroma, self.weights, self.low),
+        )
+
+    def test_confident_clash_is_punished_harder_than_the_same_clash_measured_weakly(self):
+        """The blend has to cut both ways, or it is just a penalty on good scores."""
+        self.assertLess(
+            chord_fit(self.clash_chroma, "Fmaj7", self.high),
+            chord_fit(self.clash_chroma, "Fmaj7", self.low),
+        )
+        self.assertLess(
+            harmonic_fit(self.clash_chroma, self.weights, self.high),
+            harmonic_fit(self.clash_chroma, self.weights, self.low),
+        )
+
+    def test_zero_confidence_is_exactly_the_no_chroma_neutral(self):
+        self.assertEqual(chord_fit(self.fit_chroma, "Fmaj7", 0.0), 0.5)
+        self.assertEqual(chord_fit(np.zeros(12), "Fmaj7"), 0.5)
+        self.assertEqual(harmonic_fit(self.fit_chroma, self.weights, 0.0), 0.5)
+        self.assertEqual(harmonic_fit(np.zeros(12), self.weights), 0.5)
+
+    def test_below_the_bypass_threshold_no_harmonic_opinion_is_offered(self):
+        just_under = CONFIDENCE_BYPASS - 1e-6
+        self.assertTrue(harmonic_bypass(just_under))
+        self.assertEqual(chord_fit(self.fit_chroma, "Fmaj7", just_under), 0.5)
+        self.assertEqual(chord_fit(self.clash_chroma, "Fmaj7", just_under), 0.5)
+        self.assertEqual(harmonic_fit(self.fit_chroma, self.weights, just_under), 0.5)
+        self.assertFalse(harmonic_bypass(CONFIDENCE_BYPASS))
+
+    def test_absent_confidence_is_trusted_rather_than_neutralised(self):
+        """Rows with no confidence measured their chroma elsewhere (staged audio)."""
+        self.assertFalse(harmonic_bypass(None))
+        self.assertEqual(confidence_trust(None), 1.0)
+        for bad in (None, "", "nonsense", float("nan")):
+            self.assertIsInstance(chord_fit(self.fit_chroma, "Fmaj7", bad), float)
+        self.assertEqual(
+            chord_fit(self.fit_chroma, "Fmaj7", None), chord_fit(self.fit_chroma, "Fmaj7")
+        )
+        # NaN is a broken reading, not an absent one, so it bypasses.
+        self.assertEqual(chord_fit(self.fit_chroma, "Fmaj7", float("nan")), 0.5)
+
+    def test_trust_saturates_at_the_reference_confidence(self):
+        """Past the corpus p90 a reading is believed outright, not scaled further."""
+        self.assertEqual(confidence_trust(CONFIDENCE_REFERENCE), 1.0)
+        self.assertEqual(confidence_trust(1.0), 1.0)
+        self.assertEqual(
+            chord_fit(self.fit_chroma, "Fmaj7", CONFIDENCE_REFERENCE),
+            chord_fit(self.fit_chroma, "Fmaj7"),
+        )
+        self.assertLess(confidence_trust(CONFIDENCE_BYPASS), 1.0)
+
+    def test_confidence_cannot_rescue_an_unparseable_chord(self):
+        self.assertEqual(chord_fit(self.fit_chroma, "not-a-chord", 0.9), 0.5)
+        self.assertEqual(chord_fit(self.fit_chroma, "", 0.9), 0.5)
 
 
 class TestGroove(unittest.TestCase):

@@ -39,11 +39,11 @@ from engine.blueprint_track_assembler import (  # noqa: E402
     section_bar_count,
 )
 from engine.local_song_conductor import (  # noqa: E402
-    INDEX_HONESTY,
     apply_arrangement_to_blueprint,
     conduct_arrangement,
     derive_seed,
     describe_conducted,
+    index_honesty,
 )
 from engine.gemini_arranger import (  # noqa: E402
     DEFAULT_REPLICATE_MODEL,
@@ -735,7 +735,7 @@ def execute_prompt_pipeline(
         print(
             f"[CONDUCTOR] seed mode={'explicit (reproducible)' if seed is not None else 'derived'}"
         )
-        print(f"[INDEX] {INDEX_HONESTY}")
+        print(f"[INDEX] {index_honesty()}")
         arrangement = conduct_arrangement(
             prompt,
             genre or meta.get("genre"),

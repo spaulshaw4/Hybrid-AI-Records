@@ -2,7 +2,9 @@
 
 ``slice_musical`` is keyed on the same ``file_path`` as ``slice_index``, so the
 picker can decorate candidate rows with chroma / onset grid without the live
-index ever being written or path-matched.
+index ever being written or path-matched. ``chroma_confidence`` rides along on
+the same row and is what ``stem_selector.score_candidate`` uses to decide how
+far to trust the chroma it was handed.
 
 Everything degrades to "no opinion": a missing DB, a missing row, or a partly
 backfilled corpus leaves the fields absent and the scorer falls back to its

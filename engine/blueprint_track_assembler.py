@@ -19,6 +19,7 @@ import glob
 import json
 import os
 import random
+import re
 import sqlite3
 import sys
 from collections import deque
@@ -365,9 +366,22 @@ def _is_bass_path(path: str) -> bool:
     return role == "bass" or "bass" in name
 
 
-def _prefer_name(paths: list[str], needle: str) -> list[str]:
-    hit = [p for p in paths if needle in os.path.basename(p).lower()]
-    return hit or list(paths)
+def _order_preferring_name(paths: list[str], needle: str) -> list[str]:
+    """Move names containing ``needle`` to the front. Never drops a candidate.
+
+    This used to return the matching subset and fall back to the whole pool
+    only when nothing matched, which made it a hard filter: a single staged
+    file happening to carry "other" in its name discarded every other variant
+    and collapsed the bus to one loop for the whole song. Role separation is
+    already done upstream -- by ``stem_type`` in the index query and by
+    ``split_pool_by_layer`` here -- and every survivor has been scored on key,
+    tempo, centroid and chroma, so the filename is only a tiebreak hint. A hint
+    must not be allowed to empty a pool the section map needs variants from.
+    """
+    lowered = needle.lower()
+    hit = [p for p in paths if lowered in os.path.basename(p).lower()]
+    rest = [p for p in paths if lowered not in os.path.basename(p).lower()]
+    return hit + rest
 
 
 def _exclude_names(paths: list[str], *needles: str) -> list[str]:
@@ -375,6 +389,46 @@ def _exclude_names(paths: list[str], *needles: str) -> list[str]:
     if not lowered:
         return list(paths)
     return [p for p in paths if all(n not in os.path.basename(p).lower() for n in lowered)]
+
+
+# A staged session copy carries its destination bus as a leading token
+# (``harmonic_`` + the original slice name, see
+# ``generate_track_headless.stage_scored_session_cache``), so the artifact's own
+# role token is the second one.
+_STAGED_BUS_PREFIXES = tuple(f"{stem}_" for stem in ("rhythm", "harmonic", "lead", "vocal", "bass"))
+
+
+def _is_full_mixture(path: str) -> bool:
+    """True only for the unseparated full mix of a source-separation pack.
+
+    Never layer a full stereo mixture over isolated drum and bass stems: the
+    mixture already contains them, so summing it back in comb-filters and
+    phase-cancels against the very stems it was separated from. That is what
+    this guard is for and it is still right.
+
+    What it must not catch is a phrase loop *cut from* a mixture. Those are a
+    few bars of chords and motifs -- the richest harmonic material in the
+    corpus -- and the scorer has already judged their key, tempo, centroid and
+    chroma. The two cases are told apart by which token leads the name, the
+    same prefix-anchored convention the index query and
+    ``stem_selector.role_from_filename`` use:
+
+      ``mixture.wav``, ``mixture_s4_00000.wav``          -> the pack's full mix
+      ``020_james_may_dont_let_go__mixture_phrase_0048`` -> a phrase cut from one
+
+    Substring-matching "mixture" conflated them and starved the harmonic bus to
+    zero or one variant on every live-corpus render.
+    """
+    name = os.path.splitext(os.path.basename(path))[0].lower()
+    for prefix in _STAGED_BUS_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    return name == "mixture" or name.startswith("mixture_") or name.startswith("mixture-")
+
+
+def _exclude_full_mixtures(paths: list[str]) -> list[str]:
+    return [p for p in paths if not _is_full_mixture(p)]
 
 
 def _partition_bass(paths: list[str]) -> tuple[list[str], list[str]]:
@@ -1482,14 +1536,47 @@ def _arranged_bus_pools(
             lead = rotators.get("lead")
             picks = _pick_variant_paths(lead, needed[bus]) if lead else []
         pools[bus] = picks
+        # A short pool is silent degradation: the section map still references
+        # variant indices that do not exist, so they wrap onto the loops that
+        # do and the rotation the conductor planned quietly stops happening.
+        # Say so in the transcript rather than leaving only an informational
+        # "[ARRANGE] <bus> variants=1" to be read as normal.
+        if len(picks) < needed[bus]:
+            print(
+                f"[ARRANGE][WARN] {bus} pool short: section map needs "
+                f"{needed[bus]} variants, delivered {len(picks)} "
+                f"(pool={len(source.slice_pool) if source else 0}) -- "
+                "sections will reuse loops",
+                flush=True,
+            )
     return pools
 
 
 # Drums carry no pitch, so harmony never reassigns the rhythm bus.
 HARMONIC_VARIANT_BUSES = ("bass", "harmonic", "vocal")
-# A variant within this much of the best fit counts as harmonically acceptable,
-# which leaves the conductor's rotation free to provide variety.
-VARIANT_FIT_TOLERANCE = 0.04
+
+# A variant qualifies when it retains at least this fraction of the best fit
+# measured for the section: ``fit >= (1 - VARIANT_QUALIFY_FIT_SLACK) * best``.
+#
+# This replaced a fixed 0.04 margin, which was on the wrong scale. ``harmonic_fit``
+# has no fixed unit -- it is chord-energy overlap normalised by the best tone
+# weight -- and measured variant spreads on live renders run 0.038 to 0.177,
+# sitting around 0.05. A fixed margin therefore meant two different things: at a
+# 0.038 spread it admitted every candidate (no qualification at all) and at 0.177
+# only near-ties (qualification degenerating into the argmax this is meant to
+# replace). A fraction of the best fit is scale-free: multiply every fit by the
+# same factor and the qualified set does not move.
+#
+# Chosen over a fraction of the *spread*, which looks equally scale-free but
+# always discards the lower part of the field however small the spread is -- four
+# loops at 0.72/0.71/0.70/0.69 differ by noise, and halving that range would drop
+# two usable loops for no harmonic reason. Chosen over a rank-based top-K for the
+# mirror of the same fault: top-K admits exactly K whether or not the Kth
+# genuinely clashes. At a typical best fit near 0.7 this band is ~0.10 wide, so a
+# 0.05 spread qualifies the whole pool and the conductor's rotation passes
+# through untouched, while a clash an order of magnitude below the best fit is
+# excluded at any spread.
+VARIANT_QUALIFY_FIT_SLACK = 0.15
 
 
 def _variant_chroma(paths: list[str]) -> list[np.ndarray]:
@@ -1511,24 +1598,96 @@ def _variant_chroma(paths: list[str]) -> list[np.ndarray]:
     return out
 
 
+def qualified_variants(fits: list[float]) -> list[int]:
+    """The subset of variants harmonically compatible with one section.
+
+    Qualification, not selection: this narrows the field and leaves the choice
+    to the rotation. The band is relative to the best fit this section achieved
+    (``VARIANT_QUALIFY_FIT_SLACK``), not an absolute margin, so it means the
+    same thing whether the candidates are tightly clustered or far apart.
+
+    Never empty -- the best fit always clears its own floor, and the explicit
+    fallback keeps that true if the slack is ever retuned past 1.0.
+    """
+    if not fits:
+        return []
+    best = max(fits)
+    floor = best - VARIANT_QUALIFY_FIT_SLACK * abs(best)
+    qualified = [i for i, fit in enumerate(fits) if fit >= floor]
+    return qualified or [max(range(len(fits)), key=lambda i: fits[i])]
+
+
+def _sibling_keys(section: dict, chords: list[str]) -> tuple[tuple[str, str], ...]:
+    """Groups within which two sections must not land on the same loop.
+
+    Two kinds of sibling. Sections the conductor deliberately differentiated --
+    ``verse`` and ``verse_2`` share a base name, and
+    ``local_song_conductor.apply_song_shape`` sets verse 2 one variant past
+    verse 1 precisely so it is not a copy. And sections on an identical
+    progression, which score identical pitch weights and therefore identical
+    fits: nothing in the measurement can tell them apart, so without this they
+    would all follow the same loop by construction.
+    """
+    name = str(section.get("name") or "").lower().strip()
+    base = re.sub(r"[_\s-]*\d+$", "", name.replace(" ", "_").replace("-", "_"))
+    keys: list[tuple[str, str]] = [("role", base or name)]
+    if chords:
+        keys.append(("chords", "-".join(chords).lower()))
+    return tuple(keys)
+
+
+def _rotate_within_qualified(
+    preferred: int, qualified: list[int], count: int, blocked: set[int]
+) -> int:
+    """The conductor's rotation choosing from inside the qualified subset.
+
+    Its preference wins whenever it is both qualified and not already taken by
+    a sibling section. Otherwise the walk steps upward modulo the pool, which
+    is the conductor's own variety step (verse 2 is verse 1 plus one), so the
+    replacement still reads as its rotation rather than an argmax.
+    """
+    free = [i for i in qualified if i not in blocked]
+    if preferred in free:
+        return preferred
+    for step in range(1, count + 1):
+        candidate = (preferred + step) % count
+        if candidate in free:
+            return candidate
+    if preferred in qualified:
+        return preferred  # nothing free left; its own pick still fits
+    for step in range(1, count + 1):
+        candidate = (preferred + step) % count
+        if candidate in qualified:
+            return candidate
+    return preferred
+
+
 def assign_harmonic_variants(
     plan: list[tuple[dict, int, int]],
     pools: dict[str, list[str]],
     song_plan_sections: list[dict] | None,
 ) -> dict[str, int]:
-    """Point each section at the staged loop that fits *its* chords.
+    """Qualify the staged loops per section, then let the rotation choose.
 
     Stems are staged once per track, but the section map already chooses a
-    variant per section — that index just came from the conductor's rotation,
-    blind to harmony. Scoring the staged variants against each section's own
-    ``chord_progression`` makes the per-bar chord fit real without changing how
-    stems are staged.
+    variant per section — that index came from the conductor's rotation, blind
+    to harmony. Two steps make the per-section chord fit real without taking
+    the arrangement decision away from the conductor:
 
-    The conductor's choice is kept whenever it is within
-    ``VARIANT_FIT_TOLERANCE`` of the best variant, so this filters for harmony
-    rather than collapsing every section onto one loop.
+    1. Score every staged variant against this section's own
+       ``chord_progression`` and keep the harmonically compatible subset
+       (``qualified_variants``).
+    2. Let the conductor's ``bus_variant`` pick from inside that subset, with
+       its anti-repetition intent intact (``_rotate_within_qualified``).
 
-    Returns a per-bus count of reassignments, for logging.
+    Inverting it this way is what keeps the rotation alive. Picking the
+    best-fitting variant outright collapses it: sections sharing a progression
+    produce identical pitch weights and so identical fits, and no tolerance can
+    separate them because the measurement genuinely cannot. Qualification
+    sidesteps that — identical chords yield the same qualified *set*, and the
+    rotation is free to take different members of it.
+
+    Returns a per-bus count of sections whose variant changed, for logging.
     """
     if not song_plan_sections or len(song_plan_sections) != len(plan):
         return {}
@@ -1543,22 +1702,48 @@ def assign_harmonic_variants(
         chromas = _variant_chroma(paths)
         if not any(float(c.sum()) > 0.0 for c in chromas):
             continue  # unmeasurable (silent staging) — leave the rotation alone
+        taken: dict[tuple[str, str], set[int]] = {}
         for sp_section, (section, _bars, _n) in zip(song_plan_sections, plan):
-            chords = list(sp_section.get("chord_progression") or [])
-            if not chords:
-                continue
-            weights = plan_pitch_weights(chords)
-            if float(weights.sum()) <= 0.0:
-                continue
-            fits = [harmonic_fit(c, weights) for c in chromas]
-            best = max(fits)
+            chords = [str(c) for c in (sp_section.get("chord_progression") or []) if c]
             variants = section.setdefault("bus_variant", {})
             current = int(variants.get(bus, 0)) % len(paths)
-            if fits[current] >= best - VARIANT_FIT_TOLERANCE:
-                continue  # already good enough; keep the rotation's variety
-            variants[bus] = int(max(range(len(fits)), key=lambda i: fits[i]))
-            moved[bus] = moved.get(bus, 0) + 1
+            keys = _sibling_keys(sp_section, chords)
+            weights = plan_pitch_weights(chords) if chords else None
+            if weights is None or float(weights.sum()) <= 0.0:
+                # No roadmap for this section: the rotation stands, but the
+                # loop it holds still counts as spoken for by its siblings.
+                for key in keys:
+                    taken.setdefault(key, set()).add(current)
+                continue
+            fits = [harmonic_fit(chroma, weights) for chroma in chromas]
+            chosen = _rotate_within_qualified(
+                current,
+                qualified_variants(fits),
+                len(paths),
+                {index for key in keys for index in taken.get(key, set())},
+            )
+            for key in keys:
+                taken.setdefault(key, set()).add(chosen)
+            if chosen != current:
+                variants[bus] = chosen
+                moved[bus] = moved.get(bus, 0) + 1
     return moved
+
+
+def describe_section_variants(
+    bus: str,
+    plan: list[tuple[dict, int, int]],
+    song_plan_sections: list[dict] | None,
+) -> str:
+    """One-line per-section variant dump, after qualification has run."""
+    picks = [int((section.get("bus_variant") or {}).get(bus, 0)) for section, _b, _n in plan]
+    names = [
+        str((song_plan_sections[i] if song_plan_sections and i < len(song_plan_sections) else {}).get("name")
+            or (section.get("name") or f"s{i}"))
+        for i, (section, _b, _n) in enumerate(plan)
+    ]
+    body = " ".join(f"{name}={index}" for name, index in zip(names, picks))
+    return f"[HARMONY] {bus} section variants: {body} ({len(set(picks))} distinct)"
 
 
 def assemble_arranged_buses(
@@ -1627,7 +1812,7 @@ def assemble_arranged_buses(
             )
         else:
             chord_shifts = None
-    # Each section now plays the staged loop that fits its own chords.
+    # Each section now plays a staged loop that qualifies against its own chords.
     try:
         moved = assign_harmonic_variants(plan, pools, song_plan_sections)
         if moved:
@@ -1636,6 +1821,9 @@ def assemble_arranged_buses(
                 + " ".join(f"{bus}={count}" for bus, count in sorted(moved.items())),
                 flush=True,
             )
+        for bus in HARMONIC_VARIANT_BUSES:
+            if len(pools.get(bus) or []) > 1:
+                print(describe_section_variants(bus, plan, song_plan_sections), flush=True)
     except Exception as exc:
         print(f"[HARMONY] per-section variant fit skipped ({exc})", flush=True)
 
@@ -1782,10 +1970,16 @@ def assemble_from_blueprint(
     harmonic_pool = harm_rest if harm_rest else (layers.get("harmonic") or [])
     if not drums_only:
         bass_pool = [p for p in bass_pool if p not in rhythm_pool]
-    # MUSDB-style packs: never layer the stereo mixture; prefer drums / other / bass.
-    rhythm_pool = _prefer_name(_exclude_names(rhythm_pool, "mixture", "bass"), "drum")
-    harmonic_pool = _prefer_name(_exclude_names(harmonic_pool, "mixture", "bass"), "other")
-    bass_pool = _prefer_name(_exclude_names(bass_pool, "mixture"), "bass")
+    # MUSDB-style packs: never layer the unseparated full mix (see
+    # ``_is_full_mixture``); prefer drums / other / bass names without dropping
+    # the rest of the scored pool.
+    rhythm_pool = _order_preferring_name(
+        _exclude_full_mixtures(_exclude_names(rhythm_pool, "bass")), "drum"
+    )
+    harmonic_pool = _order_preferring_name(
+        _exclude_full_mixtures(_exclude_names(harmonic_pool, "bass")), "other"
+    )
+    bass_pool = _order_preferring_name(_exclude_full_mixtures(bass_pool), "bass")
 
     rng = random.Random(seed)
     fallback_rotators = {

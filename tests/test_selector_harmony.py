@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -15,11 +16,14 @@ if REPO not in sys.path:
 
 from engine import musical_index  # noqa: E402
 from engine.musical_features import (  # noqa: E402
+    CONFIDENCE_BYPASS,
     GRID_STEPS,
     chord_pitch_classes,
     chroma_vector,
     pack_floats,
+    plan_pitch_weights,
 )
+from engine import stem_selector  # noqa: E402
 from engine.stem_selector import score_candidate  # noqa: E402
 from ml.audio_features import TARGET_SR  # noqa: E402
 
@@ -87,6 +91,135 @@ class TestChordAwareScoring(unittest.TestCase):
     def test_dead_slice_still_scores_zero_with_chord_context(self):
         dead = _row(_chord_chroma("Fmaj7"), rms_db=-90.0)
         self.assertEqual(score_candidate(dead, "harmonic", "A", 120.0, target_chord="Fmaj7")["score"], 0.0)
+
+
+class TestConfidenceWeightedScoring(unittest.TestCase):
+    """``chroma_confidence`` has to reach the scorer and change the ranking."""
+
+    def setUp(self):
+        self.fit = _chord_chroma("Fmaj7")
+        self.clash = _chord_chroma("F#")
+        self.weights = plan_pitch_weights(["Fmaj7", "Fmaj7"])
+
+    def test_identical_chroma_vectors_score_differently_when_confidence_diverges(self):
+        """Same pitch content, different certainty — the scorer must separate them."""
+        sure = score_candidate(
+            _row(self.fit, chroma_confidence=0.9), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        unsure = score_candidate(
+            _row(self.fit, chroma_confidence=CONFIDENCE_BYPASS),
+            "harmonic",
+            "A",
+            120.0,
+            target_chord="Fmaj7",
+        )
+        self.assertNotEqual(sure["score"], unsure["score"])
+        self.assertGreater(sure["chord"], unsure["chord"])
+        self.assertGreater(sure["score"], unsure["score"])
+
+    def test_progression_scoring_also_respects_confidence(self):
+        """The live-render path goes through pitch_weights, not target_chord."""
+        sure = score_candidate(
+            _row(self.fit, chroma_confidence=0.9),
+            "harmonic",
+            "A",
+            120.0,
+            pitch_weights=self.weights,
+        )
+        unsure = score_candidate(
+            _row(self.fit, chroma_confidence=CONFIDENCE_BYPASS),
+            "harmonic",
+            "A",
+            120.0,
+            pitch_weights=self.weights,
+        )
+        self.assertGreater(sure["chord"], unsure["chord"])
+
+    def test_low_confidence_candidate_bypasses_the_harmonic_gate(self):
+        """Below the threshold the chord component is dropped, not scored."""
+        weak_fit = score_candidate(
+            _row(self.fit, chroma_confidence=0.1), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        weak_clash = score_candidate(
+            _row(self.clash, chroma_confidence=0.1), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        self.assertTrue(weak_fit["chord_bypassed"])
+        self.assertTrue(weak_clash["chord_bypassed"])
+        # Identical in every other column, so with harmony ignored they tie.
+        self.assertEqual(weak_fit["score"], weak_clash["score"])
+
+    def test_bypassed_candidate_is_not_penalised_for_being_unmeasurable(self):
+        """Dropping the component must not score it zero — that is a punishment."""
+        bypassed = score_candidate(
+            _row(self.clash, chroma_confidence=0.1), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        measured_clash = score_candidate(
+            _row(self.clash, chroma_confidence=0.9), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        self.assertGreater(bypassed["score"], measured_clash["score"])
+        # Renormalised over the surviving weights, so still a real 0..1 score.
+        self.assertLessEqual(bypassed["score"], 1.0)
+
+    def test_bypassed_candidate_matches_an_unmeasured_one(self):
+        """Withholding an untrusted reading must land where "never measured" lands."""
+        bypassed = score_candidate(
+            _row(self.fit, chroma_confidence=0.1), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        unmeasured = score_candidate(_row(None), "harmonic", "A", 120.0, target_chord="Fmaj7")
+        self.assertEqual(bypassed["chord"], 0.5)
+        self.assertEqual(bypassed["score"], unmeasured["score"])
+
+    def test_redistributing_the_bypassed_weight_is_opt_in(self):
+        """The alternative handling exists but flatters bypassed candidates."""
+        self.assertFalse(stem_selector.BYPASS_REDISTRIBUTES_CHORD_WEIGHT)
+        row = _row(self.fit, chroma_confidence=0.1)
+        held = score_candidate(row, "harmonic", "A", 120.0, target_chord="Fmaj7")["score"]
+        with mock.patch.object(stem_selector, "BYPASS_REDISTRIBUTES_CHORD_WEIGHT", True):
+            spread = score_candidate(row, "harmonic", "A", 120.0, target_chord="Fmaj7")["score"]
+        self.assertGreater(spread, held)
+
+    def test_confident_clash_loses_to_an_unmeasured_slice(self):
+        clash = score_candidate(
+            _row(self.clash, chroma_confidence=0.9), "harmonic", "A", 120.0, target_chord="Fmaj7"
+        )
+        unmeasured = score_candidate(_row(None), "harmonic", "A", 120.0, target_chord="Fmaj7")
+        self.assertFalse(unmeasured["chord_bypassed"])
+        self.assertEqual(unmeasured["chord"], 0.5)
+        self.assertGreater(unmeasured["score"], clash["score"])
+
+    def test_confidence_reaches_the_scorer_through_decorate_rows(self):
+        """End to end: slice_musical column -> row dict -> score_candidate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "m.db")
+            c = sqlite3.connect(db)
+            c.execute(
+                "CREATE TABLE slice_musical (file_path TEXT PRIMARY KEY, chroma TEXT, "
+                "onset_grid TEXT, chroma_root INTEGER, chroma_is_minor INTEGER, "
+                "chroma_confidence REAL, downbeat_phase REAL)"
+            )
+            grid = pack_floats(np.zeros(GRID_STEPS))
+            c.executemany(
+                "INSERT INTO slice_musical VALUES (?,?,?,?,?,?,?)",
+                [
+                    ("D:/sure.wav", self.fit, grid, 5, 0, 0.9, 0.0),
+                    ("D:/unsure.wav", self.fit, grid, 5, 0, 0.1, 0.0),
+                ],
+            )
+            c.commit()
+            c.close()
+            conn = musical_index.open_musical_db(db)
+            rows = musical_index.decorate_rows(
+                [_row(None, file_path="D:/sure.wav"), _row(None, file_path="D:/unsure.wav")],
+                conn=conn,
+            )
+            conn.close()
+        self.assertEqual(rows[0]["chroma_confidence"], 0.9)
+        scores = [
+            score_candidate(r, "harmonic", "A", 120.0, target_chord="Fmaj7") for r in rows
+        ]
+        self.assertFalse(scores[0]["chord_bypassed"])
+        self.assertTrue(scores[1]["chord_bypassed"])
+        self.assertNotEqual(scores[0]["score"], scores[1]["score"])
 
 
 class TestGrooveScoring(unittest.TestCase):

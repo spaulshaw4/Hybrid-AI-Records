@@ -24,7 +24,12 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from engine.musical_features import harmonic_fit, plan_pitch_weights, unpack_floats  # noqa: E402
+from engine.musical_features import (  # noqa: E402
+    CONFIDENCE_BYPASS,
+    harmonic_fit,
+    plan_pitch_weights,
+    unpack_floats,
+)
 from engine.musical_index import musical_db_path  # noqa: E402
 from engine.stem_selector import rank_candidates  # noqa: E402
 
@@ -36,9 +41,10 @@ def measured_pool(role_stem: str, limit: int) -> list[dict]:
     mus = sqlite3.connect(f"file:{musical_db_path()}?mode=ro", uri=True)
     mus.execute("PRAGMA busy_timeout=15000")
     have = {
-        str(p): (c, g)
-        for p, c, g in mus.execute(
-            "SELECT file_path, chroma, onset_grid FROM slice_musical WHERE chroma IS NOT NULL"
+        str(p): (c, g, conf)
+        for p, c, g, conf in mus.execute(
+            "SELECT file_path, chroma, onset_grid, chroma_confidence FROM slice_musical "
+            "WHERE chroma IS NOT NULL"
         )
     }
     mus.close()
@@ -66,6 +72,7 @@ def measured_pool(role_stem: str, limit: int) -> list[dict]:
                 "spectral_centroid": cent,
                 "chroma": hit[0],
                 "onset_grid": hit[1],
+                "chroma_confidence": hit[2],
             }
         )
         if len(rows) >= limit:
@@ -74,12 +81,38 @@ def measured_pool(role_stem: str, limit: int) -> list[dict]:
     return rows
 
 
+def fits(picks: list[dict], weights: np.ndarray) -> np.ndarray:
+    """Raw measured fit per pick -- deliberately unweighted by confidence.
+
+    The metric has to stay independent of the scorer under test, otherwise
+    down-weighting a measurement would improve the benchmark by definition.
+    """
+    return np.array(
+        [harmonic_fit(unpack_floats(p.get("chroma"), 12), weights) for p in picks],
+        dtype=np.float64,
+    )
+
+
 def mean_fit(picks: list[dict], weights: np.ndarray) -> float:
     if not picks:
         return float("nan")
-    return float(
-        np.mean([harmonic_fit(unpack_floats(p.get("chroma"), 12), weights) for p in picks])
-    )
+    return float(np.mean(fits(picks, weights)))
+
+
+def by_band(picks: list[dict], weights: np.ndarray, threshold: float) -> str:
+    """Split the picks into trusted / bypassed measurements and report each."""
+    if not picks:
+        return "no picks"
+    conf = np.array([float(p.get("chroma_confidence") or 0.0) for p in picks])
+    f = fits(picks, weights)
+    trusted = conf >= threshold
+    parts = []
+    for label, mask in (("trusted", trusted), ("bypassed", ~trusted)):
+        if mask.any():
+            parts.append(f"{label} {int(mask.sum())} @ fit {float(f[mask].mean()):.3f}")
+        else:
+            parts.append(f"{label} 0")
+    return "  ".join(parts)
 
 
 def main() -> int:
@@ -127,6 +160,8 @@ def main() -> int:
             f"{role:9s} pool={len(pool):5d}  legacy={fa:.3f}  chord-aware={fb:.3f}  "
             f"{delta:+.1f}%   same picks: {overlap}/{args.top}"
         )
+        print(f"          legacy picks:      {by_band(legacy, weights, CONFIDENCE_BYPASS)}")
+        print(f"          chord-aware picks: {by_band(aware, weights, CONFIDENCE_BYPASS)}")
 
     if total_a:
         a, b = float(np.mean(total_a)), float(np.mean(total_b))

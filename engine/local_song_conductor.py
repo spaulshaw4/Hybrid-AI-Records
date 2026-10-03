@@ -21,20 +21,21 @@ loads, family energy-gamma, bus bias, and RMS targets come from
 defaults below are used. The *skeleton* is always Intro→Verse→Build→Drop,
 with a second verse and/or outro when duration allows.
 
-Index honesty (``D:\\MusicDatasets\\db\\corpus_index.sqlite``, 52,725 rows)
--------------------------------------------------------------------------
-Census 2026-08-31:
+Index honesty
+-------------
+``index_honesty()`` censuses the live replica at call time instead of quoting
+a cached census. A hardcoded census goes stale silently — the one this
+replaced understated the corpus 25x — and the line it produces is the first
+thing anyone reads when diagnosing corpus health, so it has to come from the
+database it describes. The standing facts it annotates do not change:
 
-* ``stem_type`` has **no bass**: harmonic 27,944 / rhythm 13,126 /
-  vocal 10,811 / lead 844 / bass 0.
-* Bass files exist as *filenames* (11,572 ``bass_s4_*.wav``, all filed
-  harmonic) plus a handful of ``808`` names. There are zero ``sub`` filenames.
-  Selection therefore matches filename/tags (``bass``, ``808``, ``sub``) and,
-  if that pool is empty, falls back to harmonic rows with a low spectral
+* ``stem_type`` has **no bass** row. Bass files exist as *filenames*
+  (``bass_s4_*.wav``, ``808``) filed under harmonic, so selection matches
+  filename/tags and falls back to harmonic rows with a low spectral
   centroid (< 450 Hz).
-* ``detected_key`` is a **pitch class only** (no maj/min). ``A`` is 17,158
-  rows (32.5 %) and is the likely detection fallback — match on pitch class,
-  never on mode.
+* ``detected_key`` is a **pitch class only** (no maj/min), and the dominant
+  class is the likely detection fallback — match on pitch class, never on
+  mode.
 """
 from __future__ import annotations
 
@@ -159,11 +160,74 @@ FULL_SONG_ARCHETYPE: list[tuple[str, tuple[int, ...]]] = [
 FULL_SONG_MIN_SECONDS = 150.0
 FULL_SONG_SKELETON = "intro_verse_chorus_verse_chorus_bridge_outro"
 
-INDEX_HONESTY = (
-    "stem_type has no bass (harmonic 27944, rhythm 13126, vocal 10811, lead 844). "
-    "Bass from filename/tags (bass_s4, 808, sub) or harmonic low-centroid fallback. "
-    "Keys are pitch class only; A is 32.5% (likely fallback) -- match pitch class, not maj/min."
-)
+# Censused once per process: generate_track_headless prints the line twice per
+# render and describe_conducted prints it again, and the two GROUP BYs cost
+# ~0.3 s on the 1.4M-row replica.
+_INDEX_HONESTY_CACHE: str | None = None
+
+
+def _census_index(conn: Any) -> str:
+    """One-line stem/key census of an open read-only ``slice_index`` handle."""
+    stems = conn.execute(
+        "SELECT stem_type, COUNT(*) FROM slice_index GROUP BY stem_type ORDER BY 2 DESC"
+    ).fetchall()
+    total = sum(int(row[1]) for row in stems)
+    if total <= 0:
+        return "slice_index is empty -- no corpus census available."
+    breakdown = ", ".join(f"{row[0] or 'unlabelled'} {int(row[1])}" for row in stems)
+    top = stems[0]
+    share = 100.0 * int(top[1]) / total
+    keys = conn.execute(
+        "SELECT detected_key, COUNT(*) FROM slice_index "
+        "WHERE detected_key IS NOT NULL AND trim(detected_key) != '' "
+        "GROUP BY detected_key ORDER BY 2 DESC LIMIT 1"
+    ).fetchone()
+    honesty = (
+        f"slice_index {total} rows ({breakdown}); "
+        f"{top[0] or 'unlabelled'} is {share:.2f}%. "
+        "stem_type has no bass: bass comes from filename/tags (bass_s4, 808, sub) "
+        "or the harmonic low-centroid fallback."
+    )
+    if keys:
+        key_share = 100.0 * int(keys[1]) / total
+        honesty += (
+            f" Keys are pitch class only; {keys[0]} is {key_share:.2f}% "
+            "(likely fallback) -- match pitch class, not maj/min."
+        )
+    return honesty
+
+
+def index_honesty(*, refresh: bool = False) -> str:
+    """Live census of the corpus replica, or a plain statement that it is unreadable.
+
+    Never raises and never falls back to a remembered census: a stale number
+    printed with authority is worse than admitting the index could not be read.
+    """
+    global _INDEX_HONESTY_CACHE
+    if _INDEX_HONESTY_CACHE is not None and not refresh:
+        return _INDEX_HONESTY_CACHE
+    try:
+        from engine.live_index import get_db_connection
+
+        conn = get_db_connection()
+        try:
+            text = _census_index(conn)
+        finally:
+            conn.close()
+    except Exception as exc:  # sqlite3.Error, FileNotFoundError, OSError
+        path = ""
+        try:
+            from engine.live_index import live_index_path
+
+            path = live_index_path()
+        except Exception:
+            pass
+        text = (
+            f"corpus index unreadable ({type(exc).__name__}: {exc}); "
+            f"no census available for {path or 'the live replica'}."
+        )
+    _INDEX_HONESTY_CACHE = text
+    return text
 
 REQUIRED_ROLES = ("intro", "verse", "build", "drop")
 
@@ -300,7 +364,7 @@ def conduct_arrangement(
     )
     arrangement["conductor"] = CONDUCTOR_NAME
     arrangement["skeleton"] = FULL_SONG_SKELETON if full_song else SKELETON_NAME
-    arrangement["index_honesty"] = INDEX_HONESTY
+    arrangement["index_honesty"] = index_honesty()
     if full_song:
         shape_full_song_dynamics(arrangement)
     # Global Song Plan is built BEFORE any SQLite stem query. Section bar
@@ -403,7 +467,7 @@ def describe_conducted(arrangement: dict[str, Any]) -> str:
         + "\n"
         + describe_arrangement(arrangement)
         + "\n[INDEX] "
-        + str(arrangement.get("index_honesty") or INDEX_HONESTY)
+        + str(arrangement.get("index_honesty") or index_honesty())
     )
 
 

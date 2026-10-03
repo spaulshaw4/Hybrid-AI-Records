@@ -345,6 +345,10 @@ MATRIX_FAMILY_TO_ARRANGEMENT = {
 # Keyword rescue for slugs the mastering matrix files as "Other".
 # Checked in order; first hit wins.
 _SLUG_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # First, because "cyberpunk" contains "punk" and would otherwise be filed
+    # as rock. engine.genre_planner already resolves these to its
+    # cyberpunk_darksynth blueprint; this keeps the two taxonomies agreeing.
+    ("electronic_club", ("cyberpunk", "darksynth", "darkwave")),
     ("hiphop_rnb", ("rap", "hip_hop", "hiphop", "trap", "drill", "boom_bap", "rnb", "r_n_b", "soul", "phonk")),
     ("rock_metal", ("rock", "metal", "punk", "grunge", "hardcore", "djent", "emo", "shoegaze")),
     ("electronic_club", ("techno", "house", "edm", "dubstep", "dnb", "drum_and_bass", "trance", "electro", "garage", "breakbeat", "jungle", "club")),

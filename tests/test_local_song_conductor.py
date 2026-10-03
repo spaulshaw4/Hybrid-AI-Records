@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 
 import pytest
@@ -13,7 +14,6 @@ if _REPO not in sys.path:
 from engine.genre_arrangement_profiles import BUSES  # noqa: E402
 from engine.local_song_conductor import (  # noqa: E402
     CONDUCTOR_NAME,
-    INDEX_HONESTY,
     REQUIRED_ROLES,
     SKELETON_NAME,
     apply_conducted_blueprint,
@@ -22,9 +22,26 @@ from engine.local_song_conductor import (  # noqa: E402
     conduct_signature,
     derive_seed,
     describe_conducted,
+    index_honesty,
 )
+from engine import local_song_conductor  # noqa: E402
 
 PROMPT = "Heavy modern rap-rock groove with punchy drums, distorted sub bass, and clean dry vocal chops"
+
+
+def _honesty_for(db_path: str) -> str:
+    """Census of ``db_path``, bypassing the per-process cache."""
+    previous = os.environ.get("CORPUS_INDEX_LIVE")
+    os.environ["CORPUS_INDEX_LIVE"] = db_path
+    local_song_conductor._INDEX_HONESTY_CACHE = None
+    try:
+        return index_honesty(refresh=True)
+    finally:
+        if previous is None:
+            os.environ.pop("CORPUS_INDEX_LIVE", None)
+        else:
+            os.environ["CORPUS_INDEX_LIVE"] = previous
+        local_song_conductor._INDEX_HONESTY_CACHE = None
 
 
 def _plan(seed: int, genre: str | None = "rap_rock", bpm: float = 140.0, duration: float = 60.0):
@@ -53,7 +70,7 @@ def test_seed_is_recorded_and_conductor_is_named():
     assert plan["seed"] == 999
     assert plan["conductor"] == CONDUCTOR_NAME
     assert plan["skeleton"] == SKELETON_NAME
-    assert "no bass" in plan["index_honesty"]
+    assert plan["index_honesty"] == index_honesty()
 
 
 def test_sixty_seconds_at_140_bpm_is_intro_verse_build_drop():
@@ -131,8 +148,8 @@ def test_describe_lists_every_section_and_honesty():
     text = describe_conducted(plan)
     for section in plan["sections"]:
         assert section["name"] in text
-    assert "pitch class" in text or "no bass" in text
-    assert INDEX_HONESTY.split(".")[0] in text or "no bass" in text
+    assert "pitch class" in text or "no bass" in text or "unreadable" in text
+    assert index_honesty().split(".")[0] in text
 
 
 def test_conducted_blueprint_keeps_bus_maps():
@@ -163,6 +180,33 @@ def test_conducted_blueprint_keeps_bus_maps():
     for original, section in zip(plan["sections"], out["sections"]):
         assert section["bus_activation"] == original["bus_activation"]
         assert section["bars"] == original["bars"]
+
+
+def test_index_honesty_censuses_the_live_replica(tmp_path):
+    db = tmp_path / "corpus_index_live.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE slice_index (id INTEGER PRIMARY KEY, stem_type TEXT, detected_key TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO slice_index (stem_type, detected_key) VALUES (?, ?)",
+        [("harmonic", "A")] * 7 + [("rhythm", "C")] * 3,
+    )
+    conn.commit()
+    conn.close()
+
+    text = _honesty_for(str(db))
+    assert "slice_index 10 rows" in text
+    assert "harmonic 7" in text and "rhythm 3" in text
+    assert "harmonic is 70.00%" in text
+    assert "A is 70.00%" in text
+
+
+def test_index_honesty_says_so_when_the_index_cannot_be_read(tmp_path):
+    text = _honesty_for(str(tmp_path / "missing.sqlite"))
+    assert "unreadable" in text
+    # A stale census printed with authority is worse than no census.
+    assert "27944" not in text
 
 
 def test_conduct_arrangement_attaches_song_plan():
