@@ -23,6 +23,9 @@
     },
     "devtools-for-agents": {
       "enabled": true
+    },
+    "grok-voice": {
+      "enabled": true
     }
   }
 }
