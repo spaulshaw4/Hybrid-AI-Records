@@ -70,6 +70,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: dsp_kernel_validation
     timeout-minutes: 20
+    env:
+      # `tsc` imports the generated client. Generate does not connect, so a
+      # placeholder is enough when the repo secret is unset.
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://ci:ci@127.0.0.1:5432/ci' }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v5
@@ -82,6 +87,9 @@ jobs:
 
       - name: Install Frontend Dependencies
         run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
 
       - name: TypeScript Static Code Analysis
         run: npx tsc --noEmit
