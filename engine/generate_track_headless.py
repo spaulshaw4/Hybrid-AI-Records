@@ -1001,6 +1001,8 @@ def execute_prompt_pipeline(
             )
 
         print(f"[BPM] locked={bpm_val:.3f} (UI / CLI wins over stem native tempo)", flush=True)
+        # Live phrase align plans with Gemini, then resolve_blueprint_dependencies
+        # synthesizes every source=generate lane before the tape stretches it.
         assemble_from_blueprint(
             blueprint_path,
             session_corpus,

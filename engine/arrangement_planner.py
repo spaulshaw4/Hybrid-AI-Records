@@ -359,19 +359,22 @@ _VOCAL_LANE = "11_lead_vocal"
 _LEAD_LANE = "10_lead_inst"
 
 _ARRANGER_SYSTEM = """
-You are an elite multitrack arranger. You never see audio samples.
+You are an elite multitrack arranger and record producer. You never see audio samples.
 Return one JSON object with song_id, bpm, key, and structure.
 Each structure item has section, start_bar, end_bar, and lane_assignments.
 Lane ids are 01_kick, 02_snare, 03_tops, 04_aux_perc, 05_sub_bass, 06_mid_bass,
 07_primary_comp, 08_harmonic_bed, 09_secondary_comp, 10_lead_inst, 11_lead_vocal,
 12_vocal_backing, 13_transitions_fx.
-A sustaining part is a stem_id string. A phrase part is
-{"stem_id", "active_bars", "rest_bars"} with section-local 1-based bars.
-active_bars and rest_bars are JSON arrays of bar numbers, never a single number.
-active_bars for one stem cannot be longer than that stem's bars. A later
-active run retriggers the same slice; it does not continue past the file.
+For each lane choose one source.
+CATALOG: {"source": "catalog", "stem_id": "id from the catalog", "active_bars": [1, 2]}.
+GENERATE: {"source": "generate", "lyrics": "one original sung line"} for vocal lanes,
+or {"source": "generate", "prompt": "what the instrument plays"} for any other lane,
+plus active_bars. Generate only when the catalog cannot cover that lane.
+Write new lyrics for this song. Do not copy an example line.
+active_bars and rest_bars are JSON arrays of section-local 1-based bar numbers, never a single number.
+A catalog stem cannot play longer than its bars. A later active run retriggers the slice.
 When 11_lead_vocal is active, 10_lead_inst is silent.
-Choose stem_id values only from the catalog. Output raw JSON only, with no markdown fences.
+Output raw JSON only, with no markdown fences.
 """.strip()
 
 
@@ -446,6 +449,29 @@ def _stem_id_of(entry: Any) -> str:
     return ""
 
 
+def _generate_assignment(entry: Mapping[str, Any], section_bars: int) -> dict[str, Any] | None:
+    """Keep a generate request. The file does not exist yet, so the window is not clipped to a slice."""
+    lyrics = str(entry.get("lyrics") or "").strip()[:400]
+    prompt = str(entry.get("prompt") or "").strip()[:400]
+    if not lyrics and not prompt:
+        return None
+    active = _clip_runs(_as_bar_list(entry.get("active_bars"), section_bars), section_bars)
+    if not active:
+        return None
+    active_set = set(active)
+    cleaned: dict[str, Any] = {
+        "source": "generate",
+        "stem_id": "",
+        "active_bars": active,
+        "rest_bars": [bar for bar in range(1, int(section_bars) + 1) if bar not in active_set],
+    }
+    if lyrics:
+        cleaned["lyrics"] = lyrics
+    if prompt:
+        cleaned["prompt"] = prompt
+    return cleaned
+
+
 def _clean_assignment(entry: Any, section_bars: int, file_bars: int) -> Any | None:
     stem = _stem_id_of(entry)
     if not stem:
@@ -503,9 +529,16 @@ def validate_arrangement_plan(
         cleaned: dict[str, Any] = {}
         for lane_name, entry in lanes_in.items():
             lane = canonical_lane(str(lane_name))
+            if lane is None:
+                continue
+            if isinstance(entry, dict) and str(entry.get("source") or "").lower() == "generate":
+                assignment = _generate_assignment(entry, bars)
+                if assignment is not None:
+                    cleaned[lane] = assignment
+                continue
             stem = _stem_id_of(entry)
             card = by_id.get(stem)
-            if lane is None or card is None:
+            if card is None:
                 continue
             file_bars = max(1, int(card.get("bars") or 1))
             assignment = _clean_assignment(entry, bars, file_bars)

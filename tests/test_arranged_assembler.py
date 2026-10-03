@@ -310,3 +310,81 @@ def test_two_seeds_produce_measurably_different_audio(tmp_path, corpus):
         outs.append(sf.read(out, always_2d=True)[0])
     n = min(len(outs[0]), len(outs[1]))
     assert not np.allclose(outs[0][:n], outs[1][:n], atol=1e-4)
+
+
+def test_console_lanes_bounce_together(tmp_path):
+    from engine.blueprint_track_assembler import _bounce_console_lanes
+    from engine.stem_lanes import LANE_IDS
+
+    sr = 1000
+    bpm = 120.0
+    bar = samples_per_bar(sr, bpm)
+    path = tmp_path / "kick_loop.wav"
+    sf.write(path, np.full((bar, 2), 0.4, dtype=np.float64), sr)
+    lanes = _bounce_console_lanes(
+        {"rhythm": [str(path)], "bass": [], "harmonic": [], "vocal": []},
+        [],
+        [({"name": "verse", "bars": 1}, 1, bar)],
+        bar,
+        sr,
+        bpm,
+        2,
+        None,
+        None,
+        0,
+        None,
+        None,
+        0.0,
+    )
+    assert set(lanes) == set(LANE_IDS)
+    assert float(np.max(np.abs(lanes["01_kick"]))) > 0.1
+    assert float(np.max(np.abs(lanes["02_snare"]))) == 0.0
+
+
+def test_full_mix_hands_the_resolved_plan_to_the_lane_pool(tmp_path, monkeypatch):
+    from engine.blueprint_track_assembler import assemble_full_mix
+
+    sr = 1000
+    bpm = 240.0
+    bar = samples_per_bar(sr, bpm)
+    path = tmp_path / "gen_vocal.wav"
+    sf.write(path, np.full((bar, 2), 0.5, dtype=np.float64), sr)
+    seen: dict = {}
+
+    def fake_resolve(plan, dest_dir=None, *, bpm=120.0, sr=44100):
+        seen["plan"] = plan
+        return plan
+
+    monkeypatch.setattr("engine.preflight_generator.resolve_blueprint_dependencies", fake_resolve)
+    blueprint = {
+        "structure": [
+            {
+                "lane_assignments": {
+                    "11_lead_vocal": {
+                        "source": "catalog",
+                        "path": str(path),
+                        "active_bars": [1],
+                    }
+                }
+            }
+        ]
+    }
+    stems = assemble_full_mix(
+        blueprint,
+        {"rhythm": [], "bass": [], "harmonic": [], "vocal": []},
+        [],
+        [({"name": "verse", "bars": 1}, 1, bar)],
+        bar,
+        sr,
+        bpm,
+        2,
+        None,
+        None,
+        0,
+        None,
+        None,
+        0.0,
+    )
+    assert seen["plan"] is blueprint
+    assert float(np.max(np.abs(stems["11_lead_vocal"]))) > 0.1
+    assert float(np.max(np.abs(stems["01_kick"]))) == 0.0

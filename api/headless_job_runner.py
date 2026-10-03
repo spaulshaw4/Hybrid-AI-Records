@@ -730,6 +730,12 @@ def _run_headless(
     genre_hint: str,
     render_opts: dict[str, Any] | None = None,
 ) -> None:
+    """Child process: Gemini plan, parallel stem pre-flight, then the tape.
+
+    The blueprint does not exist in this process. ``generate_track_headless``
+    builds it and ``assemble_arranged_buses`` calls
+    ``resolve_blueprint_dependencies`` before any lane is bounced.
+    """
     opts = dict(render_opts or {})
     script = _headless_script()
     mix = _session_mix_path(session_id)

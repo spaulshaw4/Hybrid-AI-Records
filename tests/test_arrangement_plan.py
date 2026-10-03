@@ -50,6 +50,49 @@ def test_unknown_stems_are_dropped_and_the_lead_stays_out_of_the_vocal():
     assert plan["key"] == "G_minor"
 
 
+def test_generate_request_is_kept_and_not_clipped_to_a_missing_file():
+    raw = {
+        "song_id": "outlaw_whiskey_01",
+        "structure": [
+            {
+                "section": "intro",
+                "lane_assignments": {
+                    "11_lead_vocal": {
+                        "source": "generate",
+                        "lyrics": "Going easy on the whiskey tonight",
+                        "active_bars": [1, 2, 3, 4],
+                    },
+                    "13_fx_risers": {
+                        "source": "generate",
+                        "prompt": "soft tape hiss swell",
+                        "active_bars": [5, 6, 7, 8],
+                    },
+                    "01_kick": {"source": "catalog", "stem_id": "missing_kick", "active_bars": [1, 2, 3, 4]},
+                    "10_lead_inst": {
+                        "source": "catalog",
+                        "stem_id": "gt_lick",
+                        "active_bars": [7, 8],
+                    },
+                },
+            }
+        ],
+    }
+    plan = validate_arrangement_plan(
+        raw,
+        [{"stem_id": "gt_lick", "lane": "10_lead_inst", "bars": 2}],
+        bpm=86,
+        key="G_minor",
+        genre="outlaw country",
+        sections=[{"name": "intro", "bars": 8}],
+    )
+    lanes = plan["structure"][0]["lane_assignments"]
+    assert lanes["11_lead_vocal"]["source"] == "generate"
+    assert lanes["11_lead_vocal"]["active_bars"] == [1, 2, 3, 4]
+    assert lanes["13_transitions_fx"]["prompt"] == "soft tape hiss swell"
+    assert "01_kick" not in lanes
+    assert lanes["10_lead_inst"]["active_bars"] == [7, 8]
+
+
 def test_gemini_receives_metadata_not_samples(monkeypatch):
     seen = {}
 

@@ -2069,8 +2069,13 @@ def _bounce_console_lanes(
     vocal_paths: list[str] | None = None,
     lead_plans: dict[int, list[tuple[int, int, int]]] | None = None,
     lead_paths_planned: list[str] | None = None,
+    arrangement: dict | None = None,
 ) -> dict[str, np.ndarray]:
-    """One buffer per console lane, rendered from that lane's own files."""
+    """One buffer per console lane, rendered from that lane's own files.
+
+    ``arrangement`` is the resolved blueprint. Generated wav paths in it are
+    placed by the same 13 workers, after the catalog masks.
+    """
     from engine.genre_arrangement_profiles import bass_open_steps, comping_open_steps
     from engine.stem_lanes import (
         COMP_DUCK_GAIN,
@@ -2110,8 +2115,8 @@ def _bounce_console_lanes(
             int(grammar.vocal_rest_bars),
             int(grammar.max_consecutive_repeats),
         )
-    rendered: dict[str, np.ndarray] = {}
-    for lane in LANE_IDS:
+
+    def _render_lane(lane: str) -> tuple[str, np.ndarray, np.ndarray | None]:
         files = list(assigned.get(lane) or [])
         plans = None
         if lane == "11_lead_vocal" and vocal_plans is not None and files == list(vocal_paths or []):
@@ -2133,7 +2138,32 @@ def _bounce_console_lanes(
             duty_cycle=phrase if lane == "11_lead_vocal" and plans is None else None,
             placed_segments=plans,
         )
-        rendered[lane] = audio
+        generated = None
+        if arrangement is not None:
+            from engine.preflight_generator import mix_generated_lanes
+
+            placed = mix_generated_lanes(
+                arrangement,
+                [int(n) for _section, _bars, n in plan],
+                int(sr),
+                float(bpm),
+                int(channels),
+                int(total_samples),
+                only_lane=lane,
+            )
+            generated = placed.get(lane)
+        return lane, audio, generated
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(13, len(LANE_IDS))) as pool:
+        rows = list(pool.map(_render_lane, LANE_IDS))
+    rendered = {lane: audio for lane, audio, _generated in rows}
+    generated_hold = {
+        lane: generated
+        for lane, _audio, generated in rows
+        if generated is not None and np.asarray(generated).size
+    }
     if grammar is not None:
         comp_steps = comping_open_steps(grammar.comping_style)
         bass_steps = bass_open_steps(grammar.bass_behavior)
@@ -2192,8 +2222,69 @@ def _bounce_console_lanes(
     kick = rendered["01_kick"]
     kick_hot = np.max(np.abs(kick), axis=1 if kick.ndim > 1 else 0) > 1e-3
     rendered["05_sub_bass"][kick_hot] *= COMP_DUCK_GAIN
+    for lane, generated in generated_hold.items():
+        base = np.asarray(rendered[lane])
+        extra = np.asarray(generated)
+        if extra.shape == base.shape:
+            rendered[lane] = base + extra
     print("[LANES] bounced 13 isolated stems", flush=True)
     return rendered
+
+
+def assemble_full_mix(
+    blueprint: dict | None,
+    pools: dict[str, list[str]],
+    lead_paths: list[str],
+    plan: list[tuple[dict, int, int]],
+    total_samples: int,
+    sr: int,
+    bpm: float,
+    channels: int,
+    target_key: str | None,
+    target_bpm: float | None,
+    fade: int,
+    chord_shifts: list[list[int] | None] | None,
+    grammar,
+    swing_offset_ms: float,
+    vocal_plans: dict[int, list[tuple[int, int, int]]] | None = None,
+    vocal_paths: list[str] | None = None,
+    lead_plans: dict[int, list[tuple[int, int, int]]] | None = None,
+    lead_paths_planned: list[str] | None = None,
+) -> dict[str, np.ndarray]:
+    """Pre-flight any remaining generate lanes, then bounce all 13 on the pool.
+
+    The blueprint was already spawned with the lyric key. This step uses
+    ``REPLICATE_API_TOKEN`` only when a lane still says ``source: generate``.
+    """
+    from engine.preflight_generator import resolve_blueprint_dependencies
+
+    resolved_blueprint = blueprint
+    if isinstance(blueprint, dict):
+        resolved_blueprint = resolve_blueprint_dependencies(
+            blueprint,
+            bpm=float(bpm),
+            sr=int(sr),
+        )
+    return _bounce_console_lanes(
+        pools,
+        lead_paths,
+        plan,
+        total_samples,
+        sr,
+        bpm,
+        channels,
+        target_key,
+        target_bpm,
+        fade,
+        chord_shifts,
+        grammar,
+        float(swing_offset_ms),
+        vocal_plans=vocal_plans,
+        vocal_paths=vocal_paths,
+        lead_plans=lead_plans,
+        lead_paths_planned=lead_paths_planned,
+        arrangement=resolved_blueprint if isinstance(resolved_blueprint, dict) else None,
+    )
 
 
 def assemble_arranged_buses(
@@ -2326,10 +2417,23 @@ def assemble_arranged_buses(
                 str(chord_key or target_key or ""),
                 sections=section_meta,
             )
+            # Pre-flight sits between the Gemini plan and the tape. The headless
+            # runner reaches this through generate_track_headless; it does not
+            # have the blueprint itself.
+            from engine.preflight_generator import resolve_blueprint_dependencies
+
+            gemini_arrangement = resolve_blueprint_dependencies(
+                gemini_arrangement,
+                bpm=float(bpm),
+                sr=int(sr),
+            )
             bar_n = samples_per_bar(sr, bpm)
             built: dict[int, list[tuple[int, int, int]]] = {}
             for index, (_section, bars, n) in enumerate(plan):
                 assignment = lane_assignment(gemini_arrangement, index, "11_lead_vocal")
+                if isinstance(assignment, dict) and assignment.get("path"):
+                    built[index] = []
+                    continue
                 if not isinstance(assignment, dict):
                     built[index] = []
                     continue
@@ -2344,8 +2448,20 @@ def assemble_arranged_buses(
                     built = {}
                     break
                 built[index] = segments
-            if built:
+            generated_vocal = any(
+                isinstance(lane_assignment(gemini_arrangement, index, "11_lead_vocal"), dict)
+                and (lane_assignment(gemini_arrangement, index, "11_lead_vocal") or {}).get("path")
+                for index in range(len(plan))
+            )
+            has_generated = any(
+                isinstance(config, dict) and config.get("path")
+                for section in (gemini_arrangement.get("structure") or [])
+                if isinstance(section, dict)
+                for config in (section.get("lane_assignments") or {}).values()
+            )
+            if built and (any(built.values()) or generated_vocal):
                 vocal_plans = built
+            if vocal_plans is not None or has_generated:
                 print(
                     f"[ALIGN] gemini plan {gemini_arrangement.get('song_id')} "
                     f"sections={len(gemini_arrangement.get('structure') or [])}",
@@ -2470,6 +2586,24 @@ def assemble_arranged_buses(
             f"[ARRANGE] {bus} variants={len(pools[bus])} "
             f"({', '.join(os.path.basename(p) for p in pools[bus]) or '-'})"
         )
+    generated_lanes: dict[str, np.ndarray] = {}
+    if gemini_arrangement is not None:
+        from engine.preflight_generator import LANE_TO_BUS, mix_generated_lanes
+
+        generated_lanes = mix_generated_lanes(
+            gemini_arrangement,
+            [int(n) for _section, _bars, n in plan],
+            int(sr),
+            float(bpm),
+            int(channels),
+            int(total_samples),
+        )
+        for lane, audio in generated_lanes.items():
+            bus = LANE_TO_BUS.get(lane)
+            if bus in raw and audio is not None:
+                raw[bus] = raw[bus] + audio
+        if generated_lanes:
+            print(f"[PRE-FLIGHT] placed {len(generated_lanes)} generated lanes", flush=True)
 
     # Lead plays in the fill window only. While the vocal owns the midrange
     # the lead drops 12 dB, so the two never share that pocket.
@@ -2497,9 +2631,13 @@ def assemble_arranged_buses(
                 bar_n = samples_per_bar(sr, bpm)
                 gemini_leads: dict[int, list[tuple[int, int, int]]] = {}
                 for index, (_section, bars, n) in enumerate(plan):
+                    lead_assignment = lane_assignment(gemini_arrangement, index, "10_lead_inst")
+                    if isinstance(lead_assignment, dict) and lead_assignment.get("path"):
+                        gemini_leads[index] = []
+                        continue
                     segments = segments_from_assignment(
                         lead_paths,
-                        lane_assignment(gemini_arrangement, index, "10_lead_inst"),
+                        lead_assignment,
                         int(bars),
                         bar_n,
                         int(n),
@@ -2625,7 +2763,8 @@ def assemble_arranged_buses(
     staged["_envelopes"] = envelopes  # type: ignore[assignment]
     if bounce_lanes:
         try:
-            staged["_console_lanes"] = _bounce_console_lanes(  # type: ignore[assignment]
+            staged["_console_lanes"] = assemble_full_mix(  # type: ignore[assignment]
+                gemini_arrangement,
                 pools,
                 bounced_leads,
                 plan,
