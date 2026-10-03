@@ -222,7 +222,9 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     if (pollStartedAtRef.current == null) pollStartedAtRef.current = Date.now();
 
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
+    // Browser timer id. @types/node makes ReturnType<typeof setInterval> a
+    // Timeout, which window.clearInterval does not accept.
+    let timer: number | null = null;
 
     const tick = () => {
       if (cancelled) return;

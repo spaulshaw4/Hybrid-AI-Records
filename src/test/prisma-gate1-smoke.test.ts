@@ -59,7 +59,9 @@ describe("Gate 1 circuit breaker + poll budget", () => {
   });
 
   it("starts composition bit after Gate 1 landing", () => {
-    let mask = PipelineGate.NONE;
+    // Annotated: PipelineGate is `as const`, so the initialiser would pin this
+    // to the literal 0 and reject the accumulated mask.
+    let mask: number = PipelineGate.NONE;
     mask = passGate(mask, PipelineGate.COMPOSITION);
     expect(mask & PipelineGate.COMPOSITION).toBe(PipelineGate.COMPOSITION);
   });

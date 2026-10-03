@@ -643,20 +643,8 @@ async function processClaimedJob(
 
     // 3a1. BPM ENLINEMENT — master tempo → millisecond timing grid.
     const { BpmEnlinement } = await import("@/lib/BpmEnlinement");
-    const timeSigNum =
-      studioPayload.controls &&
-      typeof studioPayload.controls === "object" &&
-      typeof (studioPayload.controls as { timeSignatureNumerator?: unknown })
-        .timeSignatureNumerator === "number"
-        ? (studioPayload.controls as { timeSignatureNumerator: number }).timeSignatureNumerator
-        : 4;
-    const timeSigDen =
-      studioPayload.controls &&
-      typeof studioPayload.controls === "object" &&
-      typeof (studioPayload.controls as { timeSignatureDenominator?: unknown })
-        .timeSignatureDenominator === "number"
-        ? (studioPayload.controls as { timeSignatureDenominator: number }).timeSignatureDenominator
-        : 4;
+    const timeSigNum = studioPayload.controls?.timeSignatureNumerator ?? 4;
+    const timeSigDen = studioPayload.controls?.timeSignatureDenominator ?? 4;
     const bpmTiming = BpmEnlinement.enlineBpmGrid(ctx, {
       masterBpm: currentBpm,
       timeSignatureNumerator: timeSigNum,
@@ -681,12 +669,7 @@ async function processClaimedJob(
       bpmTiming,
       chaosFactor: organicDrift,
       controls: studioPayload.controls,
-      syncopationThreshold:
-        studioPayload.controls &&
-        typeof studioPayload.controls === "object" &&
-        typeof (studioPayload.controls as { syncopation?: unknown }).syncopation !== "undefined"
-          ? (studioPayload.controls as { syncopation?: unknown }).syncopation
-          : undefined,
+      syncopationThreshold: studioPayload.controls?.syncopation,
     });
     const rhythmBlueprint = LogicalRhythmEnlinement.enlineLogicalRhythm(ctx, rhythmPattern);
     TelemetryAlignment.emit(ctx, {

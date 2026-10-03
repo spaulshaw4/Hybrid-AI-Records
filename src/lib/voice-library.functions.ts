@@ -1,7 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Database } from "@/integrations/supabase/types";
 import { DEV_TEST_USER_UUID, isDevAuthBypass } from "@/lib/dev-auth";
+
+/**
+ * The live ``voice_profiles`` table carries a ``name`` column that the
+ * generated Database types do not list, and Supabase's builders reject excess
+ * properties. These aliases keep the writes typed against the generated row
+ * while documenting why the extra column has to be asserted through.
+ */
+type VoiceProfileInsert = Database["public"]["Tables"]["voice_profiles"]["Insert"];
+type VoiceProfileUpdate = Database["public"]["Tables"]["voice_profiles"]["Update"];
 
 const httpsUrl = z
   .string()
@@ -248,8 +258,7 @@ export const saveVoiceProfile = createServerFn({ method: "POST" })
 
     const { data: row, error } = await supabase
       .from("voice_profiles")
-      // `name` exists on the live table but is absent from generated Database types.
-      .insert(insertRow as typeof insertRow & Record<string, unknown>)
+      .insert(insertRow as unknown as VoiceProfileInsert)
       .select(PROFILE_COLUMNS)
       .maybeSingle();
 
@@ -277,7 +286,7 @@ export const renameVoiceProfile = createServerFn({ method: "POST" })
     const supabase = await voiceProfilesClient().catch(() => context.supabase);
     const { data: row, error } = await supabase
       .from("voice_profiles")
-      .update({ label: data.label, name: data.label } as { label: string; name: string })
+      .update({ label: data.label, name: data.label } as unknown as VoiceProfileUpdate)
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .select(PROFILE_COLUMNS)

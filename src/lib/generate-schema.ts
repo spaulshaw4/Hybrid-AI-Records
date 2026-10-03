@@ -31,6 +31,15 @@ const controlsSchema = z.object({
   influence: z.number().int().min(MIN_INFLUENCE).max(MAX_INFLUENCE),
   weirdness: z.number().int().min(MIN_WEIRDNESS).max(MAX_WEIRDNESS),
   styleInfluence: z.number().int().min(MIN_STYLE_INFLUENCE).max(MAX_STYLE_INFLUENCE),
+  /**
+   * Read by ``BpmEnlinement`` for the millisecond timing grid. Undeclared keys
+   * are stripped by Zod, so without these the grid silently stayed 4/4 no
+   * matter what the caller sent.
+   */
+  timeSignatureNumerator: z.number().int().min(1).max(32).optional(),
+  timeSignatureDenominator: z.number().int().min(1).max(32).optional(),
+  /** Read by ``LogicalRhythmEnlinement`` as the syncopation threshold. */
+  syncopation: z.number().min(0).max(1).optional(),
 });
 
 /** Studio generate payload — also the In-Gate flux shield surface. */
@@ -104,6 +113,27 @@ export const generateSchema = z.object({
   idempotencyKey: z.string().trim().max(120).optional(),
   /** Correlation id stamped by the cortex dispatcher (worker / logs). */
   cortexCorrelationId: z.string().trim().max(80).optional(),
+
+  /**
+   * Harmony hints consumed by ``ClassicalTheoryEngine.deriveTonicAndMode``.
+   * Zod strips keys it does not declare, so until these were listed the engine
+   * received ``undefined`` for every hint and always fell back to its defaults.
+   */
+  key: z.string().trim().max(24).optional(),
+  musicalKey: z.string().trim().max(24).optional(),
+  tonicNote: z.string().trim().max(8).optional(),
+  mode: z.string().trim().max(24).optional(),
+  scaleMode: z.string().trim().max(24).optional(),
+
+  /** Work-ontology hints (listening context / expressive intent). */
+  workOntologyType: z.string().trim().max(60).optional(),
+  listeningMode: z.string().trim().max(60).optional(),
+  expressiveValence: z.number().min(-1).max(1).optional(),
+
+  /** Measured vocal reference stats, when the client analysed the take. */
+  vocalPeakRmsDb: z.number().min(-120).max(0).optional(),
+  vocalFundamentalHz: z.number().min(20).max(2000).optional(),
+  emotionalIntensity: z.number().min(0).max(1).optional(),
 });
 
 export type GenerateEngineTrackInput = z.infer<typeof generateSchema>;

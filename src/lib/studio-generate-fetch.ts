@@ -352,9 +352,13 @@ async function runInlineSseStudioGenerate(
 
   if (buffer.trim()) processBlock(buffer);
 
-  if (streamError) {
-    const err = new Error(streamError) as Error & { refunded?: boolean };
-    if (streamError.includes(ENGINE_BUSY_REFUNDED_MESSAGE)) err.refunded = true;
+  // `streamError` is only assigned inside the processBlock closure, which
+  // control-flow analysis does not track, so its flow type here is still the
+  // `null` initialiser. The cast restores the declared type before narrowing.
+  const failure = streamError as string | null;
+  if (failure) {
+    const err = new Error(failure) as Error & { refunded?: boolean };
+    if (failure.includes(ENGINE_BUSY_REFUNDED_MESSAGE)) err.refunded = true;
     throw err;
   }
   if (!result) {

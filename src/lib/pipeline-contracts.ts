@@ -106,8 +106,15 @@ export function isHttpAudioUrl(value: unknown): value is string {
 /**
  * True when a cloud worker (Replicate, etc.) can fetch the URL over the public
  * internet. Rejects localhost, loopback, link-local, and RFC1918 private hosts.
+ *
+ * Overloaded on purpose. As a bare ``value is string`` predicate this is a
+ * reachability *check* being read as a type refinement: callers that already
+ * hold a ``string`` get ``never`` in the negative branch, which is wrong since
+ * a rejected URL is still a string. Narrowing stays available for ``unknown``.
  */
-export function isPublicHttpAudioUrl(value: unknown): value is string {
+export function isPublicHttpAudioUrl(value: string): boolean;
+export function isPublicHttpAudioUrl(value: unknown): value is string;
+export function isPublicHttpAudioUrl(value: unknown): boolean {
   if (!isHttpAudioUrl(value)) return false;
   try {
     const { hostname } = new URL(value.trim());

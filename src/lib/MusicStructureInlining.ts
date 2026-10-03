@@ -102,7 +102,9 @@ export class MusicStructureInlining {
     const bridgeBars = ctx.tier === "free" ? 4 : 8;
     const outroBars = 4;
 
-    return [
+    // Annotated before `.map`: the trailing call strips contextual typing from
+    // the literal, widening each `sectionName` to string instead of SectionName.
+    const blocks: ArrangementBlock[] = [
       {
         sectionName: "INTRO",
         barCount: introBars,
@@ -128,12 +130,10 @@ export class MusicStructureInlining {
         barCount: outroBars,
         activeStems: rhythm.length > 0 ? [...rhythm, "fx"].filter((s, i, a) => a.indexOf(s) === i) : all,
       },
-    ].map((block) => ({
+    ];
+    return blocks.map((block) => ({
       ...block,
-      activeStems:
-        block.activeStems.length > 0
-          ? block.activeStems
-          : all,
+      activeStems: block.activeStems.length > 0 ? block.activeStems : all,
     }));
   }
 }

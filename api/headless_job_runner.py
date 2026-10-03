@@ -1353,7 +1353,8 @@ def create_app() -> Any:
             title = _form_text(form, "title")
             if title and not prompt:
                 prompt = title
-            bpm = _form_float(form, "bpm", DEFAULT_RENDER_BPM) or DEFAULT_RENDER_BPM
+            requested_bpm_value = _form_float(form, "bpm")
+            bpm = requested_bpm_value or DEFAULT_RENDER_BPM
             duration_sec = _form_float(form, "duration_sec")
             bars = _form_int(form, "bars")
             vocal_mode = _form_text(form, "vocal_mode").lower()
@@ -1371,7 +1372,8 @@ def create_app() -> Any:
             genre = (
                 body.genre_hint or body.genre or body.genre_lock or body.style or ""
             ).strip()
-            bpm = float(body.bpm) if body.bpm is not None else DEFAULT_RENDER_BPM
+            requested_bpm_value = float(body.bpm) if body.bpm is not None else None
+            bpm = requested_bpm_value if requested_bpm_value is not None else DEFAULT_RENDER_BPM
             duration_sec = body.duration_sec
             bars = body.bars
             vocal_mode = (body.vocal_mode or "").strip().lower()
@@ -1389,7 +1391,10 @@ def create_app() -> Any:
         )
         if not genre and not prompt:
             raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
-        if bars is not None and bpm is None:
+        # ``bars`` only converts to a duration against a real tempo. Falling back
+        # to DEFAULT_RENDER_BPM here would hand back a different length than the
+        # caller asked for, so an explicit bpm is required rather than assumed.
+        if bars is not None and requested_bpm_value is None:
             raise HTTPException(status_code=400, detail="bars requires bpm")
         render_opts: dict[str, Any] = {"bpm": float(bpm), "key": key}
         if vocal_path and vocal_sec > 0:
@@ -1419,7 +1424,7 @@ def create_app() -> Any:
             dry_run=dry_run,
             render_opts=render_opts,
             requested_bars=bars if bars is not None else computed_bars,
-            requested_bpm=float(bpm) if bpm is not None else None,
+            requested_bpm=requested_bpm_value,
         )
 
     @app.get("/api/tracks/status/{session_id}")

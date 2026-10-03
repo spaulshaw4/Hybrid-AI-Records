@@ -175,7 +175,18 @@ export function coatAndVerify<T>(schema: z.ZodType<T>, data: unknown): T {
   return result.data;
 }
 
-export function coatInGate(rawPayload: unknown, schema: z.ZodType = InGateSchema) {
+/**
+ * Coat an In-Gate studio payload.
+ *
+ * The schema parameter is generic so the default's inferred shape reaches the
+ * return type. Typing it as a bare ``z.ZodType`` makes it ``ZodType<unknown>``,
+ * which collapses ``coatAndVerify<T>`` to ``unknown`` and leaves every caller
+ * reading properties off an untyped value.
+ */
+export function coatInGate<T = z.infer<typeof InGateSchema>>(
+  rawPayload: unknown,
+  schema: z.ZodType<T> = InGateSchema as unknown as z.ZodType<T>,
+): T {
   const normalizedPayload = coercePayload(rawPayload);
   // If normalizedPayload is empty after a string input, log explicit diagnostic details.
   if (typeof rawPayload === "string" && Object.keys(normalizedPayload).length === 0) {

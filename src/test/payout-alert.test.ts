@@ -4,8 +4,22 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Params typed to Resend's emails.send shape so the recorded call args below
+// are inspectable; an untyped vi.fn() records an empty tuple.
+type ResendEmailBody = {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+};
 const send = vi.hoisted(() =>
-  vi.fn(async () => ({ data: { id: "email_test_1" }, error: null })),
+  vi.fn(
+    async (_body: ResendEmailBody, _opts?: { idempotencyKey?: string }) => ({
+      data: { id: "email_test_1" },
+      error: null,
+    }),
+  ),
 );
 
 vi.mock("resend", () => ({
@@ -60,16 +74,7 @@ describe("sendPayoutAlert", () => {
 
     expect(result).toEqual({ ok: true });
     expect(send).toHaveBeenCalledOnce();
-    const [body, opts] = send.mock.calls[0] as [
-      {
-        from: string;
-        to: string[];
-        subject: string;
-        html: string;
-        text: string;
-      },
-      { idempotencyKey?: string },
-    ];
+    const [body, opts] = send.mock.calls[0]!;
     expect(body.from).toBe(PAYOUT_ALERT_FROM);
     expect(body.to).toEqual([DEFAULT_PAYOUT_ALERT_EMAIL]);
     expect(body.subject).toContain("Jester");
@@ -77,6 +82,6 @@ describe("sendPayoutAlert", () => {
     expect(body.text).toContain("$1.00");
     expect(body.text).toMatch(/payout is 100% to that address/i);
     expect(body.html).toContain("Heavy Sky");
-    expect(opts.idempotencyKey).toBe("payout-alert/tx_984729184");
+    expect(opts?.idempotencyKey).toBe("payout-alert/tx_984729184");
   });
 });

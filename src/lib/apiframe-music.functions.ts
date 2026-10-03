@@ -784,6 +784,9 @@ export async function pollEngineTrackTask(
     const tracks = await Promise.all(
       result.tracks.map(async (track) => ({
         ...track,
+        // Apiframe may omit a per-track id; the contract requires one, so fall
+        // back to the task id exactly as the Sonic branch above does.
+        id: track.id ?? taskId,
         audioUrl: track.audioUrl
           ? await archiveGeneratedAudio(track.audioUrl, userId, taskId).catch(() => null)
           : null,

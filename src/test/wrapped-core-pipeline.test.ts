@@ -67,7 +67,11 @@ describe("WrappedCorePipeline", () => {
       { prompt: "sealed neon rain", title: "Neon", genre: "synthwave" },
     );
 
-    expect(result.status).toBe("SEALED_AND_EXECUTING");
+    // SealedPipelineOutcome is a union with GroundedFaultResult; expect() does
+    // not narrow it, so assert the discriminant before reading sealed fields.
+    if (result.status !== "SEALED_AND_EXECUTING") {
+      throw new Error(`expected a sealed result, got ${result.status}`);
+    }
     expect(result.assignedNode).toBe("standard-worker-grid-pool");
     expect(result.isolationNonce).toBe("reactor_sealed_1");
     expect(result.securityVerdict).toBe("PASSED_ISOLATION");

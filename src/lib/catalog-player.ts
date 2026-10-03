@@ -97,8 +97,9 @@ function bindElementListeners(el: HTMLAudioElement) {
 export function bindCatalogAudioElement(el: HTMLAudioElement) {
   audio = el;
   el.preload = "metadata";
+  // The attribute is the typed route: `playsInline` is declared on
+  // HTMLVideoElement only, though iOS Safari honours it on audio too.
   el.setAttribute("playsinline", "");
-  el.playsInline = true;
   bindElementListeners(el);
 }
 
@@ -115,7 +116,7 @@ function ensureAudio(): HTMLAudioElement | null {
   }
   audio = new Audio();
   audio.preload = "metadata";
-  audio.playsInline = true;
+  audio.setAttribute("playsinline", "");
   bindElementListeners(audio);
   return audio;
 }

@@ -1133,10 +1133,11 @@ export async function waitForStudioTrack(
   }
 
   if (finished.kind !== "ready") {
-    const err = new StudioPipelineError("GATE_1", "Base audio URL was not returned") as StudioPipelineError & {
-      step: string;
-    };
-    err.step = "composition";
+    const err = new StudioPipelineError("GATE_1", "Base audio URL was not returned");
+    // StudioPipelineError.step is readonly and gate-shaped (`GATE_1_FAILED`);
+    // the studio badge sync keys off the UI step vocabulary instead, matching
+    // the timeout branch above.
+    (err as unknown as { step: string }).step = "composition";
     throw err;
   }
   return finished.result;

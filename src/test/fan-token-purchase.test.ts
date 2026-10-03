@@ -16,6 +16,7 @@ import {
   parseTokenPurchased,
   payoutAlertRecipient,
   payoutAlertSubject,
+  type TokenPurchasedPayload,
 } from "@/lib/fan-token-purchase";
 import { handleStripeWebhook } from "@/lib/stripe-webhook-fulfill.server";
 
@@ -183,12 +184,15 @@ describe("checkout metadata + alert copy", () => {
 describe("fulfillFanTokenPurchase", () => {
   it("inserts Pending Payout and invokes the alert once", async () => {
     const record = vi.fn(async () => ({ inserted: true }));
-    const sendAlert = vi.fn(async () => ({ ok: true }));
+    // Typed param, so the recorded call args are inspectable below.
+    const sendAlert = vi.fn(async (_payload: TokenPurchasedPayload) => ({ ok: true }));
     const first = await fulfillFanTokenPurchase(SAMPLE, { recordPendingPayout: record, sendAlert });
     expect(first).toEqual({ recorded: true, inserted: true, alerted: true });
     expect(record).toHaveBeenCalledOnce();
     expect(sendAlert).toHaveBeenCalledOnce();
-    expect(sendAlert.mock.calls[0][0].data.artist_payout_target).toBe("paypal@artistdomain.com");
+    expect(sendAlert.mock.calls[0]?.[0].data.artist_payout_target).toBe(
+      "paypal@artistdomain.com",
+    );
   });
 
   it("is idempotent on transaction_id — second insert does not re-alert", async () => {

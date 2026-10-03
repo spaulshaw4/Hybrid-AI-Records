@@ -58,7 +58,7 @@ function routePaths(rel: string): string[] {
   return build([], segments);
 }
 
-type PageRoute = { file: string; paths: string[]; noindex: boolean };
+type PageRoute = { file: string; paths: string[]; noindex: boolean; isEndpoint: boolean };
 
 function collectRoutes(): PageRoute[] {
   return walk(ROUTES_DIR)
@@ -72,9 +72,14 @@ function collectRoutes(): PageRoute[] {
         /noindex:\s*true/.test(source) ||
         rel.startsWith("_authenticated/") ||
         rel.startsWith("dev.");
-      return { file: rel, paths, noindex };
+      // A route with server handlers and no component renders no HTML, so it is
+      // an endpoint rather than a page — e.g. `generate.ts`, the POST proxy to
+      // the local worker. Keyed on the declaration instead of a filename list
+      // so new endpoints outside `api/` do not have to be remembered here.
+      const isEndpoint = !/\bcomponent\s*:/.test(source) && /\bhandlers\s*:/.test(source);
+      return { file: rel, paths, noindex, isEndpoint };
     })
-    .filter((r) => r.paths.length > 0);
+    .filter((r) => r.paths.length > 0 && !r.isEndpoint);
 }
 
 async function sitemapLocs() {

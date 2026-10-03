@@ -188,7 +188,9 @@ export class ApiCompressionLine {
   /** Encode envelope bytes for the wire when client accepted gzip/deflate. */
   static encodeOutboundBody(
     envelope: ApiCompressedResponse<MasterPipelineOutcome>,
-  ): { body: Uint8Array | string; contentEncoding: CompressionAlgorithm } {
+    // ArrayBuffer-backed explicitly: BodyInit rejects Uint8Array<ArrayBufferLike>
+    // because that also admits SharedArrayBuffer, which Response cannot take.
+  ): { body: Uint8Array<ArrayBuffer> | string; contentEncoding: CompressionAlgorithm } {
     const json = JSON.stringify(envelope);
     if (envelope.algorithm === "gzip") {
       return { body: gzipSync(json), contentEncoding: "gzip" };

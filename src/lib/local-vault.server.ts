@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import type { UserVaultApiTrack, UserVaultStems } from "@/lib/user-vault.server";
 import { isDevRuntime } from "@/lib/supabase-env.server";
+import { VAULT_DEFAULT_ALBUM, VAULT_DEFAULT_ARTIST } from "@/lib/vault-tracks";
 
 const ROOT = join(process.cwd(), ".data", "local-vault");
 const CATALOG = join(ROOT, "catalog.json");
@@ -99,7 +100,9 @@ export async function persistLocalVaultTrack(
   const masterUrl = stems.masterUrl?.trim() || existing?.master_url || null;
   const next: UserVaultApiTrack = {
     id,
-    title: stems.title.trim() || existing?.title || "Untitled Track",
+    // `title` is optional on UserVaultStems: an update may omit it to keep the
+    // stored one, so it cannot be dereferenced directly.
+    title: stems.title?.trim() || existing?.title || "Untitled Track",
     style: stems.style?.trim() || existing?.style || "Custom",
     status: masterUrl ? "completed" : asVaultStatus(stems.status),
     master_url: masterUrl,
@@ -107,6 +110,8 @@ export async function persistLocalVaultTrack(
     vocal_url: stems.vocalUrl || existing?.vocal_url || null,
     raw_audio_url: stems.rawAudioUrl || existing?.raw_audio_url || null,
     created_at: existing?.created_at || new Date().toISOString(),
+    artist_name: existing?.artist_name || VAULT_DEFAULT_ARTIST,
+    album_name: existing?.album_name || VAULT_DEFAULT_ALBUM,
   };
   const without = rows.filter((row) => row.id !== id);
   await writeCatalog([next, ...without]);

@@ -11,6 +11,12 @@ import {
   withTimeout,
 } from "@/lib/pipeline-gate.server";
 import { isPublicHttpAudioUrl } from "@/lib/pipeline-contracts";
+import {
+  PIPELINE_COMPLETE,
+  PIPELINE_GATE_ORDER,
+  PipelineGate,
+  passGate,
+} from "@/lib/pipeline-flags";
 import { PIPELINE_PROGRESS, reportPipelineProgress } from "@/lib/pipeline-progress";
 import { logPipelineStep, logPipelineStepError } from "@/lib/pipeline-steps.server";
 import { backingStemUrl } from "@/lib/stem-urls";
@@ -499,6 +505,8 @@ export async function runSixGatePipeline(input: {
       structuralMarkers,
       fallbacksUsed,
       executionTimeMs,
+      // Reaching here means every gate landed; the studio badges read this mask.
+      pipelineState: PIPELINE_COMPLETE,
     };
 
     console.log(`[Pipeline Complete] Master ready: ${finalMasterUrl.slice(0, 96)}`);
@@ -541,6 +549,12 @@ export function buildAbortPipelineResponse(
     failedGate: `Gate ${failedGate}`,
     error: message,
     executionTimeMs: Date.now() - startedAt,
+    // Gates ahead of the failure are the ones that completed, so the studio
+    // keeps the badges it already earned instead of resetting to zero.
+    pipelineState: PIPELINE_GATE_ORDER.slice(0, Math.max(0, failedGate - 1)).reduce<number>(
+      (mask, flag) => passGate(mask, flag),
+      PipelineGate.NONE,
+    ),
   };
 }
 

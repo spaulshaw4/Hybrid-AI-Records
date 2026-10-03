@@ -1407,6 +1407,7 @@ export function AudioStudio() {
       lyrics: "",
       title: "",
       styles: [],
+      stylePrompt: "",
       withVocals: true,
       targetDuration: DEFAULT_TARGET_DURATION_SECONDS,
       bpm: DEFAULT_BPM,
@@ -1486,7 +1487,10 @@ export function AudioStudio() {
   const abortRef = useRef<AbortController | null>(null);
   const [pipelineState, setPipelineState] = useState<PipelineState>(IDLE_PIPELINE_STATE);
   /** Server-authoritative gate bitmask — badges light only via hasPassedGate. */
-  const [serverGateMask, setServerGateMask] = useState(PipelineGate.NONE);
+  // Annotated: PipelineGate is `as const`, so the initialiser's literal type 0
+  // would narrow the setter to accept only 0 — but this holds an accumulating
+  // bitmask of gate bits.
+  const [serverGateMask, setServerGateMask] = useState<number>(PipelineGate.NONE);
   const pipelineStepRef = useRef<PipelineStepId>("idle");
   const [playbackKind, setPlaybackKind] = useState<StemKind>("mastered");
   const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);

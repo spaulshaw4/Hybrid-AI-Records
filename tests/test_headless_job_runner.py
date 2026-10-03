@@ -337,17 +337,45 @@ def test_create_accepts_bars_with_bpm_and_jobs_alias(live_dirs, monkeypatch):
 
     monkeypatch.setattr(runner.threading, "Thread", _NoThread)
     client = TestClient(runner.app)
+    # bars alone cannot be converted to a duration; the default tempo must not
+    # be substituted silently.
     bad = client.post("/api/tracks/create", json={"prompt": "x", "bars": 32})
     assert bad.status_code == 400 and "bars requires bpm" in bad.text
     ok = client.post("/api/tracks/create", json={"prompt": "x", "bars": 32, "bpm": 120})
     assert ok.status_code == 200
     session_id = ok.json()["session_id"]
     opts = started[-1][-1]
-    assert opts == {"bpm": 120.0, "duration_sec": pytest.approx(64.0)}
+    assert opts == {
+        "bpm": 120.0,
+        "duration_sec": pytest.approx(64.0),
+        "key": "G",
+    }
     status = client.get(f"/api/jobs/{session_id}")
     assert status.status_code == 200
     body = status.json()
     assert body["requested_bars"] == 32 and body["requested_bpm"] == 120.0
+
+
+def test_create_reports_no_requested_bpm_when_caller_omitted_it(live_dirs, monkeypatch):
+    """``requested_bpm`` is what was asked for, not the fallback that was used."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("HYBRID_WORKER_TOKEN", raising=False)
+
+    class _NoThread:
+        def __init__(self, target, args, name, daemon):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(runner.threading, "Thread", _NoThread)
+    client = TestClient(runner.app)
+    ok = client.post("/api/tracks/create", json={"prompt": "x", "duration_sec": 60})
+    assert ok.status_code == 200
+    body = client.get(f"/api/jobs/{ok.json()['session_id']}").json()
+    assert body["requested_bpm"] is None
 
 
 def test_render_slots_cap_concurrent_jobs(monkeypatch):

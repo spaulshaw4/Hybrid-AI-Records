@@ -109,8 +109,9 @@ function accessTokenFromCookies(request: Request): string | null {
       try {
         const decoded = Buffer.from(joined, "base64").toString("utf8");
         const parsed = JSON.parse(decoded) as { access_token?: string } | string[];
-        if (Array.isArray(parsed) && typeof parsed[0] === "string") return parsed[0];
-        if (parsed && typeof parsed === "object" && typeof parsed.access_token === "string") {
+        if (Array.isArray(parsed)) {
+          if (typeof parsed[0] === "string") return parsed[0];
+        } else if (parsed && typeof parsed.access_token === "string") {
           return parsed.access_token;
         }
       } catch {
