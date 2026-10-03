@@ -89,6 +89,7 @@ def test_arrangement_posts_to_replicate_with_the_lyric_key(monkeypatch):
     def fake_http(url, token, payload, timeout=120.0):
         seen["url"] = url
         seen["token"] = token
+        seen["payload"] = payload
         return {
             "id": "pred",
             "status": "succeeded",
@@ -107,6 +108,8 @@ def test_arrangement_posts_to_replicate_with_the_lyric_key(monkeypatch):
         sections=[{"name": "verse_1", "bars": 8}],
     )
     assert seen["token"] == "r8_lyric"
+    assert seen["payload"]["input"]["max_output_tokens"] == 4096
+    assert seen["payload"]["input"]["temperature"] == 0.2
     assert "api.replicate.com" in seen["url"]
     assert "generativelanguage" not in seen["url"]
     assert plan["structure"][0]["lane_assignments"]["11_lead_vocal"]["stem_id"] == "vx_a"

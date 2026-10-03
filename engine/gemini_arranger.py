@@ -405,7 +405,7 @@ def lyric_replicate_token() -> str:
     return token
 
 
-def complete_json(system: str, user: str, *, timeout: float = 25.0) -> dict:
+def complete_json(system: str, user: str, *, timeout: float = 120.0) -> dict:
     """One JSON object from Gemini on Replicate, using the lyric Replicate key."""
     token = lyric_replicate_token()
     if not token:
@@ -419,7 +419,7 @@ def _complete_replicate(system: str, user: str, token: str, timeout: float) -> d
             "prompt": user,
             "system_instruction": system,
             "temperature": 0.2,
-            "max_output_tokens": 512,
+            "max_output_tokens": 4096,
             "thinking_budget": 0,
         }
     }
