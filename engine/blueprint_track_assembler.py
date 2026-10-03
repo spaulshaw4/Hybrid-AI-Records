@@ -22,6 +22,7 @@ import random
 import sqlite3
 import sys
 from collections import deque
+from dataclasses import asdict
 
 import numpy as np
 import soundfile as sf
@@ -1321,28 +1322,46 @@ BUS_STEMS_DIRNAME = "bus_stems"
 def _write_bus_stems(
     bus_dir: str,
     bus_stems: dict[str, np.ndarray],
-    gain: float,
+    gain: np.ndarray | float,
+    headroom_gain: float,
     n_samples: int,
     sr: int,
     source_trace: dict | None,
 ) -> None:
-    """Float WAVs that sum to the unmastered mix (no PCM clipping on buses)."""
+    """Float WAVs that sum to the unmastered mix (no PCM clipping on buses).
+
+    ``gain`` carries everything the mix bus applied after the sum, including
+    the crest-control curve, so the stems ride with the mix instead of
+    drifting out of sum with it. ``headroom_gain`` is the static part of it,
+    which is what the trace records.
+    """
     os.makedirs(bus_dir, exist_ok=True)
     written: dict[str, str] = {}
+    scalar = np.ndim(gain) == 0
     for bus in ARRANGE_BUSES:
         audio = bus_stems.get(bus)
         if audio is None:
             continue
-        arr = np.asarray(audio, dtype=np.float64) * float(gain)
+        arr = np.asarray(audio, dtype=np.float64)
         if arr.shape[0] < n_samples:
             pad = ((0, n_samples - arr.shape[0]),) + ((0, 0),) * (arr.ndim - 1)
             arr = np.pad(arr, pad)
+        arr = arr[:n_samples]
+        if scalar:
+            arr = arr * float(gain)
+        else:
+            curve = np.asarray(gain).reshape(-1)[:n_samples]
+            arr = arr * curve.reshape((n_samples,) + (1,) * (arr.ndim - 1))
         path = os.path.join(bus_dir, f"{bus}.wav")
-        sf.write(path, arr[:n_samples], int(sr), subtype="FLOAT")
+        sf.write(path, arr, int(sr), subtype="FLOAT")
         written[bus] = path
     print(f"[SESSION] Wrote bus stems ({', '.join(written) or 'none'}): {bus_dir}")
     if source_trace is not None:
-        source_trace["_bus_stems"] = {"dir": bus_dir, "files": written, "gain": float(gain)}
+        source_trace["_bus_stems"] = {
+            "dir": bus_dir,
+            "files": written,
+            "gain": float(headroom_gain),
+        }
 
 
 def _finalize_mix(
@@ -1356,7 +1375,7 @@ def _finalize_mix(
     source_trace: dict | None,
     bus_stems: dict[str, np.ndarray] | None = None,
 ) -> str:
-    """Shared write tail: -3 dBFS headroom, session contract copy, opt-in R128.
+    """Shared write tail: crest control, -3 dBFS headroom, session contract copy, opt-in R128.
 
     With a ``session_id``, ``bus_stems`` are written next to the session mix
     as ``bus_stems/{rhythm,bass,harmonic,vocal}.wav`` (32-bit float, same
@@ -1384,9 +1403,31 @@ def _finalize_mix(
     except Exception as exc:
         print(f"[MONO] compatibility guard skipped ({exc})")
 
+    # Crest control before the headroom trim. A couple of fill bars sitting 15
+    # dB above the body of the song give the mix a ~25 dB PLR, and no
+    # downstream limiter can recover that: its push is bounded by true-peak
+    # headroom, so the delivery master lands 6+ dB under the -14 LUFS target.
+    stem_gain: np.ndarray | float = 1.0
+    try:
+        from dsp.crest_control import control_crest
+
+        full_mix, stem_gain, crest = control_crest(full_mix, sr)
+        if crest.engaged:
+            print(
+                f"[CREST] PLR {crest.plr_before_db:.2f} -> {crest.plr_after_db:.2f} dB "
+                f"(ride {crest.level_reduction_db:.2f} dB, clip {crest.clip_reduction_db:.2f} dB)"
+            )
+        else:
+            print(f"[CREST] PLR {crest.plr_before_db:.2f} dB already deliverable; bypassed")
+        if source_trace is not None:
+            source_trace["_crest"] = asdict(crest)
+    except Exception as exc:
+        print(f"[CREST] crest control skipped ({exc})")
+
     peak = float(np.max(np.abs(full_mix))) if full_mix.size else 0.0
     headroom_gain = (HEADROOM_PEAK / peak) if peak > HEADROOM_PEAK else 1.0
     full_mix = full_mix * headroom_gain
+    stem_gain = stem_gain * headroom_gain
     print(
         f"[MIX] unmastered peak={_peak_dbfs(full_mix):.2f} dBFS "
         f"(target {HEADROOM_DBFS:.1f} dBFS sample-peak, not true-peak)"
@@ -1401,6 +1442,7 @@ def _finalize_mix(
             _write_bus_stems(
                 os.path.join(os.path.dirname(contract), BUS_STEMS_DIRNAME),
                 bus_stems,
+                stem_gain,
                 headroom_gain,
                 full_mix.shape[0],
                 sr,
