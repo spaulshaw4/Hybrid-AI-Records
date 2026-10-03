@@ -250,6 +250,26 @@ def _persist_job(job: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def _provenance_public_fields(provenance: Any) -> dict[str, Any]:
+    """Copy provenance onto the job. Do not use ``or`` — ``certified`` is often False."""
+    if provenance is None:
+        return {}
+    if isinstance(provenance, dict):
+        return {
+            "provenance_hash": provenance.get("certification_hash")
+            or provenance.get("provenance_hash"),
+            "provenance_certified": provenance.get("certified"),
+            "provenance_status": provenance.get("status"),
+            "provenance_note": provenance.get("note"),
+        }
+    return {
+        "provenance_hash": getattr(provenance, "certification_hash", None),
+        "provenance_certified": getattr(provenance, "certified", None),
+        "provenance_status": getattr(provenance, "status", None),
+        "provenance_note": getattr(provenance, "note", None),
+    }
+
+
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "session_id",
@@ -270,6 +290,8 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "true_peak_dbtp",
         "provenance_hash",
         "provenance_certified",
+        "provenance_status",
+        "provenance_note",
         "song_plan",
         "package_dir",
         "delivery_status",
@@ -935,18 +957,7 @@ def _try_module5_delivery(session_id: str, prompt: str, genre_hint: str) -> dict
                 mastering, "true_peak_dbtp", None
             ) or (mastering.get("true_peak_dbtp") if isinstance(mastering, dict) else None)
         if provenance is not None:
-            fields["provenance_hash"] = getattr(
-                provenance, "certification_hash", None
-            ) or (
-                provenance.get("certification_hash")
-                if isinstance(provenance, dict)
-                else None
-            )
-            fields["provenance_certified"] = getattr(
-                provenance, "certified", None
-            ) or (
-                provenance.get("certified") if isinstance(provenance, dict) else None
-            )
+            fields.update(_provenance_public_fields(provenance))
         fields["song_plan"] = arrangement.get("song_plan")
         return fields
 
@@ -1006,8 +1017,7 @@ def _try_module5_delivery(session_id: str, prompt: str, genre_hint: str) -> dict
     fields.update(published)
     fields["integrated_lufs"] = report.integrated_lufs
     fields["true_peak_dbtp"] = report.true_peak_dbtp
-    fields["provenance_hash"] = prov.certification_hash
-    fields["provenance_certified"] = prov.certified
+    fields.update(_provenance_public_fields(prov))
     fields["song_plan"] = song_plan
     return fields
 

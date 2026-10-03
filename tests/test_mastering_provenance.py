@@ -166,6 +166,11 @@ def test_provenance_without_references_is_unverified():
     _m, _s, report = guard.check(np.zeros(SR) + 0.01, stems={}, seed=0)
     assert report.certified is False
     assert report.details["status"] == "unverified_no_references"
+    assert report.status == "unverified_no_references"
+    assert "fingerprint corpus" in report.note
+    payload = report.to_dict()
+    assert payload["status"] == "unverified_no_references"
+    assert payload["note"] == report.note
 
 
 def test_provenance_flags_identical_clone_and_passes_transformed():

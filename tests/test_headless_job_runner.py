@@ -407,3 +407,26 @@ def test_render_slots_cap_concurrent_jobs(monkeypatch):
     for th in threads:
         th.join(5)
     assert active["max"] == 2
+
+
+def test_public_job_keeps_a_false_certification_and_its_reason():
+    """``False or ...`` used to wipe certified=False to None on the job payload."""
+    from engine.provenance_guard import ProvenanceGuard
+
+    guard = ProvenanceGuard(bpm=120.0, sr=SR)
+    _m, _s, report = guard.check(np.zeros(SR) + 0.01, stems={}, seed=0)
+    fields = runner._provenance_public_fields(report)
+    assert fields["provenance_certified"] is False
+    assert fields["provenance_status"] == "unverified_no_references"
+    assert "fingerprint corpus" in fields["provenance_note"]
+
+    public = runner._public_job(
+        {
+            "session_id": SESSION,
+            "status": "completed",
+            **fields,
+        }
+    )
+    assert public["provenance_certified"] is False
+    assert public["provenance_status"] == "unverified_no_references"
+    assert public["provenance_note"] == fields["provenance_note"]

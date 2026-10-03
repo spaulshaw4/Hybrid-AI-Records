@@ -38,7 +38,38 @@ class ProvenanceReport:
             "certification_hash": self.certification_hash,
             "transforms_applied": list(self.transforms_applied),
             "details": dict(self.details),
+            "status": self.status,
+            "note": self.note,
         }
+
+    @property
+    def status(self) -> str:
+        raw = (self.details or {}).get("status")
+        if raw:
+            return str(raw)
+        return "certified" if self.certified else "failed"
+
+    @property
+    def note(self) -> str:
+        """Why ``certified`` is True or False — the job payload used to hide this."""
+        if self.status == "unverified_no_references":
+            return (
+                "No stem fingerprint corpus was loaded, so uniqueness was not "
+                "compared. The hash is a digest of that empty check, not a "
+                "certification. Point ProvenanceGuard at a dedicated fingerprint "
+                "db (never the live catalog) to enable it."
+            )
+        if self.certified:
+            return (
+                f"Uniqueness check passed (max similarity {self.max_similarity} "
+                f"<= {self.threshold})."
+            )
+        if self.flagged_segments:
+            return (
+                f"{len(self.flagged_segments)} segment(s) still exceed similarity "
+                f"{self.threshold} after remediation (max {self.max_similarity})."
+            )
+        return f"Uniqueness check did not certify (status={self.status})."
 
 
 def segment_sample_count(sr: int, bpm: float, bars: int = BARS_PER_SEGMENT) -> int:
