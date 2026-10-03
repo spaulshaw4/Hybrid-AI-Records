@@ -54,6 +54,8 @@ except Exception:
 SCRATCH_ROOT = _LIVE["scratch"]
 RENDERS_ROOT = _LIVE["renders"]
 RELEASES_ROOT = _LIVE["releases"]
+# Per-session render transcripts. Survives the scratch purge.
+LIVE_LOG_DIR = _LIVE.get("logs") or os.path.join(_LIVE["root"], "logs")
 ASSETS_ROOT = os.path.join(RELEASES_ROOT, "assets")
 # Finalized Module 5 packages: {DELIVERIES_ROOT}/{session_id}/ (master, mp3,
 # manifest, stems/, bundle zip). Kept outside scratch so scratch can be purged.
@@ -631,6 +633,35 @@ def _run(
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
+def _archive_step_output(
+    session_id: str, step: str, stdout: str | None, stderr: str | None
+) -> str | None:
+    """Keep a render's full console output next to the other live logs.
+
+    The inline log line is capped at 1200 characters, which is roughly the tail
+    of a render — so every mid-run diagnostic the engine prints
+    (``[SONG_PLAN]``, ``[SELECT]``, ``[ARRANGE]``, ``[HARMONY]``,
+    ``[RELATIONAL]``) was being discarded, and the only way to observe the
+    pipeline was to add temporary instrumentation. The capped line stays for
+    at-a-glance reading; the full transcript lands here.
+
+    Best-effort: a logging failure must never fail a render.
+    """
+    body = (stdout or "") + (f"\n--- stderr ---\n{stderr}" if stderr else "")
+    if not body.strip():
+        return None
+    try:
+        os.makedirs(LIVE_LOG_DIR, exist_ok=True)
+        path = os.path.join(LIVE_LOG_DIR, f"{session_id}.{step}.log")
+        with open(path, "w", encoding="utf-8", errors="replace") as handle:
+            handle.write(_redact(body))
+        _log(f"[{step}] full console output: {path}")
+        return path
+    except OSError as exc:
+        _log(f"[{step}] could not archive console output ({exc})")
+        return None
+
+
 def _resolve_index() -> str:
     try:
         from engine.live_index import resolve_worker_index
@@ -724,6 +755,7 @@ def _run_headless(
     if not _replicate_token_set():
         cmd.append("--offline")
     result = _run(cmd, cwd=_REPO_ROOT)
+    _archive_step_output(session_id, "generate", result.stdout, result.stderr)
     if result.stdout:
         _log("[generate] " + _redact(result.stdout.strip()[-1200:]))
     if result.returncode != 0 or not os.path.isfile(mix):
@@ -749,6 +781,7 @@ def _run_master_pipeline(session_id: str, genre_hint: str) -> None:
         genre,
     ]
     result = _run(cmd)
+    _archive_step_output(session_id, "master", result.stdout, result.stderr)
     if result.returncode != 0:
         detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
         raise RuntimeError(f"Master pipeline failed. {detail}")

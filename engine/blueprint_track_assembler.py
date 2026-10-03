@@ -1421,6 +1421,82 @@ def _arranged_bus_pools(
     return pools
 
 
+# Drums carry no pitch, so harmony never reassigns the rhythm bus.
+HARMONIC_VARIANT_BUSES = ("bass", "harmonic", "vocal")
+# A variant within this much of the best fit counts as harmonically acceptable,
+# which leaves the conductor's rotation free to provide variety.
+VARIANT_FIT_TOLERANCE = 0.04
+
+
+def _variant_chroma(paths: list[str]) -> list[np.ndarray]:
+    """Measure chroma on the staged copies themselves.
+
+    The staged file is already key- and tempo-aligned, so its chroma reflects
+    what will actually play — more accurate than the catalogue row for the
+    original slice, and only a handful of files per render.
+    """
+    from engine.musical_features import chroma_vector
+
+    out: list[np.ndarray] = []
+    for path in paths:
+        try:
+            data, sr = sf.read(path, always_2d=True, dtype="float64")
+            out.append(chroma_vector(data, int(sr)))
+        except Exception:
+            out.append(np.zeros(12, dtype=np.float64))
+    return out
+
+
+def assign_harmonic_variants(
+    plan: list[tuple[dict, int, int]],
+    pools: dict[str, list[str]],
+    song_plan_sections: list[dict] | None,
+) -> dict[str, int]:
+    """Point each section at the staged loop that fits *its* chords.
+
+    Stems are staged once per track, but the section map already chooses a
+    variant per section — that index just came from the conductor's rotation,
+    blind to harmony. Scoring the staged variants against each section's own
+    ``chord_progression`` makes the per-bar chord fit real without changing how
+    stems are staged.
+
+    The conductor's choice is kept whenever it is within
+    ``VARIANT_FIT_TOLERANCE`` of the best variant, so this filters for harmony
+    rather than collapsing every section onto one loop.
+
+    Returns a per-bus count of reassignments, for logging.
+    """
+    if not song_plan_sections or len(song_plan_sections) != len(plan):
+        return {}
+
+    from engine.musical_features import harmonic_fit, plan_pitch_weights
+
+    moved: dict[str, int] = {}
+    for bus in HARMONIC_VARIANT_BUSES:
+        paths = pools.get(bus) or []
+        if len(paths) < 2:
+            continue  # nothing to choose between
+        chromas = _variant_chroma(paths)
+        if not any(float(c.sum()) > 0.0 for c in chromas):
+            continue  # unmeasurable (silent staging) — leave the rotation alone
+        for sp_section, (section, _bars, _n) in zip(song_plan_sections, plan):
+            chords = list(sp_section.get("chord_progression") or [])
+            if not chords:
+                continue
+            weights = plan_pitch_weights(chords)
+            if float(weights.sum()) <= 0.0:
+                continue
+            fits = [harmonic_fit(c, weights) for c in chromas]
+            best = max(fits)
+            variants = section.setdefault("bus_variant", {})
+            current = int(variants.get(bus, 0)) % len(paths)
+            if fits[current] >= best - VARIANT_FIT_TOLERANCE:
+                continue  # already good enough; keep the rotation's variety
+            variants[bus] = int(max(range(len(fits)), key=lambda i: fits[i]))
+            moved[bus] = moved.get(bus, 0) + 1
+    return moved
+
+
 def assemble_arranged_buses(
     plan: list[tuple[dict, int, int]],
     rotators: dict[str, DynamicSliceRotator],
@@ -1487,6 +1563,18 @@ def assemble_arranged_buses(
             )
         else:
             chord_shifts = None
+    # Each section now plays the staged loop that fits its own chords.
+    try:
+        moved = assign_harmonic_variants(plan, pools, song_plan_sections)
+        if moved:
+            print(
+                "[HARMONY] section variants re-pointed by chord fit: "
+                + " ".join(f"{bus}={count}" for bus, count in sorted(moved.items())),
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"[HARMONY] per-section variant fit skipped ({exc})", flush=True)
+
     envelopes: dict[str, np.ndarray] = {}
     raw: dict[str, np.ndarray] = {}
     sources: dict[str, dict[str, str]] = {}
