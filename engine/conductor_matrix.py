@@ -209,6 +209,64 @@ def apply_stereo_width(audio_array: np.ndarray, width_factor: float) -> np.ndarr
     return np.column_stack((new_left, new_right))
 
 
+# The delivery QC gate rejects a master whose stereo correlation falls below
+# 0.25. Aim above that so a later mastering stage cannot nudge it under.
+MONO_CORRELATION_FLOOR = 0.40
+
+
+def stereo_correlation(audio: np.ndarray) -> float:
+    """Pearson correlation between the channels. 1.0 is mono, 0 uncorrelated."""
+    frames, _ = as_frames(np.asarray(audio, dtype=np.float64))
+    if frames.shape[1] < 2 or frames.shape[0] < 2:
+        return 1.0
+    left, right = frames[:, 0], frames[:, 1]
+    left = left - left.mean()
+    right = right - right.mean()
+    denom = float(np.sqrt(np.sum(left * left) * np.sum(right * right)))
+    if denom <= 1e-12:
+        return 1.0
+    return float(np.clip(np.sum(left * right) / denom, -1.0, 1.0))
+
+
+def enforce_mono_compatibility(
+    audio: np.ndarray, floor: float = MONO_CORRELATION_FLOOR
+) -> tuple[np.ndarray, float, float]:
+    """Pull side energy back until the mix survives a mono fold-down.
+
+    Per-section ``stereo_width`` is a creative instruction, but a master that
+    partially cancels in mono is a defect and the delivery gate refuses it. A
+    long render spends enough time in widened choruses to drag the whole-master
+    correlation under the limit, so the guard belongs on the finished mix
+    rather than on any one section.
+
+    With ``L = M + kS`` and ``R = M - kS`` the correlation is
+    ``(m - k^2 s) / (m + k^2 s)`` for mid power ``m`` and side power ``s``,
+    which inverts exactly: ``k = sqrt(m (1 - c) / (s (1 + c)))``. So the needed
+    side gain is solved in one step instead of searched for.
+
+    Returns ``(audio, before, after)`` correlations; a mix already above the
+    floor is returned untouched.
+    """
+    frames, was_1d = as_frames(np.asarray(audio, dtype=np.float64))
+    before = stereo_correlation(frames)
+    if frames.shape[1] < 2 or before >= floor:
+        return restore_shape(frames, was_1d), before, before
+
+    left, right = frames[:, 0], frames[:, 1]
+    mid = (left + right) / 2.0
+    side = (left - right) / 2.0
+    m = float(np.mean(mid * mid))
+    s = float(np.mean(side * side))
+    if s <= 1e-18 or m <= 1e-18:
+        return restore_shape(frames, was_1d), before, before
+
+    target = float(np.clip(floor, -0.999, 0.999))
+    k = float(np.sqrt(max(0.0, m * (1.0 - target) / (s * (1.0 + target)))))
+    k = min(1.0, k)  # only ever narrow, never widen
+    widened = np.column_stack((mid + side * k, mid - side * k))
+    return restore_shape(widened, was_1d), before, stereo_correlation(widened)
+
+
 def _bus_rms(audio: np.ndarray) -> float:
     arr = np.asarray(audio, dtype=np.float64)
     if arr.size == 0:

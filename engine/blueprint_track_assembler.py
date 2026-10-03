@@ -1362,6 +1362,28 @@ def _finalize_mix(
     as ``bus_stems/{rhythm,bass,harmonic,vocal}.wav`` (32-bit float, same
     headroom gain as the mix) so Module 5 packages the real buses.
     """
+    # Mono fold-down safety before anything downstream measures it. Section
+    # widths of 1.3 accumulate across a long render and the delivery QC gate
+    # rejects a master below 0.25 correlation.
+    try:
+        from engine.conductor_matrix import enforce_mono_compatibility
+
+        full_mix, corr_before, corr_after = enforce_mono_compatibility(full_mix)
+        if corr_after > corr_before:
+            print(
+                f"[MONO] stereo correlation {corr_before:.3f} -> {corr_after:.3f} "
+                "(side pulled back for mono compatibility)"
+            )
+            if source_trace is not None:
+                source_trace["_mono_guard"] = {
+                    "before": round(corr_before, 4),
+                    "after": round(corr_after, 4),
+                }
+        else:
+            print(f"[MONO] stereo correlation {corr_before:.3f} (within limits)")
+    except Exception as exc:
+        print(f"[MONO] compatibility guard skipped ({exc})")
+
     peak = float(np.max(np.abs(full_mix))) if full_mix.size else 0.0
     headroom_gain = (HEADROOM_PEAK / peak) if peak > HEADROOM_PEAK else 1.0
     full_mix = full_mix * headroom_gain

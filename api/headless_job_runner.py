@@ -314,8 +314,16 @@ def _purge_scratch_audio(session_id: str) -> int:
     Only runs after a successful delivery. Keeps JSON (job, blueprint,
     quality report) and never touches ``DELIVERIES_ROOT``. Set
     ``HYBRID_KEEP_SCRATCH=1`` to keep buffers for debugging.
+
+    A quarantined session is exempt: the QC gate retains its scratch so the
+    defective master can be examined, and purging it destroys that evidence.
     """
     if (os.environ.get("HYBRID_KEEP_SCRATCH") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return 0
+    with _registry_lock:
+        job = _jobs.get(session_id) or {}
+    if (job.get("delivery_status") or "") == "quarantined":
+        _log(f"[cleanup] {session_id} scratch kept: QC quarantine is under inspection")
         return 0
     session_dir = os.path.join(SCRATCH_ROOT, session_id)
     if not os.path.isdir(session_dir) or not _is_under(session_dir, SCRATCH_ROOT):
@@ -783,8 +791,78 @@ def _run_master_pipeline(session_id: str, genre_hint: str) -> None:
     result = _run(cmd)
     _archive_step_output(session_id, "master", result.stdout, result.stderr)
     if result.returncode != 0:
+        combined = f"{result.stdout or ''}\n{result.stderr or ''}"
         detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
+        if _is_qc_quarantine(RuntimeError(combined)):
+            # The gate's wording must reach the caller intact; the 800-char tail
+            # of PowerShell's error block can push it out of view.
+            raise RuntimeError(
+                f"QC compliance gate failed for session {session_id}. "
+                f"Upload aborted; scratch quarantined. {detail}"
+            )
         raise RuntimeError(f"Master pipeline failed. {detail}")
+
+
+_QC_QUARANTINE_MARKERS = ("qc compliance gate failed", "scratch quarantined")
+
+
+def _is_qc_quarantine(exc: BaseException) -> bool:
+    """True when the master pipeline aborted on the QC gate, not on a crash.
+
+    The gate's wording is owned by run_master_pipeline.ps1, so match the two
+    phrases it is built from rather than the whole sentence, which carries the
+    session id and any PowerShell position text.
+    """
+    text = str(exc or "").lower()
+    return all(marker in text for marker in _QC_QUARANTINE_MARKERS)
+
+
+# Compliance keys the gate reports, paired with the metric that explains them.
+_QC_CHECK_METRICS = {
+    "streaming_target_met": ("integrated_lufs", "lufs_window", "LUFS"),
+    "true_peak_safety_met": ("true_peak_dbtp", "true_peak_ceiling_dbtp", "dBTP"),
+    "phase_compatibility_met": ("stereo_phase_correlation", "phase_window", "correlation"),
+    "plr_in_band": ("plr_db", "plr_window", "PLR dB"),
+    "dc_offset_clean": ("dc_offset", "dc_offset_limit", "DC"),
+}
+
+
+def _qc_failure_hint(session_id: str) -> str:
+    """One sentence naming the failed compliance checks and their measurements.
+
+    Only ever decorates an error message, so every failure to read the report
+    degrades to a generic pointer instead of masking the original quarantine.
+    """
+    generic = "No QC report was readable; inspect master_output_qc_report.json."
+    report_path = os.path.join(RENDERS_ROOT, session_id, "master_output_qc_report.json")
+    try:
+        with open(report_path, encoding="utf-8") as handle:
+            report = json.load(handle)
+        compliance = report.get("compliance") or {}
+        metrics = report.get("metrics") or {}
+        targets = report.get("targets") or {}
+        if not isinstance(compliance, dict):
+            return generic
+        parts: list[str] = []
+        for check, passed in compliance.items():
+            if check == "overall_qc_passed" or passed is not False:
+                continue
+            metric_key, target_key, label = _QC_CHECK_METRICS.get(check, ("", "", ""))
+            measured = metrics.get(metric_key)
+            target = targets.get(target_key)
+            bits = []
+            if isinstance(measured, (int, float)):
+                bits.append(f"{label} {measured:g}")
+            if isinstance(target, (list, tuple)) and len(target) == 2:
+                bits.append(f"window {target[0]:g}-{target[1]:g}")
+            elif isinstance(target, (int, float)):
+                bits.append(f"limit {target:g}")
+            parts.append(f"{check} ({', '.join(bits)})" if bits else check)
+        if not parts:
+            return "The QC report lists no failed check; re-run the QC analyzer."
+        return f"Failed: {'; '.join(parts)}."
+    except (OSError, ValueError, TypeError, AttributeError):
+        return generic
 
 
 def _publish_audio(session_id: str, src: str) -> tuple[str, str]:
@@ -1029,9 +1107,36 @@ def _worker_inner(
             _run_master_pipeline(session_id, genre_hint)
             filename, mime = _attach_master(session_id)
         except Exception as master_exc:
-            _log(
-                f"[worker] master pipeline failed; Gate 1 uses unmastered mix: {master_exc}"
-            )
+            # A master the QC gate quarantined must never be shipped as the
+            # unmastered mix under a "completed" status: the gate exists to
+            # stop exactly that audio from reaching the vault. Other master
+            # failures still fall back, since the unmastered mix is a usable
+            # Gate 1 artefact when nothing judged it defective.
+            detail = _redact(str(master_exc))[:400]
+            if _is_qc_quarantine(master_exc):
+                _log(f"[worker] {session_id} QC gate quarantined the master: {detail}")
+                _log(
+                    f"[worker] {session_id} scratch retained for inspection at "
+                    f"{os.path.join(SCRATCH_ROOT, session_id)}"
+                )
+                _update_job(
+                    session_id,
+                    status="failed",
+                    error=(
+                        "Master failed the QC compliance gate and was quarantined. "
+                        f"{_qc_failure_hint(session_id)} "
+                        "Inspect master_output_qc_report.json under "
+                        f"{RENDERS_ROOT}\\{session_id}, or re-run the master "
+                        "pipeline with -SkipQcGate to ship it anyway."
+                    ),
+                    delivery_status="quarantined",
+                    delivery_error=detail,
+                )
+                # Returns ahead of the delivery-success scratch purge on purpose:
+                # the pipeline retains the quarantined buffers for inspection and
+                # the cleanup pass would otherwise delete the evidence.
+                return
+            _log(f"[worker] master pipeline failed; Gate 1 uses unmastered mix: {detail}")
 
         try:
             delivery_fields = _try_module5_delivery(session_id, prompt, genre_hint)
