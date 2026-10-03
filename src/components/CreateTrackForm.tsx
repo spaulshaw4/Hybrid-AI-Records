@@ -15,11 +15,11 @@ function RetryMark({ "aria-hidden": hidden = true }: { "aria-hidden"?: boolean |
 }
 
 export function CreateTrackForm() {
-  const { generateTrack, status, sessionId, error, audioUrl } = useTrackGenerator();
+  const { generateTrack, status, sessionId, error, audioUrl, isPending } = useTrackGenerator();
   const [prompt, setPrompt] = useState("");
   const [genreHint, setGenreHint] = useState("");
 
-  const disabled = busy.includes(status);
+  const disabled = busy.includes(status) || isPending;
   const handleRetry = () => {
     void generateTrack(prompt, genreHint);
   };

@@ -741,7 +741,7 @@ def _finish_package(
     day = date.today().strftime("%Y%m%d")
     dest = package_dir_for(session_dir, len(memory.recent(1000)) + 1, day)
     export_multitrack_package(
-        RenderSession(lanes, manifest, int(lanes_meta.get("sr") or lane_sr or sr)),
+        RenderSession(lanes, manifest, int(lane_sr or sr)),
         dest,
     )
     stem_ids = [stem_id_of(path) for path in (lanes_meta.get("files") or {}).values() if path]

@@ -13,6 +13,7 @@ if _REPO not in sys.path:
 from engine.blueprint_track_assembler import (  # noqa: E402
     _carry_foundation_variant,
     _phrase_duty_segments,
+    _render_arranged_bus,
     _render_chord_spans,
     chord_root_pc,
     samples_per_bar,
@@ -102,6 +103,67 @@ def test_country_song_stays_on_triads():
     assert density == 0.40
     assert _roman_to_chord("G", "minor", "i", density) == "Gm"
     assert "9" not in _roman_to_chord("G", "minor", "VI", density)
+
+
+def test_phrase_slice_plays_forward_instead_of_retriggering(tmp_path):
+    """A short phrase file plays once from its read head. It does not restart every bar."""
+    import soundfile as sf
+
+    sr = 1000
+    bpm = 240.0
+    bar = samples_per_bar(sr, bpm)
+    phrase = np.linspace(0.2, 0.8, 250, dtype=np.float64)
+    path = tmp_path / "guitar_phrase.wav"
+    sf.write(path, phrase, sr)
+    total = 8 * bar
+    plan = [({"name": "verse", "role": "verse", "bars": 8, "bus_variant": {"harmonic": 0}}, 8, total)]
+    audio, _used = _render_arranged_bus(
+        "harmonic",
+        [str(path)],
+        plan,
+        total,
+        sr,
+        bpm,
+        1,
+        None,
+        None,
+        0,
+        duty_cycle=(4, 4, 2),
+    )
+    rendered = audio[:, 0]
+    assert np.max(np.abs(rendered[:250] - phrase)) < 1e-4
+    assert float(np.max(np.abs(rendered[250:bar]))) == 0.0
+    assert float(np.max(np.abs(rendered[bar : bar + 250]))) == 0.0
+
+
+def test_second_phrase_continues_the_file(tmp_path):
+    import soundfile as sf
+
+    sr = 1000
+    bpm = 240.0
+    bar = samples_per_bar(sr, bpm)
+    phrase = np.linspace(0.0, 1.0, 9 * bar, dtype=np.float64)
+    path = tmp_path / "vocal_phrase.wav"
+    sf.write(path, phrase, sr)
+    total = 16 * bar
+    plan = [({"name": "verse", "role": "verse", "bars": 16, "bus_variant": {"harmonic": 0}}, 16, total)]
+    audio, _used = _render_arranged_bus(
+        "harmonic",
+        [str(path)],
+        plan,
+        total,
+        sr,
+        bpm,
+        1,
+        None,
+        None,
+        0,
+        duty_cycle=(4, 4, 2),
+    )
+    rendered = audio[:, 0]
+    assert np.max(np.abs(rendered[: 4 * bar] - phrase[: 4 * bar])) < 1e-4
+    assert float(np.max(np.abs(rendered[4 * bar : 8 * bar]))) == 0.0
+    assert np.max(np.abs(rendered[8 * bar : 12 * bar] - phrase[4 * bar : 8 * bar])) < 1e-4
 
 
 def test_vocal_phrase_rests_and_does_not_tile_the_section():

@@ -24,8 +24,8 @@ export type EngineErrorInfo = {
   retryable: boolean;
 };
 
-/** Max full generation attempts (1 initial + retries). */
-export const MAX_GENERATION_ATTEMPTS = 3;
+/** One generation attempt. A dropped socket must not start another render. */
+export const MAX_GENERATION_ATTEMPTS = 1;
 /** Backoff between whole-generation retries. */
 export const GENERATION_RETRY_DELAYS_MS = [4000, 10000];
 /** Attempts when verifying/fetching the returned audio URL. */

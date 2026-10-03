@@ -588,6 +588,26 @@ def make_grid_loop(
     return body
 
 
+def place_linear_slice(
+    loop: np.ndarray,
+    target_samples: int,
+    read_offset: int = 0,
+) -> np.ndarray:
+    """Copy ``loop[read_offset:]`` into a fresh zero buffer. The read head does not wrap."""
+    arr = np.asarray(loop, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    target = max(0, int(target_samples))
+    channels = int(arr.shape[1]) if arr.ndim == 2 else 1
+    out = np.zeros((target, channels), dtype=np.float64)
+    start = max(0, int(read_offset))
+    if target == 0 or start >= arr.shape[0]:
+        return out
+    count = min(target, int(arr.shape[0]) - start)
+    out[:count] = arr[start : start + count]
+    return out
+
+
 def tile_loop_on_grid(
     loop: np.ndarray,
     target_samples: int,
@@ -1350,6 +1370,7 @@ def _render_arranged_bus(
         return out, used
     cache: dict[str, np.ndarray] = {}
     adlib: dict[str, bool] = {}
+    phrase_read: dict[str, int] = {}
     bar_samples = samples_per_bar(sr, bpm)
     allow_fills = bus == "rhythm"
     mode = (vocal_mode or "").strip().lower() if bus == "vocal" else ""
@@ -1414,7 +1435,18 @@ def _render_arranged_bus(
                 out[start:end] += body[: end - start]
                 used[os.path.basename(path)] = path
                 continue
-            if bar_shifts and any(bar_shifts) and bar_samples > 0:
+            if phrase_bed:
+                read_at = phrase_read.get(path, 0)
+                source = place_linear_slice(loop, int(length) + fade_n, read_at)
+                phrase_read[path] = read_at + int(length)
+                if bar_shifts and any(bar_shifts) and bar_samples > 0:
+                    tiled = _render_chord_spans(
+                        source, path, int(length), start - cursor, bar_shifts, bar_samples,
+                        sr, bpm, fade_n, shifted_cache, linear=True,
+                    )
+                else:
+                    tiled = source
+            elif bar_shifts and any(bar_shifts) and bar_samples > 0:
                 tiled = _render_chord_spans(
                     loop, path, int(length), start - cursor, bar_shifts, bar_samples,
                     sr, bpm, fade_n, shifted_cache,
@@ -1446,6 +1478,7 @@ def _render_chord_spans(
     bpm: float,
     fade: int,
     shifted_cache: dict[tuple[str, int], np.ndarray],
+    linear: bool = False,
 ) -> np.ndarray:
     """``length + fade`` samples: the loop pitch-shifted onto each chord span.
 
@@ -1459,6 +1492,18 @@ def _render_chord_spans(
     full: dict[int, np.ndarray] = {}
     for _a, _e, semis in spans:
         if semis in full:
+            continue
+        if linear:
+            # Phrase audio stays on the absolute index. Tiling here would replay the attack.
+            shifted = loop if semis == 0 else pitch_shift_slice(loop, float(semis), sr=int(sr))
+            padded = np.zeros((total, int(np.asarray(shifted).shape[-1] if np.asarray(shifted).ndim == 2 else 1)), dtype=np.float64)
+            piece = np.asarray(shifted, dtype=np.float64)
+            if piece.ndim == 1:
+                piece = piece[:, np.newaxis]
+            count = min(total, int(piece.shape[0]))
+            width = min(padded.shape[1], piece.shape[1])
+            padded[:count, :width] = piece[:count, :width]
+            full[semis] = padded
             continue
         key = (path, int(semis))
         shifted = shifted_cache.get(key)
@@ -2413,6 +2458,37 @@ def _write_console_lanes(
         source_trace["_console_lanes"] = {"dir": lane_dir, "files": written, "sr": int(sr)}
 
 
+def _lane_sample_spans(lane: dict, section_start: int, bar_n: int, bars: int) -> list[list[int]]:
+    """Absolute ``[start, end)`` windows for one lane. Rests stay as gaps."""
+    if bar_n <= 0 or not lane.get("stem_id"):
+        return []
+    duty = lane.get("duty_mask")
+    ranges: list[tuple[int, int]] = []
+    if isinstance(duty, list) and duty:
+        run: int | None = None
+        limit = min(len(duty), int(bars))
+        for index, flag in enumerate(duty[:limit]):
+            if flag:
+                if run is None:
+                    run = index
+            elif run is not None:
+                ranges.append((run, index))
+                run = None
+        if run is not None:
+            ranges.append((run, limit))
+    else:
+        span = lane.get("active_bars") or []
+        if len(span) >= 2:
+            lo = max(0, int(span[0]) - 1)
+            hi = min(int(bars), int(span[1]))
+            if hi > lo:
+                ranges.append((lo, hi))
+    return [
+        [int(section_start + start * bar_n), int(section_start + end * bar_n)]
+        for start, end in ranges
+    ]
+
+
 def _write_lane_manifest(
     output_wav: str,
     song_id: str,
@@ -2467,6 +2543,16 @@ def _write_lane_manifest(
         allow_clash=grammar.archetype in {"driving_rock_metal", "roots_americana"},
         gains_db=gains,
     )
+    cursor = 0
+    for section_body, (_section, bars, n) in zip(manifest["sections"], plan_sections):
+        section_body["start_sample"] = int(cursor)
+        section_body["end_sample"] = int(cursor + int(n))
+        bar_n = int(n) // max(1, int(bars))
+        for lane in (section_body.get("lanes") or {}).values():
+            if not isinstance(lane, dict):
+                continue
+            lane["sample_spans"] = _lane_sample_spans(lane, int(cursor), bar_n, int(bars))
+        cursor += int(n)
     dest = os.path.join(os.path.dirname(os.path.abspath(output_wav)) or ".", "render_manifest.json")
     write_render_manifest(dest, manifest)
     print(f"[MANIFEST] {dest}", flush=True)

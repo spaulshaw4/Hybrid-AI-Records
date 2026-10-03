@@ -28,6 +28,9 @@ export async function proxyToHybridWorker(
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.arrayBuffer();
+    // Create/generate can run for minutes. The default undici headers timeout
+    // closes the socket and the client posts the job again.
+    init.signal = AbortSignal.timeout(300_000);
   }
 
   let upstream: Response;

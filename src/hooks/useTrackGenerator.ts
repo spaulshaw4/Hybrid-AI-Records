@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const API_BASE = (
@@ -29,6 +30,30 @@ export function useTrackGenerator() {
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inflight = useRef(false);
+
+  const createJob = useMutation({
+    retry: false,
+    mutationFn: async (body: { prompt: string; genre_hint?: string }) => {
+      const res = await fetch(`${API_BASE}/api/tracks/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = (await res.json().catch(() => ({}))) as StatusPayload & {
+        session_id?: string;
+      };
+      if (!res.ok) {
+        throw new Error(
+          typeof payload.detail === "string" ? payload.detail : "Could not queue the track.",
+        );
+      }
+      if (!payload.session_id) {
+        throw new Error("Create did not return a session id.");
+      }
+      return payload.session_id;
+    },
+  });
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -43,6 +68,7 @@ export function useTrackGenerator() {
     (payload: StatusPayload) => {
       const next = (payload.status || "").toLowerCase();
       if (next === "completed") {
+        inflight.current = false;
         setStatus("completed");
         if (payload.audio_filename) {
           setAudioUrl(streamUrl(payload.audio_filename));
@@ -51,6 +77,7 @@ export function useTrackGenerator() {
         return;
       }
       if (next === "failed") {
+        inflight.current = false;
         setStatus("failed");
         setError(payload.error || payload.detail || "Generation failed.");
         stopPolling();
@@ -68,6 +95,7 @@ export function useTrackGenerator() {
       try {
         const res = await fetch(`${API_BASE}/api/tracks/status/${encodeURIComponent(id)}`);
         if (res.status === 404) {
+          inflight.current = false;
           setStatus("failed");
           setError("Session not found.");
           stopPolling();
@@ -93,49 +121,39 @@ export function useTrackGenerator() {
         setStatus("failed");
         return;
       }
+      // Same-tick double clicks both see the old status. The ref closes that gap.
+      if (inflight.current) return;
+      inflight.current = true;
       stopPolling();
       setError(null);
       setAudioUrl(null);
       setSessionId(null);
       setStatus("queued");
       try {
-        const res = await fetch(`${API_BASE}/api/tracks/create`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: trimmed.slice(0, 2000),
-            genre_hint: genreHint?.trim() || undefined,
-          }),
+        const id = await createJob.mutateAsync({
+          prompt: trimmed.slice(0, 2000),
+          genre_hint: genreHint?.trim() || undefined,
         });
-        const payload = (await res.json().catch(() => ({}))) as StatusPayload & {
-          session_id?: string;
-        };
-        if (!res.ok) {
-          setStatus("failed");
-          setError(
-            typeof payload.detail === "string" ? payload.detail : "Could not queue the track.",
-          );
-          return;
-        }
-        const id = payload.session_id;
-        if (!id) {
-          setStatus("failed");
-          setError("Create did not return a session id.");
-          return;
-        }
         setSessionId(id);
         setStatus("queued");
         void pollStatus(id);
         pollRef.current = setInterval(() => {
           void pollStatus(id);
         }, POLL_MS);
-      } catch {
+      } catch (err) {
+        inflight.current = false;
         setStatus("failed");
-        setError("Headless API is not reachable at 127.0.0.1:8880.");
+        const message = err instanceof Error ? err.message : "";
+        setError(
+          message && !message.toLowerCase().includes("failed to fetch")
+            ? message
+            : "Headless API is not reachable at 127.0.0.1:8880.",
+        );
       }
     },
-    [pollStatus, stopPolling],
+    [createJob, pollStatus, stopPolling],
   );
 
-  return { generateTrack, status, sessionId, error, audioUrl };
+  const isPending = status === "queued" || status === "running" || createJob.isPending;
+  return { generateTrack, status, sessionId, error, audioUrl, isPending };
 }

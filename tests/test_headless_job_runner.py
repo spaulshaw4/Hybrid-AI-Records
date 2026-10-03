@@ -33,6 +33,7 @@ def live_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "DELIVERIES_ROOT", str(tmp_path / "deliveries"))
     monkeypatch.setattr(runner, "_API_LOG", str(tmp_path / "api.log"))
     monkeypatch.delenv("HYBRID_KEEP_SCRATCH", raising=False)
+    runner._jobs.clear()
     return scratch, assets
 
 
@@ -376,6 +377,30 @@ def test_create_reports_no_requested_bpm_when_caller_omitted_it(live_dirs, monke
     assert ok.status_code == 200
     body = client.get(f"/api/jobs/{ok.json()['session_id']}").json()
     assert body["requested_bpm"] is None
+
+
+def test_second_create_joins_the_in_flight_render(live_dirs, monkeypatch):
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("HYBRID_WORKER_TOKEN", raising=False)
+    started: list[str] = []
+
+    class _NoThread:
+        def __init__(self, target, args, name, daemon):
+            started.append(args[0])
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(runner.threading, "Thread", _NoThread)
+    client = TestClient(runner.app)
+    first = client.post("/api/tracks/create", json={"prompt": "first"})
+    second = client.post("/api/tracks/create", json={"prompt": "second"})
+    assert first.status_code == 200 and second.status_code == 200
+    assert second.json()["session_id"] == first.json()["session_id"]
+    assert second.json()["deduped"] is True
+    assert started == [first.json()["session_id"]]
 
 
 def test_render_slots_cap_concurrent_jobs(monkeypatch):

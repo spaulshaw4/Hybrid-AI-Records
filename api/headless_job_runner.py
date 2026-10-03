@@ -1360,27 +1360,38 @@ def _enqueue_generate(
     requested_bars: int | None,
     requested_bpm: float | None,
 ) -> dict[str, Any]:
-    session_id = "ht_" + uuid.uuid4().hex[:12]
-    job = {
-        "session_id": session_id,
-        "status": "queued",
-        "genre_hint": genre or None,
-        "error": None,
-        "note": None,
-        "audio_filename": None,
-        "audio_mime": None,
-        "created_at": _utc_now(),
-        "updated_at": _utc_now(),
-        "requested_bars": requested_bars,
-        "requested_bpm": requested_bpm,
-        "master_duration_sec": render_opts.get("duration_sec"),
-        "vocal_present": bool(render_opts.get("vocal_file")),
-    }
+    """One in-flight render. A timed-out client retry joins that session."""
     with _registry_lock:
+        for existing in _jobs.values():
+            if str(existing.get("status") or "") in {"queued", "running"}:
+                return {
+                    "session_id": existing["session_id"],
+                    "status": str(existing.get("status") or "queued"),
+                    "vocal_present": bool(existing.get("vocal_present")),
+                    "deduped": True,
+                }
+        session_id = "ht_" + uuid.uuid4().hex[:12]
+        job = {
+            "session_id": session_id,
+            "status": "queued",
+            "genre_hint": genre or None,
+            "error": None,
+            "note": None,
+            "audio_filename": None,
+            "audio_mime": None,
+            "created_at": _utc_now(),
+            "updated_at": _utc_now(),
+            "requested_bars": requested_bars,
+            "requested_bpm": requested_bpm,
+            "master_duration_sec": render_opts.get("duration_sec"),
+            "vocal_present": bool(render_opts.get("vocal_file")),
+        }
         _jobs[session_id] = job
     try:
         _persist_job(job)
     except OSError as exc:
+        with _registry_lock:
+            _jobs.pop(session_id, None)
         _log(f"[create] persist failed: {exc}")
         raise HTTPException(status_code=500, detail="could not persist job") from exc
     thread = threading.Thread(

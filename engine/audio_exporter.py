@@ -15,6 +15,11 @@ import numpy as np
 import soundfile as sf
 
 PACKAGE_RATE = 48000
+# Sum headroom before the mastering bus. A 13-lane sum past ±1 clips to a square wave.
+SUM_HEADROOM = 10.0 ** (-3.0 / 20.0)
+_PCM16 = 32768.0
+_PCM24 = 8388607.0
+_PCM32 = 2147483647.0
 
 # Console lane id -> package filename without the extension.
 STEM_EXPORT_IDS = {
@@ -43,7 +48,7 @@ class RenderSession:
         manifest: Mapping[str, Any],
         sample_rate: int,
     ) -> None:
-        self.lanes = {str(lane): np.asarray(audio, dtype=np.float64) for lane, audio in lanes.items()}
+        self.lanes = {str(lane): _unit_float(audio) for lane, audio in lanes.items()}
         self.manifest = dict(manifest)
         self.sample_rate = int(sample_rate)
 
@@ -55,11 +60,44 @@ class RenderSession:
         mix = np.zeros((length, 2), dtype=np.float64)
         for audio in prepared:
             mix[: audio.shape[0]] += audio
-        return mix
+        return _fit_headroom(mix)
+
+
+def _unit_float(audio: np.ndarray) -> np.ndarray:
+    """Map every buffer into float64 on [-1, 1]. Integer PCM is scaled, never wrapped."""
+    arr = np.asarray(audio)
+    if np.issubdtype(arr.dtype, np.integer):
+        if arr.dtype == np.int32:
+            peak_i = int(np.max(np.abs(arr))) if arr.size else 0
+            scale = _PCM24 if peak_i <= int(_PCM24) else _PCM32
+        else:
+            info = np.iinfo(arr.dtype)
+            scale = float(max(abs(int(info.min)), int(info.max)))
+        arr = arr.astype(np.float64) / scale
+    else:
+        arr = np.asarray(arr, dtype=np.float64)
+        peak = float(np.max(np.abs(arr))) if arr.size else 0.0
+        if peak > 8.0:
+            if peak <= _PCM16:
+                arr = arr / _PCM16
+            elif peak <= _PCM24 + 1.0:
+                arr = arr / _PCM24
+            else:
+                arr = arr / _PCM32
+        elif peak > 1.0:
+            arr = arr / peak
+    return arr
+
+
+def _fit_headroom(audio: np.ndarray, ceiling: float = SUM_HEADROOM) -> np.ndarray:
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > ceiling > 0.0:
+        return audio * (ceiling / peak)
+    return audio
 
 
 def _stereo(audio: np.ndarray) -> np.ndarray:
-    arr = np.asarray(audio, dtype=np.float64)
+    arr = _unit_float(audio)
     if arr.ndim == 1:
         arr = np.stack([arr, arr], axis=1)
     elif arr.shape[1] == 1:
@@ -93,8 +131,10 @@ def _resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarr
 
 
 def save_wav_pcm24(path: str, audio: np.ndarray, sample_rate: int = PACKAGE_RATE) -> str:
+    """Pack unit-float audio as 24-bit PCM. soundfile scales [-1, 1]; values outside that clip to a square."""
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-    sf.write(path, _stereo(audio), int(sample_rate), subtype="PCM_24")
+    packed = np.clip(_stereo(audio), -1.0, 1.0)
+    sf.write(path, packed, int(sample_rate), subtype="PCM_24")
     return path
 
 
@@ -149,19 +189,26 @@ def package_dir_for(session_dir: str, sequence: int, day: str) -> str:
 
 
 def load_console_lanes(files: Mapping[str, str]) -> tuple[dict[str, np.ndarray], int]:
-    """Read the float lane bounce and rename each lane to its package id."""
+    """Read each lane at its own rate, resample to 48 kHz, and rename to the package id.
+
+    A decode failure becomes silence for that lane. Raw header bytes never enter the sum.
+    """
     lanes: dict[str, np.ndarray] = {}
-    rate = PACKAGE_RATE
     for lane, path in files.items():
+        export_id = STEM_EXPORT_IDS.get(str(lane), str(lane))
         if not path or not os.path.isfile(path):
             continue
-        audio, file_rate = sf.read(path, always_2d=True)
-        rate = int(file_rate or rate)
-        export_id = STEM_EXPORT_IDS.get(str(lane), str(lane))
-        lanes[export_id] = np.asarray(audio, dtype=np.float64)
+        try:
+            info = sf.info(path)
+            audio, file_rate = sf.read(path, always_2d=True, dtype="float64")
+        except Exception as exc:
+            print(f"[PACKAGE] stem decode failed {path}: {type(exc).__name__}: {exc}", flush=True)
+            continue
+        audio = _resample(_unit_float(audio), int(file_rate or info.samplerate or PACKAGE_RATE), PACKAGE_RATE)
+        lanes[export_id] = audio
     for export_id in STEM_EXPORT_IDS.values():
         if export_id not in lanes:
             length = max((audio.shape[0] for audio in lanes.values()), default=1)
             lanes[export_id] = np.zeros((length, 2), dtype=np.float64)
     ordered = {export_id: lanes[export_id] for export_id in STEM_EXPORT_IDS.values()}
-    return ordered, rate
+    return ordered, PACKAGE_RATE

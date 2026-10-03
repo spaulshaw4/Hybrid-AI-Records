@@ -5028,10 +5028,10 @@ export function AudioStudio() {
                     id={GENERATE_TRACK_BTN_ID}
                     size="lg"
                     className="h-auto min-h-12 flex-1 whitespace-normal px-4 py-3 text-sm leading-tight sm:text-base"
-                    disabled={busy && !result}
+                    disabled={busy}
                     onClick={() => void handleGenerate()}
                   >
-                    {busy && !result ? (
+                    {busy ? (
                       <>
                         <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
                         <span className="min-w-0 truncate">{statusText ?? "Working…"}</span>

@@ -4,7 +4,12 @@ import { routeTree } from "./routeTree.gen";
 import { RouteErrorFallback } from "./components/RouteErrorFallback";
 
 export const getRouter = () => {
-  const queryClient = new QueryClient();
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      // Generation jobs outlive a dropped socket. A retry starts another render.
+      mutations: { retry: false },
+    },
+  });
 
   const router = createRouter({
     routeTree,
