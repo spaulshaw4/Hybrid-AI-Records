@@ -34,6 +34,8 @@ def live_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_API_LOG", str(tmp_path / "api.log"))
     monkeypatch.delenv("HYBRID_KEEP_SCRATCH", raising=False)
     runner._jobs.clear()
+    runner._release_generation_claim()
+    runner._active_session_id = None
     return scratch, assets
 
 
@@ -401,6 +403,59 @@ def test_second_create_joins_the_in_flight_render(live_dirs, monkeypatch):
     assert second.json()["session_id"] == first.json()["session_id"]
     assert second.json()["deduped"] is True
     assert started == [first.json()["session_id"]]
+
+
+def test_three_overlapping_creates_share_one_session(live_dirs, monkeypatch):
+    """A second POST that arrives before the body is parsed joins the claim."""
+    monkeypatch.delenv("HYBRID_WORKER_TOKEN", raising=False)
+    started: list[str] = []
+
+    class _NoThread:
+        def __init__(self, target, args, name, daemon):
+            started.append(args[0])
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(runner.threading, "Thread", _NoThread)
+    barrier = threading.Barrier(3)
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def go():
+        try:
+            barrier.wait(5)
+            joined = runner._join_active_generation()
+            if joined is not None:
+                results.append(joined)
+                return
+            try:
+                results.append(
+                    runner._enqueue_generate(
+                        "p",
+                        "g",
+                        dry_run=True,
+                        render_opts={"bpm": 120.0, "key": "G", "duration_sec": 30.0},
+                        requested_bars=None,
+                        requested_bpm=None,
+                        session_id=runner._active_session_id,
+                    )
+                )
+            finally:
+                runner._release_generation_claim()
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=go) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert not errors
+    assert len(results) == 3
+    assert len({item["session_id"] for item in results}) == 1
+    assert sum(1 for item in results if item.get("deduped")) == 2
+    assert started == [results[0]["session_id"]]
 
 
 def test_render_slots_cap_concurrent_jobs(monkeypatch):

@@ -136,7 +136,8 @@ def test_phrase_slice_plays_forward_instead_of_retriggering(tmp_path):
     assert float(np.max(np.abs(rendered[bar : bar + 250]))) == 0.0
 
 
-def test_second_phrase_continues_the_file(tmp_path):
+def test_second_phrase_retriggers_the_motif(tmp_path):
+    """The next duty block starts the slice again. It does not read past EOF."""
     import soundfile as sf
 
     sr = 1000
@@ -163,7 +164,32 @@ def test_second_phrase_continues_the_file(tmp_path):
     rendered = audio[:, 0]
     assert np.max(np.abs(rendered[: 4 * bar] - phrase[: 4 * bar])) < 1e-4
     assert float(np.max(np.abs(rendered[4 * bar : 8 * bar]))) == 0.0
-    assert np.max(np.abs(rendered[8 * bar : 12 * bar] - phrase[4 * bar : 8 * bar])) < 1e-4
+    assert np.max(np.abs(rendered[8 * bar : 12 * bar] - phrase[: 4 * bar])) < 1e-4
+
+
+def test_one_phrase_file_keeps_a_third_duty_block():
+    segments = _phrase_duty_segments(
+        24, 1000, 24 * 1000, 0, 1, phrase_bars=4, rest_bars=4, max_repeats=2,
+    )
+    assert [start for start, _length, _variant in segments] == [0, 8000, 16000]
+
+
+def test_one_bass_stem_covers_the_bass_bus_once():
+    from engine.stem_lanes import assign_lanes
+
+    assigned = assign_lanes([r"D:\corpus\bass\country_bass_loop.wav"])
+    filled = [lane for lane in ("05_sub_bass", "06_mid_bass") if assigned[lane]]
+    assert filled == ["06_mid_bass"]
+    assert assigned["09_secondary_comp"] == []
+
+
+def test_untitled_guitar_occupies_primary_comp_only():
+    from engine.stem_lanes import assign_lanes
+
+    assigned = assign_lanes([r"D:\corpus\loops\acoustic_strum_verse.wav"])
+    assert assigned["07_primary_comp"]
+    assert assigned["09_secondary_comp"] == []
+    assert assigned["05_sub_bass"] == [] and assigned["06_mid_bass"] == []
 
 
 def test_vocal_phrase_rests_and_does_not_tile_the_section():

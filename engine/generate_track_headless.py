@@ -48,6 +48,7 @@ from engine.local_song_conductor import (  # noqa: E402
 from engine.gemini_arranger import (  # noqa: E402
     DEFAULT_REPLICATE_MODEL,
     arrange_from_prompt,
+    lyric_replicate_token,
     replicate_token,
     write_blueprint,
 )
@@ -1016,6 +1017,7 @@ def execute_prompt_pipeline(
             scratch_root=os.path.dirname(os.path.abspath(session_dir)),
             source_trace=source_trace,
             bounce_lanes=True,
+            phrase_align="live" if lyric_replicate_token() else "local",
         )
         print(
             f"[COMPOSITION] elapsed_sec={time.perf_counter() - compose_t0:.2f} "

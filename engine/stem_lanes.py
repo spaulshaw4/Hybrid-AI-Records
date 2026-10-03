@@ -253,6 +253,56 @@ def filter_lane(lane: str, paths: Sequence[str]) -> list[str]:
     return [path for path in paths if path_fits_lane(lane, path)]
 
 
+# When a sub-lane has no dedicated file, these tokens (or the staged family)
+# may cover the parent bus. One stem is enough; secondary comp is not required.
+LANE_FALLBACK_MAP = {
+    "05_sub_bass": ("bass", "sub", "808", "subbass"),
+    "06_mid_bass": ("bass", "electric", "finger", "slap"),
+    "07_primary_comp": ("guitar", "acoustic", "strum", "chord", "chords", "comp", "piano", "keys", "rhythm"),
+}
+
+
+def _fallback_file(paths: Sequence[str], needles: Sequence[str], family: str) -> str | None:
+    """First file that belongs to ``family`` and is not a vocal or a drum."""
+    blocked = _VOCAL | _DRUMS | _KICK | _SNARE | _TOPS
+    if family == "comp":
+        blocked = blocked | _BASS | _SUB
+    wanted = set(needles)
+    for path in paths:
+        if not path:
+            continue
+        tokens = set(_tokens(os.path.basename(path)))
+        if tokens & blocked:
+            continue
+        if staged_group(path) == family or tokens & wanted:
+            return path
+    return None
+
+
+def apply_lane_fallbacks(
+    assigned: dict[str, list[str]],
+    paths: Sequence[str],
+) -> dict[str, list[str]]:
+    """Fill an empty core bus from the catalog instead of writing silence.
+
+    A single bass stem covers the bass bus once. It is not copied onto both
+    sub and mid, which would double it in the lane sum. Secondary comp stays
+    empty when the song only has one rhythm guitar.
+    """
+    if not assigned["05_sub_bass"] and not assigned["06_mid_bass"]:
+        hit = _fallback_file(paths, LANE_FALLBACK_MAP["06_mid_bass"], "bass")
+        if hit:
+            tokens = set(_tokens(os.path.basename(hit)))
+            lane = "05_sub_bass" if tokens & (_SUB | {"808"}) else "06_mid_bass"
+            assigned[lane].append(hit)
+    comp_lanes = ("07_primary_comp", "08_harmonic_bed", "09_secondary_comp")
+    if not any(assigned[lane] for lane in comp_lanes):
+        hit = _fallback_file(paths, LANE_FALLBACK_MAP["07_primary_comp"], "comp")
+        if hit:
+            assigned["07_primary_comp"].append(hit)
+    return assigned
+
+
 def assign_lanes(paths: Sequence[str]) -> dict[str, list[str]]:
     """One file, one lane. Later copies of the same lane stay as alternates."""
     assigned: dict[str, list[str]] = {lane: [] for lane in LANE_IDS}
@@ -266,7 +316,7 @@ def assign_lanes(paths: Sequence[str]) -> dict[str, list[str]]:
         if lane is None or path in assigned[lane]:
             continue
         assigned[lane].append(path)
-    return assigned
+    return apply_lane_fallbacks(assigned, paths)
 
 
 def duty_mask(bars: int, phrase_bars: int, rest_bars: int) -> list[int]:

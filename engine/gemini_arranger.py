@@ -384,6 +384,66 @@ def _call_native_gemini(prompt: str, genre: str | None, api_key: str) -> dict:
     return json.loads(strip_json_fences(text))
 
 
+def lyric_replicate_token() -> str:
+    """Replicate token for Gemini. Same account as Co-Producer.
+
+    ``LYRIC_ENGINE_API_KEY`` (alias ``ENGINE_API_KEY``). The hybrid
+    ``REPLICATE_API_TOKEN`` stays on stem separation and is refused here.
+    """
+    _load_env_quiet()
+    token = _env_key("LYRIC_ENGINE_API_KEY", "ENGINE_API_KEY")
+    hybrid = replicate_token()
+    if not token:
+        return ""
+    if hybrid and token == hybrid:
+        print(
+            "[ALIGN] LYRIC_ENGINE_API_KEY matches REPLICATE_API_TOKEN; "
+            "refusing the hybrid token",
+            flush=True,
+        )
+        return ""
+    return token
+
+
+def complete_json(system: str, user: str, *, timeout: float = 25.0) -> dict:
+    """One JSON object from Gemini on Replicate, using the lyric Replicate key."""
+    token = lyric_replicate_token()
+    if not token:
+        raise RuntimeError("Gemini arrangement requires LYRIC_ENGINE_API_KEY")
+    return _complete_replicate(system, user, token, timeout)
+
+
+def _complete_replicate(system: str, user: str, token: str, timeout: float) -> dict:
+    payload = {
+        "input": {
+            "prompt": user,
+            "system_instruction": system,
+            "temperature": 0.2,
+            "max_output_tokens": 512,
+            "thinking_budget": 0,
+        }
+    }
+    created = _http_json(
+        f"{REPLICATE_API}/models/{DEFAULT_REPLICATE_MODEL}/predictions",
+        token,
+        payload,
+        timeout=timeout,
+    )
+    deadline = time.time() + float(timeout)
+    prediction = created
+    while prediction.get("status") not in {"succeeded", "failed", "canceled", None}:
+        if time.time() > deadline:
+            raise RuntimeError("Gemini phrase align timed out")
+        time.sleep(1.0)
+        pred_id = prediction.get("id")
+        if not pred_id:
+            break
+        prediction = _http_json(f"{REPLICATE_API}/predictions/{pred_id}", token, None, timeout=timeout)
+    if prediction.get("status") != "succeeded":
+        raise RuntimeError("Gemini phrase align failed")
+    return json.loads(strip_json_fences(_join_output(prediction.get("output"))))
+
+
 def call_live_arranger(prompt: str, genre: str | None = None) -> tuple[dict, str]:
     """Call Replicate Gemini or native Gemini. Returns (raw_json, backend_label)."""
     _load_env_quiet()

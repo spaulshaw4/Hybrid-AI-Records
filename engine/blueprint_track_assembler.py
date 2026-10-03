@@ -1243,11 +1243,11 @@ def _phrase_duty_segments(
     segments: list[tuple[int, int, int]] = []
     while bar < int(bars):
         if playing and repeats >= cap:
+            # One short slice re-triggers at the next duty block. It does not
+            # read past EOF and leave the rest of the song silent.
             if count > 1:
                 variant = (variant + 1) % count
-                repeats = 0
-            else:
-                playing = False
+            repeats = 0
         span = min(phrase if playing else rest, int(bars) - bar)
         if span <= 0:
             break
@@ -1349,6 +1349,7 @@ def _render_arranged_bus(
     vocal_mode: str | None = None,
     chord_shifts: list[list[int] | None] | None = None,
     duty_cycle: tuple[int, int, int] | None = None,
+    placed_segments: dict[int, list[tuple[int, int, int]]] | None = None,
 ) -> tuple[np.ndarray, dict[str, str]]:
     """Tile one loop per section (steady within the phrase), vary across sections.
 
@@ -1370,7 +1371,6 @@ def _render_arranged_bus(
         return out, used
     cache: dict[str, np.ndarray] = {}
     adlib: dict[str, bool] = {}
-    phrase_read: dict[str, int] = {}
     bar_samples = samples_per_bar(sr, bpm)
     allow_fills = bus == "rhythm"
     mode = (vocal_mode or "").strip().lower() if bus == "vocal" else ""
@@ -1393,13 +1393,26 @@ def _render_arranged_bus(
             bus == "harmonic"
             and any("phrase" in os.path.basename(path).lower() for path in variant_paths)
         )
-        if phrase_bed:
-            phrase_bars, rest_bars, max_repeats = duty_cycle or (None, None, _MAX_IDENTICAL_PHRASES)
-            segments = _phrase_duty_segments(
-                int(bars), bar_samples, int(n), index, len(variant_paths),
-                phrase_bars=phrase_bars,
-                rest_bars=rest_bars,
-                max_repeats=max_repeats if duty_cycle else _MAX_IDENTICAL_PHRASES,
+        placed = (
+            placed_segments.get(section_index)
+            if placed_segments is not None and section_index in placed_segments
+            else None
+        )
+        if placed is not None:
+            segments = list(placed)
+        elif phrase_bed:
+            from engine.stem_phrase_aligner import fit_phrase_segments
+
+            phrase_bars, rest_bars, _max_repeats = duty_cycle or (None, None, _MAX_IDENTICAL_PHRASES)
+            segments, _next = fit_phrase_segments(
+                variant_paths,
+                int(bars),
+                bar_samples,
+                int(n),
+                phrase_bars,
+                rest_bars,
+                sr,
+                bpm,
             )
         else:
             segments = _section_segments(
@@ -1414,6 +1427,10 @@ def _render_arranged_bus(
                 loop = _load_bus_loop(path, bus)
                 loop = _maybe_align_lock(loop, sr, int(loop.shape[0]), target_key, target_bpm)
                 loop = _as_channels(loop, channels)
+                if placed_segments is not None:
+                    from engine.arrangement_planner import strip_preroll
+
+                    loop = strip_preroll(loop, sr)
                 cache[path] = loop
                 if mode:
                     adlib[path] = is_adlib_vocal(path, int(loop.shape[0]), sr, bpm)
@@ -1435,10 +1452,11 @@ def _render_arranged_bus(
                 out[start:end] += body[: end - start]
                 used[os.path.basename(path)] = path
                 continue
-            if phrase_bed:
-                read_at = phrase_read.get(path, 0)
-                source = place_linear_slice(loop, int(length) + fade_n, read_at)
-                phrase_read[path] = read_at + int(length)
+            if phrase_bed or placed is not None:
+                # Each duty block starts this stem from sample 0. The next block
+                # pulls the next phrase, or re-triggers this motif. It does not
+                # keep reading past the end of a 2–4 second slice.
+                source = place_linear_slice(loop, int(length) + fade_n, 0)
                 if bar_shifts and any(bar_shifts) and bar_samples > 0:
                     tiled = _render_chord_spans(
                         source, path, int(length), start - cursor, bar_shifts, bar_samples,
@@ -1716,6 +1734,47 @@ def _finalize_mix(
     duration_sec = full_mix.shape[0] / sr
     print(f"[SUCCESS] Mix assembled vertical 4-bus 4/4: {output_wav} ({duration_sec:.1f}s)")
     return output_wav
+
+
+def _cover_empty_core_buses(pools: dict[str, list[str]]) -> None:
+    """Borrow a family stem onto an empty bass or comp bus.
+
+    The catalog rarely has separate sub-bass and rhythm-guitar lanes. One
+    bass file and one guitar file are enough. Secondary comp is not required,
+    and a missing sub-lane must not mute the vocal.
+    """
+    from engine.stem_lanes import _tokens, staged_group
+
+    blocked = {"vocal", "vocals", "vox", "kick", "snare", "drum", "drums", "hat", "hats"}
+
+    def accept(path: str, family: str, needles: set[str]) -> bool:
+        tokens = set(_tokens(os.path.basename(path)))
+        if tokens & blocked:
+            return False
+        return staged_group(path) == family or bool(tokens & needles)
+
+    def borrow(bus: str, family: str, needles: set[str]) -> None:
+        if pools.get(bus):
+            return
+        for other, paths in pools.items():
+            if other == bus:
+                continue
+            for path in paths or []:
+                if not accept(path, family, needles):
+                    continue
+                pools[bus] = [path]
+                print(
+                    f"[LANE] {bus} borrowed {os.path.basename(path)} from {other}",
+                    flush=True,
+                )
+                return
+
+    borrow("bass", "bass", {"bass", "sub", "808", "subbass"})
+    borrow(
+        "harmonic",
+        "comp",
+        {"guitar", "acoustic", "strum", "chord", "chords", "comp", "piano", "keys"},
+    )
 
 
 def _arranged_bus_pools(
@@ -2006,6 +2065,10 @@ def _bounce_console_lanes(
     chord_shifts: list[list[int] | None] | None,
     grammar,
     swing_offset_ms: float,
+    vocal_plans: dict[int, list[tuple[int, int, int]]] | None = None,
+    vocal_paths: list[str] | None = None,
+    lead_plans: dict[int, list[tuple[int, int, int]]] | None = None,
+    lead_paths_planned: list[str] | None = None,
 ) -> dict[str, np.ndarray]:
     """One buffer per console lane, rendered from that lane's own files."""
     from engine.genre_arrangement_profiles import bass_open_steps, comping_open_steps
@@ -2049,9 +2112,15 @@ def _bounce_console_lanes(
         )
     rendered: dict[str, np.ndarray] = {}
     for lane in LANE_IDS:
+        files = list(assigned.get(lane) or [])
+        plans = None
+        if lane == "11_lead_vocal" and vocal_plans is not None and files == list(vocal_paths or []):
+            plans = vocal_plans
+        elif lane == "10_lead_inst" and lead_plans is not None and files == list(lead_paths_planned or []):
+            plans = lead_plans
         audio, _used = _render_arranged_bus(
             bus_for[lane],
-            list(assigned.get(lane) or []),
+            files,
             plan,
             total_samples,
             sr,
@@ -2061,7 +2130,8 @@ def _bounce_console_lanes(
             target_bpm,
             fade,
             chord_shifts=chord_shifts if bus_for[lane] in CHORD_FOLLOW_BUSES else None,
-            duty_cycle=phrase if lane == "11_lead_vocal" else None,
+            duty_cycle=phrase if lane == "11_lead_vocal" and plans is None else None,
+            placed_segments=plans,
         )
         rendered[lane] = audio
     if grammar is not None:
@@ -2096,9 +2166,13 @@ def _bounce_console_lanes(
             name = str(section.get("name") or section.get("role") or "").lower()
             return not any(token in name for token in ("intro", "breakdown", "outro", "ambient"))
 
-        rendered["10_lead_inst"] = _apply_mask(
-            rendered["10_lead_inst"], _section_sample_mask(plan, total_samples, sr, bpm, _lead_bar)
-        )
+        if not (
+            lead_plans is not None
+            and list(assigned.get("10_lead_inst") or []) == list(lead_paths_planned or [])
+        ):
+            rendered["10_lead_inst"] = _apply_mask(
+                rendered["10_lead_inst"], _section_sample_mask(plan, total_samples, sr, bpm, _lead_bar)
+            )
         rendered["12_vocal_backing"] = _apply_mask(
             rendered["12_vocal_backing"], _section_sample_mask(plan, total_samples, sr, bpm, _backing_bar)
         )
@@ -2143,6 +2217,7 @@ def assemble_arranged_buses(
     genre: str | None = None,
     bounce_lanes: bool = False,
     swing_offset_ms: float = 0.0,
+    phrase_align: str = "local",
 ) -> dict[str, np.ndarray]:
     """Render the four buses from a per-section activation map.
 
@@ -2178,6 +2253,7 @@ def assemble_arranged_buses(
                 flush=True,
             )
         pools[bus] = kept
+    _cover_empty_core_buses(pools)
     if mode == "none":
         pools["vocal"] = []
         print("[VOCAL] instrumental: vocal bus muted")
@@ -2215,14 +2291,118 @@ def assemble_arranged_buses(
             )
             pools["harmonic"] = []
             pools["vocal"] = []
-        elif grammar.lead_monophony_strict:
-            for section, bars, _n in plan:
-                if not section.get("fill_bars"):
-                    section["fill_bars"] = _fill_window_bars(
-                        int(bars),
-                        int(grammar.vocal_phrase_bars),
-                        int(grammar.vocal_rest_bars),
-                    )
+    vocal_plans: dict[int, list[tuple[int, int, int]]] | None = None
+    lead_plans: dict[int, list[tuple[int, int, int]]] | None = None
+    gemini_arrangement: dict | None = None
+    vocal_paths = list(pools.get("vocal") or [])
+    if vocal_paths and phrase_align == "live":
+        try:
+            from engine.arrangement_planner import (
+                catalog_card,
+                generate_arrangement_plan_with_gemini,
+                lane_assignment,
+                segments_from_assignment,
+            )
+            from engine.stem_lanes import assign_lanes
+
+            pooled: list[str] = []
+            for files in pools.values():
+                pooled.extend(files or [])
+            assigned_cards = assign_lanes(pooled)
+            catalog = []
+            for lane, files in assigned_cards.items():
+                for path in files:
+                    if len(catalog) >= 50:
+                        break
+                    catalog.append(catalog_card(path, lane, sr, bpm))
+            section_meta = [
+                {"name": str(section.get("name") or f"section_{index + 1}"), "bars": int(bars)}
+                for index, (section, bars, _n) in enumerate(plan)
+            ]
+            gemini_arrangement = generate_arrangement_plan_with_gemini(
+                str(genre or "song"),
+                catalog,
+                float(bpm),
+                str(chord_key or target_key or ""),
+                sections=section_meta,
+            )
+            bar_n = samples_per_bar(sr, bpm)
+            built: dict[int, list[tuple[int, int, int]]] = {}
+            for index, (_section, bars, n) in enumerate(plan):
+                segments = segments_from_assignment(
+                    vocal_paths,
+                    lane_assignment(gemini_arrangement, index, "11_lead_vocal"),
+                    int(bars),
+                    bar_n,
+                    int(n),
+                )
+                if segments is None:
+                    built = {}
+                    break
+                built[index] = segments
+            if built:
+                vocal_plans = built
+                print(
+                    f"[ALIGN] gemini plan {gemini_arrangement.get('song_id')} "
+                    f"sections={len(gemini_arrangement.get('structure') or [])}",
+                    flush=True,
+                )
+            else:
+                gemini_arrangement = None
+        except Exception as exc:
+            gemini_arrangement = None
+            print(f"[ALIGN] gemini plan skipped ({type(exc).__name__})", flush=True)
+    if vocal_paths and vocal_plans is None:
+        from engine.stem_phrase_aligner import (
+            fit_phrase_segments,
+            rest_bar_indexes,
+            segments_from_bars,
+        )
+
+        phrase_bars = duty_cycle[0] if duty_cycle else None
+        rest_bars = duty_cycle[1] if duty_cycle else None
+        vocal_plans = {}
+        lead_plans = {}
+        play_cursor = 0
+        bar_n = samples_per_bar(sr, bpm)
+        for index, (section, bars, n) in enumerate(plan):
+            segments, play_cursor = fit_phrase_segments(
+                vocal_paths,
+                int(bars),
+                bar_n,
+                int(n),
+                phrase_bars,
+                rest_bars,
+                sr,
+                bpm,
+                None,
+                play_cursor,
+            )
+            vocal_plans[index] = segments
+            if not section.get("fill_bars"):
+                section["fill_bars"] = rest_bar_indexes(segments, int(bars), bar_n)
+            lead_plans[index] = segments_from_bars(
+                list(section.get("fill_bars") or []), bar_n, int(n)
+            )
+        print("[ALIGN] vocal slots follow each file (local)", flush=True)
+    elif vocal_plans is not None:
+        from engine.arrangement_planner import lane_assignment
+
+        bar_n = samples_per_bar(sr, bpm)
+        for index, (section, bars, _n) in enumerate(plan):
+            if section.get("fill_bars") or gemini_arrangement is None:
+                continue
+            assignment = lane_assignment(gemini_arrangement, index, "10_lead_inst")
+            if isinstance(assignment, dict):
+                section["fill_bars"] = [int(bar) - 1 for bar in assignment.get("active_bars") or []]
+    elif grammar is not None and getattr(grammar, "lead_monophony_strict", False):
+        for section, bars, _n in plan:
+            if not section.get("fill_bars"):
+                section["fill_bars"] = _fill_window_bars(
+                    int(bars),
+                    int(grammar.vocal_phrase_bars),
+                    int(grammar.vocal_rest_bars),
+                )
     chord_shifts: list[list[int] | None] | None = None
     if chord_key and song_plan_sections and len(song_plan_sections) == len(plan):
         chord_shifts = [
@@ -2272,6 +2452,7 @@ def assemble_arranged_buses(
             vocal_mode=mode if bus == "vocal" else None,
             chord_shifts=chord_shifts if bus in CHORD_FOLLOW_BUSES else None,
             duty_cycle=duty_cycle if bus == "vocal" else None,
+            placed_segments=vocal_plans if bus == "vocal" else None,
         )
         if bus == "harmonic" and comping_steps is not None:
             audio = _apply_step_gate(audio, sr, bpm, comping_steps)
@@ -2306,10 +2487,30 @@ def assemble_arranged_buses(
                 "reason": None,
             }
         if lead_paths:
+            if gemini_arrangement is not None:
+                from engine.arrangement_planner import lane_assignment, segments_from_assignment
+
+                bar_n = samples_per_bar(sr, bpm)
+                gemini_leads: dict[int, list[tuple[int, int, int]]] = {}
+                for index, (_section, bars, n) in enumerate(plan):
+                    segments = segments_from_assignment(
+                        lead_paths,
+                        lane_assignment(gemini_arrangement, index, "10_lead_inst"),
+                        int(bars),
+                        bar_n,
+                        int(n),
+                    )
+                    if segments is None:
+                        gemini_leads = {}
+                        break
+                    gemini_leads[index] = segments
+                if gemini_leads:
+                    lead_plans = gemini_leads
             lead_audio, _lead_used = _render_arranged_bus(
                 "harmonic", lead_paths, plan, total_samples, sr, bpm, channels,
                 target_key, target_bpm, fade,
                 chord_shifts=chord_shifts,
+                placed_segments=lead_plans,
             )
             mask = np.zeros(int(total_samples), dtype=np.float64)
             cursor = 0
@@ -2434,6 +2635,10 @@ def assemble_arranged_buses(
                 chord_shifts,
                 grammar,
                 float(swing_offset_ms),
+                vocal_plans=vocal_plans,
+                vocal_paths=vocal_paths,
+                lead_plans=lead_plans,
+                lead_paths_planned=bounced_leads,
             )
         except Exception as exc:
             print(f"[LANES] bounce skipped ({exc})", flush=True)
@@ -2577,6 +2782,7 @@ def assemble_from_blueprint(
     normalize_lufs: float | None = None,
     ceiling_dbtp: float = -0.5,
     bounce_lanes: bool = False,
+    phrase_align: str = "local",
 ) -> str:
     if not os.path.exists(blueprint_path):
         raise FileNotFoundError(f"Blueprint file not found: {blueprint_path}")
@@ -2733,6 +2939,7 @@ def assemble_from_blueprint(
                 swing_offset_ms=float(
                     (song_plan.get("swing_offset_ms") or 0.0) if isinstance(song_plan, dict) else 0.0
                 ),
+                phrase_align=phrase_align,
             )
         finally:
             if index_conn is not None:
