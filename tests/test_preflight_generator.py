@@ -1,5 +1,6 @@
 """Generated lanes become local wavs and land on the bars Gemini asked for."""
 
+import io
 import threading
 
 import numpy as np
@@ -86,7 +87,7 @@ def test_bar_fits_run_together(tmp_path, monkeypatch):
     def fake(prompt, is_vocal, dest_dir=None, duration_sec=None):
         return str(vocal if is_vocal else riser)
 
-    def fitted(path, sr, bpm, bars):
+    def fitted(path, sr, bpm, bars, mono=False):
         gate.wait(timeout=2)
 
     monkeypatch.setattr("engine.preflight_generator.generate_audio_via_replicate", fake)
@@ -194,3 +195,18 @@ def test_generated_audio_is_placed_on_the_requested_bars(tmp_path):
     vocal = lanes["11_lead_vocal"][:, 0]
     assert np.max(np.abs(vocal[:bar] - 0.5)) < 1e-6
     assert float(np.max(np.abs(vocal[bar:]))) == 0.0
+
+
+def test_bark_wav_is_decoded_and_resampled_off_24k():
+    from engine.preflight_generator import load_and_resample_generated_wav
+
+    native = 24000
+    tone = (0.25 * np.sin(np.linspace(0.0, 40.0, native, dtype=np.float64))).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, tone, native, format="WAV", subtype="PCM_16")
+    raw = buf.getvalue()
+    assert raw[:4] == b"RIFF"
+    audio = load_and_resample_generated_wav(raw, target_sr=48000, mono=True)
+    assert audio.ndim == 2 and audio.shape[1] == 1
+    assert abs(int(audio.shape[0]) - 48000) < 80
+    assert float(np.max(np.abs(audio[:64]))) < 1.0

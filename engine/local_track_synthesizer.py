@@ -197,7 +197,7 @@ def _resample_linear(data: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
     n_dst = max(1, int(round(n_src * float(dst_sr) / float(src_sr))))
     x_src = np.linspace(0.0, 1.0, n_src, endpoint=False)
     x_dst = np.linspace(0.0, 1.0, n_dst, endpoint=False)
-    out = np.empty((n_dst, data.shape[1]), dtype=data.dtype)
+    out = np.zeros((n_dst, data.shape[1]), dtype=data.dtype)
     for ch in range(data.shape[1]):
         out[:, ch] = np.interp(x_dst, x_src, data[:, ch])
     return out

@@ -101,18 +101,51 @@ def _download(url: str, dest: str) -> None:
         handle.write(data)
 
 
-def _fit_to_bars(path: str, sr: int, bpm: float, bars: int) -> None:
+def load_and_resample_generated_wav(
+    raw_bytes: bytes,
+    target_sr: int = 44100,
+    *,
+    mono: bool = False,
+) -> np.ndarray:
+    """Decode a generated wav and put it on the session rate.
+
+    ``soundfile`` consumes the RIFF header, so those bytes never become a
+    click at the start of the slice. Bark's native 24 kHz is resampled onto
+    ``target_sr`` (the render rate, 44100 unless the session asked for 48000).
+    Vocal takes are folded to mono. Instrument takes keep their channels.
+    """
+    import io
+
+    import soundfile as sf
+
+    audio, native_sr = sf.read(io.BytesIO(raw_bytes), always_2d=True)
+    audio = np.asarray(audio, dtype=np.float64)
+    if audio.size == 0:
+        raise RuntimeError("generated wav had no samples")
+    if mono and audio.shape[1] > 1:
+        audio = np.mean(audio, axis=1, keepdims=True)
+    if int(native_sr) != int(target_sr) and audio.shape[0] > 1:
+        import librosa
+
+        channels = [
+            librosa.resample(audio[:, ch], orig_sr=int(native_sr), target_sr=int(target_sr))
+            for ch in range(audio.shape[1])
+        ]
+        count = min(int(channel.shape[0]) for channel in channels)
+        audio = np.stack([channel[:count] for channel in channels], axis=1)
+    return np.ascontiguousarray(audio, dtype=np.float32)
+
+
+def _fit_to_bars(path: str, sr: int, bpm: float, bars: int, *, mono: bool = False) -> None:
     """Stretch or pad the new file to the bar window it was asked to fill."""
     import soundfile as sf
 
     from dsp.tempo_time_stretch import lock_slice_to_tempo
     from engine.blueprint_track_assembler import samples_per_bar
-    from engine.local_track_synthesizer import resample_to
 
-    audio, file_sr = sf.read(path, always_2d=True)
-    audio = np.asarray(audio, dtype=np.float64)
-    if int(file_sr) != int(sr):
-        audio = resample_to(audio, int(file_sr), int(sr))
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    audio = np.asarray(load_and_resample_generated_wav(raw, target_sr=int(sr), mono=mono), dtype=np.float64)
     target = max(1, int(bars)) * samples_per_bar(int(sr), float(bpm))
     current = float(bpm) * (float(target) / float(audio.shape[0])) if audio.shape[0] else float(bpm)
     fitted = lock_slice_to_tempo(
@@ -267,10 +300,11 @@ def _run_async(factory):
     return outcome[0]
 
 
-def _fit_job(job: tuple[str, int, float, int]) -> tuple[str, BaseException | None]:
-    path, sr, bpm, bars = job
+def _fit_job(job: tuple) -> tuple[str, BaseException | None]:
+    path, sr, bpm, bars = job[:4]
+    mono = bool(job[4]) if len(job) > 4 else False
     try:
-        _fit_to_bars(path, int(sr), float(bpm), int(bars))
+        _fit_to_bars(path, int(sr), float(bpm), int(bars), mono=mono)
     except BaseException as exc:
         return path, exc
     return path, None
@@ -345,7 +379,7 @@ async def resolve_blueprint_dependencies_async(
             failed[job.prompt] = result
             continue
         path_for[job.prompt] = str(result)
-        fit_tasks.append((str(result), int(sr), float(bpm), int(job.bars)))
+        fit_tasks.append((str(result), int(sr), float(bpm), int(job.bars), bool(job.is_vocal)))
     for path, exc in warp_all_lanes_in_parallel(fit_tasks).items():
         prompt = next((item.prompt for item in ordered if path_for.get(item.prompt) == path), "")
         if prompt:
@@ -393,8 +427,6 @@ def mix_generated_lanes(
     only_lane: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Place each generated wav on its active bars. The section mute does not apply."""
-    import soundfile as sf
-
     from engine.arrangement_planner import place_stem_on_bars
 
     structure = arrangement.get("structure") if isinstance(arrangement, Mapping) else None
@@ -421,7 +453,9 @@ def mix_generated_lanes(
                     continue
                 audio = cache.get(path)
                 if audio is None:
-                    data, _file_sr = sf.read(path, always_2d=True)
+                    with open(path, "rb") as handle:
+                        raw = handle.read()
+                    data = load_and_resample_generated_wav(raw, target_sr=int(sr))
                     audio = np.asarray(data, dtype=np.float64)
                     if audio.shape[1] == 1 and width == 2:
                         audio = np.repeat(audio, 2, axis=1)
