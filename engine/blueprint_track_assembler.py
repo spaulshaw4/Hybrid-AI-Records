@@ -2329,9 +2329,13 @@ def assemble_arranged_buses(
             bar_n = samples_per_bar(sr, bpm)
             built: dict[int, list[tuple[int, int, int]]] = {}
             for index, (_section, bars, n) in enumerate(plan):
+                assignment = lane_assignment(gemini_arrangement, index, "11_lead_vocal")
+                if not isinstance(assignment, dict):
+                    built[index] = []
+                    continue
                 segments = segments_from_assignment(
                     vocal_paths,
-                    lane_assignment(gemini_arrangement, index, "11_lead_vocal"),
+                    assignment,
                     int(bars),
                     bar_n,
                     int(n),
@@ -2351,7 +2355,7 @@ def assemble_arranged_buses(
                 gemini_arrangement = None
         except Exception as exc:
             gemini_arrangement = None
-            print(f"[ALIGN] gemini plan skipped ({type(exc).__name__})", flush=True)
+            print(f"[ALIGN] gemini plan skipped ({type(exc).__name__}: {exc})", flush=True)
     if vocal_paths and vocal_plans is None:
         from engine.stem_phrase_aligner import (
             fit_phrase_segments,

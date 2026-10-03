@@ -367,10 +367,11 @@ Lane ids are 01_kick, 02_snare, 03_tops, 04_aux_perc, 05_sub_bass, 06_mid_bass,
 12_vocal_backing, 13_transitions_fx.
 A sustaining part is a stem_id string. A phrase part is
 {"stem_id", "active_bars", "rest_bars"} with section-local 1-based bars.
+active_bars and rest_bars are JSON arrays of bar numbers, never a single number.
 active_bars for one stem cannot be longer than that stem's bars. A later
 active run retriggers the same slice; it does not continue past the file.
 When 11_lead_vocal is active, 10_lead_inst is silent.
-Choose stem_id values only from the catalog. Output JSON only.
+Choose stem_id values only from the catalog. Output raw JSON only, with no markdown fences.
 """.strip()
 
 

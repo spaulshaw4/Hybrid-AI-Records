@@ -108,7 +108,8 @@ def test_arrangement_posts_to_replicate_with_the_lyric_key(monkeypatch):
         sections=[{"name": "verse_1", "bars": 8}],
     )
     assert seen["token"] == "r8_lyric"
-    assert seen["payload"]["input"]["max_output_tokens"] == 4096
+    assert seen["payload"]["input"]["max_output_tokens"] == 8192
+    assert "thinking_budget" not in seen["payload"]["input"]
     assert seen["payload"]["input"]["temperature"] == 0.2
     assert "api.replicate.com" in seen["url"]
     assert "generativelanguage" not in seen["url"]

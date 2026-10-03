@@ -419,8 +419,7 @@ def _complete_replicate(system: str, user: str, token: str, timeout: float) -> d
             "prompt": user,
             "system_instruction": system,
             "temperature": 0.2,
-            "max_output_tokens": 4096,
-            "thinking_budget": 0,
+            "max_output_tokens": 8192,
         }
     }
     created = _http_json(
