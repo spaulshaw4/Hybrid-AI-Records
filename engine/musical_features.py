@@ -163,18 +163,20 @@ NEUTRAL_FIT = 0.5
 # winning key profile barely beat the runner-up, so the "fit" it reports is as
 # likely to be noise as signal. Callers withhold the harmonic opinion entirely
 # for such a slice (see ``engine.stem_selector.score_candidate``) instead of
-# ranking it on a measurement they cannot trust. Named because it is set above
-# the corpus mean (0.212) and so bypasses most of it: 280,202 of 1,385,549
-# slices clear it (20.2%), and per role 20.6% of harmonic / 16.6% of vocal /
-# 11.6% of rhythm candidates do. Retune here if that proves too aggressive.
-CONFIDENCE_BYPASS = 0.35
+# ranking it on a measurement they cannot trust.
+#
+# 0.35 sat above the corpus mean (0.212) and silenced 79.8% of the 1,385,549
+# slices, cutting the chord-aware A/B from +16.9% to +7.6%. 0.12 keeps the
+# unmeasurable tail out (31.1% of the corpus is under 0.10) and lets the
+# proportional blend handle the middle: 881,361 slices (63.6%) now clear it.
+CONFIDENCE_BYPASS = 0.12
 
 # Confidence at which a surviving reading is trusted outright. ``estimate_root``
 # returns a margin between the winning and runner-up key profile, not a
 # probability, and across the 1,385,549-slice corpus it is squashed low: mean
 # 0.212, median 0.176, p90 0.452, p99 0.662, max 0.930. Scaling against the p90
 # keeps the decisively-measured top decile at full strength while still
-# separating the band that clears the bypass (trust runs 0.78 -> 1.0 from 0.35
+# separating the band that clears the bypass (trust runs 0.27 -> 1.0 from 0.12
 # to 0.45). Using the raw confidence as trust would leave even the best-read
 # slice in the corpus 55% neutral and flatten the component out of existence.
 CONFIDENCE_REFERENCE = 0.45

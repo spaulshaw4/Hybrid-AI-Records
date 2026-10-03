@@ -132,6 +132,22 @@ BASS_NAME_TOKENS = ("bass", "808")
 VOCAL_EXCLUDED_FOLDERS = ("harmonic", "rhythm", "drums", "bass")
 BASS_CENTROID_FALLBACK_HZ = 450.0
 
+# Spectral-centroid band a sung human voice can plausibly occupy.
+#
+# Sung f0 runs ~80-1100 Hz and the formants that carry intelligibility sit
+# under ~3.5 kHz; sibilance and bright pop processing pull a slice's centroid
+# up to roughly 5 kHz but no further. Anything above that is air, cymbal bleed
+# or tape hiss that the separator filed as "vocals", and anything below 300 Hz
+# has no vocal formant energy in it at all. Measured on the live catalog
+# (1,385,549 slices): of the 23,314 vocal rows that survive the folder and
+# loudness filters, 1,255 sit at or above 5 kHz -- including the 13-14 kHz hiss
+# that was winning the role on a tempo match alone -- and 134 sit below 300 Hz.
+# Rejecting 1,389 rows (6.0%) leaves 21,925 real candidates, so this is a cheap
+# filter, not a pool-starving one. Rejected outright rather than down-weighted:
+# a zero centroid score still wins when nothing better qualifies.
+VOCAL_CENTROID_MIN_HZ = 300.0
+VOCAL_CENTROID_MAX_HZ = 5000.0
+
 # slice_index has no pack_id column. Session identity is the parent folder
 # (``001 - ANiMAL - Clinic A``) or, when files sit under a role directory
 # (``corpus_4s/rhythm/...``), the filename prefix before ``__``.
@@ -139,9 +155,18 @@ ROLE_PACK_DIRS = frozenset({
     "rhythm", "harmonic", "vocal", "vocals", "lead", "bass", "drums", "drum",
     "other", "stems", "slices", "oneshots", "fx",
 })
-AFFINITY_BONUS = 100.0
+# Pack coherence is a tiebreak, not a gate. The bonus is on the same 0..1
+# scale as ``score``, so a same-pack slice overtakes rivals within ~0.06 of it
+# and loses to anything genuinely better. The previous +100 lock, combined with
+# the hard same-pack filter below it, shrank the vocal pool to whatever the
+# anchor pack happened to hold -- 2 slices out of 23,314 eligible -- so a
+# ``want=3`` request could not be filled at all.
+AFFINITY_BONUS = 0.06
 # Same root (1.0), relative maj/min (0.85), or neighbouring fifth (0.72).
 AFFINITY_KEY_MIN = 0.72
+# Roles whose material is atonal. Their key label is detection noise, so they
+# are neither filtered nor scored on it; see ``score_candidate``.
+PERCUSSIVE_ROLES = frozenset({"rhythm", "drums", "drum", "perc"})
 _PHRASE_TAIL_RE = re.compile(r"_(phrase|s4|loop|oneshot)_\d+$", re.IGNORECASE)
 
 
@@ -180,7 +205,13 @@ def apply_pack_affinity(
     ranked: list[dict[str, Any]],
     anchor_pack_id: str | None,
 ) -> list[dict[str, Any]]:
-    """+100 to same-pack rows. Foreign packs only if no key-compatible same-pack hit."""
+    """Bias the ranking toward the anchor's pack without shrinking the pool.
+
+    Same-pack rows get a small additive bonus so they win close contests, and
+    only when they are key-compatible (or the role is atonal) -- pack coherence
+    must not drag a clashing slice into a pitched role. Nothing is removed:
+    the caller still needs enough distinct candidates to fill ``want``.
+    """
     if not ranked:
         return ranked
     anchor = slug_pack_token(anchor_pack_id) if anchor_pack_id else ""
@@ -192,17 +223,15 @@ def apply_pack_affinity(
     for item in ranked:
         pid = pack_id_from_path(item.get("file_path"))
         item["pack_id"] = pid
-        bonus = AFFINITY_BONUS if pid == anchor else 0.0
+        detail = item.get("score_detail") or {}
+        key_ok = bool(detail.get("key_neutral")) or float(
+            detail.get("key") or 0.0
+        ) >= AFFINITY_KEY_MIN
+        bonus = AFFINITY_BONUS if (pid == anchor and key_ok) else 0.0
         item["affinity_score"] = bonus
         item["rank_key"] = float(item.get("rank_key") or item.get("score") or 0.0) + bonus
     ranked.sort(key=lambda item: (-float(item["rank_key"]), str(item.get("file_path") or "")))
-    same_key = [
-        item
-        for item in ranked
-        if float(item.get("affinity_score") or 0.0) >= AFFINITY_BONUS
-        and float((item.get("score_detail") or {}).get("key") or 0.0) >= AFFINITY_KEY_MIN
-    ]
-    return same_key or ranked
+    return ranked
 
 
 def note_to_semitone(note: str | None) -> int | None:
@@ -242,6 +271,36 @@ def key_compatibility(candidate_key: str | None, target_key: str | None) -> floa
     if distance == 2:
         return 0.45
     return 0.15
+
+
+def compatible_pitch_classes(
+    target_key: str | None,
+    minimum: float = AFFINITY_KEY_MIN,
+) -> list[str]:
+    """Roots scoring at least ``minimum`` against the target, for the SQL pool.
+
+    Filtering the candidate query to ``detected_key = target`` makes every
+    survivor score exactly 1.0 and deletes the key weight. Admitting the whole
+    compatible neighbourhood -- same root, relative major/minor, neighbouring
+    fifth -- keeps the pool musically sane while leaving the scorer something
+    to discriminate on.
+    """
+    if note_to_semitone(target_key) is None:
+        return []
+    return [name for name in NOTE_NAMES if key_compatibility(name, target_key) >= minimum]
+
+
+def vocal_centroid_plausible(centroid_hz: Any) -> bool:
+    """False for slices whose brightness rules out sung voice. See the band above."""
+    if centroid_hz is None:
+        return True  # unmeasured: no evidence either way, let scoring decide
+    try:
+        value = float(centroid_hz)
+    except (TypeError, ValueError):
+        return True
+    if value <= 1.0:
+        return False  # silent / DC-only
+    return VOCAL_CENTROID_MIN_HZ <= value <= VOCAL_CENTROID_MAX_HZ
 
 
 def fold_bpm(candidate_bpm: float, target_bpm: float) -> float:
@@ -394,10 +453,13 @@ def fetch_indexed_pool(
         return []
     where = ["si.stem_type = ?"]
     params: list[Any] = [stem]
-    key = _pitch_class(target_key)
-    if key:
-        where.append("si.detected_key = ?")
-        params.append(key)
+    # The compatible neighbourhood, not the exact root: an equality filter here
+    # is what made every survivor score key=1.00 and left the 0.16 key weight
+    # inert. Still an indexed equality set, never a scan.
+    keys = compatible_pitch_classes(target_key)
+    if keys:
+        where.append(f"si.detected_key IN ({','.join('?' * len(keys))})")
+        params.extend(keys)
     if target_bpm is not None:
         bpm = float(target_bpm)
         # Equivalent to ABS(estimated_bpm - :bpm) <= 8.0; BETWEEN uses the
@@ -460,6 +522,8 @@ def _python_role_filter(rows: list[dict[str, Any]], role: str) -> list[dict[str,
             continue
         if role == "harmonic" and name.startswith("bass"):
             continue
+        if role == "vocal" and not vocal_centroid_plausible(row.get("spectral_centroid")):
+            continue
         kept.append(row)
     if role == "bass" and not kept:
         kept = [
@@ -498,8 +562,11 @@ def _indexed_candidates(
     """Stem + key + ±8 BPM, then widen key / BPM if the tight pool is short."""
     stem = _stem_type_for_role(role) or "harmonic"
     need = max(1, int(min_rows))
+    # Percussive material is atonal; filtering it by key only narrows the pool
+    # on a label that scoring deliberately ignores.
+    pool_key = None if str(role or "").strip().lower() in PERCUSSIVE_ROLES else target_key
     rows = _python_role_filter(
-        fetch_indexed_pool(conn, stem, target_key, target_bpm, limit=limit),
+        fetch_indexed_pool(conn, stem, pool_key, target_bpm, limit=limit),
         role,
     )
     if len(rows) < need:
@@ -587,7 +654,10 @@ def score_candidate(
     ``slice_musical`` (see ``engine.musical_index.decorate_rows``); an
     unmeasured slice scores a neutral 0.5 rather than a penalty, and a slice
     whose ``chroma_confidence`` is low scores partway toward that neutral.
-    Supplying either switches the weighting to ``SCORE_WEIGHTS_MUSICAL``.
+    Supplying either switches the weighting to ``SCORE_WEIGHTS_MUSICAL``. In
+    that weighting a ``PERCUSSIVE_ROLES`` candidate is scored key-neutral --
+    the key component is withheld and its weight shared out -- because a drum
+    loop's ``detected_key`` is a detection artefact, not a musical fact.
     """
     level = level_fit(row.get("rms_db"), role)
     if level <= 0.0:
@@ -662,28 +732,33 @@ def score_candidate(
             else groove_target,
         )
     w = SCORE_WEIGHTS_MUSICAL
-    if chord_bypassed and BYPASS_REDISTRIBUTES_CHORD_WEIGHT:
-        # Drop the component and renormalise the rest. Never scores it 0 --
-        # that would punish a slice for an unreliable reading -- but it does
-        # flatter bypassed candidates; see the constant's note.
-        score = (
-            w["key"] * key
-            + w["bpm"] * bpm
-            + w["centroid"] * centroid
-            + w["level"] * level * (0.65 + 0.35 * energy)
-            + w["groove"] * groove
-        ) / (1.0 - w["chord"])
-    else:
-        score = (
-            w["key"] * key
-            + w["chord"] * chord
-            + w["bpm"] * bpm
-            + w["centroid"] * centroid
-            + w["level"] * level * (0.65 + 0.35 * energy)
-            + w["groove"] * groove
-        )
+    # Components actually in play, then renormalise over the weights that
+    # survive. With every component present the divisor is 1.0, so a pitched
+    # role scores exactly as it did before; dropping one spreads its weight
+    # over the rest instead of imputing a value nobody measured.
+    components: dict[str, float] = {
+        "bpm": bpm,
+        "centroid": centroid,
+        "level": level * (0.65 + 0.35 * energy),
+        "groove": groove,
+    }
+    # Drums and percussion are atonal: ``detected_key`` on a kick loop is a
+    # detection artefact (the live catalog files 46% of rhythm slices as "A"),
+    # so scoring it would be noise dressed as musical judgement. Withhold the
+    # component rather than hand every percussive slice a flat 1.0.
+    key_neutral = str(role or "").strip().lower() in PERCUSSIVE_ROLES
+    if not key_neutral:
+        components["key"] = key
+    # Drop the chord component and renormalise the rest. Never scores it 0 --
+    # that would punish a slice for an unreliable reading -- but it does
+    # flatter bypassed candidates; see the constant's note.
+    if not (chord_bypassed and BYPASS_REDISTRIBUTES_CHORD_WEIGHT):
+        components["chord"] = chord
+    divisor = sum(w[name] for name in components) or 1.0
+    score = sum(w[name] * value for name, value in components.items()) / divisor
     return {
         "key": round(key, 4),
+        "key_neutral": bool(key_neutral),
         "chord": round(float(chord), 4),
         "chord_bypassed": bool(chord_bypassed),
         "bpm": round(bpm, 4),
@@ -777,6 +852,12 @@ def fetch_candidate_rows(
             for folder in VOCAL_EXCLUDED_FOLDERS:
                 where.append("lower(replace(si.file_path, '/', '\\')) NOT LIKE ?")
                 params.append(f"%\\{folder}\\%")
+            # Brightness sanity: hiss and cymbal bleed are not voices.
+            where.append(
+                "(si.spectral_centroid IS NULL "
+                "OR (si.spectral_centroid >= ? AND si.spectral_centroid <= ?))"
+            )
+            params.extend([float(VOCAL_CENTROID_MIN_HZ), float(VOCAL_CENTROID_MAX_HZ)])
     cleaned = [str(t).strip() for t in (tags or []) if str(t).strip()]
     if cleaned:
         like = " OR ".join("si.tags LIKE ?" for _ in cleaned)
@@ -934,6 +1015,7 @@ def select_for_role(
     use_cooldown: bool = True,
     anchor_pack_id: str | None = None,
     pitch_weights: Any = None,
+    groove_target: Any = None,
     trace: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch, score, and seeded-pick ``count`` slices for one role.
@@ -944,6 +1026,13 @@ def select_for_role(
     ``pitch_weights`` (from ``musical_features.plan_pitch_weights``) scores each
     candidate's measured chroma against the song's whole chord progression, so
     a stem is chosen for the notes it contains and not only its key label.
+
+    ``groove_target`` (16 accent buckets from
+    ``genre_arrangement_profiles.groove_target_for_role``) scores each
+    candidate's measured accent pattern against the groove the genre's
+    arrangement family asks for. ``None`` for roles with no bar-level accent
+    opinion, which redistributes the groove weight instead of ranking every
+    sustained slice against a template that does not apply to it.
 
     ``trace`` receives the full ranked pool under ``"ranked"``. The stems that
     lost are what make a pick informative, so the mix ledger needs them too.
@@ -969,6 +1058,7 @@ def select_for_role(
             require_on_disk=require_on_disk,
             use_cooldown=use_cooldown,
             pitch_weights=pitch_weights,
+            groove_target=groove_target,
         )
     except Exception as exc:
         print(
@@ -1063,12 +1153,19 @@ def describe_selection(role: str, picks: list[dict[str, Any]]) -> str:
     lines = []
     for item in picks:
         detail = item["score_detail"]
+        key_txt = "n/a" if detail.get("key_neutral") else f"{detail['key']:.2f}"
+        extra = ""
+        if "chord" in detail:
+            extra += f" chord={detail['chord']:.2f}"
+        if "groove" in detail:
+            extra += f" groove={detail['groove']:.2f}"
         lines.append(
             f"[SELECT] {role:<9} {os.path.basename(item['file_path']):<28} "
             f"score={detail['score']:.3f} key={item.get('detected_key')}"
-            f"({detail['key']:.2f}) bpm={float(item.get('estimated_bpm') or 0):.0f}"
+            f"({key_txt}) bpm={float(item.get('estimated_bpm') or 0):.0f}"
             f"({detail['bpm']:.2f}) cent={float(item.get('spectral_centroid') or 0):.0f}"
             f"({detail['centroid']:.2f}) rms={float(item.get('rms_db') or 0):.1f}"
-            f"({detail['level']:.2f}) used={item.get('use_count') or 0}"
+            f"({detail['level']:.2f}){extra} used={item.get('use_count') or 0}"
+            f" pack={item.get('pack_id') or '-'}"
         )
     return "\n".join(lines)

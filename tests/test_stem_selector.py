@@ -13,11 +13,14 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from engine.stem_selector import (  # noqa: E402
+    AFFINITY_BONUS,
     DEAD_RMS_DBFS,
     STRETCH_RATE_MAX,
     STRETCH_RATE_MIN,
+    apply_pack_affinity,
     bpm_compatibility,
     centroid_fit,
+    compatible_pitch_classes,
     extract_session_slug,
     fetch_candidate_rows,
     fetch_indexed_pool,
@@ -33,6 +36,7 @@ from engine.stem_selector import (  # noqa: E402
     role_from_filename,
     score_candidate,
     select_for_role,
+    vocal_centroid_plausible,
 )
 
 SCHEMA = """
@@ -476,3 +480,129 @@ def test_empty_index_returns_none_instead_of_raising():
     assert hit is None
     assert source == "empty"
     assert select_for_role(conn, "rhythm", "D", 120.0, 2, Random(1), require_on_disk=False) == []
+
+
+def test_pitched_roles_discriminate_on_key_drums_do_not():
+    """The old equality filter made every survivor key=1.00; neighbourhood +
+    key-neutral drums is what makes the 0.16 weight mean something."""
+    from engine.musical_features import plan_pitch_weights
+
+    weights = plan_pitch_weights(["Am7", "Fmaj7"])
+    same = {
+        "detected_key": "A",
+        "estimated_bpm": 120.0,
+        "rms_db": -20.0,
+        "spectral_centroid": 2200.0,
+    }
+    distant = dict(same, detected_key="D#")
+    harmonic_same = score_candidate(same, "harmonic", "A", 120.0, pitch_weights=weights)
+    harmonic_far = score_candidate(distant, "harmonic", "A", 120.0, pitch_weights=weights)
+    assert harmonic_same["key"] > harmonic_far["key"]
+    assert harmonic_same["score"] > harmonic_far["score"]
+    assert harmonic_same.get("key_neutral") is False
+
+    drum_a = score_candidate(same, "rhythm", "A", 120.0, pitch_weights=weights)
+    drum_far = score_candidate(distant, "rhythm", "A", 120.0, pitch_weights=weights)
+    assert drum_a["key_neutral"] is True
+    assert drum_far["key_neutral"] is True
+    assert drum_a["score"] == drum_far["score"]
+
+    neighbourhood = compatible_pitch_classes("A")
+    assert "A" in neighbourhood
+    assert "E" in neighbourhood  # fifth
+    assert "D#" not in neighbourhood
+
+
+def test_vocal_hiss_is_rejected_not_downweighted():
+    assert vocal_centroid_plausible(13028.0) is False
+    assert vocal_centroid_plausible(14026.0) is False
+    assert vocal_centroid_plausible(2600.0) is True
+    assert vocal_centroid_plausible(None) is True
+
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(SCHEMA)
+    rows = [
+        ("D:/voice/vocals_s4_00001.wav", "vocals_s4_00001.wav", "vocal", "A", 120.0, -22.0, 2600.0, "vocal", 4.0),
+        ("D:/hiss/vocals_s4_00024.wav", "vocals_s4_00024.wav", "vocal", "A", 118.0, -27.0, 13028.0, "vocal", 4.0),
+    ]
+    conn.executemany(
+        "INSERT INTO slice_index (file_path, filename, stem_type, detected_key, "
+        "estimated_bpm, rms_db, spectral_centroid, tags, duration_sec) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    kept = fetch_candidate_rows(conn, "vocal", use_cooldown=False)
+    names = {row["filename"] for row in kept}
+    assert "vocals_s4_00001.wav" in names
+    assert "vocals_s4_00024.wav" not in names
+
+
+def test_pack_affinity_is_a_tiebreak_not_a_gate():
+    """+100 used to collapse the pool to the anchor pack; 0.06 must not."""
+    same = {
+        "file_path": r"D:\packs\anchor_kit\vocals_s4_00001.wav",
+        "score": 0.70,
+        "rank_key": 0.70,
+        "score_detail": {"key": 1.0, "score": 0.70},
+    }
+    better = {
+        "file_path": r"D:\packs\other_kit\vocals_s4_00002.wav",
+        "score": 0.90,
+        "rank_key": 0.90,
+        "score_detail": {"key": 1.0, "score": 0.90},
+    }
+    close = {
+        "file_path": r"D:\packs\other_kit\vocals_s4_00003.wav",
+        "score": 0.72,
+        "rank_key": 0.72,
+        "score_detail": {"key": 1.0, "score": 0.72},
+    }
+    ranked = apply_pack_affinity([dict(same), dict(better), dict(close)], "anchor_kit")
+    assert len(ranked) == 3
+    assert AFFINITY_BONUS < 1.0
+    assert ranked[0]["file_path"] == better["file_path"]
+    by_path = {item["file_path"]: item for item in ranked}
+    assert by_path[same["file_path"]]["rank_key"] == pytest.approx(0.70 + AFFINITY_BONUS)
+    assert by_path[same["file_path"]]["rank_key"] > close["score"]
+
+
+def test_vocal_pool_fills_want_across_packs(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(SCHEMA)
+    rows = []
+    packs = ("087_skelpolu_together_alone", "004_al_james", "028_motor_tapes")
+    for i, pack in enumerate(packs):
+        folder = tmp_path / pack
+        folder.mkdir()
+        name = f"{pack}__vocals_s000{i:02d}.wav"
+        path = folder / name
+        path.write_bytes(b"")
+        rows.append(
+            (str(path), name, "vocal", "A", 118.0 + i, -22.0, 2400.0 + i * 50, "vocal", 4.0)
+        )
+    hiss = tmp_path / "hiss" / "vocals_s4_00024.wav"
+    hiss.parent.mkdir()
+    hiss.write_bytes(b"")
+    rows.append((str(hiss), hiss.name, "vocal", "A", 118.0, -27.0, 13028.0, "vocal", 4.0))
+    conn.executemany(
+        "INSERT INTO slice_index (file_path, filename, stem_type, detected_key, "
+        "estimated_bpm, rms_db, spectral_centroid, tags, duration_sec) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    picks = select_for_role(
+        conn,
+        "vocal",
+        "A",
+        120.0,
+        3,
+        Random(7),
+        require_on_disk=True,
+        use_cooldown=False,
+        anchor_pack_id="087_skelpolu_together_alone",
+    )
+    assert len(picks) == 3
+    assert all(float(p.get("spectral_centroid") or 0) < 5000.0 for p in picks)
+    packs_used = {pack_id_from_path(p["file_path"]) for p in picks}
+    assert len(packs_used) >= 2

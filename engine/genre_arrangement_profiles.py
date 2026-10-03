@@ -105,6 +105,75 @@ PREDROP_FLAVOURS: dict[str, dict[str, float]] = {
 
 DEFAULT_FAMILY = "other"
 
+# Accent buckets per 4/4 bar, matching ``musical_features.GRID_STEPS``.
+GROOVE_GRID_STEPS = 16
+
+
+def _accents(pattern: dict[int, float]) -> tuple[float, ...]:
+    """Sparse step->accent map into a peak-normalised 16-step bar."""
+    grid = [0.0] * GROOVE_GRID_STEPS
+    for step, value in pattern.items():
+        grid[int(step) % GROOVE_GRID_STEPS] = float(value)
+    peak = max(grid)
+    if peak <= 0.0:
+        return tuple(grid)
+    return tuple(value / peak for value in grid)
+
+
+# Four-on-the-floor, backbeat, boom-bap, swung ride, tresillo. Peak-normalised
+# the same way ``musical_features.onset_grid`` normalises a measured slice, so
+# ``groove_fit`` compares the two directly as a cosine similarity.
+_FOUR_ON_FLOOR = _accents({0: 1.00, 2: 0.35, 4: 1.00, 6: 0.45, 8: 1.00, 10: 0.35, 12: 1.00, 14: 0.45})
+_BACKBEAT = _accents({0: 1.00, 2: 0.30, 4: 0.95, 6: 0.35, 8: 0.85, 10: 0.30, 12: 0.95, 14: 0.40})
+_BOOM_BAP = _accents({0: 1.00, 3: 0.40, 4: 0.90, 6: 0.50, 8: 0.65, 10: 0.60, 12: 0.90, 14: 0.45})
+_SWING_RIDE = _accents({0: 0.95, 3: 0.50, 4: 0.80, 7: 0.60, 8: 0.95, 11: 0.50, 12: 0.80, 15: 0.60})
+_TRESILLO = _accents({0: 1.00, 3: 0.85, 6: 0.90, 8: 0.50, 10: 0.80, 12: 0.60})
+_KICK_LOCK = _accents({0: 1.00, 4: 0.55, 8: 0.85, 12: 0.55})
+_SUB_PULSE = _accents({0: 1.00, 8: 0.80})
+_TRAP_SUB = _accents({0: 1.00, 6: 0.50, 8: 0.70, 12: 0.40})
+_WALKING = _accents({0: 1.00, 4: 0.85, 8: 0.90, 12: 0.85})
+
+# Per-family accent target for the buses that genuinely have one.
+#
+# Only the percussive buses are listed. A pad, a guitar bed or a vocal phrase
+# has no defensible bar-level accent pattern -- asking for one would score
+# every sustained slice against the same template and separate nothing -- so
+# those roles resolve to ``None`` and ``score_candidate`` redistributes the
+# 0.10 groove weight instead. ``cinematic_ambient`` is deliberately empty for
+# the same reason: that family's rhythm bus is unmetered texture.
+GROOVE_TEMPLATES: dict[str, dict[str, tuple[float, ...]]] = {
+    "rock_metal": {"rhythm": _BACKBEAT, "bass": _KICK_LOCK},
+    "hiphop_rnb": {"rhythm": _BOOM_BAP, "bass": _TRAP_SUB},
+    "electronic_club": {"rhythm": _FOUR_ON_FLOOR, "bass": _KICK_LOCK},
+    "pop_dance": {"rhythm": _FOUR_ON_FLOOR, "bass": _KICK_LOCK},
+    "jazz_roots": {"rhythm": _SWING_RIDE, "bass": _WALKING},
+    "world_latin": {"rhythm": _TRESILLO, "bass": _TRESILLO},
+    "cinematic_ambient": {},
+    "other": {"rhythm": _BACKBEAT, "bass": _SUB_PULSE},
+}
+
+
+def groove_target_for_role(family: str | None, role: str | None) -> list[float] | None:
+    """Accent template for one bus, or ``None`` when there is no opinion.
+
+    ``family`` is an arrangement family slug (``electronic_club``); a genre
+    slug is resolved through :func:`family_for_genre` first, so callers can
+    pass either. ``None`` is a real answer: it tells the picker to leave the
+    groove component out rather than rank every candidate against a template
+    that does not apply to the role.
+    """
+    slug = str(family or "").strip().lower()
+    table = GROOVE_TEMPLATES.get(slug)
+    if table is None:
+        table = GROOVE_TEMPLATES.get(family_for_genre(slug)) or GROOVE_TEMPLATES[DEFAULT_FAMILY]
+    target = table.get(str(role or "").strip().lower())
+    return list(target) if target else None
+
+
+def groove_targets(family: str | None) -> dict[str, list[float] | None]:
+    """``{bus: template-or-None}`` for every bus, for threading into selection."""
+    return {bus: groove_target_for_role(family, bus) for bus in BUSES}
+
 
 def _archetype(*sections: tuple[str, tuple[int, ...]]) -> list[tuple[str, tuple[int, ...]]]:
     """A section template: ordered (role, allowed bar counts) pairs."""

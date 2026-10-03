@@ -234,6 +234,34 @@ class TestGrooveScoring(unittest.TestCase):
         sb = score_candidate(b, "rhythm", "A", 120.0, groove_target=four)["groove"]
         self.assertGreater(sa, sb)
 
+    def test_groove_target_changes_the_ranking(self):
+        """Without a target the 0.10 weight is inert; with one it moves a pick."""
+        four = np.zeros(GRID_STEPS)
+        four[[0, 4, 8, 12]] = 1.0
+        half = np.zeros(GRID_STEPS)
+        half[[0, 8]] = 1.0
+        a = _row(None, file_path="four.wav", onset_grid=pack_floats(four))
+        b = _row(None, file_path="half.wav", onset_grid=pack_floats(half))
+        idle = (
+            score_candidate(a, "rhythm", "A", 120.0)["score"],
+            score_candidate(b, "rhythm", "A", 120.0)["score"],
+        )
+        armed = (
+            score_candidate(a, "rhythm", "A", 120.0, groove_target=four)["score"],
+            score_candidate(b, "rhythm", "A", 120.0, groove_target=four)["score"],
+        )
+        self.assertEqual(idle[0], idle[1])
+        self.assertGreater(armed[0], armed[1])
+
+    def test_family_template_is_what_the_selector_receives(self):
+        from engine.genre_arrangement_profiles import groove_target_for_role
+
+        club = groove_target_for_role("electronic_club", "rhythm")
+        self.assertIsNotNone(club)
+        self.assertEqual(len(club), GRID_STEPS)
+        self.assertIsNone(groove_target_for_role("electronic_club", "harmonic"))
+        self.assertIsNone(groove_target_for_role("cinematic_ambient", "rhythm"))
+
 
 class TestMusicalIndexFailsSafe(unittest.TestCase):
     def test_missing_db_returns_rows_untouched(self):

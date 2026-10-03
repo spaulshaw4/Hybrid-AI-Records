@@ -410,6 +410,32 @@ def stage_scored_session_cache(
         except Exception as exc:
             print(f"[HARMONY] chord-aware selection unavailable ({exc})", flush=True)
 
+    # Rhythmic context. Without one the groove weight has nothing to compare a
+    # candidate's measured accent grid against and never moves a ranking. The
+    # genre's arrangement family carries that opinion (four-on-the-floor vs
+    # backbeat vs tresillo); roles with no bar-level accent pattern resolve to
+    # None so the weight redistributes rather than scoring them all alike.
+    groove_targets: dict[str, Any] = {}
+    try:
+        from engine.genre_arrangement_profiles import (
+            family_for_genre,
+            groove_target_for_role,
+        )
+
+        family = str((arrangement or {}).get("family") or "") or family_for_genre(
+            str(meta.get("genre") or "")
+        )
+        groove_targets = {
+            role: groove_target_for_role(family, role) for role in SELECTOR_ROLES
+        }
+        named = [role for role, target in groove_targets.items() if target]
+        print(
+            f"[GROOVE] family={family} targets={','.join(named) or 'none'}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[GROOVE] groove-aware selection unavailable ({exc})", flush=True)
+
     if not db_path or not os.path.isfile(db_path):
         return 0
     try:
@@ -491,6 +517,7 @@ def stage_scored_session_cache(
                 use_cooldown=not reproducible,
                 anchor_pack_id=anchor_pack_id or None,
                 pitch_weights=pitch_weights,
+                groove_target=groove_targets.get(role),
                 trace=trace if ledger is not None else None,
             )
             if not picks:
