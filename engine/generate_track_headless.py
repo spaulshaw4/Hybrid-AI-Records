@@ -320,6 +320,7 @@ def stage_scored_session_cache(
     max_per_stem: int = 8,
     max_stage: int = 64,
     reproducible: bool = False,
+    memory: Any = None,
 ) -> int:
     """Stage slices chosen by musical fit, not by whichever row came back first.
 
@@ -416,10 +417,13 @@ def stage_scored_session_cache(
     # backbeat vs tresillo); roles with no bar-level accent pattern resolve to
     # None so the weight redistributes rather than scoring them all alike.
     groove_targets: dict[str, Any] = {}
+    grammar = None
     try:
         from engine.genre_arrangement_profiles import (
             family_for_genre,
+            grammar_rhythm_target,
             groove_target_for_role,
+            resolve_genre_grammar,
         )
 
         family = str((arrangement or {}).get("family") or "") or family_for_genre(
@@ -428,6 +432,15 @@ def stage_scored_session_cache(
         groove_targets = {
             role: groove_target_for_role(family, role) for role in SELECTOR_ROLES
         }
+        grammar = resolve_genre_grammar(str(meta.get("genre") or (arrangement or {}).get("genre") or ""))
+        rhythm_grid = grammar_rhythm_target(grammar)
+        if rhythm_grid is not None:
+            groove_targets["rhythm"] = rhythm_grid
+        print(
+            f"[GRAMMAR] archetype={grammar.archetype} grid={grammar.kick_snare_grid} "
+            f"priority={'>'.join(grammar.bus_priority)}",
+            flush=True,
+        )
         named = [role for role, target in groove_targets.items() if target]
         print(
             f"[GROOVE] family={family} targets={','.join(named) or 'none'}",
@@ -489,9 +502,23 @@ def stage_scored_session_cache(
             print(f"[LEDGER] disabled ({exc})", flush=True)
             ledger = None
     try:
+        priority = grammar.bus_priority if grammar is not None else SELECTOR_ROLES
+        role_order = [role for role in priority if role in SELECTOR_ROLES]
         for role in SELECTOR_ROLES:
+            if role not in role_order:
+                role_order.append(role)
+        for role in role_order:
             if staged >= max_stage:
                 break
+            if role in {"harmonic", "vocal", "lead"} and (
+                staged_by.get("rhythm", 0) == 0 or staged_by.get("bass", 0) == 0
+            ):
+                print(
+                    f"[ANCHOR] {role} waits: rhythm={staged_by.get('rhythm', 0)} "
+                    f"bass={staged_by.get('bass', 0)}",
+                    flush=True,
+                )
+                continue
             # One spare beyond the variant pool so a drum fill has somewhere to go.
             want = min(int(max_per_stem), max(2, int(pool.get(role, 2)) + 1))
             print(
@@ -519,6 +546,7 @@ def stage_scored_session_cache(
                 pitch_weights=pitch_weights,
                 groove_target=groove_targets.get(role),
                 trace=trace if ledger is not None else None,
+                fatigue_penalty=None if memory is None or reproducible else memory.penalty_for,
             )
             if not picks:
                 print(f"[SELECT] {role}: no scored candidates in {os.path.basename(db_path)}")
@@ -676,6 +704,63 @@ def stage_session_cache(
     return staged
 
 
+def _finish_package(
+    session_dir: str,
+    session_id: str,
+    source_trace: dict[str, Any],
+    memory: Any,
+    scratch: Any,
+    genre: str | None,
+    bpm: float,
+    sr: int,
+) -> str:
+    """Bounce the 13 lanes into exports/song_YYYYMMDD_NNN and remember the DNA."""
+    import json
+    from datetime import date
+
+    from engine.audio_exporter import (
+        RenderSession,
+        export_multitrack_package,
+        load_console_lanes,
+        package_dir_for,
+    )
+    from engine.stem_lanes import stem_id_of
+
+    lanes_meta = (source_trace or {}).get("_console_lanes") or {}
+    lanes, lane_sr = load_console_lanes(lanes_meta.get("files") or {})
+    manifest: dict[str, Any] = {}
+    manifest_path = os.path.join(session_dir, "render_manifest.json")
+    if os.path.isfile(manifest_path):
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            manifest = loaded
+    if scratch is not None:
+        manifest["scratch"] = scratch.to_dict()
+    manifest.setdefault("song_id", session_id)
+    day = date.today().strftime("%Y%m%d")
+    dest = package_dir_for(session_dir, len(memory.recent(1000)) + 1, day)
+    export_multitrack_package(
+        RenderSession(lanes, manifest, int(lanes_meta.get("sr") or lane_sr or sr)),
+        dest,
+    )
+    stem_ids = [stem_id_of(path) for path in (lanes_meta.get("files") or {}).values() if path]
+    memory.record_render(
+        str(genre or ""),
+        scratch.key if scratch is not None else str(manifest.get("key") or ""),
+        float(scratch.bpm if scratch is not None else bpm),
+        list(scratch.romans) if scratch is not None else [],
+        stem_ids,
+        song_id=session_id,
+        form=scratch.form_id if scratch is not None else "",
+        feel=scratch.rhythmic_feel if scratch is not None else "",
+        swing_ms=float(scratch.swing_offset_ms) if scratch is not None else 0.0,
+        progression_id=scratch.progression_id if scratch is not None else "",
+        lane_dna={"package": dest, "stems": stem_ids},
+    )
+    return dest
+
+
 def execute_prompt_pipeline(
     prompt: str,
     session_id: str,
@@ -758,6 +843,26 @@ def execute_prompt_pipeline(
 
     resolved_seed, resolved_request = derive_seed(prompt, request_id, seed)
     arrangement: dict[str, Any] | None = None
+    memory = None
+    scratch = None
+    try:
+        from engine.arrangement_planner import EngineMemory, plan_scratch
+
+        memory = EngineMemory(os.path.join(session_dir, "engine_memory.db"))
+        if seed is None and bpm is None and not key:
+            scratch = plan_scratch(str(genre or meta.get("genre") or ""), memory)
+            bpm_val = float(scratch.bpm)
+            meta["bpm"] = bpm_val
+            print(
+                f"[SCRATCH] key={scratch.key} bpm={scratch.bpm:.0f} "
+                f"progression={scratch.progression_id} feel={scratch.rhythmic_feel} "
+                f"swing_ms={scratch.swing_offset_ms:.0f}",
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"[SCRATCH] fresh blueprint unavailable ({exc})", flush=True)
+        memory = None
+        scratch = None
     if arrange:
         print(
             f"[CONDUCTOR] seed mode={'explicit (reproducible)' if seed is not None else 'derived'}"
@@ -770,9 +875,14 @@ def execute_prompt_pipeline(
             duration_sec,
             seed=resolved_seed,
             request_id=resolved_request,
-            key=key,
+            key=key or (scratch.key if scratch is not None else None),
             scale=(blueprint.get("track_metadata") or {}).get("scale"),
         )
+        if scratch is not None and isinstance(arrangement, dict):
+            from engine.arrangement_planner import apply_scratch
+
+            apply_scratch(arrangement, scratch, genre or meta.get("genre"))
+            bpm_val = float(scratch.bpm)
         # Mirror resolved plan key onto blueprint before arrangement overlay.
         sp = arrangement.get("song_plan") if isinstance(arrangement, dict) else None
         if isinstance(sp, dict) and sp.get("key"):
@@ -872,6 +982,7 @@ def execute_prompt_pipeline(
                 max_per_stem=max_per_stem,
                 max_stage=max_stage,
                 reproducible=seed is not None,
+                memory=memory,
             )
         if staged < 6:
             staged = stage_session_cache(
@@ -904,6 +1015,7 @@ def execute_prompt_pipeline(
             session_id=session_id,
             scratch_root=os.path.dirname(os.path.abspath(session_dir)),
             source_trace=source_trace,
+            bounce_lanes=True,
         )
         print(
             f"[COMPOSITION] elapsed_sec={time.perf_counter() - compose_t0:.2f} "
@@ -917,6 +1029,21 @@ def execute_prompt_pipeline(
             flush=True,
         )
         raise
+    else:
+        if memory is not None:
+            try:
+                result_package = _finish_package(
+                    session_dir, session_id, source_trace, memory, scratch, genre, bpm_val, sr
+                )
+                source_trace["_package"] = result_package
+            except Exception as exc:
+                print(f"[PACKAGE] {exc}", flush=True)
+    finally:
+        if memory is not None:
+            try:
+                memory.close()
+            except Exception:
+                pass
     if os.path.abspath(unmastered_named) != os.path.abspath(unmastered_mix):
         shutil.copy2(unmastered_named, unmastered_mix)
     mix_bytes = os.path.getsize(unmastered_mix) if os.path.isfile(unmastered_mix) else 0
@@ -976,6 +1103,8 @@ def execute_prompt_pipeline(
         result["arrangement"] = arrangement
     if r128_meta:
         result["r128"] = r128_meta
+    if source_trace.get("_package"):
+        result["package"] = source_trace["_package"]
     return result
 
 

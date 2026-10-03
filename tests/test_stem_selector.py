@@ -37,6 +37,7 @@ from engine.stem_selector import (  # noqa: E402
     score_candidate,
     select_for_role,
     vocal_centroid_plausible,
+    _python_role_filter,
 )
 
 SCHEMA = """
@@ -606,3 +607,12 @@ def test_vocal_pool_fills_want_across_packs(tmp_path):
     assert all(float(p.get("spectral_centroid") or 0) < 5000.0 for p in picks)
     packs_used = {pack_id_from_path(p["file_path"]) for p in picks}
     assert len(packs_used) >= 2
+
+
+def test_harmonic_filter_drops_a_vocal_stem():
+    rows = [
+        {"filename": "other_pad.wav", "file_path": r"D:\corpus\harmonic\other_pad.wav"},
+        {"filename": "vocal_rap_140.wav", "file_path": r"D:\corpus\vocal\vocal_rap_140.wav"},
+    ]
+    kept = _python_role_filter(rows, "harmonic")
+    assert [row["filename"] for row in kept] == ["other_pad.wav"]

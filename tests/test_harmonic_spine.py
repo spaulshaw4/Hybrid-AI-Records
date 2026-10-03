@@ -11,13 +11,16 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from engine.blueprint_track_assembler import (  # noqa: E402
+    _carry_foundation_variant,
+    _phrase_duty_segments,
     _render_chord_spans,
     chord_root_pc,
     samples_per_bar,
     section_chord_offsets,
 )
 from engine.local_song_conductor import conduct_arrangement  # noqa: E402
-from engine.song_plan import _roman_to_chord, role_progression  # noqa: E402
+from engine.song_plan import _roman_to_chord, chord_density_for_song, role_progression  # noqa: E402
+from engine.stem_role_router import split_pool_by_layer  # noqa: E402
 
 SR = 22050
 BPM = 110.0
@@ -52,6 +55,20 @@ def test_full_song_plan_carries_role_chords_and_two_bar_rhythm():
     assert bars[0]["chord"] == bars[1]["chord"] != bars[2]["chord"]
 
 
+def test_g_minor_stays_in_key_and_spells_flats():
+    """G minor is Gm–Eb–Bb–F. Not A#/D#, and not a jump to A minor or C major."""
+    verse = [
+        _roman_to_chord("G", "minor", roman, 0.3)
+        for roman in role_progression("minor", "verse", 0.3)
+    ]
+    assert verse == ["Gm", "Eb", "Bb", "F"]
+    offsets = section_chord_offsets(verse, 4, 1, "G", "minor")
+    assert offsets == [0, -4, 3, -2]
+    assert section_chord_offsets(["F#"], 1, 1, "G", "minor") == [0]
+    # C is iv of G minor: a fourth up, the short wrap, still inside the key.
+    assert section_chord_offsets(["C"], 1, 1, "G", "minor") == [5]
+
+
 def test_section_offsets_are_shortest_wrap_from_the_key():
     assert chord_root_pc("F#m7") == 6 and chord_root_pc("Bb") == 10
     offsets = section_chord_offsets(["C", "G", "Am", "F"], 8, 2, "C")
@@ -78,3 +95,38 @@ def test_chord_spans_shift_the_loop_and_keep_the_grid():
     seam = 2 * bar
     jump = float(np.max(np.abs(np.diff(out[seam - 50 : seam + 500, 0]))))
     assert jump < 0.1
+
+
+def test_country_song_stays_on_triads():
+    density = chord_density_for_song("outlaw_country", "whiskey in G minor", 0.85)
+    assert density == 0.40
+    assert _roman_to_chord("G", "minor", "i", density) == "Gm"
+    assert "9" not in _roman_to_chord("G", "minor", "VI", density)
+
+
+def test_vocal_phrase_rests_and_does_not_tile_the_section():
+    bar = 1000
+    segments = _phrase_duty_segments(8, bar, 8 * bar, 0, 2)
+    assert segments == [(0, 4 * bar, 0)]
+    longer = _phrase_duty_segments(16, bar, 16 * bar, 0, 2)
+    assert [variant for _start, _length, variant in longer] == [0, 1]
+    assert longer[1][0] == 8 * bar
+
+
+def test_chorus_keeps_the_verse_drum_groove():
+    verse = {"name": "verse", "role": "verse", "bus_variant": {"rhythm": 1}}
+    chorus = {"name": "chorus", "role": "chorus", "bus_variant": {"rhythm": 0}}
+    _carry_foundation_variant([(verse, 8, 8), (chorus, 8, 8)])
+    assert chorus["bus_variant"]["rhythm"] == 1
+
+
+def test_vocal_files_do_not_fill_the_harmonic_bed():
+    pools = split_pool_by_layer(
+        [
+            r"D:\corpus\vocal\vocal_rap_140.wav",
+            r"D:\corpus\rhythm\drums_loop.wav",
+        ]
+    )
+    assert pools["vocal"] == [r"D:\corpus\vocal\vocal_rap_140.wav"]
+    assert pools["harmonic"] == []
+    assert all("vocal" not in path for path in pools["rhythm"])

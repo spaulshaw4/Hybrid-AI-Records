@@ -40,7 +40,8 @@ def test_section_blueprint_uses_name_not_global_clock():
     assert intro["drums_muted"] is True
     assert intro["bass_muted"] is True
     assert intro["stereo_width"] == 0.8
-    assert verse["bass_muted"] is True
+    assert verse["bass_muted"] is False
+    assert verse["bass_active"] is True
     assert verse["stereo_width"] == 1.0
     assert chorus["stereo_width"] == 1.3
 
@@ -50,12 +51,13 @@ def test_genre_from_plan_reads_core_metadata():
     assert genre_from_plan({"source_genres": [{"slug": "electroswing"}]}) == "electroswing"
 
 
-def test_unmapped_genre_falls_back_to_electroswing():
+def test_unmapped_genre_uses_its_family_not_electroswing():
     verse = get_section_blueprint("pop", "verse_2")
-    assert verse["genre"] == "electroswing"
+    assert verse["genre"] == "pop"
     assert verse["drums_muted"] is False
     assert verse["bass_muted"] is False
-    assert verse["sidechain_pump"] == 0.2
+    assert verse["drums_active"] is True
+    assert verse["bass_active"] is True
 
 
 def test_cyberpunk_darksynth_maps_neon_intro_to_adrenalized_chorus():
@@ -70,7 +72,8 @@ def test_cyberpunk_darksynth_maps_neon_intro_to_adrenalized_chorus():
     assert intro["stereo_width"] == 0.8
     assert GENRE_BLUEPRINTS["cyberpunk_darksynth"]["verse_1"]["sidechain_pump"] == 0.4
     assert verse["drums_muted"] is False
-    assert verse["bass_muted"] is True
+    assert verse["bass_muted"] is False
+    assert verse["bass_active"] is True
     assert verse["sidechain_pump"] == 0.4
     assert verse["lowpass_freq"] == 2000.0
     assert pre["sidechain_pump"] == 0.7
@@ -100,18 +103,20 @@ def test_electroswing_maps_speakeasy_intro_to_roaring_chorus():
     assert chorus["stereo_width"] == 1.25
 
 
-def test_rap_and_rock_use_electroswing_until_mapped():
+def test_rap_and_rock_use_their_own_family():
     verse = rules_for_named_section("trap", "verse_1")
     chorus = rules_for_named_section("trap", "chorus")
-    assert verse["genre"] == "electroswing"
+    assert verse["genre"] == "trap"
     assert verse["bass_active"] is True
-    assert chorus["stereo_width"] == 1.25
+    assert verse["drums_active"] is True
+    assert chorus["stereo_width"] == 1.15
 
     rock_chorus = rules_for_named_section("heavy rock", "chorus")
     rock_bridge = rules_for_named_section("heavy rock", "bridge")
     assert rock_chorus["stereo_width"] == 1.25
+    assert rock_chorus["bass_active"] is True
     assert rock_bridge["bass_muted"] is True
-    assert rock_bridge["drums_muted"] is False
+    assert rock_bridge["drums_muted"] is True
 
 
 def test_bar_lookup_follows_scaled_layout():

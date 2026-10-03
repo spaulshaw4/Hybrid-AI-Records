@@ -263,10 +263,17 @@ def split_pool_by_layer(paths: list[str]) -> dict[str, list[str]]:
             harmonic.append(path)
         else:
             unknown.append(path)
+    # Unlabeled files may fill a short bed. A vocal, or a drum already
+    # parked on rhythm, must not be copied onto the chord bus.
+    bed = [
+        path
+        for path in unknown
+        if infer_role_from_path(path) not in {"vocal", "vocals"}
+    ]
     return {
-        "rhythm": rhythm or unknown or list(paths),
-        "harmonic": harmonic or unknown or list(paths),
-        "lead": lead or unknown or vocal or list(paths),
-        "vocal": vocal or lead or unknown or list(paths),
+        "rhythm": rhythm or bed,
+        "harmonic": harmonic or bed,
+        "lead": lead or bed,
+        "vocal": vocal,
         "unknown": unknown,
     }

@@ -24,6 +24,7 @@ from engine.genre_feature_vector import (
 )
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_SHARP_TO_FLAT = {"C#": "Db", "D#": "Eb", "F#": "Gb", "G#": "Ab", "A#": "Bb"}
 _FLAT_TO_SHARP = {
     "DB": "C#",
     "EB": "D#",
@@ -31,6 +32,12 @@ _FLAT_TO_SHARP = {
     "AB": "G#",
     "BB": "A#",
 }
+# Key signatures that use flats. Relative minors included so G minor spells
+# Bb and Eb, not A# and D# (those read as a different song).
+_FLAT_MAJOR_ROOTS = {"F", "Bb", "Eb", "Ab", "Db", "Gb"}
+_FLAT_MINOR_ROOTS = {"D", "G", "C", "F", "Bb", "Eb"}
+# Country / folk songs want triads in one key, not jazz 9ths on every degree.
+_TRIAD_GENRE_TOKENS = ("country", "folk", "bluegrass", "americana", "outlaw", "honky")
 
 # Diatonic roman templates keyed by scale family.
 _PROGRESSIONS: dict[str, list[str]] = {
@@ -84,6 +91,21 @@ _ROLE_PROGRESSION_FAMILY = {
     "natural_minor": "minor",
     "aeolian": "minor",
 }
+
+
+def _prefer_flats(root: str, scale: str) -> bool:
+    mode = str(scale or "").lower()
+    if mode in {"minor", "natural_minor", "aeolian", "dorian", "phrygian", "harmonic_minor"}:
+        return root in _FLAT_MINOR_ROOTS
+    return root in _FLAT_MAJOR_ROOTS
+
+
+def chord_density_for_song(genre: str | None, prompt: str | None, density: float) -> float:
+    """Cap extensions when the song is roots music, not a jazz chart."""
+    haystack = f"{genre or ''} {prompt or ''}".lower()
+    if any(token in haystack for token in _TRIAD_GENRE_TOKENS):
+        return min(float(density), 0.40)
+    return float(density)
 
 
 def bars_per_chord_for(bars: int) -> int:
@@ -288,6 +310,8 @@ def _roman_to_chord(root: str, scale: str, roman: str, density: float) -> str:
     root_pc = NOTE_NAMES.index(root) if root in NOTE_NAMES else 4
     pc = (root_pc + pcs[deg % len(pcs)] - (1 if flat else 0)) % 12
     name = NOTE_NAMES[pc]
+    if _prefer_flats(root, scale):
+        name = _SHARP_TO_FLAT.get(name, name)
     # Case carries quality: lowercase numerals are minor, uppercase major.
     is_minor = token_clean in _MINOR_ROMAN and not diminished
     quality = "dim" if diminished else ("m" if is_minor else "")
@@ -302,6 +326,88 @@ def _roman_to_chord(root: str, scale: str, roman: str, density: float) -> str:
     else:
         quality = ""
     return f"{name}{quality}"
+
+
+def _split_roman(roman: str) -> tuple[str, str]:
+    """``i9`` -> (``i``, ``9``). The degree keeps its case; the suffix is the color."""
+    token = str(roman or "").strip()
+    flat = token.startswith("b")
+    body = token[1:] if flat else token
+    for suffix in ("maj9", "maj7", "m11", "m9", "m7", "sus4", "sus2", "add9", "13", "11", "9", "7", "5"):
+        if body.lower().endswith(suffix) and len(body) > len(suffix):
+            degree = ("b" if flat else "") + body[: -len(suffix)]
+            return degree, suffix.lower()
+    return token, ""
+
+
+def _grammar_chord(root: str, scale: str, roman: str, grammar: Any) -> str:
+    """Spell one numeral with only the colors that archetype allows.
+
+    Minor degrees stay triads unless the archetype asked for m7/m9/m11.
+    Major I, IV, and V take a dominant 7 when that color is allowed.
+    Power chords replace major triads only when ``power`` is the palette
+    and a plain triad was not also requested for that degree.
+    """
+    degree, asked = _split_roman(roman)
+    triad = _roman_to_chord(root, scale, degree, 0.2)
+    minor = triad.endswith("m")
+    base = triad[:-1] if minor else triad
+    allowed = {str(item) for item in grammar.allowed_chords}
+    forbidden = {str(item) for item in grammar.forbidden_chords}
+    degree_name = degree[1:] if degree.startswith("b") else degree
+
+    def permit(color: str) -> bool:
+        return color in allowed and color not in forbidden
+
+    if asked == "sus2" and permit("sus2"):
+        return f"{base}sus2"
+    if asked == "sus4" and permit("sus4"):
+        return f"{base}sus4"
+    if minor:
+        if asked in {"11", "m11"} and permit("m11"):
+            return f"{base}m11"
+        if asked in {"9", "m9"} and (permit("m9") or "9th" in allowed):
+            return f"{base}m9"
+        if "triad" in allowed or "minor_chord_loop" in allowed:
+            if asked in {"7", "m7"} and permit("m7"):
+                return f"{base}m7"
+            return f"{base}m"
+        if permit("m9") or "9th" in allowed:
+            return f"{base}m9"
+        if permit("m7"):
+            return f"{base}m7"
+        if permit("m11"):
+            return f"{base}m11"
+        if permit("power"):
+            return f"{base}5"
+        return f"{base}m"
+    degree_upper = degree_name.upper()
+    dominant_ok = "dom7_natural" not in forbidden and "dom7" not in forbidden
+    if degree_upper == "V" and permit("dom7") and dominant_ok:
+        return f"{base}7"
+    if degree_upper in {"I", "IV"} and permit("dom7") and "maj7" not in allowed and dominant_ok:
+        return f"{base}7"
+    if permit("maj7"):
+        return f"{base}maj7"
+    if permit("maj9"):
+        return f"{base}maj9"
+    if permit("13"):
+        return f"{base}13"
+    if permit("power") and "triad" not in allowed:
+        return f"{base}5"
+    if permit("power") and degree_upper not in {"I", "IV", "V"}:
+        return f"{base}5"
+    if permit("add9"):
+        return f"{base}add9"
+    if permit("sus4") and "triad" not in allowed:
+        return f"{base}sus4"
+    return base
+
+
+def _chords_for_romans(root: str, scale: str, romans: list[str], density: float, grammar: Any) -> list[str]:
+    if grammar is None:
+        return [_roman_to_chord(root, scale, roman, density) for roman in romans]
+    return [_grammar_chord(root, scale, roman, grammar) for roman in romans]
 
 
 def _progression_for(scale: str, density: float) -> list[str]:
@@ -408,7 +514,19 @@ def build_song_plan(
 
     bpm_i = int(round(float(bpm if bpm is not None else 120)))
     bpm_i = max(40, min(240, bpm_i))
-    density = float(genre_blend.harmonic_complexity)
+    density = chord_density_for_song(
+        genre_hint, prompt, float(genre_blend.harmonic_complexity)
+    )
+    from engine.genre_arrangement_profiles import resolve_genre_grammar
+
+    grammar = resolve_genre_grammar(genre_hint or prompt)
+    print(
+        f"[GRAMMAR] {genre_hint or prompt or 'unknown'} -> {grammar.archetype} "
+        f"chords={','.join(grammar.allowed_chords)} "
+        f"vocal={grammar.vocal_phrase_bars}/{grammar.vocal_rest_bars} "
+        f"bass={grammar.bass_behavior}",
+        flush=True,
+    )
     romans = _progression_for(scale_mode, density)
 
     sections_out: list[SectionPlan] = []
@@ -446,9 +564,7 @@ def build_song_plan(
                 energy = clamp01(float(raw.get("energy") or raw.get("energy_level") or 0.5))
             activation = raw.get("bus_activation") if isinstance(raw.get("bus_activation"), dict) else None
             section_romans = role_progression(scale_mode, role, density)
-            chords = [
-                _roman_to_chord(root, scale_mode, roman, density) for roman in section_romans
-            ]
+            chords = _chords_for_romans(root, scale_mode, section_romans, density, grammar)
             per_chord = bars_per_chord_for(bars)
             # Cycle chords across bars for the harmonic roadmap.
             for offset in range(bars):
@@ -494,9 +610,7 @@ def build_song_plan(
             slice_arc = bar_arc[cursor : cursor + bars]
             energy_10 = float(np.mean(slice_arc)) if slice_arc.size else 50.0
             energy = conductor.tension_to_unit(energy_10)
-            chords = [
-                _roman_to_chord(root, scale_mode, roman, density) for roman in romans
-            ]
+            chords = _chords_for_romans(root, scale_mode, romans, density, grammar)
             for offset in range(bars):
                 roman = romans[offset % len(romans)]
                 roadmap.append(

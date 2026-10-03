@@ -64,9 +64,13 @@ export default defineConfig(({ command, mode }) => {
           icons: [{ src: "/favicon.jpg", sizes: "512x512", type: "image/jpeg" }],
         },
         workbox: {
-          globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,webp,woff2}"],
+          // Client files are copied to .output/public after this plugin's
+          // closeBundle, so dist is empty and a precache glob only warns.
+          // Registration is paused in src/lib/register-sw.ts; runtime caching
+          // is what a later re-enable should use.
+          globPatterns: [],
+          navigateFallback: undefined,
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-          navigateFallback: "/",
           navigateFallbackDenylist: [/^\/~oauth/, /^\/api\//],
           runtimeCaching: [
             {
@@ -81,7 +85,7 @@ export default defineConfig(({ command, mode }) => {
             },
             {
               urlPattern: ({ url, sameOrigin }) =>
-                sameOrigin && url.pathname.startsWith("/_build/"),
+                sameOrigin && url.pathname.startsWith("/assets/"),
               handler: "CacheFirst",
               options: {
                 cacheName: "built-assets",

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -565,3 +566,369 @@ def role_activation(role: str) -> dict[str, float]:
 
 def known_families() -> list[str]:
     return sorted(ARRANGEMENT_FAMILIES)
+
+
+# ---------------------------------------------------------------------------
+# Arrangement grammar. Every catalog genre inherits one of ten archetypes.
+# A subgenre entry overrides only the fields that actually differ.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ArrangementGrammar:
+    bpm_range: tuple[int, int]
+    scale_types: list[str]
+    allowed_chords: list[str]
+    forbidden_chords: list[str]
+    kick_snare_grid: str
+    comping_style: str
+    bass_behavior: str
+    vocal_phrase_bars: int
+    vocal_rest_bars: int
+    max_consecutive_repeats: int
+    lead_monophony_strict: bool = True
+    bus_priority: list[str] = field(
+        default_factory=lambda: ["rhythm", "bass", "harmonic", "vocal", "lead"]
+    )
+    archetype: str = ""
+
+
+_BOOM_CHICK = _accents({0: 1.00, 4: 0.85, 8: 1.00, 12: 0.85})
+_ONE_DROP = _accents({8: 1.00, 10: 0.35})
+_HALF_TIME = _accents({0: 1.00, 8: 0.95, 12: 0.25})
+_TRAIN = _accents({0: 1.00, 2: 0.70, 4: 0.90, 6: 0.70, 8: 1.00, 10: 0.70, 12: 0.90, 14: 0.70})
+
+_RHYTHM_GRIDS: dict[str, tuple[float, ...]] = {
+    "rock_standard_2_4": _BACKBEAT,
+    "loose_four_on_floor": _FOUR_ON_FLOOR,
+    "four_on_the_floor": _FOUR_ON_FLOOR,
+    "boom_chick_backbeat": _BOOM_CHICK,
+    "fast_acoustic_train": _TRAIN,
+    "shuffle_2_4": _SWING_RIDE,
+    "double_kick_skank": _BACKBEAT,
+    "one_drop_beat_three": _ONE_DROP,
+    "snare_on_three_half_time": _HALF_TIME,
+    "swing_boom_bap_grid": _BOOM_BAP,
+    "swing_grid": _SWING_RIDE,
+    "syncopated_sparse_rim": _TRESILLO,
+}
+
+# 16th-note steps that stay open. None means the bus sustains (no chop).
+_COMPING_STEPS: dict[str, set[int] | None] = {
+    "palm_mute_driving_eighths": {0, 2, 4, 6, 8, 10, 12, 14},
+    "percussive_strum_upbeat_accent": {0, 2, 4, 6, 8, 10, 12, 14},
+    "offbeat_skank_eighths": {2, 6, 10, 14},
+    "syncopated_rhodes_chops": {3, 6, 10, 13, 15},
+    "comping_on_2_and_4": {4, 12},
+    "fingerpick_arpeggio": {0, 4, 8, 12},
+    "sparse_atmospheric_chops": None,
+    "sustained_pad": None,
+    "open_fifth_wash": None,
+    "fuzz_heavy_riffs": {0, 2, 4, 6, 8, 10, 12, 14},
+    "angular_scratch_chords": {0, 3, 6, 8, 11, 14},
+    "twang_telecaster_backbeat": {0, 4, 8, 12},
+    "verse_arpeggio_chorus_wall": {0, 2, 4, 6, 8, 10, 12, 14},
+    "lazy_strum_high_whistle_lead": {2, 6, 10, 14},
+}
+_BASS_STEPS: dict[str, set[int] | None] = {
+    "root_pedal_locked_to_kick": {0, 2, 4, 6, 8, 10, 12, 14},
+    "alternating_root_fifth": {0, 8, 12},
+    "offbeat_sub_sidechain": {2, 6, 10, 14},
+    "melodic_sub_silent_on_one": {4, 6, 12, 14},
+    "pitched_log_drum": {0, 3, 6, 10, 14},
+    "glide_808_locked_to_kick": None,
+    "glide_808_sub_saturated": None,
+    "walking_bass": {0, 4, 8, 12},
+    "upright_sample_chop": {0, 4, 8, 12},
+    "melodic_lead_chorus_picked": {0, 2, 4, 6, 8, 10, 12, 14},
+    "contrabass_pedal": None,
+    "sub_drone": None,
+    "bass_free": set(),
+}
+
+
+ARCHETYPES: dict[str, ArrangementGrammar] = {
+    "driving_rock_metal": ArrangementGrammar(
+        bpm_range=(115, 150),
+        scale_types=["natural_minor", "dorian", "mixolydian"],
+        allowed_chords=["power", "triad", "sus2", "sus4"],
+        forbidden_chords=["maj7", "maj9", "dim7"],
+        kick_snare_grid="rock_standard_2_4",
+        comping_style="palm_mute_driving_eighths",
+        bass_behavior="root_pedal_locked_to_kick",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=4,
+        max_consecutive_repeats=2,
+        archetype="driving_rock_metal",
+    ),
+    "roots_americana": ArrangementGrammar(
+        bpm_range=(90, 130),
+        scale_types=["natural_minor", "major_pentatonic", "blues"],
+        allowed_chords=["triad", "dom7"],
+        forbidden_chords=["maj7", "maj9", "sus2", "m9"],
+        kick_snare_grid="boom_chick_backbeat",
+        comping_style="percussive_strum_upbeat_accent",
+        bass_behavior="alternating_root_fifth",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=4,
+        max_consecutive_repeats=1,
+        archetype="roots_americana",
+    ),
+    "four_on_the_floor_club": ArrangementGrammar(
+        bpm_range=(118, 135),
+        scale_types=["natural_minor", "dorian", "mixolydian"],
+        allowed_chords=["m7", "sus2", "sus4", "triad"],
+        forbidden_chords=["maj9", "power"],
+        kick_snare_grid="four_on_the_floor",
+        comping_style="sustained_pad",
+        bass_behavior="offbeat_sub_sidechain",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=8,
+        max_consecutive_repeats=2,
+        archetype="four_on_the_floor_club",
+    ),
+    "broken_beat_urban": ArrangementGrammar(
+        bpm_range=(125, 165),
+        scale_types=["natural_minor", "phrygian", "harmonic_minor"],
+        allowed_chords=["triad", "m7", "minor_chord_loop"],
+        forbidden_chords=["maj7", "dom7_natural"],
+        kick_snare_grid="snare_on_three_half_time",
+        comping_style="sparse_atmospheric_chops",
+        bass_behavior="glide_808_locked_to_kick",
+        vocal_phrase_bars=8,
+        vocal_rest_bars=2,
+        max_consecutive_repeats=2,
+        archetype="broken_beat_urban",
+    ),
+    "island_syncopated": ArrangementGrammar(
+        bpm_range=(68, 100),
+        scale_types=["major", "natural_minor", "dorian"],
+        allowed_chords=["triad", "dom7"],
+        forbidden_chords=["power", "maj9", "sus4"],
+        kick_snare_grid="one_drop_beat_three",
+        comping_style="offbeat_skank_eighths",
+        bass_behavior="melodic_sub_silent_on_one",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=4,
+        max_consecutive_repeats=2,
+        bus_priority=["bass", "rhythm", "harmonic", "vocal", "lead"],
+        archetype="island_syncopated",
+    ),
+    "afro_groove_log": ArrangementGrammar(
+        bpm_range=(110, 118),
+        scale_types=["dorian", "natural_minor", "pentatonic"],
+        allowed_chords=["m7", "m9", "m11", "sus2"],
+        forbidden_chords=["power", "dom7_sharp9"],
+        kick_snare_grid="syncopated_sparse_rim",
+        comping_style="syncopated_rhodes_chops",
+        bass_behavior="pitched_log_drum",
+        vocal_phrase_bars=2,
+        vocal_rest_bars=6,
+        max_consecutive_repeats=2,
+        archetype="afro_groove_log",
+    ),
+    "extended_harmony": ArrangementGrammar(
+        bpm_range=(70, 140),
+        scale_types=["dorian", "mixolydian", "natural_minor", "major"],
+        allowed_chords=["maj7", "m9", "m7", "dom7", "13"],
+        forbidden_chords=["power"],
+        kick_snare_grid="swing_grid",
+        comping_style="comping_on_2_and_4",
+        bass_behavior="walking_bass",
+        vocal_phrase_bars=2,
+        vocal_rest_bars=2,
+        max_consecutive_repeats=2,
+        archetype="extended_harmony",
+    ),
+    "acoustic_folk_bluegrass": ArrangementGrammar(
+        bpm_range=(80, 140),
+        scale_types=["major", "natural_minor", "mixolydian"],
+        allowed_chords=["triad"],
+        forbidden_chords=["maj7", "maj9", "m7", "m9", "dom7"],
+        kick_snare_grid="boom_chick_backbeat",
+        comping_style="fingerpick_arpeggio",
+        bass_behavior="alternating_root_fifth",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=2,
+        max_consecutive_repeats=2,
+        archetype="acoustic_folk_bluegrass",
+    ),
+    "cinematic_orchestral": ArrangementGrammar(
+        bpm_range=(60, 120),
+        scale_types=["natural_minor", "major", "harmonic_minor"],
+        allowed_chords=["triad", "sus2", "sus4"],
+        forbidden_chords=["maj9", "power"],
+        kick_snare_grid="rock_standard_2_4",
+        comping_style="sustained_pad",
+        bass_behavior="contrabass_pedal",
+        vocal_phrase_bars=4,
+        vocal_rest_bars=4,
+        max_consecutive_repeats=2,
+        archetype="cinematic_orchestral",
+    ),
+    "ambient_drone_minimal": ArrangementGrammar(
+        bpm_range=(40, 90),
+        scale_types=["natural_minor", "dorian", "phrygian"],
+        allowed_chords=["power", "triad", "sus2"],
+        forbidden_chords=["dom7", "maj9", "m9"],
+        kick_snare_grid="rock_standard_2_4",
+        comping_style="open_fifth_wash",
+        bass_behavior="sub_drone",
+        vocal_phrase_bars=8,
+        vocal_rest_bars=0,
+        max_consecutive_repeats=2,
+        lead_monophony_strict=False,
+        archetype="ambient_drone_minimal",
+    ),
+}
+
+# Only the fields that differ from the parent. Everything else is inherited.
+GENRE_TAXONOMY: dict[str, dict[str, Any]] = {
+    "outlaw_country": {
+        "parent": "roots_americana",
+        "scale_types": ["natural_minor", "blues"],
+        "bpm_range": (96, 126),
+    },
+    "bluegrass": {
+        "parent": "roots_americana",
+        "bpm_range": (130, 165),
+        "kick_snare_grid": "fast_acoustic_train",
+        "vocal_rest_bars": 2,
+    },
+    "bakersfield_sound": {
+        "parent": "roots_americana",
+        "kick_snare_grid": "shuffle_2_4",
+        "comping_style": "twang_telecaster_backbeat",
+    },
+    "stoner_rock": {
+        "parent": "driving_rock_metal",
+        "bpm_range": (70, 95),
+        "scale_types": ["pentatonic_minor", "blues"],
+        "comping_style": "fuzz_heavy_riffs",
+    },
+    "thrash_metal": {
+        "parent": "driving_rock_metal",
+        "bpm_range": (170, 220),
+        "kick_snare_grid": "double_kick_skank",
+        "forbidden_chords": ["maj7", "dom7", "add9"],
+    },
+    "post_punk": {
+        "parent": "driving_rock_metal",
+        "bpm_range": (120, 140),
+        "bass_behavior": "melodic_lead_chorus_picked",
+        "comping_style": "angular_scratch_chords",
+    },
+    "trap": {
+        "parent": "broken_beat_urban",
+        "bpm_range": (135, 155),
+        "bass_behavior": "glide_808_sub_saturated",
+    },
+    "boom_bap": {
+        "parent": "broken_beat_urban",
+        "bpm_range": (85, 96),
+        "kick_snare_grid": "swing_boom_bap_grid",
+        "bass_behavior": "upright_sample_chop",
+    },
+    "g_funk": {
+        "parent": "broken_beat_urban",
+        "bpm_range": (90, 102),
+        "allowed_chords": ["m7", "9th", "triad"],
+        "comping_style": "lazy_strum_high_whistle_lead",
+    },
+    "symphonic_rock": {"parent": "driving_rock_metal", "bpm_range": (118, 142)},
+    "alternative_rock": {"parent": "driving_rock_metal", "bpm_range": (120, 155)},
+    "reggae": {"parent": "island_syncopated", "bpm_range": (68, 88)},
+    "dub": {"parent": "island_syncopated", "bpm_range": (68, 88), "vocal_rest_bars": 8},
+    "amapiano": {"parent": "afro_groove_log", "bpm_range": (112, 116)},
+    "neo_soul": {"parent": "extended_harmony", "bpm_range": (70, 100)},
+}
+
+# First match wins. Specific families are listed before the words they contain.
+_ARCHETYPE_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ambient_drone_minimal", ("ambient", "drone", "minimal", "new_age")),
+    ("cinematic_orchestral", ("cinematic", "orchestral", "symphony", "film_score", "classical")),
+    ("extended_harmony", ("jazz", "neo_soul", "neosoul", "bebop", "swing", "bossa", "soul")),
+    ("afro_groove_log", ("amapiano", "afro_house", "afrohouse", "afrobeats", "afrobeat")),
+    ("island_syncopated", ("reggae", "dub", "ska", "dancehall", "rocksteady")),
+    ("acoustic_folk_bluegrass", ("bluegrass", "folk", "acoustic")),
+    ("roots_americana", ("outlaw", "country", "americana", "honky", "bakersfield", "blues")),
+    ("broken_beat_urban", ("trap", "hip_hop", "hiphop", "rap", "drill", "boom_bap", "phonk", "grime")),
+    (
+        "four_on_the_floor_club",
+        ("cyberpunk", "darksynth", "synthwave", "house", "techno", "trance", "disco", "edm", "dnb", "drum_and_bass", "club", "pop"),
+    ),
+    ("driving_rock_metal", ("metal", "punk", "grunge", "rock", "djent", "hardcore", "shoegaze", "emo")),
+)
+
+
+def _token_hit(slug: str, needle: str) -> bool:
+    padded = f"_{slug}_"
+    return f"_{needle}_" in padded
+
+
+def _classify_archetype(slug: str) -> str:
+    for archetype, needles in _ARCHETYPE_TOKENS:
+        if any(_token_hit(slug, needle) for needle in needles):
+            return archetype
+    return "driving_rock_metal"
+
+
+def _clone_grammar(parent: ArrangementGrammar, overrides: dict[str, Any], archetype: str) -> ArrangementGrammar:
+    payload = asdict(parent)
+    payload["scale_types"] = list(payload["scale_types"])
+    payload["allowed_chords"] = list(payload["allowed_chords"])
+    payload["forbidden_chords"] = list(payload["forbidden_chords"])
+    payload["bus_priority"] = list(payload["bus_priority"])
+    payload["bpm_range"] = tuple(payload["bpm_range"])
+    for key, value in overrides.items():
+        if key == "parent":
+            continue
+        if key == "bpm_range":
+            value = tuple(value)
+        payload[key] = value
+    payload["archetype"] = archetype
+    return ArrangementGrammar(**payload)
+
+
+def resolve_genre_grammar(genre_tag: str | None) -> ArrangementGrammar:
+    """Parent archetype plus the subgenre's own deltas.
+
+    An unknown tag is classified by its words (metal, house, reggae, …).
+    A tag with no musical word in it still resolves, to driving rock, so the
+    assembler always has a chord palette and a vocal rest.
+    """
+    normalized = slugify_genre(genre_tag)
+    spec = GENRE_TAXONOMY.get(normalized)
+    if spec is None and normalized:
+        for key, row in GENRE_TAXONOMY.items():
+            if _token_hit(normalized, key):
+                spec = row
+                break
+    if spec:
+        parent_name = str(spec["parent"])
+        return _clone_grammar(ARCHETYPES[parent_name], spec, parent_name)
+    return _clone_grammar(ARCHETYPES[_classify_archetype(normalized)], {}, _classify_archetype(normalized))
+
+
+def grammar_rhythm_target(grammar: ArrangementGrammar) -> list[float] | None:
+    """Kick/snare accent grid for the rhythm picker. None keeps the family template."""
+    target = _RHYTHM_GRIDS.get(grammar.kick_snare_grid)
+    return list(target) if target else None
+
+
+def comping_open_steps(style: str | None) -> set[int] | None:
+    """16th-note steps the chord bus may sound on. None sustains the whole bar."""
+    if not style:
+        return None
+    if style not in _COMPING_STEPS:
+        return None
+    return _COMPING_STEPS[style]
+
+
+def bass_open_steps(behavior: str | None) -> set[int] | None:
+    """16th-note steps the bass may sound on. None sustains. Empty silences it."""
+    if not behavior:
+        return None
+    if behavior not in _BASS_STEPS:
+        return None
+    return _BASS_STEPS[behavior]

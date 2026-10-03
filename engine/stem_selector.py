@@ -509,12 +509,23 @@ def _attach_history(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> Non
         row["use_count"] = count
 
 
+def _row_is_vocal_stem(row: dict[str, Any]) -> bool:
+    """A sung file, by name or by the vocal folder. Not a title that mentions singing."""
+    name = str(row.get("filename") or os.path.basename(str(row.get("file_path") or ""))).lower()
+    if name.startswith("vocal") or name.startswith("vox"):
+        return True
+    path = str(row.get("file_path") or "").replace("/", "\\").lower()
+    return "\\vocal\\" in path or "\\vocals\\" in path or "\\vox\\" in path
+
+
 def _python_role_filter(rows: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
     """Drop mixtures / wrong-role filenames after the indexed fetch."""
     kept: list[dict[str, Any]] = []
     for row in rows:
         name = str(row.get("filename") or "").lower()
         if name.startswith("mixture"):
+            continue
+        if role in {"harmonic", "lead", "rhythm", "bass"} and _row_is_vocal_stem(row):
             continue
         if role == "bass":
             if _row_is_bass(row):
@@ -530,6 +541,7 @@ def _python_role_filter(rows: list[dict[str, Any]], role: str) -> list[dict[str,
             row
             for row in rows
             if not str(row.get("filename") or "").lower().startswith("mixture")
+            and not _row_is_vocal_stem(row)
             and 1.0 < float(row.get("spectral_centroid") or 0.0) < BASS_CENTROID_FALLBACK_HZ
         ]
     return kept
@@ -1017,6 +1029,7 @@ def select_for_role(
     pitch_weights: Any = None,
     groove_target: Any = None,
     trace: dict[str, Any] | None = None,
+    fatigue_penalty: Any = None,
 ) -> list[dict[str, Any]]:
     """Fetch, score, and seeded-pick ``count`` slices for one role.
 
@@ -1072,6 +1085,24 @@ def select_for_role(
         for item in ranked:
             item.setdefault("pack_id", pack_id_from_path(item.get("file_path")))
             item.setdefault("affinity_score", 0.0)
+    if fatigue_penalty is not None and ranked:
+        untouched = list(ranked)
+        from engine.stem_lanes import stem_id_of
+
+        for item in ranked:
+            stem_id = stem_id_of(str(item.get("file_path") or ""))
+            try:
+                penalty = max(0.0, min(1.0, float(fatigue_penalty(stem_id))))
+            except Exception:
+                penalty = 0.0
+            item["fatigue"] = round(penalty, 4)
+            item["score"] = round(float(item.get("score") or 0.0) * (1.0 - penalty), 4)
+            item["rank_key"] = item["score"]
+        ranked = [item for item in ranked if float(item.get("score") or 0.0) > 0.0]
+        if not ranked:
+            ranked = untouched
+        else:
+            ranked.sort(key=lambda item: (-float(item["rank_key"]), str(item.get("file_path") or "")))
     picks = pick_variants(ranked, count, rng, top_k=top_k)
     if trace is not None:
         trace["ranked"] = ranked

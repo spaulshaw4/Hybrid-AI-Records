@@ -572,21 +572,49 @@ def genre_from_plan(plan: Any) -> str:
     return ""
 
 
-def get_section_blueprint(genre: str, section_name: str) -> dict[str, Any]:
-    """Fetch DSP rules based on the specific genre and section being rendered."""
-    clean_genre = _normalize_genre_key(genre)
-    # Fallback to electroswing if the specific genre is not yet mapped
-    resolved = clean_genre if clean_genre in GENRE_BLUEPRINTS else "electroswing"
-    blueprint_map = GENRE_BLUEPRINTS[resolved]
+# Active song sections are built rhythm-up. Intro, outro, and breakdowns may
+# drop the foundation; a verse or chorus may not.
+_FOUNDATION_ROLES = frozenset({"verse", "build", "chorus", "drop"})
 
-    name = str(section_name or "")
-    base_section = _catalog_section_key(name)
-    raw = dict(blueprint_map.get(base_section) or _CATALOG_FALLBACK)
-    return _hydrate_console(
-        raw,
-        role=normalise_section_role(section_name),
-        genre=resolved,
-    )
+
+def _require_foundation(rules: dict[str, Any]) -> dict[str, Any]:
+    """Verse / build / chorus / drop keep drums and bass in the mix."""
+    role = str(rules.get("role") or "")
+    if role not in _FOUNDATION_ROLES or rules.get("breakdown"):
+        return rules
+    rules["drums_muted"] = False
+    rules["bass_muted"] = False
+    rules["drums_active"] = True
+    rules["bass_active"] = True
+    volume = dict(rules.get("volume") or {})
+    if volume:
+        volume["rhythm"] = max(float(volume.get("rhythm") or 0.0), 0.70)
+        volume["bass"] = max(float(volume.get("bass") or 0.0), 0.70)
+        rules["volume"] = volume
+    return rules
+
+
+def get_section_blueprint(genre: str, section_name: str) -> dict[str, Any]:
+    """Fetch DSP rules for this song's genre, not a stand-in genre.
+
+    Cyberpunk and electroswing keep their named catalogs. Every other genre
+    uses its arrangement family (country -> jazz_roots console, rock -> rock),
+    so an outlaw-country song is not mixed as electroswing.
+    """
+    clean_genre = _normalize_genre_key(genre)
+    role = normalise_section_role(section_name)
+    if clean_genre in GENRE_BLUEPRINTS:
+        blueprint_map = GENRE_BLUEPRINTS[clean_genre]
+        raw = dict(blueprint_map.get(_catalog_section_key(section_name)) or _CATALOG_FALLBACK)
+        rules = _hydrate_console(raw, role=role, genre=clean_genre)
+    else:
+        family = family_for_genre(clean_genre)
+        rules = _hydrate_console(
+            _family_as_catalog(section_console_state(family, role)),
+            role=role,
+            genre=clean_genre or family,
+        )
+    return _require_foundation(rules)
 
 
 def rules_for_plan_bar(
