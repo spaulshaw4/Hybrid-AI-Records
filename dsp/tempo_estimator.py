@@ -41,19 +41,31 @@ BPM_MAX = 215.0
 #: than an order of magnitude, and still only ~600 grid points.
 BPM_STEPS = 600
 
-#: Beat-period multiples summed by the comb, and their weights. Weight decays
-#: because a 4 s slice only overlaps itself for a third of its length at lag 4.
-_COMB_MULTIPLES = (1.0, 2.0, 3.0, 4.0)
-_COMB_WEIGHTS = (1.0, 0.55, 0.35, 0.22)
-#: Offbeat positions subtracted from the comb. Without these a half-tempo
-#: reading scores identically to the true one, because every true beat is also
-#: a half-tempo offbeat.
-_OFFBEAT_MULTIPLES = (0.5, 1.5, 2.5)
-_OFFBEAT_WEIGHT = 0.45
+#: Beat-period multiples summed by the comb, unweighted. Terms past
+#: ``_MAX_LAG_FRACTION`` of the envelope contribute nothing, so slow hypotheses
+#: naturally get fewer terms than fast ones -- that asymmetry is deliberate and
+#: measured: it is what stops a 4 s slice from reading as half-time.
+_COMB_MULTIPLES = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+#: The autocorrelation past this fraction of the envelope is built from too
+#: little overlap to trust.
+_MAX_LAG_FRACTION = 0.7
 
-#: Log-normal tempo prior, matching the usual dance-corpus assumption.
-_PRIOR_CENTER_BPM = 122.0
-_PRIOR_SIGMA_OCTAVES = 1.05
+#: Subtracted at 2/3 and 4/3 of the candidate period. A dotted reading (period
+#: 1.5 beats) was the single largest error class in the first version: its comb
+#: lands on true beats at multiples 2 and 4, so nothing else distinguishes it.
+#: For the true period these two taps fall between beats and cost nothing.
+_THIRD_MULTIPLES = (2.0 / 3.0, 4.0 / 3.0)
+_THIRD_WEIGHT = 0.8
+
+#: Log-normal tempo prior. Tuned on a held-out-free dev half of the filename
+#: ground truth; the corpus is dance/production loops and really is centred
+#: near 120. Half an octave of spread still admits 85-170 comfortably.
+_PRIOR_CENTER_BPM = 120.0
+_PRIOR_SIGMA_OCTAVES = 0.5
+#: Overlap-normalisation exponent: ``corr[l] / (n - l) ** _OVERLAP_EXPONENT``.
+#: 1.0 is fully unbiased and too noisy at long lags; 0.0 is the raw biased
+#: estimate and favours fast tempos. The midpoint measured best.
+_OVERLAP_EXPONENT = 0.5
 
 _MEL_FB_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
 
@@ -136,28 +148,29 @@ def onset_envelope(mono: np.ndarray, sr: int = TARGET_SR) -> np.ndarray:
 
 
 def _autocorrelation(env: np.ndarray) -> np.ndarray:
-    """Overlap-normalised autocorrelation of the onset envelope, peak-scaled.
+    """Overlap-compensated autocorrelation of the onset envelope, peak-scaled.
 
-    Dividing by the number of overlapping samples keeps long lags comparable to
-    short ones; without it the comb would always prefer the fastest tempo in
-    range simply because more of the envelope contributes there.
+    Computed through the FFT, so cost is independent of the lag range. The
+    partial division by overlap count keeps long lags comparable to short ones
+    without fully amplifying their noise.
     """
     centered = env - float(np.mean(env))
     n = centered.size
     size = int(1 << (2 * n - 1).bit_length())
     spec = sp_fft.rfft(centered, size)
     corr = sp_fft.irfft(spec * np.conj(spec), size)[:n]
-    overlap = np.arange(n, 0, -1, dtype=np.float64)
+    overlap = np.arange(n, 0, -1, dtype=np.float64) ** _OVERLAP_EXPONENT
     corr = corr / overlap
     head = float(corr[0])
     return corr / head if head > EPS else corr
 
 
 def _interp_at(corr: np.ndarray, lags: np.ndarray) -> np.ndarray:
-    """Linear interpolation of ``corr`` at fractional lags; 0 past the end."""
+    """Linear interpolation of ``corr`` at fractional lags; 0 past the limit."""
+    limit = min(corr.size, int(_MAX_LAG_FRACTION * corr.size))
     floor = np.floor(lags).astype(np.int64)
     frac = lags - floor
-    valid = (floor >= 0) & (floor + 1 < corr.size)
+    valid = (floor >= 0) & (floor + 1 < limit)
     out = np.zeros(lags.shape, dtype=np.float64)
     fi = floor[valid]
     out[valid] = corr[fi] * (1.0 - frac[valid]) + corr[fi + 1] * frac[valid]
@@ -183,10 +196,10 @@ def tempo_salience(env: np.ndarray, sr: int = TARGET_SR, hop: int = HOP) -> np.n
     frame_rate = float(sr) / float(hop)
     base_lags = frame_rate * 60.0 / _GRID
     score = np.zeros(_GRID.size, dtype=np.float64)
-    for mult, weight in zip(_COMB_MULTIPLES, _COMB_WEIGHTS):
-        score += weight * _interp_at(corr, base_lags * mult)
-    for mult in _OFFBEAT_MULTIPLES:
-        score -= _OFFBEAT_WEIGHT * _interp_at(corr, base_lags * mult)
+    for mult in _COMB_MULTIPLES:
+        score += _interp_at(corr, base_lags * mult)
+    for mult in _THIRD_MULTIPLES:
+        score -= _THIRD_WEIGHT * _interp_at(corr, base_lags * mult)
     return score * _PRIOR
 
 
