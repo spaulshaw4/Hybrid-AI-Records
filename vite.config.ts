@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { lovableAssetDevMiddleware } from "./src/lib/lovable-asset-proxy.server";
 
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode || process.env.NODE_ENV || "development", process.cwd(), "");
@@ -37,6 +38,15 @@ export default defineConfig(({ command, mode }) => {
       dedupe: ["react", "react-dom", "@tanstack/react-router", "@tanstack/react-query"],
     },
     plugins: [
+      {
+        name: "lovable-asset-proxy",
+        configureServer(server) {
+          server.middlewares.use(lovableAssetDevMiddleware());
+        },
+        configurePreviewServer(server) {
+          server.middlewares.use(lovableAssetDevMiddleware());
+        },
+      },
       tsConfigPaths({ projects: ["./tsconfig.json"] }),
       tanstackStart({
         srcDirectory: "src",

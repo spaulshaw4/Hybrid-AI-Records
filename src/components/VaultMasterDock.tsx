@@ -28,7 +28,7 @@ export function VaultMasterDock() {
   return (
     <div
       id="vault-master-dock"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-zinc-950/95 px-4 py-3 backdrop-blur-xl"
+      className="fixed bottom-[var(--site-dock-height)] start-[var(--site-sidebar-width)] end-0 z-40 border-t border-white/10 bg-zinc-950/95 px-4 py-3 backdrop-blur-xl"
     >
       <div className="mx-auto flex max-w-5xl items-center gap-3">
         <Button

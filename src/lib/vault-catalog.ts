@@ -108,7 +108,26 @@ export function workerDownloadUrls(
   };
 }
 
-/** Finished-record URLs only — WAV master first, MP3 as stream fallback. */
+const MP3_URL = /\.mp3(?:$|[?#])/i;
+const WAV_URL = /\.wav(?:$|[?#])/i;
+
+/** Delivery MP3 for the vault download control. WAV masters are not this file. */
+export function vaultMp3DownloadUrl(urls: {
+  streamUrl?: string;
+  fallbackUrl?: string;
+}): string {
+  for (const url of [urls.streamUrl, urls.fallbackUrl]) {
+    const trimmed = (url || "").trim();
+    if (MP3_URL.test(trimmed)) return trimmed;
+  }
+  return "";
+}
+
+/**
+ * Finished-record URLs. Playback uses the MP3 when one exists — engine masters
+ * are float WAV, which browsers reject. The WAV stays the download.
+ * `fallbackUrl` keeps the MP3 so the download control stays enabled.
+ */
 export function vaultMasterUrls(row: {
   id: string;
   masterUrl?: string;
@@ -116,13 +135,15 @@ export function vaultMasterUrls(row: {
 }): { wavUrl: string; streamUrl: string; fallbackUrl: string } {
   if (isWorkerSessionId(row.id)) {
     const urls = workerDownloadUrls(row.id);
-    return { wavUrl: urls.wavUrl, streamUrl: urls.wavUrl, fallbackUrl: urls.mp3Url };
+    return { wavUrl: urls.wavUrl, streamUrl: urls.mp3Url, fallbackUrl: urls.mp3Url };
   }
   const master = (row.masterUrl || "").trim();
   const mp3 = (row.mp3Url || "").trim();
-  const wavUrl = /\.wav(\?|$)/i.test(master) ? master : "";
-  const streamUrl = wavUrl || mp3 || master;
-  return { wavUrl: wavUrl || master, streamUrl, fallbackUrl: mp3 || master };
+  const wavUrl = WAV_URL.test(master) ? master : "";
+  const playableMp3 = MP3_URL.test(mp3) ? mp3 : MP3_URL.test(master) ? master : "";
+  const nonWavMaster = master && !WAV_URL.test(master) ? master : "";
+  const streamUrl = playableMp3 || nonWavMaster || master;
+  return { wavUrl: wavUrl || master, streamUrl, fallbackUrl: playableMp3 };
 }
 
 export function rememberWorkerSession(sessionId: string): void {

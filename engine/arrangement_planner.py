@@ -367,10 +367,9 @@ Lane ids are 01_kick, 02_snare, 03_tops, 04_aux_perc, 05_sub_bass, 06_mid_bass,
 12_vocal_backing, 13_transitions_fx.
 For each lane choose one source.
 CATALOG: {"source": "catalog", "stem_id": "id from the catalog", "active_bars": [1, 2]}.
-GENERATE: {"source": "generate", "lyrics": "one original sung line"} for vocal lanes,
-or {"source": "generate", "prompt": "what the instrument plays"} for any other lane,
-plus active_bars. Generate only when the catalog cannot cover that lane.
-Write new lyrics for this song. Do not copy an example line.
+11_lead_vocal is always CATALOG. Never generate a lead vocal.
+GENERATE is only for a non-vocal lane the catalog cannot cover:
+{"source": "generate", "prompt": "what the instrument plays", "active_bars": [1, 2]}.
 active_bars and rest_bars are JSON arrays of section-local 1-based bar numbers, never a single number.
 A catalog stem cannot play longer than its bars. A later active run retriggers the slice.
 When 11_lead_vocal is active, 10_lead_inst is silent.
@@ -532,6 +531,8 @@ def validate_arrangement_plan(
             if lane is None:
                 continue
             if isinstance(entry, dict) and str(entry.get("source") or "").lower() == "generate":
+                if lane == _VOCAL_LANE:
+                    continue
                 assignment = _generate_assignment(entry, bars)
                 if assignment is not None:
                     cleaned[lane] = assignment

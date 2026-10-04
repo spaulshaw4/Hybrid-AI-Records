@@ -409,13 +409,25 @@ def test_three_overlapping_creates_share_one_session(live_dirs, monkeypatch):
     """A second POST that arrives before the body is parsed joins the claim."""
     monkeypatch.delenv("HYBRID_WORKER_TOKEN", raising=False)
     started: list[str] = []
+    real_thread = threading.Thread
 
     class _NoThread:
-        def __init__(self, target, args, name, daemon):
-            started.append(args[0])
+        def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None):
+            self._inner = None
+            if target is runner._worker:
+                started.append(args[0])
+                return
+            self._inner = real_thread(
+                group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+            )
 
         def start(self):
-            pass
+            if self._inner is not None:
+                self._inner.start()
+
+        def join(self, timeout=None):
+            if self._inner is not None:
+                self._inner.join(timeout)
 
     monkeypatch.setattr(runner.threading, "Thread", _NoThread)
     barrier = threading.Barrier(3)

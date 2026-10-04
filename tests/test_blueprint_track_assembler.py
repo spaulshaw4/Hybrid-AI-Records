@@ -22,6 +22,8 @@ from engine.blueprint_track_assembler import (  # noqa: E402
     get_section_order,
     junction_zero_crossing,
     load_phrase_slice,
+    _load_bus_loop,
+    _load_role_loop,
     loop_join_fade_samples,
     samples_for_bars,
     samples_per_bar,
@@ -138,6 +140,32 @@ class TestLoadPhraseSlice(unittest.TestCase):
             self.assertEqual(padded.shape[0], 1000)
             self.assertEqual(trimmed.shape[0], 1000)
             self.assertLess(float(np.max(np.abs(trimmed[-1]))), 0.05)
+
+
+class TestPhraseGridSnap(unittest.TestCase):
+    def test_phrase_roles_snap_and_grid_roles_stay_full(self):
+        sr = 8000
+        lead_in = np.zeros((int(0.25 * sr), 2))
+        t = np.arange(int(0.5 * sr)) / sr
+        tone = np.sin(2.0 * np.pi * 440.0 * t + 1.2)
+        body = np.stack([tone, tone], axis=1)
+        audio = np.vstack([lead_in, body, lead_in])
+        ones = np.ones((1000, 2), dtype=np.float64)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "loop.wav")
+            flat = os.path.join(tmp, "flat.wav")
+            sf.write(path, audio, sr)
+            sf.write(flat, ones, sr)
+            phrase = _load_role_loop(path, "lead")
+            grid = _load_role_loop(path, "bass")
+            bus_phrase = _load_bus_loop(path, "harmonic")
+            bus_grid = _load_bus_loop(path, "rhythm")
+            flat_phrase = _load_role_loop(flat, "vocal")
+        self.assertLess(phrase.shape[0], audio.shape[0])
+        self.assertEqual(grid.shape[0], audio.shape[0])
+        self.assertLess(bus_phrase.shape[0], audio.shape[0])
+        self.assertEqual(bus_grid.shape[0], audio.shape[0])
+        self.assertEqual(flat_phrase.shape[0], ones.shape[0])
 
 
 class TestAssembleFromBlueprint(unittest.TestCase):

@@ -118,7 +118,7 @@ def inspect_handoff(scratch_root: str, session_id: str) -> dict[str, Any]:
             slice_count = sum(
                 1
                 for name in os.listdir(slices)
-                if name.lower().endswith((".wav", ".flac", ".mp3"))
+                if name.lower().endswith(".wav")
             )
         except OSError:
             slice_count = 0

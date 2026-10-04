@@ -101,39 +101,123 @@ def _download(url: str, dest: str) -> None:
         handle.write(data)
 
 
-def load_and_resample_generated_wav(
-    raw_bytes: bytes,
-    target_sr: int = 44100,
-    *,
-    mono: bool = False,
-) -> np.ndarray:
-    """Decode a generated wav and put it on the session rate.
+def _temp_suffix(raw: bytes) -> str:
+    """Keep the container librosa expects. MP3 is decoded, then the lane is WAV."""
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WAVE":
+        return ".wav"
+    if raw[:4] == b"fLaC":
+        return ".flac"
+    if raw[:4] == b"FORM":
+        return ".aiff"
+    return ".mp3"
 
-    ``soundfile`` consumes the RIFF header, so those bytes never become a
-    click at the start of the slice. Bark's native 24 kHz is resampled onto
-    ``target_sr`` (the render rate, 44100 unless the session asked for 48000).
-    Vocal takes are folded to mono. Instrument takes keep their channels.
+
+def _lame_delay_and_pad(raw: bytes) -> tuple[int, int]:
+    """Encoder delay and end padding from a Xing/LAME tag, in native samples."""
+    window = raw[:8192]
+    start = -1
+    for marker in (b"Xing", b"Info"):
+        idx = window.find(marker)
+        if idx < 0 or idx + 8 > len(window):
+            continue
+        flags = int.from_bytes(window[idx + 4 : idx + 8], "big")
+        cursor = idx + 8
+        if flags & 1:
+            cursor += 4
+        if flags & 2:
+            cursor += 4
+        if flags & 4:
+            cursor += 100
+        if flags & 8:
+            cursor += 4
+        if window[cursor : cursor + 4] in {b"LAME", b"Lavc", b"Lavf"}:
+            start = cursor
+            break
+    if start < 0:
+        found = window.find(b"LAME")
+        start = found
+    if start < 0 or start + 20 > len(window):
+        return 0, 0
+    b0, b1, b2 = window[start + 17], window[start + 18], window[start + 19]
+    delay = (b0 << 4) | (b1 >> 4)
+    padding = ((b1 & 0x0F) << 8) | b2
+    if delay > 10000 or padding > 10000:
+        return 0, 0
+    return int(delay), int(padding)
+
+
+def _mp3_native_rate(raw: bytes) -> int:
+    limit = min(len(raw) - 4, 8192)
+    for index in range(max(0, limit)):
+        if raw[index] != 0xFF or (raw[index + 1] & 0xE0) != 0xE0:
+            continue
+        version = (raw[index + 1] >> 3) & 0x03
+        sr_idx = (raw[index + 2] >> 2) & 0x03
+        table = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
+        rates = table.get(version)
+        if rates and sr_idx < 3:
+            return rates[sr_idx]
+        break
+    return 44100
+
+
+def _drop_mp3_padding(audio: np.ndarray, raw: bytes, target_sr: int) -> np.ndarray:
+    """Drop a LAME gap only when that region is still silence.
+
+    ffmpeg often removes the gap itself. A hot transient in those samples stays.
     """
-    import io
+    if _temp_suffix(raw) != ".mp3":
+        return audio
+    delay, padding = _lame_delay_and_pad(raw)
+    if delay <= 0 and padding <= 0:
+        return audio
+    native = _mp3_native_rate(raw)
+    scale = float(target_sr) / float(native or target_sr)
+    skip = int(round(delay * scale))
+    tail = int(round(padding * scale))
+    trimmed = audio
+    if skip > 0 and skip < trimmed.shape[0] and float(np.max(np.abs(trimmed[:skip]))) < 1e-3:
+        trimmed = trimmed[skip:]
+    if tail > 0 and tail < trimmed.shape[0] and float(np.max(np.abs(trimmed[-tail:]))) < 1e-3:
+        trimmed = trimmed[:-tail]
+    return trimmed
 
-    import soundfile as sf
 
-    audio, native_sr = sf.read(io.BytesIO(raw_bytes), always_2d=True)
-    audio = np.asarray(audio, dtype=np.float64)
-    if audio.size == 0:
-        raise RuntimeError("generated wav had no samples")
-    if mono and audio.shape[1] > 1:
-        audio = np.mean(audio, axis=1, keepdims=True)
-    if int(native_sr) != int(target_sr) and audio.shape[0] > 1:
-        import librosa
+def load_and_resample_generated_wav(raw_bytes: bytes, target_sr: int = 48000) -> np.ndarray:
+    """Decode a Replicate download from a real file, then return session-rate PCM.
 
-        channels = [
-            librosa.resample(audio[:, ch], orig_sr=int(native_sr), target_sr=int(target_sr))
-            for ch in range(audio.shape[1])
-        ]
-        count = min(int(channel.shape[0]) for channel in channels)
-        audio = np.stack([channel[:count] for channel in channels], axis=1)
-    return np.ascontiguousarray(audio, dtype=np.float32)
+    An MP3 is written to a ``.mp3`` temp path so librosa/ffmpeg can read the
+    header instead of treating those bytes as samples. Declared encoder silence
+    is removed before the array is returned. Callers pass the session rate.
+    """
+    import tempfile
+
+    import librosa
+
+    if not raw_bytes or len(raw_bytes) < 64:
+        raise RuntimeError("generated audio was empty")
+    with tempfile.NamedTemporaryFile(suffix=_temp_suffix(raw_bytes), delete=False) as tmp_file:
+        tmp_file.write(raw_bytes)
+        tmp_file_path = tmp_file.name
+    try:
+        audio_data, _native_sr = librosa.load(tmp_file_path, sr=int(target_sr), mono=True)
+    finally:
+        if os.path.exists(tmp_file_path):
+            try:
+                os.remove(tmp_file_path)
+            except OSError:
+                pass
+    audio_data = _drop_mp3_padding(np.asarray(audio_data, dtype=np.float32), raw_bytes, int(target_sr))
+    if audio_data.size == 0:
+        raise RuntimeError("generated audio had no samples")
+    return np.ascontiguousarray(audio_data, dtype=np.float32)
+
+
+def _as_columns(audio: np.ndarray) -> np.ndarray:
+    arr = np.asarray(audio, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    return arr
 
 
 def _fit_to_bars(path: str, sr: int, bpm: float, bars: int, *, mono: bool = False) -> None:
@@ -143,9 +227,10 @@ def _fit_to_bars(path: str, sr: int, bpm: float, bars: int, *, mono: bool = Fals
     from dsp.tempo_time_stretch import lock_slice_to_tempo
     from engine.blueprint_track_assembler import samples_per_bar
 
+    del mono
     with open(path, "rb") as handle:
         raw = handle.read()
-    audio = np.asarray(load_and_resample_generated_wav(raw, target_sr=int(sr), mono=mono), dtype=np.float64)
+    audio = _as_columns(load_and_resample_generated_wav(raw, target_sr=int(sr)))
     target = max(1, int(bars)) * samples_per_bar(int(sr), float(bpm))
     current = float(bpm) * (float(target) / float(audio.shape[0])) if audio.shape[0] else float(bpm)
     fitted = lock_slice_to_tempo(
@@ -347,6 +432,10 @@ async def resolve_blueprint_dependencies_async(
         for lane_name, config in list(lanes.items()):
             if not isinstance(config, dict) or config.get("source") != "generate":
                 continue
+            if str(lane_name) == "11_lead_vocal":
+                print("[PRE-FLIGHT] 11_lead_vocal stays on the catalog", flush=True)
+                lanes.pop(lane_name, None)
+                continue
             is_vocal = "vocal" in str(lane_name).lower() or bool(config.get("lyrics"))
             gen_prompt = str(config.get("lyrics") or config.get("prompt") or "").strip()
             if not gen_prompt:
@@ -456,7 +545,7 @@ def mix_generated_lanes(
                     with open(path, "rb") as handle:
                         raw = handle.read()
                     data = load_and_resample_generated_wav(raw, target_sr=int(sr))
-                    audio = np.asarray(data, dtype=np.float64)
+                    audio = _as_columns(data)
                     if audio.shape[1] == 1 and width == 2:
                         audio = np.repeat(audio, 2, axis=1)
                     elif audio.shape[1] != width:

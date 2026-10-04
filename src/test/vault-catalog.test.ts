@@ -10,6 +10,7 @@ import {
   resolveCatalogGenre,
   resolveCatalogKey,
   vaultMasterUrls,
+  vaultMp3DownloadUrl,
   workerDownloadUrls,
   workerJobToVaultPayload,
   durationSecFromWorkerJob,
@@ -50,12 +51,25 @@ describe("vault catalog helpers", () => {
     });
   });
 
-  it("plays and downloads the stereo master WAV first", () => {
-    expect(vaultMasterUrls({ id: "ht_f27624979de9" })).toEqual({
+  it("plays the MP3 and keeps the WAV as the download", () => {
+    const urls = vaultMasterUrls({ id: "ht_f27624979de9" });
+    expect(urls).toEqual({
       wavUrl: "/api/stream/ht_f27624979de9_master.wav",
-      streamUrl: "/api/stream/ht_f27624979de9_master.wav",
+      streamUrl: "/api/stream/ht_f27624979de9_master.mp3",
       fallbackUrl: "/api/stream/ht_f27624979de9_master.mp3",
     });
+    expect(vaultMp3DownloadUrl(urls)).toBe("/api/stream/ht_f27624979de9_master.mp3");
+  });
+
+  it("enables an MP3 download beside a float WAV master", () => {
+    const urls = vaultMasterUrls({
+      id: "row-1",
+      masterUrl: "/files/night_drive.wav",
+      mp3Url: "/files/night_drive.mp3",
+    });
+    expect(urls.wavUrl).toBe("/files/night_drive.wav");
+    expect(urls.streamUrl).toBe("/files/night_drive.mp3");
+    expect(vaultMp3DownloadUrl(urls)).toBe("/files/night_drive.mp3");
   });
 
   it("parses [RELATIONAL] snap readout", () => {

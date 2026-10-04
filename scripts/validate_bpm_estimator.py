@@ -82,7 +82,7 @@ def ground_truth(split: str, limit: int, seed: int) -> list[tuple[str, int, floa
 def _score_one(path: str) -> tuple[float, float, float]:
     """``(old_bpm, new_bpm, new_conf)`` recomputed from audio for both paths."""
     from dsp.tempo_estimator import estimate_tempo
-    from dsp.tempo_time_stretch import estimate_slice_bpm_or_none
+    from dsp.tempo_time_stretch import estimate_slice_bpm_legacy
 
     try:
         import soundfile as sf
@@ -92,7 +92,7 @@ def _score_one(path: str) -> tuple[float, float, float]:
         return 0.0, 0.0, 0.0
     mono = np.asarray(data, dtype=np.float64).mean(axis=1)
     try:
-        old = estimate_slice_bpm_or_none(mono, sr=int(sr))
+        old = estimate_slice_bpm_legacy(mono, sr=int(sr))
     except Exception:
         old = None
     try:

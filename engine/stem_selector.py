@@ -735,7 +735,10 @@ def score_candidate(
     elif pitch_weights is not None:
         # Whole-progression fit: one staged stem has to work across every bar.
         chord = harmonic_fit(unpack_floats(row.get("chroma"), 12), pitch_weights, confidence)
-    groove = 0.5
+    # No accent target means the 0.10 groove weight is not a measurement.
+    # Leaving it in at a flat 0.5 scores every slice the same and spends
+    # weight that should move to the components that were actually measured.
+    groove = None
     if groove_target is not None:
         groove = groove_fit(
             unpack_floats(row.get("onset_grid"), GRID_STEPS),
@@ -752,7 +755,6 @@ def score_candidate(
         "bpm": bpm,
         "centroid": centroid,
         "level": level * (0.65 + 0.35 * energy),
-        "groove": groove,
     }
     # Drums and percussion are atonal: ``detected_key`` on a kick loop is a
     # detection artefact (the live catalog files 46% of rhythm slices as "A"),
@@ -761,6 +763,8 @@ def score_candidate(
     key_neutral = str(role or "").strip().lower() in PERCUSSIVE_ROLES
     if not key_neutral:
         components["key"] = key
+    if groove is not None:
+        components["groove"] = groove
     # Drop the chord component and renormalise the rest. Never scores it 0 --
     # that would punish a slice for an unreliable reading -- but it does
     # flatter bypassed candidates; see the constant's note.
@@ -768,7 +772,7 @@ def score_candidate(
         components["chord"] = chord
     divisor = sum(w[name] for name in components) or 1.0
     score = sum(w[name] * value for name, value in components.items()) / divisor
-    return {
+    detail = {
         "key": round(key, 4),
         "key_neutral": bool(key_neutral),
         "chord": round(float(chord), 4),
@@ -777,9 +781,11 @@ def score_candidate(
         "centroid": round(centroid, 4),
         "level": round(level, 4),
         "energy": round(float(energy), 4),
-        "groove": round(float(groove), 4),
         "score": round(float(score), 4),
     }
+    if groove is not None:
+        detail["groove"] = round(float(groove), 4)
+    return detail
 
 
 def _stem_type_for_role(role: str) -> str | None:

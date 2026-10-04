@@ -251,8 +251,22 @@ def slice_file_4s(
     os.makedirs(output_dir, exist_ok=True)
     base_name = unique_base_name(input_path)
     saved_count = 0
+    snap_cut = None
+    try:
+        repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        if repo not in sys.path:
+            sys.path.insert(0, repo)
+        from engine.blueprint_track_assembler import snap_cut_to_zc_or_silence as snap_cut
+    except Exception:
+        snap_cut = None
     for i in range(num_slices):
         start = i * samples_per_slice
+        # Keep the 4.0 s window, but slide its start onto silence or a
+        # zero-crossing so the file does not open on a hard sample index.
+        if snap_cut is not None and i > 0:
+            snapped = int(snap_cut(data, start, int(sr)))
+            if 0 <= snapped and snapped + samples_per_slice <= total_samples:
+                start = snapped
         end = start + samples_per_slice
         chunk = data[start:end, :]
         # Skip slices that are pure digital silence

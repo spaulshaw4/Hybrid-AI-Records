@@ -635,6 +635,7 @@ def deliver_conducted_track(
     project_dir: str,
     sr: int = 44100,
     index_db: str | None = None,
+    memory_db: str | None = None,
     report_dir: str | None = None,
     session_id: str | None = None,
     public_base_url: str = "/api/stream",
@@ -670,7 +671,13 @@ def deliver_conducted_track(
     bus = MasteringBus(target_lufs=target_lufs, ceiling_dbtp=ceiling, enforce_compliance=True)
     mastered, master_report = bus.process(rendered["mix"], int(sr))
 
-    guard = ProvenanceGuard(index_db=index_db, bpm=bpm, sr=int(sr))
+    # Fingerprints stay in the session memory db. index_db is the slice
+    # catalog and is never handed to the guard (live/source catalogs are ro).
+    guard = ProvenanceGuard(
+        memory_db=memory_db or os.path.join(project_dir, "engine_memory.db"),
+        bpm=bpm,
+        sr=int(sr),
+    )
     try:
         for ref in provenance_refs or []:
             guard.register_reference(ref.get("audio"), file_path=str(ref.get("file_path") or ""))

@@ -104,14 +104,17 @@ def _bpm_from_onset_intervals(env: np.ndarray, sr: int, hop: int) -> float | Non
     return bpm
 
 
-def estimate_slice_bpm(audio_mono: np.ndarray, sr: int = 44100) -> float:
-    """Onset-strength autocorrelation BPM. Numpy path is the default."""
-    bpm = estimate_slice_bpm_or_none(audio_mono, sr=sr)
-    return float(bpm) if bpm is not None else 120.0
+# Below this the continuous estimator is reporting its prior, not a beat.
+# Click trains and drum loops land well above it; a pad returns None.
+_MIN_TEMPO_CONFIDENCE = 0.05
 
 
-def estimate_slice_bpm_or_none(audio_mono: np.ndarray, sr: int = 44100) -> float | None:
-    """Like ``estimate_slice_bpm`` but ``None`` when no tempo is detectable."""
+def estimate_slice_bpm_legacy(audio_mono: np.ndarray, sr: int = 44100) -> float | None:
+    """Integer-lag autocorrelation BPM. Kept so the validator can score the comb.
+
+    At hop 512 only about 63 tempos fall inside 60–220 BPM. Callers that lock
+    or index a slice use ``estimate_slice_bpm_or_none`` instead.
+    """
     mono = np.asarray(audio_mono, dtype=np.float64)
     if mono.ndim > 1:
         mono = _mono(mono)
@@ -120,16 +123,28 @@ def estimate_slice_bpm_or_none(audio_mono: np.ndarray, sr: int = 44100) -> float
     bpm = _bpm_from_autocorr(env, sr, hop)
     if bpm is None:
         bpm = _bpm_from_onset_intervals(env, sr, hop)
-    if bpm is None:
-        librosa = _optional_librosa()
-        if librosa is not None:
-            try:
-                onset_env = librosa.onset.onset_strength(y=mono, sr=sr)
-                tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=sr, aggregate=np.median)
-                bpm = float(np.atleast_1d(tempo)[0]) if len(np.atleast_1d(tempo)) else None
-            except Exception:
-                bpm = None
     return float(bpm) if bpm is not None else None
+
+
+def estimate_slice_bpm(audio_mono: np.ndarray, sr: int = 44100) -> float:
+    """Continuous-grid BPM from ``dsp.tempo_estimator``. 120 when undetectable."""
+    bpm = estimate_slice_bpm_or_none(audio_mono, sr=sr)
+    return float(bpm) if bpm is not None else 120.0
+
+
+def estimate_slice_bpm_or_none(audio_mono: np.ndarray, sr: int = 44100) -> float | None:
+    """``None`` when the buffer has no beat. Does not fall back to the lag comb."""
+    from dsp.tempo_estimator import estimate_tempo
+
+    try:
+        bpm, conf = estimate_tempo(audio_mono, int(sr))
+    except Exception:
+        return None
+    if not np.isfinite(bpm) or not np.isfinite(conf):
+        return None
+    if float(bpm) <= 0.0 or float(conf) < _MIN_TEMPO_CONFIDENCE:
+        return None
+    return float(bpm)
 
 
 def _wsola_channel(y: np.ndarray, rate: float, win: int = 1024, hop_s: int = 256) -> np.ndarray:

@@ -150,27 +150,6 @@ const ALBUM_META: Record<
       "The Absolute Pulse",
     ],
   },
-  "kilimanjaro": {
-    title: "Kilimanjaro",
-    artist: "Golden Ice 265",
-    genre: "Amapiano",
-    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
-    division: "nigeria",
-  },
-  "golden ice 265": {
-    title: "Kilimanjaro",
-    artist: "Golden Ice 265",
-    genre: "Amapiano",
-    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
-    division: "nigeria",
-  },
-  "golden ice 265 kilimanjaro": {
-    title: "Kilimanjaro",
-    artist: "Golden Ice 265",
-    genre: "Amapiano",
-    credits: "Written by Golden Ice 265 · Produced by Hybrid AI Records Nigerian Division",
-    division: "nigeria",
-  },
 };
 
 function albumMeta(folderName: string) {

@@ -955,6 +955,7 @@ def _try_module5_delivery(session_id: str, prompt: str, genre_hint: str) -> dict
             report_dir=package_dir,
             public_base_url="/api/stream",
             index_db=_resolve_index(),
+            memory_db=os.path.join(SCRATCH_ROOT, session_id, "engine_memory.db"),
         )
         published = _publish_delivery_package(session_id, package_dir)
         mastering = result.get("mastering")

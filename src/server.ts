@@ -17,6 +17,7 @@ void import("./lib/generation-queue-worker.server")
   .catch(() => undefined);
 
 import { consumeLastCapturedError } from "./lib/error-capture";
+import { proxyLovableAsset } from "./lib/lovable-asset-proxy.server";
 import { renderErrorPage } from "./lib/error-page";
 import { logServerError, newErrorReference } from "./lib/server-error-log";
 import { isH3SwallowedErrorBody, unwrapSsrError } from "./lib/ssr-error";
@@ -103,6 +104,11 @@ async function normalizeCatastrophicSsrResponse(
 export default {
   async fetch(request: Request, env?: unknown, ctx?: unknown) {
     try {
+      if (request.method === "GET" || request.method === "HEAD") {
+        const asset = await proxyLovableAsset(request);
+        if (asset) return asset;
+      }
+
       const pathname = new URL(request.url).pathname.replace(/\/$/, "") || "/";
       if (pathname === "/api/coproducer") {
         if (request.method !== "POST") {

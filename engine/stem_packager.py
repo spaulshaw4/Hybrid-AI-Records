@@ -95,6 +95,7 @@ def _write_pcm24(path: str, audio: np.ndarray, sr: int) -> None:
 
 
 def _ffmpeg_mp3(wav_path: str, mp3_path: str, bitrate: str = "320k") -> bool:
+    """Encode the finished master for delivery. The 13 lanes stay WAV."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         # Common Windows WinGet install location when PATH is incomplete.

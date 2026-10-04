@@ -236,6 +236,8 @@ def analyze_single_slice(file_path: str) -> dict[str, Any] | None:
             estimated_bpm = float(estimate_slice_bpm(mono, sr=sr_i))
         except Exception:
             estimated_bpm = 120.0
+        # Tempo stays on dsp.tempo_estimator. librosa.beat.tempo is the
+        # integer-lag comb that collapsed the catalog to 63 distinct BPMs.
         librosa = _optional_librosa()
         if librosa is not None:
             try:
@@ -245,13 +247,6 @@ def analyze_single_slice(file_path: str) -> dict[str, Any] | None:
                 pass
             try:
                 centroid = float(np.mean(librosa.feature.spectral_centroid(y=mono, sr=sr_i)))
-            except Exception:
-                pass
-            try:
-                onset_env = librosa.onset.onset_strength(y=mono, sr=sr_i)
-                tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=sr_i, aggregate=np.median)
-                if len(np.atleast_1d(tempo)):
-                    estimated_bpm = float(np.atleast_1d(tempo)[0])
             except Exception:
                 pass
         return {

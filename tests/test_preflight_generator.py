@@ -15,8 +15,8 @@ def test_resolve_points_a_generate_lane_at_the_downloaded_wav(tmp_path, monkeypa
     sf.write(dest, np.ones((16, 1), dtype=np.float64), 1000)
 
     def fake(prompt, is_vocal, dest_dir=None, duration_sec=None):
-        assert is_vocal
-        assert "whiskey" in prompt
+        assert not is_vocal
+        assert "guitar" in prompt
         return str(dest)
 
     monkeypatch.setattr("engine.preflight_generator.generate_audio_via_replicate", fake)
@@ -25,21 +25,28 @@ def test_resolve_points_a_generate_lane_at_the_downloaded_wav(tmp_path, monkeypa
         "structure": [
             {
                 "lane_assignments": {
+                    "10_lead_inst": {
+                        "source": "generate",
+                        "prompt": "guitar solo",
+                        "stem_id": "",
+                        "active_bars": [1, 2, 3, 4],
+                    },
                     "11_lead_vocal": {
                         "source": "generate",
                         "lyrics": "whiskey line",
-                        "stem_id": "",
                         "active_bars": [1, 2, 3, 4],
-                    }
+                    },
                 }
             }
         ]
     }
     resolved = resolve_blueprint_dependencies(plan, str(tmp_path), bpm=120, sr=1000)
-    vocal = resolved["structure"][0]["lane_assignments"]["11_lead_vocal"]
-    assert vocal["source"] == "catalog"
-    assert vocal["path"] == str(dest)
-    assert vocal["stem_id"] == "gen"
+    lanes = resolved["structure"][0]["lane_assignments"]
+    assert "11_lead_vocal" not in lanes
+    lead = lanes["10_lead_inst"]
+    assert lead["source"] == "catalog"
+    assert lead["path"] == str(dest)
+    assert lead["stem_id"] == "gen"
 
 
 def test_distinct_stems_are_requested_together(tmp_path, monkeypatch):
@@ -47,7 +54,8 @@ def test_distinct_stems_are_requested_together(tmp_path, monkeypatch):
 
     def fake(prompt, is_vocal, dest_dir=None, duration_sec=None):
         gate.wait(timeout=2)
-        path = tmp_path / f"{'vocal' if is_vocal else 'riser'}.wav"
+        name = "lead" if "guitar" in prompt else "riser"
+        path = tmp_path / f"{name}.wav"
         sf.write(path, np.ones((8, 1), dtype=np.float64), 1000)
         return str(path)
 
@@ -57,9 +65,9 @@ def test_distinct_stems_are_requested_together(tmp_path, monkeypatch):
         "structure": [
             {
                 "lane_assignments": {
-                    "11_lead_vocal": {
+                    "10_lead_inst": {
                         "source": "generate",
-                        "lyrics": "vocal line",
+                        "prompt": "guitar solo",
                         "active_bars": [1, 2],
                     },
                     "13_transitions_fx": {
@@ -73,19 +81,19 @@ def test_distinct_stems_are_requested_together(tmp_path, monkeypatch):
     }
     resolved = resolve_blueprint_dependencies(plan, str(tmp_path), bpm=120, sr=1000)
     lanes = resolved["structure"][0]["lane_assignments"]
-    assert lanes["11_lead_vocal"]["path"].endswith("vocal.wav")
+    assert lanes["10_lead_inst"]["path"].endswith("lead.wav")
     assert lanes["13_transitions_fx"]["path"].endswith("riser.wav")
 
 
 def test_bar_fits_run_together(tmp_path, monkeypatch):
     gate = threading.Barrier(2)
-    vocal = tmp_path / "vocal.wav"
+    lead = tmp_path / "lead.wav"
     riser = tmp_path / "riser.wav"
-    sf.write(vocal, np.ones((8, 1), dtype=np.float64), 1000)
+    sf.write(lead, np.ones((8, 1), dtype=np.float64), 1000)
     sf.write(riser, np.ones((8, 1), dtype=np.float64), 1000)
 
     def fake(prompt, is_vocal, dest_dir=None, duration_sec=None):
-        return str(vocal if is_vocal else riser)
+        return str(lead if "guitar" in prompt else riser)
 
     def fitted(path, sr, bpm, bars, mono=False):
         gate.wait(timeout=2)
@@ -96,9 +104,9 @@ def test_bar_fits_run_together(tmp_path, monkeypatch):
         "structure": [
             {
                 "lane_assignments": {
-                    "11_lead_vocal": {
+                    "10_lead_inst": {
                         "source": "generate",
-                        "lyrics": "vocal line",
+                        "prompt": "guitar solo",
                         "active_bars": [1, 2],
                     },
                     "13_transitions_fx": {
@@ -115,13 +123,13 @@ def test_bar_fits_run_together(tmp_path, monkeypatch):
 
 
 def test_one_failed_stem_keeps_the_other(tmp_path, monkeypatch):
-    vocal = tmp_path / "vocal.wav"
-    sf.write(vocal, np.ones((8, 1), dtype=np.float64), 1000)
+    lead = tmp_path / "lead.wav"
+    sf.write(lead, np.ones((8, 1), dtype=np.float64), 1000)
 
     def fake(prompt, is_vocal, dest_dir=None, duration_sec=None):
-        if not is_vocal:
+        if "riser" in prompt:
             raise RuntimeError("musicgen down")
-        return str(vocal)
+        return str(lead)
 
     monkeypatch.setattr("engine.preflight_generator.generate_audio_via_replicate", fake)
     monkeypatch.setattr("engine.preflight_generator._fit_to_bars", lambda *args, **kwargs: None)
@@ -129,9 +137,9 @@ def test_one_failed_stem_keeps_the_other(tmp_path, monkeypatch):
         "structure": [
             {
                 "lane_assignments": {
-                    "11_lead_vocal": {
+                    "10_lead_inst": {
                         "source": "generate",
-                        "lyrics": "vocal line",
+                        "prompt": "guitar solo",
                         "active_bars": [1, 2],
                     },
                     "13_transitions_fx": {
@@ -145,8 +153,8 @@ def test_one_failed_stem_keeps_the_other(tmp_path, monkeypatch):
     }
     resolved = resolve_blueprint_dependencies(plan, str(tmp_path), bpm=120, sr=1000)
     lanes = resolved["structure"][0]["lane_assignments"]
-    assert lanes["11_lead_vocal"]["path"] == str(vocal)
-    assert lanes["11_lead_vocal"]["stem_id"] == "vocal"
+    assert lanes["10_lead_inst"]["path"] == str(lead)
+    assert lanes["10_lead_inst"]["stem_id"] == "lead"
     assert "13_transitions_fx" not in lanes
 
 
@@ -206,7 +214,25 @@ def test_bark_wav_is_decoded_and_resampled_off_24k():
     sf.write(buf, tone, native, format="WAV", subtype="PCM_16")
     raw = buf.getvalue()
     assert raw[:4] == b"RIFF"
-    audio = load_and_resample_generated_wav(raw, target_sr=48000, mono=True)
-    assert audio.ndim == 2 and audio.shape[1] == 1
+    audio = load_and_resample_generated_wav(raw, target_sr=48000)
+    assert audio.ndim == 1
     assert abs(int(audio.shape[0]) - 48000) < 80
     assert float(np.max(np.abs(audio[:64]))) < 1.0
+
+
+def test_lame_padding_is_removed_and_a_real_attack_is_kept():
+    from engine.preflight_generator import _drop_mp3_padding, _lame_delay_and_pad
+
+    tag = bytearray(36)
+    tag[0:4] = b"LAME"
+    delay, padding = 4, 2
+    tag[17] = (delay >> 4) & 0xFF
+    tag[18] = ((delay & 0x0F) << 4) | ((padding >> 8) & 0x0F)
+    tag[19] = padding & 0xFF
+    raw = b"Xing" + (0).to_bytes(4, "big") + bytes(tag)
+    assert _lame_delay_and_pad(raw) == (4, 2)
+    silent = np.array([0.0, 0.0, 0.0, 0.0, 0.4, 0.4, 0.0, 0.0], dtype=np.float32)
+    trimmed = _drop_mp3_padding(silent, raw, 44100)
+    assert np.allclose(trimmed, [0.4, 0.4])
+    attack = np.full(8, 0.4, dtype=np.float32)
+    assert np.allclose(_drop_mp3_padding(attack, raw, 44100), attack)

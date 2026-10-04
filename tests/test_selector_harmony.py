@@ -253,6 +253,22 @@ class TestGrooveScoring(unittest.TestCase):
         self.assertEqual(idle[0], idle[1])
         self.assertGreater(armed[0], armed[1])
 
+    def test_missing_groove_target_drops_the_weight(self):
+        """A flat 0.5 used to spend the 0.10 groove weight on every musical score."""
+        four = np.zeros(GRID_STEPS)
+        four[[0, 4, 8, 12]] = 1.0
+        half = np.zeros(GRID_STEPS)
+        half[[0, 8]] = 1.0
+        a = _row(None, onset_grid=pack_floats(four))
+        b = _row(None, onset_grid=pack_floats(half))
+        left = score_candidate(a, "harmonic", "A", 120.0, target_chord="C")
+        right = score_candidate(b, "harmonic", "A", 120.0, target_chord="C")
+        self.assertNotIn("groove", left)
+        self.assertNotIn("groove", right)
+        self.assertEqual(left["score"], right["score"])
+        armed = score_candidate(a, "harmonic", "A", 120.0, target_chord="C", groove_target=four)
+        self.assertIn("groove", armed)
+
     def test_family_template_is_what_the_selector_receives(self):
         from engine.genre_arrangement_profiles import groove_target_for_role
 

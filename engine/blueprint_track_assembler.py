@@ -818,19 +818,28 @@ def extract_vocal_loop(data: np.ndarray, sr: int) -> np.ndarray:
         start, end = max(regions, key=lambda pair: pair[1] - pair[0])
     else:
         start, end = 0, n
+    original_end = end
     start = snap_cut_to_zc_or_silence(arr, start, int(sr))
-    end = snap_cut_to_zc_or_silence(arr, max(start + 1, end - 1 if end > 0 else 0), int(sr))
+    end_target = n - 1 if original_end >= n else max(start, original_end - 1)
+    end = snap_cut_to_zc_or_silence(arr, end_target, int(sr))
+    # A snap that stays on the final sample is the file end, not a cut one
+    # sample early. Constant audio has no zero-crossing, so the loop stays whole.
+    if original_end >= n and end >= n - 1:
+        end = n
     if end <= start:
         end = n
     return arr[start:end]
 
 
 def _load_role_loop(path: str, role: str) -> np.ndarray:
+    """Phrase roles snap to silence or a zero-crossing. Grid roles stay rigid.
+
+    Operator precedence used to make the phrase branch dead code, so only an
+    exact vocal token snapped and lead/harmonic loops joined on a hard index.
+    """
     data, sr = sf.read(path, always_2d=True)
     arr = np.asarray(data, dtype=np.float64)
-    if role in {"vocal", "vocals", "vox"} or is_phrase_role(role) and role in {"vocal", "vocals"}:
-        return extract_vocal_loop(arr, int(sr))
-    if is_phrase_role(role) and role in {"vocal"}:
+    if is_phrase_role(role):
         return extract_vocal_loop(arr, int(sr))
     return arr
 
@@ -1064,12 +1073,7 @@ def _choose_locked_loop(
             return _silence_block(target_samples, channels), None
     if not path or not os.path.isfile(path):
         return _silence_block(target_samples, channels), None
-    if vocal or role in {"vocal", "vocals", "vox"}:
-        data, file_sr = sf.read(path, always_2d=True)
-        loop = extract_vocal_loop(np.asarray(data, dtype=np.float64), int(file_sr))
-    else:
-        data, _file_sr = sf.read(path, always_2d=True)
-        loop = np.asarray(data, dtype=np.float64)
+    loop = _load_role_loop(path, "vocal" if vocal else role)
     loop = _maybe_align_lock(loop, sr, int(loop.shape[0]), target_key, target_bpm)
     loop = _as_channels(loop, channels) * float(weight)
     tiled = tile_loop_equal_power(loop, target_samples, sr)
@@ -1162,11 +1166,7 @@ def _pick_variant_paths(rotator: DynamicSliceRotator, count: int) -> list[str]:
 
 
 def _load_bus_loop(path: str, bus: str) -> np.ndarray:
-    data, file_sr = sf.read(path, always_2d=True)
-    arr = np.asarray(data, dtype=np.float64)
-    if bus == "vocal":
-        return extract_vocal_loop(arr, int(file_sr))
-    return arr
+    return _load_role_loop(path, bus)
 
 
 def _section_segments(

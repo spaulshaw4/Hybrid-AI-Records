@@ -48,6 +48,7 @@ import {
   resolveCatalogGenre,
   resolveCatalogKey,
   vaultMasterUrls,
+  vaultMp3DownloadUrl,
 } from "@/lib/vault-catalog";
 
 type Props = {
@@ -137,6 +138,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const [loading, setLoading] = useState(false);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
   const playback = useCatalogPlayback();
+  const playFallbackRef = useRef<(() => void) | null>(null);
 
   const refresh = useCallback(async () => {
     if (!signedIn) {
@@ -296,15 +298,36 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   function playRow(row: UserVaultRow) {
     const urls = vaultMasterUrls(row);
     if (!isPlayableVaultAudioUrl(urls.streamUrl)) return;
-    void playCatalogTrack(toPlayable(row, urls.streamUrl), "vault").then(() => {
-      const el = document.getElementById("hybrid-catalog-audio");
-      if (!(el instanceof HTMLAudioElement)) return;
+    const el = document.getElementById("hybrid-catalog-audio");
+    if (el instanceof HTMLAudioElement && playFallbackRef.current) {
+      el.removeEventListener("error", playFallbackRef.current);
+      playFallbackRef.current = null;
+    }
+    // Attach before play. catalog-player releases the element on error, so a
+    // listener registered after play() resolves never sees the failure.
+    if (
+      el instanceof HTMLAudioElement &&
+      urls.fallbackUrl &&
+      urls.fallbackUrl !== urls.streamUrl
+    ) {
       const retry = () => {
-        if (!urls.fallbackUrl || urls.fallbackUrl === urls.streamUrl) return;
+        playFallbackRef.current = null;
         void playCatalogTrack(toPlayable(row, urls.fallbackUrl), "vault");
       };
+      playFallbackRef.current = retry;
       el.addEventListener("error", retry, { once: true });
-    });
+    }
+    void playCatalogTrack(toPlayable(row, urls.streamUrl), "vault");
+  }
+
+  function downloadMasterMp3(row: UserVaultRow) {
+    const urls = vaultMasterUrls(row);
+    const mp3 = vaultMp3DownloadUrl(urls);
+    if (!mp3) {
+      toast.error("Master MP3 is not available for this track.");
+      return;
+    }
+    onDownload(mp3, `${fileSlug(row.title)}_master.mp3`);
   }
 
   async function downloadMasterWav(row: UserVaultRow) {
@@ -400,7 +423,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                   Duration
                                 </TableHead>
                                 <TableHead className="text-zinc-400">Status</TableHead>
-                                <TableHead className="w-[5.5rem] text-end text-zinc-400">
+                                <TableHead className="w-[8.5rem] text-end text-zinc-400">
                                   Actions
                                 </TableHead>
                               </TableRow>
@@ -427,6 +450,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                   DEFAULT_CATALOG_DURATION_SEC,
                                 );
                                 const urls = vaultMasterUrls(row);
+                                const mp3Url = vaultMp3DownloadUrl(urls);
                                 const ready = isPlayableVaultAudioUrl(urls.streamUrl);
                                 const active =
                                   playback.owner === "vault" && playback.currentTrack?.id === row.id;
@@ -470,7 +494,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                         </Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="w-[5.5rem] text-end">
+                                    <TableCell className="w-[8.5rem] text-end">
                                       <div className="inline-flex items-center justify-end gap-0.5">
                                         {row.status === "processing" ? (
                                           <Loader2
@@ -495,6 +519,17 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                               ) : (
                                                 <Play className="size-3.5" aria-hidden />
                                               )}
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              variant="ghost"
+                                              className="h-8 px-2 text-[10px] font-semibold tracking-wide"
+                                              disabled={!mp3Url}
+                                              aria-label={`Download master MP3 for ${row.title}`}
+                                              onClick={() => downloadMasterMp3(row)}
+                                            >
+                                              MP3
                                             </Button>
                                             <Button
                                               type="button"

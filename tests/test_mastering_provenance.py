@@ -332,6 +332,60 @@ def test_blueprint_finalize_writes_bus_stems_that_sum_to_mix():
         assert trace["_bus_stems"]["gain"] < 1.0
 
 
+def test_false_certification_on_a_dict_stays_false():
+    from api.headless_job_runner import _provenance_public_fields
+
+    fields = _provenance_public_fields(
+        {"certified": False, "status": "unverified_no_references", "note": "no refs"}
+    )
+    assert fields["provenance_certified"] is False
+
+
+def test_live_catalog_is_ignored_and_render_history_stays(tmp_path):
+    import sqlite3
+
+    from engine.arrangement_planner import EngineMemory
+    from engine.provenance_guard import ProvenanceGuard
+
+    catalog = tmp_path / "corpus_index_live.sqlite"
+    conn = sqlite3.connect(catalog)
+    conn.execute("CREATE TABLE slice_index (id INTEGER PRIMARY KEY, file_path TEXT)")
+    conn.execute("INSERT INTO slice_index (file_path) VALUES ('keep.wav')")
+    conn.commit()
+    conn.close()
+    before = catalog.read_bytes()
+    guard = ProvenanceGuard(index_db=str(catalog), bpm=120.0, sr=8000)
+    assert guard.conn is None
+    assert guard.ignored_catalog
+    _master, _stems, report = guard.check(np.zeros((8000, 2)), stems={}, seed=1)
+    assert report.certified is False
+    assert catalog.read_bytes() == before
+
+    other = tmp_path / "notes.sqlite"
+    side = sqlite3.connect(other)
+    side.execute("CREATE TABLE notes (id INTEGER)")
+    side.commit()
+    side.close()
+    ro = ProvenanceGuard(index_db=str(other), bpm=120.0, sr=8000)
+    assert ro.conn is not None
+    with pytest.raises(sqlite3.OperationalError):
+        ro.conn.execute("CREATE TABLE nope (id INTEGER)")
+    names = [row[0] for row in ro.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    assert "stem_fingerprints" not in names
+    ro.close()
+
+    memory = tmp_path / "session" / "engine_memory.db"
+    ledger = EngineMemory(str(memory))
+    ledger.record_render("pop", "C", 120.0, ["I"], ["stem"])
+    ledger.close()
+    session = ProvenanceGuard(memory_db=str(memory), bpm=120.0, sr=8000)
+    tables = [row[0] for row in session.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    assert "render_history" in tables
+    assert "stem_fingerprints" in tables
+    assert session.conn.execute("SELECT COUNT(*) FROM render_history").fetchone()[0] == 1
+    session.close()
+
+
 def test_conductor_deliver_pipeline_smoke():
     from engine.local_song_conductor import deliver_conducted_track
     from engine.song_plan import GenreVector, GlobalSongPlan, SectionPlan

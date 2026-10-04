@@ -18,6 +18,38 @@ DRIFT_MIN = 0.01
 DRIFT_MAX = 0.02
 BARS_PER_SEGMENT = 4
 
+# Live and source catalogs are read-only indexes. The guard must never open
+# them: CREATE TABLE / INSERT would mutate the catalog the worker only reads.
+_LIVE_CATALOG_NAMES = frozenset({
+    "corpus_index_live.sqlite",
+    "corpus_index.sqlite",
+})
+_LIVE_CATALOG_PATHS = (
+    r"C:\live_web_outputs\db\corpus_index_live.sqlite",
+    r"D:\MusicDatasets\db\corpus_index.sqlite",
+    r"D:\MusicDatasets\database\corpus_index.sqlite",
+)
+
+
+def is_live_catalog(path: str | None) -> bool:
+    """True for the C: replica and the D: source catalogs."""
+    if not path:
+        return False
+    if os.path.basename(str(path)).lower() in _LIVE_CATALOG_NAMES:
+        return True
+    try:
+        norm = os.path.normcase(os.path.abspath(path))
+    except (OSError, ValueError):
+        return False
+    return any(norm == os.path.normcase(os.path.abspath(candidate)) for candidate in _LIVE_CATALOG_PATHS)
+
+
+def _sqlite_uri(path: str, *, mode: str) -> str:
+    posix = os.path.abspath(path).replace("\\", "/")
+    if not posix.startswith("/"):
+        posix = "/" + posix
+    return f"file:{posix}?mode={mode}"
+
 
 @dataclass
 class ProvenanceReport:
@@ -167,6 +199,7 @@ class ProvenanceGuard:
         *,
         conn: sqlite3.Connection | None = None,
         index_db: str | None = None,
+        memory_db: str | None = None,
         threshold: float = SIMILARITY_THRESHOLD,
         bpm: float = 120.0,
         sr: int = 44100,
@@ -176,13 +209,31 @@ class ProvenanceGuard:
         self.sr = int(sr)
         self._owned = False
         self.conn = conn
-        if self.conn is None and index_db and os.path.isfile(index_db):
-            try:
-                self.conn = sqlite3.connect(index_db)
-                self._owned = True
-            except sqlite3.Error:
-                self.conn = None
-        self._ensure_fingerprint_table()
+        self.ignored_catalog: str | None = None
+        # Writable fingerprints live in the session memory db, next to
+        # render_history. A catalog path is ignored, never opened.
+        if self.conn is None and memory_db:
+            if is_live_catalog(memory_db):
+                self.ignored_catalog = memory_db
+            else:
+                try:
+                    parent = os.path.dirname(os.path.abspath(memory_db))
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    self.conn = sqlite3.connect(memory_db)
+                    self._owned = True
+                    self._ensure_fingerprint_table()
+                except sqlite3.Error:
+                    self.conn = None
+        if self.conn is None and index_db:
+            if is_live_catalog(index_db):
+                self.ignored_catalog = index_db
+            elif os.path.isfile(index_db):
+                try:
+                    self.conn = sqlite3.connect(_sqlite_uri(index_db, mode="ro"), uri=True)
+                    self._owned = True
+                except sqlite3.Error:
+                    self.conn = None
         self._memory_refs: list[dict[str, Any]] = []
 
     def close(self) -> None:
@@ -345,7 +396,11 @@ class ProvenanceGuard:
             flagged = flagged_after
 
         # No reference fingerprints means nothing was compared: never certify.
-        status = "checked" if refs else "unverified_no_references"
+        # A live catalog that was refused is not a fingerprint corpus.
+        if self.ignored_catalog and not refs:
+            status = "unverified_no_references"
+        else:
+            status = "checked" if refs else "unverified_no_references"
         certified = bool(refs) and max_sim <= self.threshold and not flagged
         digest = hashlib.sha256(
             json.dumps(
@@ -372,6 +427,7 @@ class ProvenanceGuard:
                 "segments_scanned": bool(refs),
                 "references": len(refs),
                 "status": status,
+                "ignored_catalog": self.ignored_catalog,
             },
         )
         return master_out, stems_out, report

@@ -35,6 +35,46 @@ INCOMING_DIR = BASE_DIR / "incoming"
 
 FMA_META = BASE_DIR / "fma" / "fma_metadata" / "fma_metadata"
 MTG_GENRE_TSV = BASE_DIR / "mtg" / "data" / "autotagging_genre.tsv"
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def fma_meta_candidates(base: Path) -> list[Path]:
+    """Nested FMA dump first, then the single folder, then a repo-local copy."""
+    return [
+        base / "fma" / "fma_metadata" / "fma_metadata",
+        base / "fma" / "fma_metadata",
+        base / "fma_metadata",
+        _REPO / "data" / "fma",
+    ]
+
+
+def resolve_fma_meta(base: Path) -> Path:
+    """First candidate that actually holds genres.csv or tracks.csv."""
+    fallback = fma_meta_candidates(base)[0]
+    for candidate in fma_meta_candidates(base):
+        if (candidate / "genres.csv").is_file() or (candidate / "tracks.csv").is_file():
+            return candidate
+    return fallback
+
+
+def resolve_mtg_tsv(base: Path) -> Path:
+    candidates = [
+        base / "mtg" / "data" / "autotagging_genre.tsv",
+        _REPO / "data" / "mtg" / "autotagging_genre.tsv",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
+def configure_paths(base: Path) -> None:
+    """Point the module globals at ``base``. Tests pass a temp tree, not D:."""
+    global BASE_DIR, INCOMING_DIR, FMA_META, MTG_GENRE_TSV
+    BASE_DIR = Path(base)
+    INCOMING_DIR = BASE_DIR / "incoming"
+    FMA_META = resolve_fma_meta(BASE_DIR)
+    MTG_GENRE_TSV = resolve_mtg_tsv(BASE_DIR)
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
@@ -233,7 +273,10 @@ def main():
                         help="Only process genres whose slug contains this substring")
     parser.add_argument("--top-level-only", action="store_true",
                         help="Use FMA's 16 top-level genres instead of the 163-genre hierarchy")
+    parser.add_argument("--base", default=None,
+                        help="Dataset root. Default is D:\\MusicDatasets. Does not ingest a genre JSON.")
     args = parser.parse_args()
+    configure_paths(Path(args.base) if args.base else BASE_DIR)
 
     print("=" * 64)
     print("HYBRID 1.0 - GENRE CORPUS BUILDER")

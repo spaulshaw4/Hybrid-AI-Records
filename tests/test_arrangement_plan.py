@@ -86,8 +86,8 @@ def test_generate_request_is_kept_and_not_clipped_to_a_missing_file():
         sections=[{"name": "intro", "bars": 8}],
     )
     lanes = plan["structure"][0]["lane_assignments"]
-    assert lanes["11_lead_vocal"]["source"] == "generate"
-    assert lanes["11_lead_vocal"]["active_bars"] == [1, 2, 3, 4]
+    assert "11_lead_vocal" not in lanes
+    assert lanes["13_transitions_fx"]["source"] == "generate"
     assert lanes["13_transitions_fx"]["prompt"] == "soft tape hiss swell"
     assert "01_kick" not in lanes
     assert lanes["10_lead_inst"]["active_bars"] == [7, 8]

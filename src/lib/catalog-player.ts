@@ -47,6 +47,34 @@ function setState(patch: Partial<CatalogPlaybackState>) {
   emit();
 }
 
+function resolveMediaUrl(url: string): string {
+  try {
+    const base = typeof window !== "undefined" ? window.location.href : "https://localhost/";
+    return new URL(url, base).href;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Same-track pause/play only when the element still has that exact source.
+ * A released element (src attribute removed after a media error) or a new URL
+ * must load again — `el.src` stays truthy after release because it resolves
+ * against the document.
+ */
+export function catalogSourceShouldToggle(
+  currentTrackId: string | null | undefined,
+  nextTrackId: string,
+  activeSrc: string,
+  nextUrl: string,
+): boolean {
+  if (!currentTrackId || currentTrackId !== nextTrackId) return false;
+  const current = activeSrc.trim();
+  const next = nextUrl.trim();
+  if (!current || !next) return false;
+  return resolveMediaUrl(current) === resolveMediaUrl(next);
+}
+
 function playbackUrl(track: CatalogPlayable): string {
   const raw = (track.audio_url ?? track.src ?? "").trim();
   if (!raw) return "";
@@ -157,8 +185,9 @@ export async function playCatalogTrack(
 
   claimCatalogPlayback(owner);
 
-  const sameTrack = state.currentTrack?.id === track.id || state.track?.id === track.id;
-  if (sameTrack && (el.currentSrc || el.src)) {
+  const activeSrc = (el.getAttribute("src") || "").trim();
+  const currentId = state.currentTrack?.id ?? state.track?.id;
+  if (catalogSourceShouldToggle(currentId, track.id, activeSrc, url)) {
     if (el.paused) {
       setState({ playing: true, currentTrack: track, track });
       await safePlay(el);
