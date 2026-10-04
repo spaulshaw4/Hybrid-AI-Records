@@ -1,4 +1,4 @@
-import { StrictMode, startTransition } from "react";
+import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { StartClient } from "@tanstack/react-start/client";
 
@@ -9,11 +9,12 @@ import { initBrowserSentry } from "./lib/sentry-browser";
 // was grouping as Sentry JAVASCRIPT-NEXTJS-1 (GET / 500).
 initBrowserSentry();
 
-startTransition(() => {
-  hydrateRoot(
-    document,
-    <StrictMode>
-      <StartClient />
-    </StrictMode>,
-  );
-});
+// Hydrate in the deferred entry module, before DOMContentLoaded. A transition
+// deferred this until idle, so keyboard handlers were still missing after the
+// poster and the order form were already on screen.
+hydrateRoot(
+  document,
+  <StrictMode>
+    <StartClient />
+  </StrictMode>,
+);

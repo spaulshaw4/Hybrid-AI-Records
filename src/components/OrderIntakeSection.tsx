@@ -114,13 +114,20 @@ export function OrderIntakeSection() {
     stopFocusGuard();
     // Programmatic focus (hydration, scroll, a late retry banner) must not
     // count as the user leaving the first field. Only a real click or Tab does.
-    let userReleased = false;
+    // The flag lives on window so a later guard (URL replace, remount) does not
+    // yank keystrokes back onto #qo-artist after the user already left it.
+    const userMoved = () =>
+      (window as Window & { __qoUserMoved?: boolean }).__qoUserMoved === true;
+    const activeNow = document.activeElement;
+    let userReleased =
+      userMoved() ||
+      (!!activeNow && activeNow !== document.body && activeNow !== field && form.contains(activeNow));
 
     const restoreField = () => {
       // Escape/back bump `focusGenRef`, which is the cancel signal. Do not also
       // require `#order` here: pushState can lag a frame behind the click, and
       // a hash mismatch would abort the settle loop with focus still on <body>.
-      if (gen !== focusGenRef.current || userReleased) return false;
+      if (gen !== focusGenRef.current || userReleased || userMoved()) return false;
       const el = firstOrderField();
       if (!el) return true;
       if (document.activeElement !== el) {
@@ -141,9 +148,12 @@ export function OrderIntakeSection() {
       if (target === field) return;
       if (target instanceof Element && field?.contains(target)) return;
       userReleased = true;
+      (window as Window & { __qoUserMoved?: boolean }).__qoUserMoved = true;
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Tab") userReleased = true;
+      if (event.key !== "Tab") return;
+      userReleased = true;
+      (window as Window & { __qoUserMoved?: boolean }).__qoUserMoved = true;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -352,9 +362,10 @@ export function OrderIntakeSection() {
                 if (!form || !field || !(e.target instanceof Node) || !form.contains(e.target)) return;
                 if (e.target === field) return;
                 released = true;
+                window.__qoUserMoved = true;
               }, true);
               document.addEventListener("keydown", function(e){
-                if (e.key === "Tab") released = true;
+                if (e.key === "Tab") { released = true; window.__qoUserMoved = true; }
               }, true);
               function place(){
                 if (released || location.hash !== "#order") return false;

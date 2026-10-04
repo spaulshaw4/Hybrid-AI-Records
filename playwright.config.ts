@@ -103,7 +103,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Four local workers overlap Vite SSR hard enough that the homepage client
+  // bundle misses the play-preview budget. Two keeps this pair under 45s.
+  // CI stays on one worker (`--timeout=15000`).
+  workers: process.env.CI ? 1 : 2,
   reporter: [["list"]],
   use: {
     baseURL: E2E_ORIGIN,
