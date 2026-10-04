@@ -1,10 +1,13 @@
 """Lyria 3 Pro generate path. HTTP is mocked; nothing is sent to Replicate."""
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import os
 import sys
+import types
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -21,6 +24,7 @@ from engine.generate_track_headless import (  # noqa: E402
     LYRIC_SANITIZE_URL,
     LYRIA_POLL_SEC,
     LYRIA_PREDICTIONS_URL,
+    _is_lyria_gateway_drop,
     compose_lyria_prompt,
     lyria_output_url,
     render_lyria_master,
@@ -495,3 +499,107 @@ def test_blank_lyrics_skip_the_preflight(tmp_path, monkeypatch):
     render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_nolyrics")
     assert len(calls) == 2
     assert calls[0].full_url == LYRIA_PREDICTIONS_URL
+
+
+def _succeeded_lyria(req):
+    if req.get_method() == "POST":
+        return _json_resp(
+            {
+                "id": "pred_done",
+                "status": "succeeded",
+                "output": "https://replicate.delivery/pb/done.wav",
+            }
+        )
+    return _Resp(_pcm_wav_bytes(), {"Content-Type": "audio/wav"})
+
+
+def test_prediction_retries_remote_disconnected_then_succeeds(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    slept: list[float] = []
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda seconds: slept.append(seconds))
+    posts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        if req.full_url == LYRIA_PREDICTIONS_URL:
+            posts["n"] += 1
+            if posts["n"] == 1:
+                raise http.client.RemoteDisconnected("Remote end closed connection without response")
+        return _succeeded_lyria(req)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    saved = render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_retry")
+    assert saved.endswith("ht_retry_master.wav")
+    assert posts["n"] == 2
+    assert slept == [3.0]
+    _assert_master_wav(saved)
+
+
+def test_prediction_retries_urlerror_wrapped_disconnect(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda _seconds: None)
+    posts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        if req.full_url == LYRIA_PREDICTIONS_URL:
+            posts["n"] += 1
+            if posts["n"] == 1:
+                raise urllib.error.URLError(http.client.RemoteDisconnected("closed"))
+        return _succeeded_lyria(req)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_wrapped")
+    assert posts["n"] == 2
+
+
+def test_prediction_stops_after_two_gateway_retries(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    slept: list[float] = []
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda seconds: slept.append(seconds))
+    posts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        if req.full_url == LYRIA_PREDICTIONS_URL:
+            posts["n"] += 1
+            raise http.client.RemoteDisconnected("closed")
+        return _succeeded_lyria(req)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(http.client.RemoteDisconnected):
+        render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_giveup")
+    assert posts["n"] == 3
+    assert slept == [3.0, 3.0]
+
+
+def test_prediction_does_not_retry_http_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    slept: list[float] = []
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda seconds: slept.append(seconds))
+    posts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        posts["n"] += 1
+        raise urllib.error.HTTPError(req.full_url, 500, "err", hdrs=None, fp=io.BytesIO(b"no"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_http")
+    assert posts["n"] == 1
+    assert slept == []
+
+
+def test_gateway_drop_includes_requests_connection_error(monkeypatch):
+    class RequestsConnectionError(OSError):
+        pass
+
+    fake_requests = types.ModuleType("requests")
+    fake_exc = types.ModuleType("requests.exceptions")
+    fake_exc.ConnectionError = RequestsConnectionError
+    fake_requests.exceptions = fake_exc
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    monkeypatch.setitem(sys.modules, "requests.exceptions", fake_exc)
+    assert _is_lyria_gateway_drop(RequestsConnectionError("reset"))
+    assert not _is_lyria_gateway_drop(RuntimeError("HTTP 422"))

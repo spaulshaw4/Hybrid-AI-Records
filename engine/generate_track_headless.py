@@ -7,6 +7,7 @@ tape for tests; ``main`` does not call it.
 from __future__ import annotations
 
 import argparse
+import http.client
 import os
 import re
 import shutil
@@ -1188,6 +1189,8 @@ def _export_mix(src: str, dest: str, duration_sec: float | None, sr: int) -> str
 LYRIA_PREDICTIONS_URL = "https://api.replicate.com/v1/models/google/lyria-3-pro/predictions"
 LYRIA_TIMEOUT_SEC = 180.0
 LYRIA_POLL_SEC = 3.0
+LYRIA_GATEWAY_RETRIES = 2
+LYRIA_GATEWAY_RETRY_SLEEP_SEC = 3.0
 LYRIA_MASTER_RATE = 48000
 LYRIC_SANITIZE_URL = "https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions"
 LYRIC_SANITIZE_TIMEOUT_SEC = 5.0
@@ -1488,6 +1491,67 @@ def sanitize_lyrics_for_lyria(
         return original
 
 
+def _requests_connection_error() -> type[BaseException] | None:
+    """``requests`` is optional. Missing it must not block the urllib path."""
+    try:
+        from requests.exceptions import ConnectionError as requests_connection_error
+    except ImportError:
+        return None
+    return requests_connection_error
+
+
+def _is_lyria_gateway_drop(exc: BaseException) -> bool:
+    """True for a dropped Replicate socket, including one wrapped by urllib.
+
+    ``requests.exceptions.ConnectionError`` and ``http.client.RemoteDisconnected``
+    are the named cases. urllib raises ``URLError`` whose ``reason`` is a
+    ``ConnectionError`` (``RemoteDisconnected`` is one of those).
+    """
+    transient: tuple[type[BaseException], ...] = (
+        http.client.RemoteDisconnected,
+        ConnectionError,
+    )
+    requests_connection_error = _requests_connection_error()
+    if requests_connection_error is not None:
+        transient = (*transient, requests_connection_error)
+    stack: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if isinstance(current, transient):
+            return True
+        reason = getattr(current, "reason", None)
+        if isinstance(reason, BaseException):
+            stack.append(reason)
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None and current.__context__ is not current.__cause__:
+            stack.append(current.__context__)
+    return False
+
+
+def _lyria_prediction_http(http_json: Any, *args: Any, **kwargs: Any) -> dict:
+    """POST or poll Lyria. Two retries, 3 seconds apart, on a gateway drop."""
+    drops = 0
+    while True:
+        try:
+            return http_json(*args, **kwargs)
+        except Exception as exc:
+            if drops >= LYRIA_GATEWAY_RETRIES or not _is_lyria_gateway_drop(exc):
+                raise
+            drops += 1
+            print(
+                f"[LYRIA] gateway drop ({exc.__class__.__name__}); "
+                f"retry {drops}/{LYRIA_GATEWAY_RETRIES}",
+                flush=True,
+            )
+            time.sleep(LYRIA_GATEWAY_RETRY_SLEEP_SEC)
+
+
 def render_lyria_master(
     dest_dir: str,
     *,
@@ -1501,8 +1565,9 @@ def render_lyria_master(
     """Sanitize lyrics, POST lyria-3-pro, poll ``urls.get``, save 48 kHz PCM WAV.
 
     Gemini Flash runs on ``REPLICATE_API_TOKEN`` and has a 5 second budget.
-    A slow or failed preflight keeps the original lyrics. Returns the path of
-    the saved master, always ``{session_id}_master.wav``.
+    A slow or failed preflight keeps the original lyrics. A dropped Replicate
+    socket retries twice, 3 seconds apart. Returns the path of the saved
+    master, always ``{session_id}_master.wav``.
     """
     from engine.gemini_arranger import _http_json
 
@@ -1515,7 +1580,8 @@ def render_lyria_master(
         prompt = lyrics
     full_prompt = compose_lyria_prompt(style, prompt, lyrics)
     deadline = time.monotonic() + float(timeout_sec)
-    prediction = _http_json(
+    prediction = _lyria_prediction_http(
+        _http_json,
         LYRIA_PREDICTIONS_URL,
         token,
         {"input": {"prompt": full_prompt}},
@@ -1532,7 +1598,7 @@ def render_lyria_master(
         time.sleep(float(poll_sec))
         if time.monotonic() > deadline:
             raise RuntimeError("Lyria prediction timed out")
-        prediction = _http_json(poll_url, token, None, timeout=60.0)
+        prediction = _lyria_prediction_http(_http_json, poll_url, token, None, timeout=60.0)
     status = str(prediction.get("status") or "")
     if status != "succeeded":
         err = prediction.get("error") or status or "failed"
