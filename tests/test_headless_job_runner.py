@@ -331,6 +331,43 @@ def test_run_headless_accepts_master_over_100kb_despite_nonzero_exit(live_dirs, 
     assert not (sdir / "unmastered_mix.wav").is_file()
 
 
+def test_run_headless_accepts_windows_backslash_master_despite_nonzero_exit(live_dirs, monkeypatch):
+    """A Windows ``[LYRIA] master=`` line must not fail Gate 1.
+
+    The live child prints ``C:\\live_web_outputs\\...\\{session}_master.wav``
+    and may exit non-zero. Acceptance is ``os.path`` under scratch for a file
+    larger than 100KB. The line is not decoded as a Python escape, so
+    backslashes stay backslashes, and a missing ``unmastered_mix.wav`` is
+    irrelevant once that master exists.
+    """
+    scratch, _assets = live_dirs
+    session = "ht_d06dcc27613f"
+    sdir = scratch / session
+    sdir.mkdir()
+    master = sdir / f"{session}_master.wav"
+    master.write_bytes(b"\0" * (100 * 1024 + 64))
+    printed = str(master)
+    assert os.path.isfile(printed)
+    assert os.path.getsize(printed) > 100 * 1024
+    if os.name == "nt":
+        assert "\\" in printed
+        assert printed == os.path.join(str(sdir), f"{session}_master.wav")
+    # Same shape as the archived generate log: backslashes and a CRLF.
+    child_stdout = f"[LYRIA] master={printed}\r\n"
+
+    class _Result:
+        returncode = 1
+        stdout = child_stdout
+        stderr = ""
+
+    _stub_headless_child(monkeypatch, _Result())
+    found = runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    assert found == printed
+    assert os.path.isfile(found)
+    assert os.path.getsize(found) > 100 * 1024
+    assert not (sdir / "unmastered_mix.wav").is_file()
+
+
 def test_run_headless_accepts_mp3_master_over_100kb(live_dirs, monkeypatch):
     scratch, _assets = live_dirs
     session = "ht_lyria_mp3"
