@@ -301,13 +301,32 @@ def test_run_headless_accepts_lyria_master_without_unmastered_mix(live_dirs, mon
     assert master.stat().st_size > 100 * 1024
 
     class _Result:
-        returncode = 1
+        returncode = 0
         stdout = f"[LYRIA] master={master}\n"
         stderr = ""
 
     _stub_headless_child(monkeypatch, _Result())
     runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
     assert not (sdir / "unmastered_mix.wav").is_file()
+    assert master.is_file()
+
+
+def test_run_headless_fails_when_child_returncode_is_nonzero(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    session = "ht_lyria_bad_rc"
+    sdir = scratch / session
+    sdir.mkdir()
+    master = sdir / f"{session}_master.wav"
+    sf.write(str(master), np.zeros((25601, 2), dtype=np.float32), 48000, subtype="PCM_16")
+
+    class _Result:
+        returncode = 1
+        stdout = f"[LYRIA] master={master}\n"
+        stderr = ""
+
+    _stub_headless_child(monkeypatch, _Result())
+    with pytest.raises(RuntimeError, match="Headless generate failed"):
+        runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
 
 
 def test_run_headless_still_fails_when_lyria_master_is_missing(live_dirs, monkeypatch):
