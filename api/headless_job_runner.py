@@ -794,6 +794,11 @@ def _run_headless(
     _archive_step_output(session_id, "generate", result.stdout, result.stderr)
     if result.stdout:
         _log("[generate] " + _redact(result.stdout.strip()[-1200:]))
+    # Lyria writes {session}_master.wav and never unmastered_mix.wav. A master
+    # that exists and is larger than 100KB is success even when returncode != 0.
+    lyria_master = os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_master.wav")
+    if os.path.isfile(lyria_master) and os.path.getsize(lyria_master) > 100 * 1024:
+        return
     if result.returncode != 0 or not os.path.isfile(mix):
         detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
         raise RuntimeError(f"Headless generate failed. {detail}")

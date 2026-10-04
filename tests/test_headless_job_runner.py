@@ -252,7 +252,8 @@ def test_worker_completes_job_with_lyria_master_urls(live_dirs, monkeypatch):
         assert "sample lyric" not in f"{style}\n{prompt}\n{lyrics}".lower()
         os.makedirs(dest_dir, exist_ok=True)
         dest = os.path.join(dest_dir, f"{session_id}_master.wav")
-        tone = np.zeros((4800, 2), dtype=np.float32)
+        # Stereo PCM16 at 48 kHz is 4 bytes/frame; >25600 frames clears 100KB.
+        tone = np.zeros((25601, 2), dtype=np.float32)
         sf.write(dest, tone, 48000, subtype="PCM_16", format="WAV")
         return dest
 
@@ -279,6 +280,49 @@ def test_worker_completes_job_with_lyria_master_urls(live_dirs, monkeypatch):
     with open(published, "rb") as handle:
         header = handle.read(12)
     assert header[:4] == b"RIFF" and header[8:12] == b"WAVE"
+    assert published.stat().st_size > 100 * 1024
+
+
+def _stub_headless_child(monkeypatch, result):
+    monkeypatch.setattr(runner, "_headless_script", lambda: "generate_track_headless.py")
+    monkeypatch.setattr(runner, "_resolve_corpus", lambda: "corpus")
+    monkeypatch.setattr(runner, "_resolve_index", lambda: "index.sqlite")
+    monkeypatch.setattr(runner, "_archive_step_output", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_run", lambda *a, **k: result)
+
+
+def test_run_headless_accepts_lyria_master_without_unmastered_mix(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    session = "ht_lyria_gate"
+    sdir = scratch / session
+    sdir.mkdir()
+    master = sdir / f"{session}_master.wav"
+    sf.write(str(master), np.zeros((25601, 2), dtype=np.float32), 48000, subtype="PCM_16")
+    assert master.stat().st_size > 100 * 1024
+
+    class _Result:
+        returncode = 1
+        stdout = f"[LYRIA] master={master}\n"
+        stderr = ""
+
+    _stub_headless_child(monkeypatch, _Result())
+    runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    assert not (sdir / "unmastered_mix.wav").is_file()
+
+
+def test_run_headless_still_fails_when_lyria_master_is_missing(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    session = "ht_lyria_nomaster"
+    (scratch / session).mkdir()
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    _stub_headless_child(monkeypatch, _Result())
+    with pytest.raises(RuntimeError, match="Headless generate failed"):
+        runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
 
 
 def test_scratch_purge_is_skipped_on_request_and_on_failure(live_dirs, monkeypatch):

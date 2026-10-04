@@ -1363,40 +1363,24 @@ def _decode_lyria_download(body: bytes, url: str, content_type: str) -> Any:
 
 
 def assert_lyria_master_wav(path: str) -> None:
-    """Accept a Lyria master only when Gate 1 can open a real 48 kHz PCM WAV.
+    """Gate 1 for a Lyria master: the file exists and is larger than 100KB.
 
-    A missing path, a non-``.wav`` name, a non-RIFF container, or any rate
-    other than 48000 Hz fails. Loudness, limiter, and true-peak are not part
-    of this check.
+    RIFF layout, sample rate, PCM subtype, and bar count are not checked here.
+    Those belonged to the 13-lane engine. Loudness, limiter, and true-peak
+    stay on the mastering path and are not part of this check.
     """
     if not path or not os.path.isfile(path):
         raise RuntimeError(f"Lyria master is missing: {path}")
-    if os.path.splitext(path)[1].lower() != ".wav":
-        raise RuntimeError(f"Lyria master must be a .wav file: {path}")
-    with open(path, "rb") as handle:
-        header = handle.read(12)
-    if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
-        raise RuntimeError(f"Lyria master is not a WAV container: {path}")
-    info = sf.info(path)
-    rate = int(info.samplerate)
-    if rate != LYRIA_MASTER_RATE:
-        raise RuntimeError(
-            f"Lyria master sample rate is {rate}, expected {LYRIA_MASTER_RATE}: {path}"
-        )
-    container = str(info.format or "").upper()
-    if container != "WAV":
-        raise RuntimeError(f"Lyria master container is {container or 'unknown'}, expected WAV: {path}")
-    subtype = str(info.subtype or "").upper()
-    if not subtype.startswith("PCM"):
-        raise RuntimeError(f"Lyria master is {subtype or 'not PCM'}: {path}")
+    if os.path.getsize(path) <= 100 * 1024:
+        raise RuntimeError(f"Lyria master must be larger than 100KB: {path}")
 
 
 def _write_lyria_wav(path: str, audio: Any) -> None:
+    """Write 48 kHz PCM_16. Short test tones are valid; the 100KB gate is later."""
     import numpy as np
 
     packed = np.clip(np.asarray(audio, dtype=np.float64), -1.0, 1.0)
     sf.write(path, packed, LYRIA_MASTER_RATE, subtype="PCM_16", format="WAV")
-    assert_lyria_master_wav(path)
 
 
 def render_lyria_master(

@@ -44,9 +44,13 @@ def _json_resp(payload: dict) -> _Resp:
     return _Resp(json.dumps(payload).encode("utf-8"), {"Content-Type": "application/json"})
 
 
-def _pcm_wav_bytes(sample_rate: int = 44100) -> bytes:
-    """A short stereo PCM WAV. Not 48 kHz, so the master must be resampled."""
-    frames = int(sample_rate * 0.05)
+def _pcm_wav_bytes(sample_rate: int = 44100, seconds: float = 0.05) -> bytes:
+    """Stereo PCM WAV. Not 48 kHz, so the master must be resampled.
+
+    ``seconds=0.05`` stays under 100KB so the write path can be tested without
+    the Gate 1 size check. Publish tests pass a longer duration.
+    """
+    frames = int(sample_rate * seconds)
     t = np.arange(frames, dtype=np.float64) / float(sample_rate)
     stereo = np.column_stack(
         [
@@ -249,7 +253,8 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
     monkeypatch.setattr("engine.blueprint_track_assembler._bounce_console_lanes", boom)
     monkeypatch.setattr("engine.generate_track_headless.assemble_from_blueprint", boom)
 
-    audio = _pcm_wav_bytes()
+    # One second at 44.1 kHz resamples to 48000 stereo PCM16 frames (>100KB).
+    audio = _pcm_wav_bytes(seconds=1.0)
     poll_url = "https://api.replicate.com/v1/predictions/job1"
     audio_url = "https://replicate.delivery/pb/job1.wav"
     responses = [
@@ -288,3 +293,30 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
     }
     assert calls[1].full_url == poll_url
     assert calls[2].full_url == audio_url
+    published = assets / f"{session}_master.wav"
+    assert published.stat().st_size > 100 * 1024
+
+
+def test_write_lyria_wav_allows_short_tones_and_gate_is_size_only(tmp_path):
+    from engine.generate_track_headless import _write_lyria_wav, assert_lyria_master_wav
+
+    short = tmp_path / "short_tone.wav"
+    _write_lyria_wav(str(short), np.zeros(480, dtype=np.float64))
+    assert short.stat().st_size < 100 * 1024
+    info = sf.info(str(short))
+    assert info.samplerate == 48000
+    assert info.format == "WAV"
+    assert str(info.subtype).startswith("PCM")
+    with pytest.raises(RuntimeError, match="100KB"):
+        assert_lyria_master_wav(str(short))
+
+    # Gate 1 does not require a RIFF header, a sample rate, or a bar count.
+    fat = tmp_path / "fat_master.wav"
+    fat.write_bytes(b"\0" * (100 * 1024 + 1))
+    assert_lyria_master_wav(str(fat))
+    exact = tmp_path / "exact_100kb.wav"
+    exact.write_bytes(b"\0" * (100 * 1024))
+    with pytest.raises(RuntimeError, match="100KB"):
+        assert_lyria_master_wav(str(exact))
+    with pytest.raises(RuntimeError, match="missing"):
+        assert_lyria_master_wav(str(tmp_path / "absent.wav"))

@@ -294,7 +294,7 @@ export async function generateFromHybridWorker(input: {
     );
   }
   const buffer = Buffer.from(await audioRes.arrayBuffer());
-  if (buffer.byteLength < 4096) {
+  if (!(buffer.byteLength > 100 * 1024)) {
     console.error("[HYBRID_WORKER] empty mix", filename, buffer.byteLength);
     throw new Error("[Circuit Breaker] Gate 1 failed: Empty audio buffer returned.");
   }
