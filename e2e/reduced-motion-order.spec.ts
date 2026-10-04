@@ -22,7 +22,7 @@ const FIRST_FIELD = ORDER_FIRST_FIELD;
 test.use({ reducedMotion: "reduce" });
 
 test.describe("Reduced motion — order deep link and focus", () => {
-  test.describe.configure({ timeout: 90_000 });
+  // Suite timeout comes from Playwright config / `--timeout`.
 
   // Belt and braces: some sandbox Chromium builds ignore the context-level
   // preference, so emulate it on the page too before any navigation.

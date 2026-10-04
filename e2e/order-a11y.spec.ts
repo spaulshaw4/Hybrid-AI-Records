@@ -16,8 +16,7 @@ const CTA = ORDER_CTA;
 const FIRST_FIELD = ORDER_FIRST_FIELD;
 
 test.describe("Order form accessibility", () => {
-  // Cold Vite compiles of /portal on CI runners need headroom beyond the default 60s.
-  test.describe.configure({ timeout: 90_000 });
+  // Suite timeout comes from Playwright config / `--timeout`.
 
   test("Connect & Order shows a visible focus ring when keyboard-focused", async ({ page }) => {
     await gotoPortal(page);
@@ -160,7 +159,7 @@ async function openOrderForm(page: Page) {
 }
 
 test.describe("Order form axe-core audit", () => {
-  test.describe.configure({ timeout: 90_000 });
+  // Suite timeout comes from Playwright config / `--timeout`.
 
   test("entry step has no accessibility violations", async ({ page }) => {
     await openOrderForm(page);

@@ -120,7 +120,8 @@ jobs:
     # screenshots, traces and the full run log as build artifacts.
     name: Keyboard + focus + hash deep-link gate (order flow)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A hung locator used to hold the runner until the 25-minute job cap.
+    timeout-minutes: 5
 
     env:
       PLAYWRIGHT_JUNIT_OUTPUT_NAME: order-a11y.junit.xml
@@ -146,7 +147,7 @@ jobs:
         run: |
           set -o pipefail
           bun run test:e2e:a11y:order -- \
-            --reporter=list,junit,html 2>&1 | tee order-a11y-run.log
+            --timeout=15000 --reporter=list,junit,html 2>&1 | tee order-a11y-run.log
 
       - name: Summarize result
         if: always()
