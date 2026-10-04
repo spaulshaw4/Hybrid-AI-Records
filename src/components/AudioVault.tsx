@@ -199,23 +199,27 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     }
     let cancelled = false;
     void (async () => {
-      const { data } = await supabase.auth.getUser();
-      const user = data.user;
-      if (cancelled) return;
-      if (!user) {
-        setProfileName(null);
-        return;
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data.user;
+        if (cancelled) return;
+        if (!user) {
+          setProfileName(null);
+          return;
+        }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        const saved = profile?.display_name?.trim() ?? "";
+        const resolved =
+          saved && !isPlaceholderVaultArtist(saved) ? saved : profileNameFromAuthUser(user);
+        setProfileName(resolved && !isPlaceholderVaultArtist(resolved) ? resolved : null);
+      } catch {
+        if (!cancelled) setProfileName(null);
       }
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("display_name")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (cancelled) return;
-      const saved = profile?.display_name?.trim() ?? "";
-      const resolved =
-        saved && !isPlaceholderVaultArtist(saved) ? saved : profileNameFromAuthUser(user);
-      setProfileName(resolved && !isPlaceholderVaultArtist(resolved) ? resolved : null);
     })();
     return () => {
       cancelled = true;

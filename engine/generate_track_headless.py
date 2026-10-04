@@ -1188,6 +1188,7 @@ def _export_mix(src: str, dest: str, duration_sec: float | None, sr: int) -> str
 LYRIA_PREDICTIONS_URL = "https://api.replicate.com/v1/models/google/lyria-3-pro/predictions"
 LYRIA_TIMEOUT_SEC = 180.0
 LYRIA_POLL_SEC = 3.0
+LYRIA_MASTER_RATE = 48000
 _LYRIA_TERMINAL = frozenset({"succeeded", "failed", "canceled"})
 
 
@@ -1270,6 +1271,134 @@ def _lyria_token() -> str:
     return replicate_token()
 
 
+def _as_frame_channels(audio: Any) -> Any:
+    """``(frames, channels)`` float64. Librosa stereo arrives as ``(channels, frames)``."""
+    import numpy as np
+
+    arr = np.asarray(audio, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr[:, np.newaxis]
+    if arr.ndim != 2:
+        raise RuntimeError("Lyria audio was not mono or stereo PCM")
+    if arr.shape[0] <= 8 and arr.shape[1] > arr.shape[0]:
+        arr = np.ascontiguousarray(arr.T)
+    return arr
+
+
+def _resample_to_rate(audio: Any, src_sr: int, dst_sr: int) -> Any:
+    """Resample ``(frames, channels)`` PCM. Same-rate audio is returned unchanged."""
+    import numpy as np
+
+    arr = _as_frame_channels(audio)
+    src = int(src_sr)
+    dst = int(dst_sr)
+    if src == dst or arr.size == 0:
+        return arr
+    try:
+        from math import gcd
+        from scipy.signal import resample_poly
+
+        div = gcd(src, dst) or 1
+        return np.asarray(resample_poly(arr, dst // div, src // div, axis=0), dtype=np.float64)
+    except Exception:
+        import librosa
+
+        channels = [
+            librosa.resample(np.ascontiguousarray(arr[:, ch]), orig_sr=src, target_sr=dst)
+            for ch in range(arr.shape[1])
+        ]
+        return np.stack(channels, axis=1)
+
+
+def _read_audio_array(path: str) -> tuple[Any, int]:
+    """Decode a temp download. WAV uses soundfile; MP3 falls through to librosa."""
+    import numpy as np
+
+    soundfile_error: Exception | None = None
+    try:
+        data, sr = sf.read(path, always_2d=True, dtype="float64")
+        if getattr(data, "size", 0):
+            return np.asarray(data, dtype=np.float64), int(sr)
+    except Exception as exc:
+        soundfile_error = exc
+    try:
+        import librosa
+    except Exception as exc:
+        raise RuntimeError(f"Lyria audio could not be decoded: {soundfile_error or exc}") from exc
+    try:
+        loaded, sr = librosa.load(path, sr=None, mono=False)
+    except Exception as exc:
+        raise RuntimeError(f"Lyria audio could not be decoded: {exc}") from exc
+    return _as_frame_channels(loaded), int(sr)
+
+
+def _decode_lyria_download(body: bytes, url: str, content_type: str) -> Any:
+    """Decode Replicate audio to mono-or-stereo float PCM at ``LYRIA_MASTER_RATE``."""
+    import tempfile
+
+    import numpy as np
+
+    if not body:
+        raise RuntimeError("Lyria audio download was empty")
+    suffix = _audio_extension(url, content_type, body)
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(body)
+        audio, native_sr = _read_audio_array(tmp_path)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    audio = _resample_to_rate(audio, int(native_sr), LYRIA_MASTER_RATE)
+    audio = _as_frame_channels(audio)
+    if audio.size == 0:
+        raise RuntimeError("Lyria audio had no samples")
+    if audio.shape[1] > 2:
+        audio = audio[:, :2]
+    if audio.shape[1] == 1:
+        return np.ascontiguousarray(audio[:, 0])
+    return np.ascontiguousarray(audio)
+
+
+def assert_lyria_master_wav(path: str) -> None:
+    """Accept a Lyria master only when Gate 1 can open a real 48 kHz PCM WAV.
+
+    A missing path, a non-``.wav`` name, a non-RIFF container, or any rate
+    other than 48000 Hz fails. Loudness, limiter, and true-peak are not part
+    of this check.
+    """
+    if not path or not os.path.isfile(path):
+        raise RuntimeError(f"Lyria master is missing: {path}")
+    if os.path.splitext(path)[1].lower() != ".wav":
+        raise RuntimeError(f"Lyria master must be a .wav file: {path}")
+    with open(path, "rb") as handle:
+        header = handle.read(12)
+    if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+        raise RuntimeError(f"Lyria master is not a WAV container: {path}")
+    info = sf.info(path)
+    rate = int(info.samplerate)
+    if rate != LYRIA_MASTER_RATE:
+        raise RuntimeError(
+            f"Lyria master sample rate is {rate}, expected {LYRIA_MASTER_RATE}: {path}"
+        )
+    container = str(info.format or "").upper()
+    if container != "WAV":
+        raise RuntimeError(f"Lyria master container is {container or 'unknown'}, expected WAV: {path}")
+    subtype = str(info.subtype or "").upper()
+    if not subtype.startswith("PCM"):
+        raise RuntimeError(f"Lyria master is {subtype or 'not PCM'}: {path}")
+
+
+def _write_lyria_wav(path: str, audio: Any) -> None:
+    import numpy as np
+
+    packed = np.clip(np.asarray(audio, dtype=np.float64), -1.0, 1.0)
+    sf.write(path, packed, LYRIA_MASTER_RATE, subtype="PCM_16", format="WAV")
+    assert_lyria_master_wav(path)
+
+
 def render_lyria_master(
     dest_dir: str,
     *,
@@ -1280,9 +1409,9 @@ def render_lyria_master(
     timeout_sec: float = LYRIA_TIMEOUT_SEC,
     poll_sec: float = LYRIA_POLL_SEC,
 ) -> str:
-    """POST lyria-3-pro, poll ``urls.get`` until it finishes, save the audio.
+    """POST lyria-3-pro, poll ``urls.get`` until it finishes, save 48 kHz PCM WAV.
 
-    Returns the path of the saved master, always ``{session_id}_master.mp3``.
+    Returns the path of the saved master, always ``{session_id}_master.wav``.
     """
     from engine.gemini_arranger import _http_json
 
@@ -1314,11 +1443,20 @@ def render_lyria_master(
         err = prediction.get("error") or status or "failed"
         raise RuntimeError(f"Lyria prediction {status}: {err}")
     audio_url = lyria_output_url(prediction.get("output"))
-    body, _content_type = _download_lyria_audio(audio_url, timeout=60.0)
+    body, content_type = _download_lyria_audio(audio_url, timeout=60.0)
     os.makedirs(dest_dir, exist_ok=True)
-    master_path = os.path.join(dest_dir, f"{session_id}_master.mp3")
-    with open(master_path, "wb") as handle:
-        handle.write(body)
+    audio = _decode_lyria_download(body, audio_url, content_type)
+    master_path = os.path.join(dest_dir, f"{session_id}_master.wav")
+    _write_lyria_wav(master_path, audio)
+    # Vault MP3 download can use the original bytes. A failed sidecar must not
+    # block Gate 1, which only opens the WAV.
+    if _audio_extension(audio_url, content_type, body) == ".mp3":
+        raw_mp3 = os.path.join(dest_dir, f"{session_id}_master.mp3")
+        try:
+            with open(raw_mp3, "wb") as handle:
+                handle.write(body)
+        except OSError:
+            pass
     return master_path
 
 

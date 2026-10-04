@@ -1,12 +1,15 @@
 """Lyria 3 Pro generate path. HTTP is mocked; nothing is sent to Replicate."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import urllib.request
 
+import numpy as np
 import pytest
+import soundfile as sf
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _REPO not in sys.path:
@@ -39,6 +42,36 @@ class _Resp:
 
 def _json_resp(payload: dict) -> _Resp:
     return _Resp(json.dumps(payload).encode("utf-8"), {"Content-Type": "application/json"})
+
+
+def _pcm_wav_bytes(sample_rate: int = 44100) -> bytes:
+    """A short stereo PCM WAV. Not 48 kHz, so the master must be resampled."""
+    frames = int(sample_rate * 0.05)
+    t = np.arange(frames, dtype=np.float64) / float(sample_rate)
+    stereo = np.column_stack(
+        [
+            0.2 * np.sin(2.0 * np.pi * 440.0 * t),
+            0.1 * np.sin(2.0 * np.pi * 660.0 * t),
+        ]
+    )
+    buf = io.BytesIO()
+    sf.write(buf, stereo, sample_rate, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
+def _assert_master_wav(path: str) -> None:
+    info = sf.info(path)
+    assert info.samplerate == 48000
+    assert info.format == "WAV"
+    assert str(info.subtype).startswith("PCM")
+    with open(path, "rb") as handle:
+        header = handle.read(12)
+    assert header[:4] == b"RIFF"
+    assert header[8:12] == b"WAVE"
+    data, rate = sf.read(path, always_2d=True)
+    assert rate == 48000
+    assert data.shape[0] > 0
+    assert data.shape[1] in (1, 2)
 
 
 def test_compose_uses_job_style_prompt_and_lyrics():
@@ -79,7 +112,7 @@ def test_lyria_posts_polls_downloads_and_skips_the_bounce(tmp_path, monkeypatch)
     monkeypatch.setattr("engine.blueprint_track_assembler._bounce_console_lanes", boom)
     monkeypatch.setattr("engine.generate_track_headless.assemble_from_blueprint", boom)
 
-    audio = b"ID3" + b"\x00" * 64
+    audio = _pcm_wav_bytes()
     poll_url = "https://api.replicate.com/v1/predictions/pred_test"
     audio_url = "https://replicate.delivery/pb/out.mp3"
     responses = [
@@ -97,7 +130,7 @@ def test_lyria_posts_polls_downloads_and_skips_the_bounce(tmp_path, monkeypatch)
                 "output": [audio_url],
             }
         ),
-        _Resp(audio, {"Content-Type": "audio/mpeg"}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
     ]
     calls = []
 
@@ -134,9 +167,8 @@ def test_lyria_posts_polls_downloads_and_skips_the_bounce(tmp_path, monkeypatch)
     assert calls[2].full_url == audio_url
     assert calls[2].get_method() == "GET"
     assert calls[2].get_header("Authorization") is None
-    assert saved.endswith(os.path.join("ht_lyria_master.mp3")) or saved.endswith("ht_lyria_master.mp3")
-    with open(saved, "rb") as handle:
-        assert handle.read() == audio
+    assert saved.endswith(os.path.join("ht_lyria_master.wav")) or saved.endswith("ht_lyria_master.wav")
+    _assert_master_wav(saved)
 
 
 def test_lyric_key_alone_does_not_call_lyria(tmp_path, monkeypatch):
@@ -177,7 +209,7 @@ def test_equal_lyric_and_hybrid_token_still_posts_the_hybrid_token(tmp_path, mon
                     "output": "https://replicate.delivery/pb/done.mp3",
                 }
             )
-        return _Resp(b"ID3" + b"\x00" * 8, {"Content-Type": "audio/mpeg"})
+        return _Resp(_pcm_wav_bytes(), {"Content-Type": "audio/wav"})
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     saved = render_lyria_master(
@@ -189,7 +221,8 @@ def test_equal_lyric_and_hybrid_token_still_posts_the_hybrid_token(tmp_path, mon
     assert len(calls) == 2
     assert calls[0].get_header("Authorization") == "Bearer r8_same"
     assert calls[0].full_url == LYRIA_PREDICTIONS_URL
-    assert saved.endswith("ht_equal_master.mp3")
+    assert saved.endswith("ht_equal_master.wav")
+    _assert_master_wav(saved)
 
 
 def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
@@ -216,13 +249,13 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
     monkeypatch.setattr("engine.blueprint_track_assembler._bounce_console_lanes", boom)
     monkeypatch.setattr("engine.generate_track_headless.assemble_from_blueprint", boom)
 
-    audio = b"ID3" + b"\x00" * 128
+    audio = _pcm_wav_bytes()
     poll_url = "https://api.replicate.com/v1/predictions/job1"
-    audio_url = "https://replicate.delivery/pb/job1.mp3"
+    audio_url = "https://replicate.delivery/pb/job1.wav"
     responses = [
         _json_resp({"id": "job1", "status": "processing", "urls": {"get": poll_url}}),
         _json_resp({"id": "job1", "status": "succeeded", "output": audio_url}),
-        _Resp(audio, {"Content-Type": "audio/mpeg"}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
     ]
     calls = []
 
@@ -244,10 +277,11 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
     )
     public = runner._public_job(runner._lookup_job(session))
     assert public["status"] == "completed", public.get("error")
-    assert public["audio_filename"] == f"{session}_master.mp3"
-    assert public["master_url"] == f"/api/stream/{session}_master.mp3"
-    assert public["mp3_url"] == public["master_url"]
-    assert (assets / f"{session}_master.mp3").read_bytes() == audio
+    assert public["audio_filename"] == f"{session}_master.wav"
+    assert public["master_url"] == f"/api/stream/{session}_master.wav"
+    assert public["audio_mime"] == "audio/wav"
+    assert public.get("mp3_url") in {None, ""}
+    _assert_master_wav(str(assets / f"{session}_master.wav"))
     assert calls[0].full_url == LYRIA_PREDICTIONS_URL
     assert json.loads(calls[0].data.decode("utf-8")) == {
         "input": {"prompt": "dark synth\nprompt field\n\nneon rain"}

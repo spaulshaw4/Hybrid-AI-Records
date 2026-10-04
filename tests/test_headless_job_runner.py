@@ -246,17 +246,14 @@ def test_worker_completes_job_with_lyria_master_urls(live_dirs, monkeypatch):
     scratch, assets = live_dirs
     _seed_job(scratch)
     _forbid_lane_bounce(monkeypatch)
-    master = scratch / "downloaded.mp3"
-    master.write_bytes(b"ID3" + b"\x00" * 32)
-
     def fake_render(dest_dir, *, style, prompt, lyrics, session_id, **_k):
         assert style == "dark synth"
         assert lyrics == "neon rain"
         assert "sample lyric" not in f"{style}\n{prompt}\n{lyrics}".lower()
         os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, f"{session_id}_master.mp3")
-        with open(dest, "wb") as handle:
-            handle.write(master.read_bytes())
+        dest = os.path.join(dest_dir, f"{session_id}_master.wav")
+        tone = np.zeros((4800, 2), dtype=np.float32)
+        sf.write(dest, tone, 48000, subtype="PCM_16", format="WAV")
         return dest
 
     monkeypatch.setattr("engine.generate_track_headless.render_lyria_master", fake_render)
@@ -269,11 +266,19 @@ def test_worker_completes_job_with_lyria_master_urls(live_dirs, monkeypatch):
     )
     public = runner._public_job(runner._lookup_job(SESSION))
     assert public["status"] == "completed", public.get("error")
-    assert public["audio_filename"] == f"{SESSION}_master.mp3"
-    assert public["master_url"] == f"/api/stream/{SESSION}_master.mp3"
-    assert public["mp3_url"] == public["master_url"]
-    assert public["audio_mime"] == "audio/mpeg"
-    assert (assets / f"{SESSION}_master.mp3").is_file()
+    assert public["audio_filename"] == f"{SESSION}_master.wav"
+    assert public["master_url"] == f"/api/stream/{SESSION}_master.wav"
+    assert public["audio_mime"] == "audio/wav"
+    assert public.get("mp3_url") in {None, ""}
+    published = assets / f"{SESSION}_master.wav"
+    assert published.is_file()
+    info = sf.info(str(published))
+    assert info.samplerate == 48000
+    assert info.format == "WAV"
+    assert str(info.subtype).startswith("PCM")
+    with open(published, "rb") as handle:
+        header = handle.read(12)
+    assert header[:4] == b"RIFF" and header[8:12] == b"WAVE"
 
 
 def test_scratch_purge_is_skipped_on_request_and_on_failure(live_dirs, monkeypatch):

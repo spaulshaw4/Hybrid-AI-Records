@@ -894,21 +894,39 @@ def _qc_failure_hint(session_id: str) -> str:
 
 
 def _publish_lyria_master(session_id: str, src: str) -> dict[str, Any]:
-    """Copy a Lyria download into the stream assets and return job URL fields."""
+    """Copy the Lyria WAV into the stream assets and return job URL fields.
+
+    Gate 1 opens ``master_url`` / ``audio_filename``. Those always name
+    ``{session_id}_master.wav``. An original MP3 sidecar is published only
+    when it is already on disk; a missing MP3 does not fail the WAV.
+    """
+    from engine.generate_track_headless import assert_lyria_master_wav
+
     if not src or not os.path.isfile(src):
         raise RuntimeError(f"Lyria did not write a master for {session_id}")
-    filename = f"{session_id}_master.mp3"
+    assert_lyria_master_wav(src)
+    filename = f"{session_id}_master.wav"
     dest = os.path.join(ASSETS_ROOT, filename)
     os.makedirs(ASSETS_ROOT, exist_ok=True)
     if os.path.abspath(src) != os.path.abspath(dest):
         shutil.copy2(src, dest)
     url = f"/api/stream/{filename}"
-    return {
+    published: dict[str, Any] = {
         "audio_filename": filename,
-        "audio_mime": MIME_BY_EXT.get(".mp3", "audio/mpeg"),
+        "audio_mime": MIME_BY_EXT.get(".wav", "audio/wav"),
         "master_url": url,
-        "mp3_url": url,
     }
+    raw_mp3 = os.path.join(os.path.dirname(os.path.abspath(src)), f"{session_id}_master.mp3")
+    if os.path.isfile(raw_mp3):
+        mp3_name = f"{session_id}_master.mp3"
+        dest_mp3 = os.path.join(ASSETS_ROOT, mp3_name)
+        try:
+            if os.path.abspath(raw_mp3) != os.path.abspath(dest_mp3):
+                shutil.copy2(raw_mp3, dest_mp3)
+            published["mp3_url"] = f"/api/stream/{mp3_name}"
+        except OSError as exc:
+            _log(f"[LYRIA] mp3 sidecar skipped for {session_id}: {exc}")
+    return published
 
 
 def _publish_audio(session_id: str, src: str) -> tuple[str, str]:

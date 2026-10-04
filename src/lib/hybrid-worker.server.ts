@@ -61,6 +61,29 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
+/** Last path segment of a worker stream URL, without a query string. */
+function streamFileName(url: string): string {
+  const path = url.split("?")[0]?.split("#")[0] ?? "";
+  const name = path.split("/").pop() || "";
+  try {
+    return decodeURIComponent(name).trim();
+  } catch {
+    return name.trim();
+  }
+}
+
+/**
+ * Gate 1 streams the Lyria master. A 48 kHz WAV on ``master_url`` wins over
+ * an MP3 filename so the circuit breaker opens the WAV, not a missing path.
+ */
+function gate1StreamFile(job: Record<string, unknown>): string {
+  const masterName = streamFileName(String(job.master_url || ""));
+  const named = String(job.audio_filename || "").trim();
+  if (masterName.toLowerCase().endsWith(".wav")) return masterName;
+  if (named.toLowerCase().endsWith(".wav")) return named;
+  return named;
+}
+
 function workerAuthHeaders(json = true): Record<string, string> {
   const headers: Record<string, string> = {};
   if (json) headers["Content-Type"] = "application/json";
@@ -244,7 +267,7 @@ export async function generateFromHybridWorker(input: {
       throw new Error(`[Circuit Breaker] Gate 1 failed: ${error}`);
     }
     if (status === "completed") {
-      filename = String(job.audio_filename || "").trim();
+      filename = gate1StreamFile(job);
       break;
     }
   }
