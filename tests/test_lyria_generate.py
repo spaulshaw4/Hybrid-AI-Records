@@ -17,11 +17,14 @@ if _REPO not in sys.path:
 
 from engine.gemini_arranger import lyric_replicate_token  # noqa: E402
 from engine.generate_track_headless import (  # noqa: E402
+    LYRIC_SANITIZE_SYSTEM,
+    LYRIC_SANITIZE_URL,
     LYRIA_POLL_SEC,
     LYRIA_PREDICTIONS_URL,
     compose_lyria_prompt,
     lyria_output_url,
     render_lyria_master,
+    sanitize_lyrics_for_lyria,
 )
 
 
@@ -42,6 +45,20 @@ class _Resp:
 
 def _json_resp(payload: dict) -> _Resp:
     return _Resp(json.dumps(payload).encode("utf-8"), {"Content-Type": "application/json"})
+
+
+def _echo_sanitize(req):
+    """Succeed a Gemini preflight by echoing the lyrics, so Lyria fixtures stay put."""
+    if "gemini-2.5-flash" not in getattr(req, "full_url", ""):
+        return None
+    payload = json.loads(req.data.decode("utf-8"))
+    return _json_resp(
+        {
+            "id": "san_echo",
+            "status": "succeeded",
+            "output": payload["input"]["prompt"],
+        }
+    )
 
 
 def _pcm_wav_bytes(sample_rate: int = 44100, seconds: float = 0.05) -> bytes:
@@ -140,6 +157,10 @@ def test_lyria_posts_polls_downloads_and_skips_the_bounce(tmp_path, monkeypatch)
 
     def fake_urlopen(req, timeout=None):
         calls.append(req)
+        echoed = _echo_sanitize(req)
+        if echoed is not None:
+            assert timeout is not None and timeout <= 5.0
+            return echoed
         if not responses:
             raise AssertionError(f"unexpected HTTP call to {req.full_url}")
         return responses.pop(0)
@@ -155,22 +176,28 @@ def test_lyria_posts_polls_downloads_and_skips_the_bounce(tmp_path, monkeypatch)
     )
 
     assert slept == [LYRIA_POLL_SEC]
-    assert calls[0].full_url == LYRIA_PREDICTIONS_URL
-    assert calls[0].get_method() == "POST"
+    assert calls[0].full_url == LYRIC_SANITIZE_URL
     assert calls[0].get_header("Authorization") == "Bearer r8_hybrid"
     assert "r8_lyric" not in (calls[0].get_header("Authorization") or "")
-    assert calls[0].get_header("Content-type") == "application/json"
-    assert calls[0].get_header("Prefer") == "wait"
-    assert json.loads(calls[0].data.decode("utf-8")) == {
+    sanitize_body = json.loads(calls[0].data.decode("utf-8"))
+    assert sanitize_body["input"]["prompt"] == "neon rain"
+    assert sanitize_body["input"]["system_instruction"] == LYRIC_SANITIZE_SYSTEM
+    assert calls[1].full_url == LYRIA_PREDICTIONS_URL
+    assert calls[1].get_method() == "POST"
+    assert calls[1].get_header("Authorization") == "Bearer r8_hybrid"
+    assert "r8_lyric" not in (calls[1].get_header("Authorization") or "")
+    assert calls[1].get_header("Content-type") == "application/json"
+    assert calls[1].get_header("Prefer") == "wait"
+    assert json.loads(calls[1].data.decode("utf-8")) == {
         "input": {"prompt": "dark synth\nnight drive\n\nneon rain"}
     }
-    assert calls[1].full_url == poll_url
-    assert calls[1].get_method() == "GET"
-    assert calls[1].data is None
-    assert calls[1].get_header("Authorization") == "Bearer r8_hybrid"
-    assert calls[2].full_url == audio_url
+    assert calls[2].full_url == poll_url
     assert calls[2].get_method() == "GET"
-    assert calls[2].get_header("Authorization") is None
+    assert calls[2].data is None
+    assert calls[2].get_header("Authorization") == "Bearer r8_hybrid"
+    assert calls[3].full_url == audio_url
+    assert calls[3].get_method() == "GET"
+    assert calls[3].get_header("Authorization") is None
     assert saved.endswith(os.path.join("ht_lyria_master.wav")) or saved.endswith("ht_lyria_master.wav")
     _assert_master_wav(saved)
 
@@ -205,6 +232,9 @@ def test_equal_lyric_and_hybrid_token_still_posts_the_hybrid_token(tmp_path, mon
 
     def fake_urlopen(req, timeout=None):
         calls.append(req)
+        echoed = _echo_sanitize(req)
+        if echoed is not None:
+            return echoed
         if req.get_method() == "POST":
             return _json_resp(
                 {
@@ -222,9 +252,11 @@ def test_equal_lyric_and_hybrid_token_still_posts_the_hybrid_token(tmp_path, mon
         lyrics="line one",
         session_id="ht_equal",
     )
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert calls[0].full_url == LYRIC_SANITIZE_URL
     assert calls[0].get_header("Authorization") == "Bearer r8_same"
-    assert calls[0].full_url == LYRIA_PREDICTIONS_URL
+    assert calls[1].get_header("Authorization") == "Bearer r8_same"
+    assert calls[1].full_url == LYRIA_PREDICTIONS_URL
     assert saved.endswith("ht_equal_master.wav")
     _assert_master_wav(saved)
 
@@ -266,6 +298,9 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
 
     def fake_urlopen(req, timeout=None):
         calls.append(req)
+        echoed = _echo_sanitize(req)
+        if echoed is not None:
+            return echoed
         return responses.pop(0)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -287,12 +322,13 @@ def test_worker_publishes_master_and_mp3_urls(tmp_path, monkeypatch):
     assert public["audio_mime"] == "audio/wav"
     assert public.get("mp3_url") in {None, ""}
     _assert_master_wav(str(assets / f"{session}_master.wav"))
-    assert calls[0].full_url == LYRIA_PREDICTIONS_URL
-    assert json.loads(calls[0].data.decode("utf-8")) == {
+    assert calls[0].full_url == LYRIC_SANITIZE_URL
+    assert calls[1].full_url == LYRIA_PREDICTIONS_URL
+    assert json.loads(calls[1].data.decode("utf-8")) == {
         "input": {"prompt": "dark synth\nprompt field\n\nneon rain"}
     }
-    assert calls[1].full_url == poll_url
-    assert calls[2].full_url == audio_url
+    assert calls[2].full_url == poll_url
+    assert calls[3].full_url == audio_url
     published = assets / f"{session}_master.wav"
     assert published.stat().st_size > 100 * 1024
 
@@ -339,3 +375,123 @@ def test_main_exits_zero_after_printing_lyria_master(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         main(["--prompt", "Outlaw Country", "--session", "ht_exit", "--scratch", str(tmp_path)])
     assert exc.value.code == 0
+
+
+def test_sanitize_lyrics_land_in_the_lyria_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    monkeypatch.setenv("LYRIC_ENGINE_API_KEY", "r8_lyric")
+    original = "[Verse]\nGoing easy on the whiskey"
+    sanitized = "[Verse]\nGoing easy on the bottle"
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        if "gemini-2.5-flash" in req.full_url:
+            assert timeout is not None and timeout <= 5.0
+            assert req.get_header("Authorization") == "Bearer r8_hybrid"
+            assert "r8_lyric" not in (req.get_header("Authorization") or "")
+            body = json.loads(req.data.decode("utf-8"))
+            assert body["input"]["prompt"] == original
+            assert body["input"]["system_instruction"] == LYRIC_SANITIZE_SYSTEM
+            assert req.get_header("Prefer") == "wait"
+            return _json_resp({"id": "san", "status": "succeeded", "output": sanitized})
+        if req.full_url == LYRIA_PREDICTIONS_URL:
+            sent = json.loads(req.data.decode("utf-8"))["input"]["prompt"]
+            assert "whiskey" not in sent.lower()
+            assert sent == f"outlaw country\n\n{sanitized}"
+            return _json_resp(
+                {
+                    "id": "pred_done",
+                    "status": "succeeded",
+                    "output": "https://replicate.delivery/pb/done.wav",
+                }
+            )
+        return _Resp(_pcm_wav_bytes(), {"Content-Type": "audio/wav"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    saved = render_lyria_master(
+        str(tmp_path),
+        style="outlaw country",
+        prompt=original,
+        lyrics=original,
+        session_id="ht_whiskey",
+    )
+    assert saved.endswith("ht_whiskey_master.wav")
+    assert calls[0].full_url == LYRIC_SANITIZE_URL
+    assert calls[1].full_url == LYRIA_PREDICTIONS_URL
+    _assert_master_wav(saved)
+
+
+def test_sanitize_polls_then_returns_lyrics(monkeypatch):
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda _seconds: None)
+    poll_url = "https://api.replicate.com/v1/predictions/san_poll"
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        if req.get_method() == "POST":
+            return _json_resp({"id": "san_poll", "status": "processing", "urls": {"get": poll_url}})
+        return _json_resp({"id": "san_poll", "status": "succeeded", "output": "[Chorus]\nrye"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    out = sanitize_lyrics_for_lyria("[Chorus]\nwhiskey", token="r8_hybrid")
+    assert out == "[Chorus]\nrye"
+    assert calls == [LYRIC_SANITIZE_URL, poll_url]
+
+
+def test_sanitize_timeout_keeps_original_lyrics(monkeypatch, capsys):
+    clock = {"t": 0.0}
+    monkeypatch.setattr("engine.generate_track_headless.time.monotonic", lambda: clock["t"])
+
+    def fake_urlopen(req, timeout=None):
+        assert timeout is not None and timeout <= 5.0
+        clock["t"] = 5.1
+        return _json_resp(
+            {
+                "id": "slow",
+                "status": "processing",
+                "urls": {"get": "https://api.replicate.com/v1/predictions/slow"},
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    original = "[Verse]\nwhiskey night"
+    assert sanitize_lyrics_for_lyria(original, token="r8_hybrid") == original
+    err = capsys.readouterr().err
+    assert "sanitize skipped" in err
+    assert "using original lyrics" in err
+
+
+def test_sanitize_error_keeps_original_lyrics(monkeypatch, capsys):
+    def fake_urlopen(req, timeout=None):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    original = "[Bridge]\nbourbon"
+    assert sanitize_lyrics_for_lyria(original, token="r8_hybrid") == original
+    assert "sanitize skipped" in capsys.readouterr().err
+
+
+def test_blank_lyrics_skip_the_preflight(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        assert "gemini-2.5-flash" not in req.full_url
+        if req.get_method() == "POST":
+            return _json_resp(
+                {
+                    "id": "pred_done",
+                    "status": "succeeded",
+                    "output": "https://replicate.delivery/pb/done.wav",
+                }
+            )
+        return _Resp(_pcm_wav_bytes(), {"Content-Type": "audio/wav"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    render_lyria_master(str(tmp_path), style="outlaw country", lyrics="", session_id="ht_nolyrics")
+    assert len(calls) == 2
+    assert calls[0].full_url == LYRIA_PREDICTIONS_URL
