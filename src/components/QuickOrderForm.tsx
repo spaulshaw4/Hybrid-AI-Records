@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CheckCircle2, ClipboardCheck, Pencil } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -88,6 +88,27 @@ export function QuickOrderForm() {
   // falling back to this device's last saved entry. Also keeps up with
   // back/forward navigation. SSR-safe: reads on mount.
   const hydrated = useRef(false);
+  // Adopt keystrokes that landed in the SSR inputs before React attached onChange.
+  useLayoutEffect(() => {
+    const form = document.getElementById("quick-order-form");
+    if (form) form.dataset.reactSubmit = "1";
+    const draft = (window as Window & { __qoDraft?: Partial<Record<"qo-artist" | "qo-email" | "qo-link", string>> }).__qoDraft;
+    const nextArtist = draft?.["qo-artist"] || "";
+    const nextEmail = draft?.["qo-email"] || "";
+    const nextLink = draft?.["qo-link"] || "";
+    if (nextArtist) setArtist(nextArtist);
+    if (nextEmail) setEmail(nextEmail);
+    if (nextLink) setLink(nextLink);
+    if (form?.dataset.pendingReview !== "1") return;
+    delete form.dataset.pendingReview;
+    const values = { artist: nextArtist, email: nextEmail, pkg, link: nextLink };
+    const next = collectErrors(values);
+    FIELD_ORDER.forEach((f) => touched.current.add(f));
+    setErrors(next);
+    const firstInvalid = FIELD_ORDER.find((f) => next[f]);
+    if (firstInvalid) document.getElementById(INPUT_ID[firstInvalid])?.focus();
+    else setStep("review");
+  }, []);
   /** Tier the mount-time prefill asked for, until React commits it. */
   const pendingPkg = useRef<OrderPackage | null>(null);
   useEffect(() => {
@@ -177,10 +198,28 @@ export function QuickOrderForm() {
     revalidate(field);
   }
 
+  /** DOM/draft value for a field the user edited before hydration flushed React state. */
+  function liveValue(id: "qo-artist" | "qo-email" | "qo-link", state: string) {
+    if (state.trim()) return state;
+    const draft = (window as Window & { __qoDraft?: Record<string, string> }).__qoDraft?.[id];
+    if (draft?.trim()) return draft;
+    const el = document.getElementById(id);
+    return el instanceof HTMLInputElement ? el.value : state;
+  }
+
   /** Validates and moves to the confirmation step — nothing is sent yet. */
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const next = collectErrors();
+    const values = {
+      artist: liveValue("qo-artist", artist),
+      email: liveValue("qo-email", email),
+      pkg,
+      link: liveValue("qo-link", link),
+    };
+    if (values.artist !== artist) setArtist(values.artist);
+    if (values.email !== email) setEmail(values.email);
+    if (values.link !== link) setLink(values.link);
+    const next = collectErrors(values);
     FIELD_ORDER.forEach((f) => touched.current.add(f));
     setErrors(next);
 
@@ -435,6 +474,7 @@ export function QuickOrderForm() {
           id="qo-artist"
           name="artist"
           required
+          autoFocus
           value={artist}
           maxLength={200}
           autoComplete="nickname"

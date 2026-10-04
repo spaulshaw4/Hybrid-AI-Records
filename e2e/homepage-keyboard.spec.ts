@@ -8,15 +8,21 @@ import { expect, test, type Page } from "@playwright/test";
 
 const MAX_TABS = 48;
 
-/** Focus a hydrated play button and open its preview with Enter. */
+/** Open the release preview from the keyboard once the client handler is live. */
 async function openPreview(page: Page) {
   const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
     has: page.getByRole("button", { name: "Close video" }),
   });
   const play = page.locator('button[aria-label^="Play video:"]').first();
+  await expect(play).toBeVisible();
   await play.scrollIntoViewIfNeeded();
-  await play.press("Enter");
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  // The poster is in the SSR HTML before Enter is wired. Once the dialog node
+  // exists, wait for it instead of pressing Enter again (that can dismiss it).
+  await expect(async () => {
+    if ((await dialog.count()) === 0) await play.press("Enter");
+    await expect(dialog).toBeVisible({ timeout: 2_000 });
+    await expect(dialog.getByRole("button", { name: "Close video" })).toBeVisible();
+  }).toPass({ timeout: 14_000 });
 }
 
 /** Describe the focused element in a stable, assertable way. */
@@ -49,7 +55,9 @@ test.describe("Homepage keyboard navigation", () => {
   // Cold Vite compiles of `/` + catalog cards need headroom on CI runners.
   // Keep this file on one worker: four parallel homepage loads stall hydration,
   // so Enter never reaches the client click handler.
-  test.describe.configure({ mode: "serial", timeout: 150_000 });
+  // Suite timeout comes from Playwright config / `--timeout`. A 150s override
+  // let one hung locator hold CI for the whole job.
+  test.describe.configure({ mode: "serial" });
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -61,18 +69,11 @@ test.describe("Homepage keyboard navigation", () => {
     });
     // Prefer a concrete catalog signal over networkidle (analytics keeps the
     // network busy and hangs CI) or a fixed sleep (flakes on cold compiles).
+    // Visible play control is the ready signal. The dialog's aria-modal state
+    // is asserted in the play-preview tests, after Enter actually opens it.
     await expect(page.locator('button[aria-label^="Play video:"]').first()).toBeVisible({
       timeout: readyMs,
     });
-    // SSR paints the controls before React attaches onClick / client routing.
-    await page.waitForFunction(
-      () => {
-        const el = document.querySelector('button[aria-label^="Play video:"]');
-        return !!el && Object.keys(el).some((key) => key.startsWith("__react"));
-      },
-      undefined,
-      { timeout: 45_000 },
-    );
   });
 
   test("primary CTAs are reachable and activatable by keyboard", async ({ page }) => {

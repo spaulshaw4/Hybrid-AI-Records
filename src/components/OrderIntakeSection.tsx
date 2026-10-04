@@ -227,6 +227,7 @@ export function OrderIntakeSection() {
   };
 
   useEffect(() => {
+    document.documentElement.dataset.orderFocusReady = "1";
     let first = true;
     const handle = () => {
       if (window.location.hash === "#order") {
@@ -322,6 +323,78 @@ export function OrderIntakeSection() {
         <div className="mt-10">
           <QuickOrderForm />
         </div>
+        {/* Fragment navigation to #order blurs the autofocused artist field and
+            leaves document.activeElement on body before the React bundle hydrates.
+            This runs from the SSR HTML so deep links and pre-hydration CTA clicks
+            still land on #qo-artist. The focus guard above keeps Escape, history,
+            and late retry banners working after hydration. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+              var root = document.documentElement;
+              var released = false;
+              window.__qoDraft = window.__qoDraft || {};
+              document.addEventListener("submit", function (e) {
+                var form = e.target;
+                if (!form || form.id !== "quick-order-form" || form.dataset.reactSubmit) return;
+                e.preventDefault();
+                form.dataset.pendingReview = "1";
+              }, true);
+              document.addEventListener("input", function (e) {
+                var t = e.target;
+                if (!t || !t.id || !/^qo-(artist|email|link)$/.test(t.id)) return;
+                window.__qoDraft[t.id] = t.value;
+              }, true);
+              function cta(){ return document.querySelector('a[aria-controls="quick-order-form"]'); }
+              document.addEventListener("pointerdown", function(e){
+                var form = document.getElementById("quick-order-form");
+                var field = document.getElementById("qo-artist");
+                if (!form || !field || !(e.target instanceof Node) || !form.contains(e.target)) return;
+                if (e.target === field) return;
+                released = true;
+              }, true);
+              document.addEventListener("keydown", function(e){
+                if (e.key === "Tab") released = true;
+              }, true);
+              function place(){
+                if (released || location.hash !== "#order") return false;
+                var el = document.getElementById("qo-artist");
+                if (!el) return false;
+                if (document.activeElement !== el) el.focus({ preventScroll: true });
+                var header = document.querySelector("header");
+                var offset = ((header && header.offsetHeight) || 0) + 12;
+                var top = Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY - offset));
+                if (Math.abs(window.scrollY - top) > 2) window.scrollTo({ top: top, behavior: "auto" });
+                return document.activeElement === el;
+              }
+              function arm(){
+                var until = Date.now() + 700;
+                var stable = 0;
+                (function kick(){
+                  if (released || location.hash !== "#order" || Date.now() > until) return;
+                  if (place()) stable++; else stable = 0;
+                  if (stable >= 3) return;
+                  setTimeout(kick, 50);
+                })();
+              }
+              document.addEventListener("DOMContentLoaded", arm);
+              window.addEventListener("hashchange", function(){
+                if (root.dataset.orderFocusReady) return;
+                if (location.hash === "#order") arm();
+                else { var el = cta(); if (el) el.focus(); }
+              });
+              document.addEventListener("keydown", function(e){
+                if (root.dataset.orderFocusReady || e.key !== "Escape" || location.hash !== "#order") return;
+                var form = document.getElementById("quick-order-form");
+                if (!form || !form.contains(document.activeElement)) return;
+                history.replaceState(history.state, "", location.pathname + location.search);
+                var el = cta();
+                if (el) el.focus();
+              }, true);
+              arm();
+            })();`,
+          }}
+        />
       </section>
     </>
   );
