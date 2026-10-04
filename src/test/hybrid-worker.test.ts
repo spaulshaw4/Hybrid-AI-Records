@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_HYBRID_WORKER_URL,
   canonicalizeWorkerUrl,
+  composeWorkerStylePrompt,
   hybridWorkerUrl,
 } from "@/lib/hybrid-worker.server";
 import { proxyToHybridWorker } from "@/lib/hybrid-worker-proxy.server";
@@ -90,5 +91,23 @@ describe("proxyToHybridWorker", () => {
     expect(response.headers.get("x-hybrid-worker-upstream")).toBe(
       "http://127.0.0.1:8880/generate",
     );
+  });
+});
+
+describe("composeWorkerStylePrompt", () => {
+  it("keeps the style text and appends tempo, influence, and temperature", () => {
+    const style = composeWorkerStylePrompt("Acoustic, close-mic", undefined, {
+      bpm: 86,
+      influence: 40,
+      weirdness: 80,
+      styleInfluence: 20,
+    });
+    expect(style.startsWith("Acoustic, close-mic")).toBe(true);
+    expect(style).toContain("[Tempo: 86 BPM]");
+    expect(style).toContain("[Adherence: 40%]");
+    expect(style).toContain("[Style Influence: 20%");
+    expect(style).toContain("[Temperature:");
+    expect(style).toContain("[Freeform:");
+    expect(style).toContain("[Experimental:");
   });
 });

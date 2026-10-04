@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { DEFAULT_LONGFORM_SECONDS, MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
+import { clampDurationPreset, DEFAULT_TARGET_DURATION_SECONDS } from "@/lib/track-length";
+import { generationTokenCharge } from "@/lib/token-alerts";
 import { parseGenerateEngineTrackInput, type GenerateEngineTrackInput } from "@/lib/generate-schema";
 
 export {
@@ -112,9 +113,8 @@ export async function runGenerateEngineTrack(
       allowReslice: _allowReslice,
       ...rest
     } = data;
-    const durationSeconds = Math.min(
-      MINIMAX_MAX_SECONDS,
-      Math.max(10, requestedSeconds ?? DEFAULT_LONGFORM_SECONDS),
+    const durationSeconds = clampDurationPreset(
+      requestedSeconds ?? DEFAULT_TARGET_DURATION_SECONDS,
     );
     const payload = rest;
     const genre = (payload.genre || payload.style || payload.prompt).trim();
@@ -243,7 +243,7 @@ export async function runGenerateEngineTrack(
       userId: context.userId,
       supabase: context.supabase,
       idempotencyKey: spendKey,
-      amount: 1,
+      amount: generationTokenCharge(durationSeconds),
       note: payload.title || "Studio master generation",
     });
 
@@ -269,6 +269,7 @@ export async function runGenerateEngineTrack(
           style: payload.style || "",
           tags: payload.tags,
           genreHint: genre,
+          duration: durationSeconds,
           durationSeconds,
           bpm,
           instrumental: payload.instrumental,
@@ -276,6 +277,12 @@ export async function runGenerateEngineTrack(
           referenceAudioUrl: referenceSampleUrl,
           vocalAudioBase64: payload.vocalAudioBase64,
           vocalFileName: payload.vocalFileName,
+          controls: {
+            bpm: bpm ?? controls?.bpm ?? 110,
+            influence: controls?.influence ?? 75,
+            weirdness: controls?.weirdness ?? 20,
+            styleInfluence: controls?.styleInfluence,
+          },
         }),
         LOCAL_WORKER_TIMEOUT_MS,
         "Gate 1 (local Hybrid worker)",

@@ -146,6 +146,16 @@ export function vaultMasterUrls(row: {
   return { wavUrl: wavUrl || master, streamUrl, fallbackUrl: playableMp3 };
 }
 
+export function forgetWorkerSession(sessionId: string): void {
+  if (typeof window === "undefined" || !isWorkerSessionId(sessionId)) return;
+  try {
+    const next = listRememberedWorkerSessions().filter((id) => id !== sessionId.trim());
+    window.localStorage.setItem(WORKER_SESSIONS_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore quota */
+  }
+}
+
 export function rememberWorkerSession(sessionId: string): void {
   if (typeof window === "undefined" || !isWorkerSessionId(sessionId)) return;
   try {
@@ -377,6 +387,33 @@ export type WorkerJobPayload = {
   master_duration_sec?: number | null;
   relational?: unknown;
 };
+
+/**
+ * One generate used to paint a temp row, a vault row, and the worker session.
+ * Keep the vault row when it already points at that session, and drop temps
+ * that repeat a real title.
+ */
+export function preferSingleMasterRows<
+  T extends {
+    id: string;
+    title: string;
+    masterUrl?: string;
+    mp3Url?: string;
+    rawAudioUrl?: string;
+  },
+>(rows: readonly T[]): T[] {
+  const saved = rows.filter((row) => !isWorkerSessionId(row.id) && !row.id.startsWith("temp-"));
+  const savedTitles = new Set(saved.map((row) => row.title.trim().toLowerCase()));
+  const savedBlob = saved
+    .map((row) => `${row.masterUrl ?? ""} ${row.mp3Url ?? ""} ${row.rawAudioUrl ?? ""}`)
+    .join("\n");
+  return rows.filter((row) => {
+    if (row.id.startsWith("temp-") && savedTitles.has(row.title.trim().toLowerCase())) return false;
+    if (!isWorkerSessionId(row.id)) return true;
+    if (savedBlob.includes(row.id)) return false;
+    return !savedTitles.has(row.title.trim().toLowerCase());
+  });
+}
 
 export function workerJobToVaultPayload(job: WorkerJobPayload): {
   id: string;

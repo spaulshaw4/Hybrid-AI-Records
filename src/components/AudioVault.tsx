@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Download, Loader2, Pause, Play } from "lucide-react";
+import { Download, Loader2, Pause, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -43,11 +43,15 @@ import {
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
 } from "@/lib/vault-tracks";
-import { guestTrackToPayload, listGuestVaultTracks } from "@/lib/guest-vault";
+import { deleteGuestVaultTrack, guestTrackToPayload, listGuestVaultTracks } from "@/lib/guest-vault";
+import { deleteVaultTrackApi, isPersistedVaultId } from "@/lib/vault-client";
 import {
   DEFAULT_CATALOG_DURATION_SEC,
   fetchWorkerVaultPayloads,
+  forgetWorkerSession,
   formatDurationSeconds,
+  isWorkerSessionId,
+  preferSingleMasterRows,
   resolveCatalogDurationSec,
   resolveCatalogGenre,
   vaultMasterUrls,
@@ -140,6 +144,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const [rows, setRows] = useState<UserVaultRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const playback = useCatalogPlayback();
   const playFallbackRef = useRef<(() => void) | null>(null);
@@ -150,9 +155,11 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
         const guest = await listGuestVaultTracks();
         const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
         setRows((prev) =>
-          mergeVaultRows(
-            [...workerRows, ...guest.map((track) => guestTrackToPayload(track))].map(fromApi),
-            prev,
+          preferSingleMasterRows(
+            mergeVaultRows(
+              [...workerRows, ...guest.map((track) => guestTrackToPayload(track))].map(fromApi),
+              prev,
+            ),
           ),
         );
       } catch {
@@ -171,13 +178,17 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       }
       const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
       setRows((prev) =>
-        mergeVaultRows([...workerRows, ...catalog.tracks].map(fromApi), prev),
+        preferSingleMasterRows(
+          mergeVaultRows([...workerRows, ...catalog.tracks].map(fromApi), prev),
+        ),
       );
     } catch {
       try {
         const fallback = await loadVault({ data: undefined });
         const workerRows = await fetchWorkerVaultPayloads().catch(() => []);
-        setRows((prev) => mergeVaultRows([...workerRows.map(fromApi), ...fallback], prev));
+        setRows((prev) =>
+          preferSingleMasterRows(mergeVaultRows([...workerRows.map(fromApi), ...fallback], prev)),
+        );
       } catch (error) {
         logTransientPollDisconnect({
           source: "vault_catalog",
@@ -297,11 +308,22 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   }, [processing, signedIn, refresh]);
 
   const [openAlbums, setOpenAlbums] = useState<string[]>([]);
+  const [showFailed, setShowFailed] = useState(false);
+  const failedCount = rows.filter((row) => row.status === "failed").length;
+  // A fresh array every render made `grouped` / `defaultOpenAlbums` change
+  // identity, and the effect below then called setState forever.
+  const visibleRows = useMemo(
+    () =>
+      preferSingleMasterRows(
+        showFailed ? rows : rows.filter((row) => row.status !== "failed"),
+      ),
+    [rows, showFailed],
+  );
 
   const grouped = useMemo(
     () =>
       groupVaultTracksByArtistAlbum(
-        rows.map((row) => ({
+        visibleRows.map((row) => ({
           id: row.id,
           title: row.title,
           style: row.style,
@@ -318,7 +340,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           mp3_url: row.mp3Url ?? null,
         })),
       ),
-    [rows, signedIn, profileName],
+    [visibleRows, signedIn, profileName],
   );
 
   const defaultOpenAlbums = useMemo(
@@ -330,7 +352,15 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   );
 
   useEffect(() => {
-    setOpenAlbums(defaultOpenAlbums);
+    setOpenAlbums((current) => {
+      if (
+        current.length === defaultOpenAlbums.length &&
+        current.every((key, index) => key === defaultOpenAlbums[index])
+      ) {
+        return current;
+      }
+      return defaultOpenAlbums;
+    });
   }, [defaultOpenAlbums]);
 
   function artistFor(row: UserVaultRow): string {
@@ -397,17 +427,57 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     }
   }
 
+  async function deleteRow(row: UserVaultRow) {
+    setDeletingId(row.id);
+    try {
+      if (isPersistedVaultId(row.id)) {
+        await deleteVaultTrackApi(row.id);
+      } else if (row.id.startsWith("guest-")) {
+        await deleteGuestVaultTrack(row.id);
+      } else if (isWorkerSessionId(row.id)) {
+        const response = await fetch(`/api/tracks/${encodeURIComponent(row.id)}`, {
+          method: "DELETE",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok && response.status !== 404) {
+          throw new Error("Deletion failed on server");
+        }
+        forgetWorkerSession(row.id);
+      }
+      setRows((prev) => prev.filter((item) => item.id !== row.id));
+      toast.success("Track removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete that track.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="vault-container mb-24 bg-zinc-900/40 backdrop-blur-xl border border-white/[0.08] shadow-2xl rounded-xl text-zinc-100 p-6 transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/55">
       <div className="mb-1 flex items-center justify-between gap-3 pb-4">
         <h3 className="text-lg font-bold text-zinc-100">Your Audio Vault</h3>
-        <span className="text-xs text-zinc-400">Finished masters only</span>
+        <div className="flex items-center gap-3">
+          {failedCount > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-zinc-400"
+              aria-pressed={showFailed}
+              onClick={() => setShowFailed((open) => !open)}
+            >
+              {showFailed ? "Hide failed" : `Show failed (${failedCount})`}
+            </Button>
+          ) : null}
+          <span className="text-xs text-zinc-400">Finished masters only</span>
+        </div>
       </div>
 
       <div id="vault-track-list" className="divide-y divide-zinc-800/50">
         {loading && rows.length === 0 ? (
           <p className="py-3 text-sm text-zinc-400">Loading vault assets…</p>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <p className="py-3 text-sm text-zinc-400">
             {signedIn
               ? "No tracks saved. Hit Generate to start."
@@ -582,6 +652,21 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                             </Button>
                                           </>
                                         )}
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="ghost"
+                                          className="size-8 text-zinc-400 hover:text-red-300"
+                                          disabled={deletingId === row.id}
+                                          aria-label={`Delete ${row.title}`}
+                                          onClick={() => void deleteRow(row)}
+                                        >
+                                          {deletingId === row.id ? (
+                                            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                                          ) : (
+                                            <Trash2 className="size-3.5" aria-hidden />
+                                          )}
+                                        </Button>
                                       </div>
                                     </TableCell>
                                   </TableRow>

@@ -11,6 +11,7 @@ the session master (/api/stream/{session}_master.mp3). It does not run the
 from __future__ import annotations
 
 import argparse
+import asyncio
 import gc
 import hmac
 import json
@@ -19,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import traceback
 import uuid
@@ -1167,14 +1169,20 @@ def _worker_inner(
             _update_job(session_id, status="completed", note=note)
             return
         opts = dict(render_opts or {})
-        from engine.generate_track_headless import render_lyria_master
+        from engine.generate_track_headless import generation_token_charge, render_lyria_master
 
+        duration_raw = opts.get("duration_sec")
+        duration_value = float(duration_raw) if duration_raw is not None else None
+        # Flat price. 300s and 420s do not add a second token.
+        token_charge = generation_token_charge(duration_value)
+        _log(f"[TOKEN] charge={token_charge} duration_sec={duration_raw}")
         saved = render_lyria_master(
             os.path.join(SCRATCH_ROOT, session_id),
             style=str(opts.get("style") or ""),
             prompt=prompt,
             lyrics=str(opts.get("lyrics") or ""),
             session_id=session_id,
+            duration_sec=duration_value,
         )
         published = _publish_lyria_master(session_id, saved)
         _log(
@@ -1246,11 +1254,14 @@ class CreateTrackBody(BaseModel):
     # Optional arrangement length: bars (quarter-note 4/4 bars) at ``bpm``.
     bars: int | None = Field(default=None, ge=4, le=256)
     bpm: float | None = Field(default=None, ge=60.0, le=200.0)
-    # Target length in seconds; used when ``bars`` is absent.
+    # Target length in seconds. ``duration`` is the studio field and wins over bars.
+    duration: float | None = Field(default=None, ge=10.0, le=420.0)
     duration_sec: float | None = Field(default=None, ge=10.0, le=420.0)
     # lead = lyrics expected, adlib = no lyrics, none = instrumental.
     vocal_mode: str | None = Field(default=None, max_length=16)
     key: str | None = Field(default=None, max_length=24)
+    # Accepted and ignored. Generation is always one master.
+    num_outputs: int | None = Field(default=1)
 
 
 DEFAULT_RENDER_SECONDS = 210.0
@@ -1500,7 +1511,9 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             prompt = title
         requested_bpm_value = _form_float(form, "bpm")
         bpm = requested_bpm_value or DEFAULT_RENDER_BPM
-        duration_sec = _form_float(form, "duration_sec")
+        duration_sec = _form_float(form, "duration")
+        if duration_sec is None:
+            duration_sec = _form_float(form, "duration_sec")
         bars = _form_int(form, "bars")
         vocal_mode = _form_text(form, "vocal_mode").lower()
         key = _form_text(form, "key", default="G")
@@ -1521,7 +1534,7 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         ).strip()
         requested_bpm_value = float(body.bpm) if body.bpm is not None else None
         bpm = requested_bpm_value if requested_bpm_value is not None else DEFAULT_RENDER_BPM
-        duration_sec = body.duration_sec
+        duration_sec = body.duration if body.duration is not None else body.duration_sec
         bars = body.bars
         vocal_mode = (body.vocal_mode or "").strip().lower()
         key = (body.key or "G").strip() or "G"
@@ -1540,17 +1553,18 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
     if bars is not None and requested_bpm_value is None:
         raise HTTPException(status_code=400, detail="bars requires bpm")
-    render_opts: dict[str, Any] = {"bpm": float(bpm), "key": key}
+    # One Lyria master. num_outputs above 1 is not a batch.
+    render_opts: dict[str, Any] = {"bpm": float(bpm), "key": key, "num_outputs": 1}
     if vocal_path and vocal_sec > 0:
         from engine.vocal_ingest import song_length_from_vocal
 
         render_opts["duration_sec"] = song_length_from_vocal(vocal_sec, float(bpm))
         render_opts["vocal_file"] = vocal_path
         render_opts["vocal_mode"] = "lead"
-    elif bars is not None:
-        render_opts["duration_sec"] = float(bars) * 4.0 * 60.0 / float(bpm)
     elif duration_sec is not None:
         render_opts["duration_sec"] = float(duration_sec)
+    elif bars is not None:
+        render_opts["duration_sec"] = float(bars) * 4.0 * 60.0 / float(bpm)
     else:
         render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
     if vocal_mode in VOCAL_MODES and "vocal_mode" not in render_opts:
@@ -1599,7 +1613,7 @@ def create_app() -> Any:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(CORS_ORIGINS),
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Hybrid-Worker-Token"],
     )
 
@@ -1639,6 +1653,27 @@ def create_app() -> Any:
             return await _fulfill_create_track(request)
         finally:
             _release_generation_claim()
+
+    @app.delete("/api/tracks/{session_id}")
+    def delete_track(session_id: str, request: Request) -> dict[str, Any]:
+        """Drop a scratch session so a failed run does not keep its WAV/MP3."""
+        _require_worker_token(request)
+        session_id = (session_id or "").strip()
+        if (
+            not session_id
+            or session_id in {".", ".."}
+            or "/" in session_id
+            or "\\" in session_id
+        ):
+            raise HTTPException(status_code=400, detail="invalid session")
+        session_dir = os.path.abspath(os.path.join(SCRATCH_ROOT, session_id))
+        if not _is_under(session_dir, os.path.abspath(SCRATCH_ROOT)):
+            raise HTTPException(status_code=400, detail="invalid session")
+        with _registry_lock:
+            _jobs.pop(session_id, None)
+        if os.path.isdir(session_dir):
+            shutil.rmtree(session_dir, ignore_errors=True)
+        return {"status": "deleted", "session_id": session_id}
 
     @app.get("/api/tracks/status/{session_id}")
     @app.get("/api/jobs/{session_id}")
@@ -1699,6 +1734,60 @@ def create_app() -> Any:
             f"label={label:+.3f}"
         )
         return {"recorded": True, "session_id": session_id, "event": event, "label": label}
+
+    def _voice_json(status_code: int, message: str) -> Response:
+        payload = json.dumps({"status": "error", "error": message})
+        return Response(content=payload, status_code=status_code, media_type="application/json")
+
+    @app.post("/api/voice/process")
+    async def process_voice(request: Request) -> Any:
+        """Multipart ``file`` + ``lyrics`` → HeartMuLa vocal wav.
+
+        The prediction runs off the event loop. A failure is a JSON body and
+        does not affect other requests or Lyria generation.
+        """
+        try:
+            _require_worker_token(request)
+        except HTTPException as exc:
+            return _voice_json(int(exc.status_code), str(exc.detail))
+        temp_path: str | None = None
+        try:
+            try:
+                form = await request.form()
+            except Exception:
+                return _voice_json(400, "multipart form is required")
+            lyrics = _form_text(form, "lyrics")
+            if not lyrics:
+                return _voice_json(400, "lyrics are required")
+            upload = form.get("file")
+            if upload is None or not hasattr(upload, "read"):
+                return _voice_json(400, "file is required")
+            raw = await _read_upload_bytes(upload)
+            if len(raw) < 64:
+                return _voice_json(400, "file is empty")
+            if len(raw) > 25 * 1024 * 1024:
+                return _voice_json(400, "file is too large")
+            session_id = _form_text(form, "session_id") or ("ht_" + uuid.uuid4().hex[:12])
+            fd, temp_path = tempfile.mkstemp(suffix=".wav")
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(raw)
+            from services.voice_service import process_voice_track
+
+            vocal_path = await asyncio.to_thread(
+                process_voice_track, temp_path, lyrics, session_id
+            )
+        except ValueError as exc:
+            return _voice_json(400, str(exc)[:400] or "invalid voice request")
+        except Exception as exc:
+            _log(f"[VOICE_PROCESS] failed: {_redact(str(exc))[:400]}")
+            return _voice_json(502, _redact(str(exc))[:400] or "voice processing failed")
+        finally:
+            if temp_path:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+        return {"status": "ready", "vocal_path": vocal_path}
 
     @app.get("/api/stream/{filename}")
     def stream_audio(filename: str, request: Request) -> Any:

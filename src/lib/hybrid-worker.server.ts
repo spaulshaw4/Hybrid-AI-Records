@@ -5,12 +5,17 @@
  * (default in non-production), create/poll/stream stay on the workstation.
  */
 
+import { applyEngineControlsToPrompt, type EngineControls } from "@/lib/engine-controls";
+import { clampDurationPreset } from "@/lib/track-length";
+
 export const HYBRID_WORKER_PORT = 8880;
 export const DEFAULT_HYBRID_WORKER_URL = `http://127.0.0.1:${HYBRID_WORKER_PORT}`;
 /** Vite / leftover Next / old worker ports — never the live Python listener. */
 export const FRONTEND_DEV_PORTS = new Set(["3000", "8000", "8080", "8082", "5173"]);
 /** Headless generate + optional master can exceed the 120s AIMusicAPI poll. */
 export const LOCAL_WORKER_TIMEOUT_MS = 8 * 60_000;
+/** One master per Generate click. The worker does not render candidate batches. */
+export const SINGLE_TRACK_OUTPUTS = 1;
 const POLL_MS = 2_000;
 
 function isLoopbackHost(hostname: string): boolean {
@@ -123,6 +128,24 @@ async function vocalBytesFromInput(input: {
 export const DEFAULT_WORKER_DURATION_SECONDS = 210;
 export const DEFAULT_WORKER_BPM = 110;
 
+/**
+ * Style textarea plus slider directives. Lyria only receives a prompt string,
+ * so tempo, adherence, style lock, and temperature have to travel inside it.
+ */
+export function composeWorkerStylePrompt(
+  tags: string | undefined,
+  style: string | undefined,
+  controls?: EngineControls,
+): string {
+  const stylePrompt = [tags, style]
+    .map((part) => (part || "").trim())
+    .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index)
+    .join("\n")
+    .slice(0, 6000);
+  if (!controls) return stylePrompt;
+  return applyEngineControlsToPrompt(stylePrompt, controls).slice(0, 6000);
+}
+
 /** 4/4 bars for a target length: bars = round(seconds * bpm / 240). */
 export function barsForDuration(seconds: number, bpm: number): number {
   return Math.max(4, Math.min(256, Math.round((seconds * bpm) / 240)));
@@ -134,6 +157,8 @@ export async function generateFromHybridWorker(input: {
   prompt: string;
   genreHint?: string;
   durationSeconds?: number;
+  /** Preset seconds sent as ``duration`` on POST /api/tracks/create. */
+  duration?: number;
   bpm?: number;
   instrumental?: boolean;
   /** Style prompt. Studio also sends the Style Prompt textarea as ``tags``. */
@@ -141,6 +166,7 @@ export async function generateFromHybridWorker(input: {
   tags?: string;
   lyrics?: string;
   key?: string;
+  controls?: EngineControls;
   vocalFile?: Buffer | Uint8Array;
   vocalAudioBase64?: string;
   vocalFileName?: string;
@@ -160,9 +186,10 @@ export async function generateFromHybridWorker(input: {
 
   const bpmRaw = Number(input.bpm);
   const bpm = Number.isFinite(bpmRaw) && bpmRaw >= 60 && bpmRaw <= 200 ? bpmRaw : DEFAULT_WORKER_BPM;
-  const secondsRaw = Number(input.durationSeconds);
-  const durationSeconds =
-    Number.isFinite(secondsRaw) && secondsRaw >= 10 ? secondsRaw : DEFAULT_WORKER_DURATION_SECONDS;
+  const secondsRaw = Number(input.duration ?? input.durationSeconds);
+  const durationSeconds = clampDurationPreset(
+    Number.isFinite(secondsRaw) ? secondsRaw : DEFAULT_WORKER_DURATION_SECONDS,
+  );
   const bars = barsForDuration(durationSeconds, bpm);
   const vocalMode: HybridVocalMode = input.instrumental
     ? "none"
@@ -186,14 +213,12 @@ export async function generateFromHybridWorker(input: {
   form.append("genre_hint", (input.genreHint || "").trim());
   form.append("bpm", String(bpm));
   form.append("bars", String(bars));
+  form.append("duration", String(durationSeconds));
   form.append("duration_sec", String(durationSeconds));
   form.append("vocal_mode", vocalMode);
   form.append("key", (input.key || "").trim() || "G");
-  const stylePrompt = [input.tags, input.style]
-    .map((part) => (part || "").trim())
-    .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index)
-    .join("\n")
-    .slice(0, 6000);
+  form.append("num_outputs", String(SINGLE_TRACK_OUTPUTS));
+  const stylePrompt = composeWorkerStylePrompt(input.tags, input.style, input.controls);
   const lyricText = input.instrumental ? "" : (input.lyrics || "").trim().slice(0, 6000);
   if (stylePrompt) form.append("style", stylePrompt);
   if (lyricText) form.append("lyrics", lyricText);

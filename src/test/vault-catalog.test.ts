@@ -12,6 +12,7 @@ import {
   vaultMasterUrls,
   vaultMp3DownloadUrl,
   workerDownloadUrls,
+  preferSingleMasterRows,
   workerJobToVaultPayload,
   durationSecFromWorkerJob,
   extractSongPlanKey,
@@ -123,5 +124,27 @@ describe("vault catalog helpers", () => {
         song_plan: { total_bars: 96, bpm: 110 },
       }),
     ).toBe(68);
+  });
+
+  it("drops a worker session and a temp row when the vault already has that master", () => {
+    const rows = preferSingleMasterRows([
+      {
+        id: "temp-1",
+        title: "Copper Lantern",
+        masterUrl: "",
+      },
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "Copper Lantern",
+        masterUrl: "/api/stream/ht_c7562badba42_master.wav",
+        mp3Url: "/api/stream/ht_c7562badba42_master.mp3",
+      },
+      {
+        id: "ht_c7562badba42",
+        title: "Acoustic",
+        masterUrl: "/api/stream/ht_c7562badba42_master.wav",
+      },
+    ]);
+    expect(rows.map((row) => row.id)).toEqual(["11111111-1111-4111-8111-111111111111"]);
   });
 });

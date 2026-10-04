@@ -47,6 +47,26 @@ export const MAX_TARGET_DURATION_SECONDS = 420; // 7:00
 export const TARGET_DURATION_STEP_SECONDS = 15;
 export const DEFAULT_TARGET_DURATION_SECONDS = 210; // 3:30
 
+/** Engine length presets. 180 and 210 are one Lyria pass. 300 and 420 continue once. */
+export const DURATION_PRESET_SECONDS = [180, 210, 300, 420] as const;
+export type DurationPresetSeconds = (typeof DURATION_PRESET_SECONDS)[number];
+
+/** Snap any requested length onto 180, 210, 300, or 420. Above 420 becomes 420. */
+export function clampDurationPreset(seconds: number): DurationPresetSeconds {
+  const value = Number.isFinite(seconds) ? seconds : DEFAULT_TARGET_DURATION_SECONDS;
+  if (value > DURATION_PRESET_SECONDS[DURATION_PRESET_SECONDS.length - 1]) return 420;
+  let best: DurationPresetSeconds = DEFAULT_TARGET_DURATION_SECONDS;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const preset of DURATION_PRESET_SECONDS) {
+    const dist = Math.abs(preset - value);
+    if (dist < bestDist || (dist === bestDist && preset > best)) {
+      best = preset;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
 export function trackLengthOption(id: TrackLengthId): TrackLengthOption {
   return TRACK_LENGTHS.find((o) => o.id === id) ?? TRACK_LENGTHS[1]!;
 }

@@ -44,7 +44,7 @@ function allowTokenlessGenerate(): boolean {
 import { checkEngineHealth } from "@/lib/apiframe-music.functions";
 import { checkStatus } from "@/lib/generate-status-fetch";
 import { streamStudioGenerate } from "@/lib/studio-generate-fetch";
-import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
+import { requestVoiceProcess, shouldProcessVoice } from "@/lib/voice-process-client";
 import {
   getEngineBreakerStatus,
   type EngineBreakerStatus,
@@ -164,12 +164,9 @@ import { isLocalVocalProfileId } from "@/lib/vocal-profile-store";
 import { uploadVoiceSample } from "@/lib/voice-sample-upload";
 import {
   DEFAULT_TARGET_DURATION_SECONDS,
-  MAX_TARGET_DURATION_SECONDS,
-  MIN_TARGET_DURATION_SECONDS,
-  TARGET_DURATION_STEP_SECONDS,
+  DURATION_PRESET_SECONDS,
   arrangeLyricsForDuration,
-  formatDuration,
-  snapTargetDuration,
+  clampDurationPreset,
 } from "@/lib/track-length";
 import {
   DEFAULT_BPM,
@@ -1423,7 +1420,7 @@ export function AudioStudio() {
     setStyles(draft.styles);
     setStylePrompt(draft.stylePrompt);
     setWithVocals(draft.withVocals);
-    setTargetDuration(draft.targetDuration);
+    setTargetDuration(clampDurationPreset(draft.targetDuration));
     setBpm(draft.bpm);
     setAudioInfluence(draft.audioInfluence);
     setWeirdness(draft.weirdness);
@@ -2423,9 +2420,8 @@ export function AudioStudio() {
       status: "generating",
       prompt: promptSnippet,
     });
-    notifyVaultOfNewGeneration({ title: trackTitle, style: styleLine || "Custom" });
-
     // Open the permanent vault record so the run survives refreshes and devices.
+    // One notify happens after the vault id exists — an id-less row here was a second track.
     let vaultId: string | null = null;
     try {
       const created = await openVaultTrack({
@@ -2677,6 +2673,14 @@ export function AudioStudio() {
       });
 
       if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
+      // Optional vocal pass. Not awaited — Lyria starts on the lines below.
+      const voiceScript = lyrics.trim();
+      if (
+        recordedVoiceBlob &&
+        shouldProcessVoice(recordedVoiceBlob, voiceScript)
+      ) {
+        void requestVoiceProcess(recordedVoiceBlob, voiceScript);
+      }
       // Soft pulse only — never advance stage badges ahead of serverGateMask bits.
       setServerGateMask(PipelineGate.NONE);
       const progressStartedAt = Date.now();
@@ -2747,10 +2751,8 @@ export function AudioStudio() {
           idempotencyKey: runId,
 
           model: "V4_5" as const,
-          durationSeconds: Math.min(
-            MINIMAX_MAX_SECONDS,
-            Math.max(10, Math.round(targetDuration)),
-          ),
+          duration: clampDurationPreset(targetDuration),
+          durationSeconds: clampDurationPreset(targetDuration),
           ...(audioVaultId ? { vaultId: audioVaultId } : {}),
           ...(withVocals && recordedVoiceBlob && recordedVoiceBlob.size > 64
             ? {
@@ -2762,6 +2764,7 @@ export function AudioStudio() {
               }
             : {}),
 
+          num_outputs: 1,
           controls: {
             bpm: clampBpm(bpm),
             influence: clampInfluence(audioInfluence),
@@ -4247,111 +4250,6 @@ export function AudioStudio() {
                 </div>
               ) : null}
 
-              <div className="space-y-1.5">
-                <Label htmlFor="style-prompt" className="text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    Style Prompt / Genre Descriptors
-                    <InlineTip label="Style Prompt / Genre Descriptors">
-                      Sent unchanged as Gate 1 <code>tags</code>. Genre chips are only used when
-                      this box is empty — nothing rewrites or truncates your text.
-                    </InlineTip>
-                  </span>
-                </Label>
-                <Textarea
-                  id="style-prompt"
-                  value={stylePrompt}
-                  onChange={(event) => setStylePrompt(event.target.value)}
-                  rows={4}
-                  placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
-                  className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-sm text-zinc-100 placeholder:text-zinc-500 shadow-none focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={aiBusy !== null}
-                  onClick={() => void handleOptimizeStyle()}
-                  className="w-full justify-center gap-2 border-zinc-700/80 bg-zinc-950/60 text-zinc-100 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100"
-                >
-                  {aiBusy === "style" ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" aria-hidden />
-                      Optimizing…
-                    </>
-                  ) : (
-                    <>⚡ Optimize Style</>
-                  )}
-                </Button>
-                {styleTagsPreview ? (
-                  <p className="text-xs text-muted-foreground">
-                    Engine tags: <span className="text-foreground">{styleTagsPreview}</span>
-                  </p>
-                ) : null}
-              </div>
-
-            </div>
-
-
-            <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="target-duration"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">Finished length from 1:00 to 7:00. A recorded vocal take sizes the track to the take plus an 8-bar outro.</InlineTip></span></Label>
-                <span className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground">
-                  {formatDuration(targetDuration)} min
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  aria-label="Decrease target duration by 15 seconds"
-                  disabled={targetDuration <= MIN_TARGET_DURATION_SECONDS}
-                  onClick={() => setTargetDuration((s) => snapTargetDuration(s - TARGET_DURATION_STEP_SECONDS))}
-                  className="shrink-0 rounded-md border border-border bg-background/60 px-3 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-40"
-                >
-                  − 15s
-                </button>
-
-                <Slider
-                  id="target-duration"
-                  min={MIN_TARGET_DURATION_SECONDS}
-                  max={MAX_TARGET_DURATION_SECONDS}
-                  step={TARGET_DURATION_STEP_SECONDS}
-                  value={[targetDuration]}
-                  onValueChange={(next) =>
-                    setTargetDuration(snapTargetDuration(next[0] ?? targetDuration))
-                  }
-                  className="flex-1"
-                  aria-label="Target duration in seconds"
-                />
-
-                <button
-                  type="button"
-                  aria-label="Increase target duration by 15 seconds"
-                  disabled={targetDuration >= MAX_TARGET_DURATION_SECONDS}
-                  onClick={() => setTargetDuration((s) => snapTargetDuration(s + TARGET_DURATION_STEP_SECONDS))}
-                  className="shrink-0 rounded-md border border-border bg-background/60 px-3 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-40"
-                >
-                  + 15s
-                </button>
-              </div>
-
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>{formatDuration(MIN_TARGET_DURATION_SECONDS)}</span>
-                <span>{formatDuration(MAX_TARGET_DURATION_SECONDS)}</span>
-              </div>
-              {recordedVoiceBlob && recordedVoiceBlob.size > 64 ? (
-                <p
-                  className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300"
-                  role="status"
-                >
-                  Voice detected — the arrangement will follow your take, then an 8-bar outro.
-                </p>
-              ) : null}
-            </div>
-            </div>
-          </section>
-          ) : null}
-
-          {studioStep === 3 ? (
           <section className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
             <h3 className="py-3 text-base font-semibold text-foreground">
               Advanced
@@ -4526,7 +4424,99 @@ export function AudioStudio() {
             </div>
             </div>
           </section>
+              <div className="space-y-1.5">
+                <Label htmlFor="style-prompt" className="text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    Style Prompt / Genre Descriptors
+                    <InlineTip label="Style Prompt / Genre Descriptors">
+                      Sent as written. Tempo, audio influence, style influence, and weirdness
+                      are added beside it on generate. Genre chips are used only when this box is empty.
+                    </InlineTip>
+                  </span>
+                </Label>
+                <Textarea
+                  id="style-prompt"
+                  value={stylePrompt}
+                  onChange={(event) => setStylePrompt(event.target.value)}
+                  rows={4}
+                  placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
+                  className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-sm text-zinc-100 placeholder:text-zinc-500 shadow-none focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={aiBusy !== null}
+                  onClick={() => void handleOptimizeStyle()}
+                  className="w-full justify-center gap-2 border-zinc-700/80 bg-zinc-950/60 text-zinc-100 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100"
+                >
+                  {aiBusy === "style" ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                      Optimizing…
+                    </>
+                  ) : (
+                    <>⚡ Optimize Style</>
+                  )}
+                </Button>
+                {styleTagsPreview ? (
+                  <p className="text-xs text-muted-foreground">
+                    Engine tags: <span className="text-foreground">{styleTagsPreview}</span>
+                  </p>
+                ) : null}
+              </div>
+
+            </div>
+
+
+            <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <Label id="target-duration-label"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">Choose 180, 210, 300, or 420 seconds. Every length costs 1 Hybrid Token.</InlineTip></span></Label>
+                <span className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground">
+                  {targetDuration}s
+                </span>
+              </div>
+
+              <div
+                role="radiogroup"
+                aria-labelledby="target-duration-label"
+                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              >
+                {DURATION_PRESET_SECONDS.map((seconds) => {
+                  const selected = targetDuration === seconds;
+                  const minuteLabel =
+                    seconds === 180 ? "3 min" : seconds === 210 ? "3.5 min" : seconds === 300 ? "5 min" : "7 min";
+                  return (
+                    <button
+                      key={seconds}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setTargetDuration(seconds)}
+                      className={`rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                        selected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border-strong bg-background text-foreground hover:border-primary/60"
+                      }`}
+                    >
+                      {seconds}
+                      <span className="mt-0.5 block text-xs font-medium opacity-80">{minuteLabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {recordedVoiceBlob && recordedVoiceBlob.size > 64 ? (
+                <p
+                  className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300"
+                  role="status"
+                >
+                  Voice detected — the arrangement will follow your take, then an 8-bar outro.
+                </p>
+              ) : null}
+            </div>
+            </div>
+          </section>
           ) : null}
+
 
           {studioStep === 2 ? (
           <section className="relative overflow-visible rounded-xl border border-white/[0.08] bg-zinc-900/40 px-3 sm:px-4">
@@ -4982,7 +4972,7 @@ export function AudioStudio() {
                   ) : null}
                   <div className="flex justify-between gap-3">
                     <dt className="text-zinc-400">Length</dt>
-                    <dd className="text-end text-zinc-100">{formatDuration(targetDuration)}</dd>
+                    <dd className="text-end text-zinc-100">{targetDuration}s</dd>
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-zinc-400">Tempo</dt>

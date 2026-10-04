@@ -9,6 +9,7 @@ redis
 numpy
 scipy
 soundfile
+pydub
 pyworld
 pyloudnorm
 pedalboard

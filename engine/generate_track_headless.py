@@ -1192,6 +1192,18 @@ LYRIA_POLL_SEC = 3.0
 LYRIA_GATEWAY_RETRIES = 2
 LYRIA_GATEWAY_RETRY_SLEEP_SEC = 3.0
 LYRIA_MASTER_RATE = 48000
+# Studio presets. 180 and 210 stay one Lyria pass. 300 and 420 continue once.
+LYRIA_DURATION_PRESETS = (180, 210, 300, 420)
+LYRIA_SINGLE_PASS_MAX_SEC = 210
+LYRIA_PASS1_SEC = 210
+LYRIA_CONTINUATION_TAIL_SEC = 15.0
+LYRIA_CROSSFADE_MS = 1000
+LYRIA_CONTINUATION_INSTRUCTION = (
+    "Continue the same song from its previous 15-second ending. "
+    "Do not restart the intro. Treat that ending as the overlap, then continue with the remaining lyrics."
+)
+# One Hybrid Token ($2.00) for every preset, including 300s and 420s.
+HYBRID_GENERATION_TOKEN_CHARGE = 1
 LYRIC_SANITIZE_URL = "https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions"
 LYRIC_SANITIZE_TIMEOUT_SEC = 5.0
 LYRIC_SANITIZE_POLL_SEC = 0.25
@@ -1552,33 +1564,30 @@ def _lyria_prediction_http(http_json: Any, *args: Any, **kwargs: Any) -> dict:
             time.sleep(LYRIA_GATEWAY_RETRY_SLEEP_SEC)
 
 
-def render_lyria_master(
-    dest_dir: str,
-    *,
-    style: str = "",
-    prompt: str = "",
-    lyrics: str = "",
-    session_id: str = "lyria",
-    timeout_sec: float = LYRIA_TIMEOUT_SEC,
-    poll_sec: float = LYRIA_POLL_SEC,
-) -> str:
-    """Sanitize lyrics, POST lyria-3-pro, poll ``urls.get``, save 48 kHz PCM WAV.
+def clamp_lyria_duration(seconds: float | None) -> int:
+    """Snap a requested length onto 180, 210, 300, or 420. Above 420 becomes 420."""
+    from services.composition import clamp_duration
 
-    Gemini Flash runs on ``REPLICATE_API_TOKEN`` and has a 5 second budget.
-    A slow or failed preflight keeps the original lyrics. A dropped Replicate
-    socket retries twice, 3 seconds apart. Returns the path of the saved
-    master, always ``{session_id}_master.wav``.
-    """
+    return clamp_duration(seconds)
+
+
+def generation_token_charge(duration_sec: float | None = None) -> int:
+    """Hybrid Tokens charged for one generation. 300s and 420s still cost 1."""
+    from services.composition import generation_token_charge as charge
+
+    return charge(duration_sec)
+
+
+def _lyria_prompt_audio(
+    token: str,
+    full_prompt: str,
+    *,
+    timeout_sec: float,
+    poll_sec: float,
+) -> tuple[Any, bytes, str, str]:
+    """POST one Lyria prediction and return decoded PCM plus the download bytes."""
     from engine.gemini_arranger import _http_json
 
-    token = _lyria_token()
-    if not token:
-        raise RuntimeError("REPLICATE_API_TOKEN is not set")
-    original_lyrics = lyrics or ""
-    lyrics = sanitize_lyrics_for_lyria(original_lyrics, token=token)
-    if (prompt or "").strip() and (prompt or "").strip() == original_lyrics.strip():
-        prompt = lyrics
-    full_prompt = compose_lyria_prompt(style, prompt, lyrics)
     deadline = time.monotonic() + float(timeout_sec)
     prediction = _lyria_prediction_http(
         _http_json,
@@ -1605,8 +1614,132 @@ def render_lyria_master(
         raise RuntimeError(f"Lyria prediction {status}: {err}")
     audio_url = lyria_output_url(prediction.get("output"))
     body, content_type = _download_lyria_audio(audio_url, timeout=60.0)
-    os.makedirs(dest_dir, exist_ok=True)
     audio = _decode_lyria_download(body, audio_url, content_type)
+    return audio, body, content_type, audio_url
+
+
+def _render_lyria_two_pass(
+    dest_dir: str,
+    *,
+    style: str,
+    prompt: str,
+    lyrics: str,
+    session_id: str,
+    duration_sec: int,
+    token: str,
+    timeout_sec: float,
+    poll_sec: float,
+) -> str:
+    """Two Lyria predictions and one pydub master. Pass 2 errors fail the job.
+
+    ``part1.wav`` and ``part2.wav`` stay in the session scratch dir and are not
+    published. The master is ``{session_id}_master.wav``. Lyria stays prompt-only:
+    the 15s tail is the stitch overlap, not a second model input.
+    """
+    from services.composition import (
+        continuation_block,
+        extract_context_tail,
+        split_lyrics_for_passes,
+        stitch_lyria_master,
+    )
+
+    os.makedirs(dest_dir, exist_ok=True)
+    part1_path = os.path.join(dest_dir, "part1.wav")
+    part2_path = os.path.join(dest_dir, "part2.wav")
+    tail_path = os.path.join(dest_dir, "part1_tail.wav")
+    master_path = os.path.join(dest_dir, f"{session_id}_master.wav")
+    first_lyrics, remaining_lyrics = split_lyrics_for_passes(lyrics, duration_sec)
+    prompt1 = compose_lyria_prompt(style, prompt, first_lyrics)
+    print("[LYRIA] pass 1 render", flush=True)
+    audio1, _body1, _type1, _url1 = _lyria_prompt_audio(
+        token,
+        prompt1,
+        timeout_sec=timeout_sec,
+        poll_sec=poll_sec,
+    )
+    _write_lyria_wav(part1_path, audio1)
+    try:
+        extract_context_tail(part1_path, tail_path)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Lyria prediction failed: {exc}") from exc
+    prompt2 = compose_lyria_prompt(style, prompt, continuation_block(remaining_lyrics))
+    print("[LYRIA] pass 2 render", flush=True)
+    try:
+        audio2, _body2, _type2, _url2 = _lyria_prompt_audio(
+            token,
+            prompt2,
+            timeout_sec=timeout_sec,
+            poll_sec=poll_sec,
+        )
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Lyria prediction failed: {exc}") from exc
+    _write_lyria_wav(part2_path, audio2)
+    try:
+        stitch_lyria_master(part1_path, part2_path, master_path)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Lyria prediction failed: {exc}") from exc
+    print(f"[LYRIA] exported master {master_path}", flush=True)
+    return master_path
+
+
+def render_lyria_master(
+    dest_dir: str,
+    *,
+    style: str = "",
+    prompt: str = "",
+    lyrics: str = "",
+    session_id: str = "lyria",
+    timeout_sec: float = LYRIA_TIMEOUT_SEC,
+    poll_sec: float = LYRIA_POLL_SEC,
+    duration_sec: float | None = None,
+) -> str:
+    """Sanitize lyrics, POST lyria-3-pro, poll ``urls.get``, save 48 kHz PCM WAV.
+
+    Durations of 210 seconds or less (including 180) are one prediction and do
+    not write part1/part2. 300 and 420 run a second prediction, extract the
+    trailing 15 seconds of part1.wav, and stitch with
+    ``part1.append(part2, crossfade=1000)``. Above 420 clamps to 420.
+    ``num_outputs`` is not sent; each prediction body is ``{"input": {"prompt": ...}}``.
+
+    Gemini Flash runs on ``REPLICATE_API_TOKEN`` and has a 5 second budget.
+    A slow or failed preflight keeps the original lyrics. A dropped Replicate
+    socket retries twice, 3 seconds apart. Returns the path of the saved
+    master, always ``{session_id}_master.wav``.
+    """
+    token = _lyria_token()
+    if not token:
+        raise RuntimeError("REPLICATE_API_TOKEN is not set")
+    original_lyrics = lyrics or ""
+    lyrics = sanitize_lyrics_for_lyria(original_lyrics, token=token)
+    if (prompt or "").strip() and (prompt or "").strip() == original_lyrics.strip():
+        prompt = lyrics
+    requested = None if duration_sec is None else clamp_lyria_duration(duration_sec)
+    if requested is not None and requested > LYRIA_SINGLE_PASS_MAX_SEC:
+        return _render_lyria_two_pass(
+            dest_dir,
+            style=style,
+            prompt=prompt,
+            lyrics=lyrics,
+            session_id=session_id,
+            duration_sec=requested,
+            token=token,
+            timeout_sec=timeout_sec,
+            poll_sec=poll_sec,
+        )
+    full_prompt = compose_lyria_prompt(style, prompt, lyrics)
+    audio, body, content_type, audio_url = _lyria_prompt_audio(
+        token,
+        full_prompt,
+        timeout_sec=timeout_sec,
+        poll_sec=poll_sec,
+    )
+    os.makedirs(dest_dir, exist_ok=True)
     master_path = os.path.join(dest_dir, f"{session_id}_master.wav")
     _write_lyria_wav(master_path, audio)
     # Vault MP3 download can use the original bytes. A failed sidecar must not
@@ -1721,6 +1854,7 @@ def main(argv: list[str] | None = None) -> int:
             prompt=str(args.prompt or ""),
             lyrics=str(args.lyrics or ""),
             session_id=str(args.session),
+            duration_sec=args.duration,
         )
     except (ValueError, RuntimeError, OSError) as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)

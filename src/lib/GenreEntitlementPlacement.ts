@@ -82,13 +82,16 @@ export class GenreEntitlementPlacement {
     const entitlementId = `entitlement_${ctx.sessionNonce}_${Date.now()}`;
     const rule = ENTITLEMENT_PROFILES[targetGenre];
     const bpm = Number.isFinite(currentBpm) ? currentBpm : 0;
-    const isBpmValid = bpm >= rule.requiredBpmRange[0] && bpm <= rule.requiredBpmRange[1];
+    // Tempo is the user's choice. requiredBpmRange stays on the profile as a
+    // stylistic hint for defaults, but it must not quarantine HEAVY_ALTERNATIVE_ROCK
+    // at 86 BPM (or any other genre/tempo pair).
+    const entitlementStatus: EntitlementStatus = "PASSED_ENTITLEMENT";
 
     return {
       entitlementId,
       genreVerified: targetGenre,
       appliedRules: rule,
-      entitlementStatus: isBpmValid ? "PASSED_ENTITLEMENT" : "GENRE_MISMATCH_QUARANTINED",
+      entitlementStatus,
       currentBpm: bpm,
     };
   }

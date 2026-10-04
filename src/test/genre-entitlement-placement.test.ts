@@ -24,20 +24,23 @@ describe("GenreEntitlementPlacement", () => {
     expect(result.appliedRules.masterLufsTarget).toBe(-11.5);
   });
 
-  it("quarantines BPM outside genre entitlement", () => {
+  it("accepts a tempo outside the old genre BPM range", () => {
     const ctx = ContextFactory.create(
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
       "free",
       "cortex-worker",
       { sessionNonce: "nonce_q" },
     );
-    const result = GenreEntitlementPlacement.verifyAndEnforceEntitlement(
+    const nuMetal = GenreEntitlementPlacement.verifyAndEnforceEntitlement(ctx, "NU_METAL", 160);
+    const altRock = GenreEntitlementPlacement.verifyAndEnforceEntitlement(
       ctx,
-      "NU_METAL",
-      160,
+      "HEAVY_ALTERNATIVE_ROCK",
+      86,
     );
-    expect(result.entitlementStatus).toBe("GENRE_MISMATCH_QUARANTINED");
-    expect(result.appliedRules.requiredBpmRange).toEqual([95, 130]);
+    expect(nuMetal.entitlementStatus).toBe("PASSED_ENTITLEMENT");
+    expect(altRock.entitlementStatus).toBe("PASSED_ENTITLEMENT");
+    expect(altRock.currentBpm).toBe(86);
+    expect(altRock.appliedRules.requiredBpmRange).toEqual([110, 145]);
   });
 
   it("resolves free-text genres and mid-range BPM defaults", () => {

@@ -27,6 +27,7 @@ from engine.generate_track_headless import (  # noqa: E402
     _is_lyria_gateway_drop,
     compose_lyria_prompt,
     lyria_output_url,
+    generation_token_charge,
     render_lyria_master,
     sanitize_lyrics_for_lyria,
 )
@@ -608,3 +609,169 @@ def test_gateway_drop_includes_requests_connection_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "requests.exceptions", fake_exc)
     assert _is_lyria_gateway_drop(RequestsConnectionError("reset"))
     assert not _is_lyria_gateway_drop(RuntimeError("HTTP 422"))
+
+
+_LONG_LYRICS = "[Verse]\nalpha verse line\n\n[Chorus]\nbravo chorus line"
+
+
+class _FakeSegment:
+    """Stand-in for pydub so the stitch contract can run without ffmpeg."""
+
+    crossfades: list[int] = []
+    exports: list[str] = []
+
+    def __init__(self, path: str):
+        self.path = path
+
+    @classmethod
+    def from_wav(cls, path: str):
+        return cls(path)
+
+    def __len__(self) -> int:
+        return 20000
+
+    def __getitem__(self, _item):
+        return self
+
+    def append(self, _other, crossfade: int = 0):
+        type(self).crossfades.append(int(crossfade))
+        return self
+
+    def export(self, path: str, format: str = "wav"):
+        assert format == "wav"
+        type(self).exports.append(path)
+        with open(path, "wb") as handle:
+            handle.write(b"RIFF" + b"\0" * 32)
+        return path
+
+
+def _install_fake_pydub(monkeypatch) -> None:
+    _FakeSegment.crossfades = []
+    _FakeSegment.exports = []
+    fake = types.ModuleType("pydub")
+    fake.AudioSegment = _FakeSegment
+    monkeypatch.setitem(sys.modules, "pydub", fake)
+
+
+def _prime_lyria(monkeypatch) -> None:
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    monkeypatch.setenv("LYRIC_ENGINE_API_KEY", "r8_lyric")
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda _seconds: None)
+
+
+def _scripted_lyria(monkeypatch, wavs: list[bytes], *, fail_on_post: int | None = None):
+    """Return a list that records every Lyria prediction POST."""
+    posts: list = []
+    downloads = list(wavs)
+
+    def fake_urlopen(req, timeout=None):
+        echoed = _echo_sanitize(req)
+        if echoed is not None:
+            return echoed
+        if getattr(req, "full_url", "") == LYRIA_PREDICTIONS_URL and req.get_method() == "POST":
+            posts.append(req)
+            if fail_on_post is not None and len(posts) == fail_on_post:
+                return _json_resp({"id": f"pred_{len(posts)}", "status": "failed", "error": "pass failed"})
+            return _json_resp(
+                {
+                    "id": f"pred_{len(posts)}",
+                    "status": "succeeded",
+                    "output": f"https://replicate.delivery/pb/pass{len(posts)}.wav",
+                }
+            )
+        if not downloads:
+            raise AssertionError(f"unexpected HTTP call to {req.full_url}")
+        return _Resp(downloads.pop(0), {"Content-Type": "audio/wav"})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return posts
+
+
+@pytest.mark.parametrize("seconds", [180, 210, 300, 420, None])
+def test_generation_token_charge_is_one_for_every_preset(seconds):
+    assert generation_token_charge(seconds) == 1
+
+
+def test_stitch_helper_uses_pydub_append_crossfade_1000():
+    path = os.path.join(_REPO, "services", "composition.py")
+    text = open(path, encoding="utf-8").read()
+    assert "part1 = AudioSegment.from_wav(part1_path)" in text
+    assert "part2 = AudioSegment.from_wav(part2_path)" in text
+    assert "full_master = part1.append(part2, crossfade=1000)" in text
+    assert 'full_master.export(master_output_path, format="wav")' in text
+
+
+@pytest.mark.parametrize("seconds", [180, 210])
+def test_short_presets_make_one_lyria_prediction(tmp_path, monkeypatch, seconds):
+    _prime_lyria(monkeypatch)
+    posts = _scripted_lyria(monkeypatch, [_pcm_wav_bytes()])
+    session = f"ht_{seconds}"
+    saved = render_lyria_master(
+        str(tmp_path),
+        style="dark synth",
+        prompt="night drive",
+        lyrics=_LONG_LYRICS,
+        session_id=session,
+        duration_sec=seconds,
+    )
+    assert len(posts) == 1
+    body = json.loads(posts[0].data.decode("utf-8"))
+    assert list(body) == ["input"]
+    assert list(body["input"]) == ["prompt"]
+    assert "alpha verse line" in body["input"]["prompt"]
+    assert "bravo chorus line" in body["input"]["prompt"]
+    assert saved.endswith(f"{session}_master.wav")
+    assert os.path.isfile(saved)
+    assert not (tmp_path / "part1.wav").exists()
+    assert not (tmp_path / "part2.wav").exists()
+
+
+@pytest.mark.parametrize("seconds", [300, 420])
+def test_long_presets_make_two_predictions_and_crossfade_1000(tmp_path, monkeypatch, seconds):
+    _prime_lyria(monkeypatch)
+    _install_fake_pydub(monkeypatch)
+    posts = _scripted_lyria(monkeypatch, [_pcm_wav_bytes(), _pcm_wav_bytes()])
+    session = f"ht_{seconds}"
+    saved = render_lyria_master(
+        str(tmp_path),
+        style="dark synth",
+        prompt="night drive",
+        lyrics=_LONG_LYRICS,
+        session_id=session,
+        duration_sec=seconds,
+    )
+    assert len(posts) == 2
+    first = json.loads(posts[0].data.decode("utf-8"))["input"]["prompt"]
+    second = json.loads(posts[1].data.decode("utf-8"))["input"]["prompt"]
+    assert list(json.loads(posts[0].data.decode("utf-8"))) == ["input"]
+    assert "alpha verse line" in first
+    assert "bravo chorus line" not in first
+    assert "15-second ending" in second
+    assert "bravo chorus line" in second
+    assert "alpha verse line" not in second
+    assert _FakeSegment.crossfades == [1000]
+    assert (tmp_path / "part1.wav").is_file()
+    assert (tmp_path / "part2.wav").is_file()
+    assert saved == str(tmp_path / f"{session}_master.wav")
+    assert os.path.isfile(saved)
+    assert any(path.endswith(f"{session}_master.wav") for path in _FakeSegment.exports)
+
+
+def test_pass_two_failure_raises_like_a_single_lyria_failure(tmp_path, monkeypatch):
+    _prime_lyria(monkeypatch)
+    _install_fake_pydub(monkeypatch)
+    posts = _scripted_lyria(monkeypatch, [_pcm_wav_bytes()], fail_on_post=2)
+    with pytest.raises(RuntimeError, match="Lyria prediction failed"):
+        render_lyria_master(
+            str(tmp_path),
+            style="dark synth",
+            lyrics=_LONG_LYRICS,
+            session_id="ht_pass2",
+            duration_sec=420,
+        )
+    assert len(posts) == 2
+    assert (tmp_path / "part1.wav").is_file()
+    assert not (tmp_path / "part2.wav").exists()
+    assert not (tmp_path / "ht_pass2_master.wav").exists()
+    assert _FakeSegment.crossfades == []

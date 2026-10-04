@@ -76,6 +76,10 @@ export const generateSchema = z.object({
   engine: z.enum(["minimax", "hybrid", "elevenlabs"]).optional(),
   /** Target length in seconds. Clamped to the master ceiling on the server. */
   durationSeconds: z.number().int().min(10).max(MINIMAX_MAX_SECONDS).optional(),
+  /** Same preset, forwarded as ``duration`` on POST /api/tracks/create. */
+  duration: z.number().int().min(10).max(MINIMAX_MAX_SECONDS).optional(),
+  /** One master per click. A client batch count is coerced so it cannot fan out. */
+  num_outputs: z.preprocess(() => 1, z.literal(1)).optional(),
   /** Ignored. Kept for older clients. */
   allowReslice: z.boolean().optional(),
   controls: controlsSchema.optional(),

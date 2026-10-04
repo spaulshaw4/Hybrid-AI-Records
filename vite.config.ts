@@ -21,6 +21,20 @@ export default defineConfig(({ command, mode }) => {
         "/generate": { target: "http://127.0.0.1:8880", changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
         "/api/tracks": { target: "http://127.0.0.1:8880", changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
         "/api/stream": { target: "http://127.0.0.1:8880", changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
+        "/api/voice": {
+          target: "http://127.0.0.1:8880",
+          changeOrigin: true,
+          timeout: 180000,
+          proxyTimeout: 180000,
+          configure: (proxy) => {
+            proxy.on("proxyReq", (proxyReq) => {
+              const token = process.env.HYBRID_WORKER_TOKEN?.trim();
+              if (token && !proxyReq.getHeader("x-hybrid-worker-token")) {
+                proxyReq.setHeader("X-Hybrid-Worker-Token", token);
+              }
+            });
+          },
+        },
       },
       // FMA / large data trees are often locked or huge on Windows; watching them
       // crashes the watcher with EBUSY and is never useful for HMR.

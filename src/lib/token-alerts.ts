@@ -15,6 +15,15 @@ export const CONVERSION_TOKEN_COST = 1;
 /** Tokens charged for one master track generation. */
 export const GENERATION_TOKEN_COST = 1;
 
+/**
+ * Hybrid Tokens deducted for one studio generation.
+ *
+ * 180, 210, 300, and 420 seconds all cost 1. Duration never adds a token.
+ */
+export function generationTokenCharge(_durationSeconds?: number | null): number {
+  return GENERATION_TOKEN_COST;
+}
+
 /** At or below this balance we warn the artist to top up. */
 export const LOW_BALANCE_THRESHOLD = 2;
 
