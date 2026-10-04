@@ -8,24 +8,15 @@ import { expect, test, type Page } from "@playwright/test";
 
 const MAX_TABS = 48;
 
-/** Focus a play button and open its preview, retrying if hydration re-renders it. */
+/** Focus a hydrated play button and open its preview with Enter. */
 async function openPreview(page: Page) {
-  const readyMs = process.env.CI ? 30_000 : 20_000;
   const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
     has: page.getByRole("button", { name: "Close video" }),
   });
   const play = page.locator('button[aria-label^="Play video:"]').first();
-
-  await expect(async () => {
-    await expect(play).toBeVisible({ timeout: 5_000 });
-    await play.scrollIntoViewIfNeeded();
-    // Enter is the keyboard path; a DOM click covers hydration that swallowed the key.
-    await play.press("Enter").catch(() => undefined);
-    if (!(await dialog.isVisible().catch(() => false))) {
-      await play.click({ force: true, noWaitAfter: true });
-    }
-    await expect(dialog).toBeVisible({ timeout: 4_000 });
-  }).toPass({ timeout: readyMs });
+  await play.scrollIntoViewIfNeeded();
+  await play.press("Enter");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
 }
 
 /** Describe the focused element in a stable, assertable way. */
@@ -56,7 +47,9 @@ async function tabUntil(
 
 test.describe("Homepage keyboard navigation", () => {
   // Cold Vite compiles of `/` + catalog cards need headroom on CI runners.
-  test.describe.configure({ timeout: 90_000 });
+  // Keep this file on one worker: four parallel homepage loads stall hydration,
+  // so Enter never reaches the client click handler.
+  test.describe.configure({ mode: "serial", timeout: 150_000 });
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -71,6 +64,15 @@ test.describe("Homepage keyboard navigation", () => {
     await expect(page.locator('button[aria-label^="Play video:"]').first()).toBeVisible({
       timeout: readyMs,
     });
+    // SSR paints the controls before React attaches onClick / client routing.
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('button[aria-label^="Play video:"]');
+        return !!el && Object.keys(el).some((key) => key.startsWith("__react"));
+      },
+      undefined,
+      { timeout: 45_000 },
+    );
   });
 
   test("primary CTAs are reachable and activatable by keyboard", async ({ page }) => {
@@ -114,19 +116,12 @@ test.describe("Homepage keyboard navigation", () => {
     }
     expect(listen, "Listen & Download CTA should be reachable by Tab").not.toBeNull();
 
-    // Submit Your Music navigates to the isolated distribution intake.
-    // Poll the URL instead of waiting on one navigation: a cancelled SPA
-    // transition (client router still attaching) otherwise hangs until timeout.
-    const readyMs = process.env.CI ? 30_000 : 20_000;
-    await expect(async () => {
-      if (!/\/portal/.test(page.url())) {
-        await submitLink.focus();
-        await page.keyboard.press("Enter");
-      }
-      await expect(page).toHaveURL(/\/portal/, { timeout: 4_000 });
-    }).toPass({ timeout: readyMs });
-    await expect(page.locator("#order")).toBeVisible({ timeout: readyMs });
-    await expect(page.locator("#quick-order-form")).toBeVisible({ timeout: readyMs });
+    // Client-side routing updates the URL without a document load event.
+    await submitLink.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL("**/portal", { waitUntil: "commit", timeout: 30_000 });
+    await expect(page.locator("#order")).toBeVisible();
+    await expect(page.locator("#quick-order-form")).toBeVisible();
   });
 
   test("release play preview opens with Enter and closes with Escape", async ({ page }) => {

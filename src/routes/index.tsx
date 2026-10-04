@@ -6,7 +6,7 @@ import keliasCover from "@/assets/kelias-i-save-cover.png.asset.json";
 import podcastCover from "@/assets/hybrid-podcast-logo-v2.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Play, ArrowUpRight, Youtube, Instagram, Link as LinkIcon, ShoppingBag, Facebook, ShieldCheck, Check, Minus, Search, X } from "lucide-react";
 import { AboutModal } from "@/components/AboutModal";
 import { TermsModal } from "@/components/TermsModal";
@@ -204,8 +204,12 @@ function VideoModal({ video, onClose }: { video: VideoItem | null; onClose: () =
           )}
         </div>
         <button
+          type="button"
           aria-label="Close video"
-          onClick={onClose}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
           className="grid h-10 w-10 shrink-0 place-items-center border border-border text-foreground transition-colors hover:border-primary hover:text-primary"
         >
           <X size={18} />
@@ -364,19 +368,37 @@ function Home() {
     [],
   );
 
+  // Shown immediately on click/Enter. The URL param is the shareable copy and can lag.
+  const [openedVideo, setOpenedVideo] = useState<VideoItem | null>(null);
+  const [videoDismissed, setVideoDismissed] = useState(false);
+
   // The open video lives in the URL so any artist click is shareable.
   const activeVideo = useMemo<VideoItem | null>(() => {
-    if (!videoParam) return null;
-    const release = RELEASES.find((r) => r.id === videoParam);
-    if (release) return { id: release.id, title: release.title, subtitle: release.artist };
-    const episode = PODCAST_EPISODES.find((e) => e.id === videoParam);
-    if (episode) return { id: episode.id, title: episode.title, subtitle: episode.date };
-    return null;
-  }, [videoParam]);
+    if (videoDismissed) return null;
+    if (videoParam) {
+      const release = RELEASES.find((r) => r.id === videoParam);
+      if (release) return { id: release.id, title: release.title, subtitle: release.artist };
+      const episode = PODCAST_EPISODES.find((e) => e.id === videoParam);
+      if (episode) return { id: episode.id, title: episode.title, subtitle: episode.date };
+    }
+    return openedVideo;
+  }, [videoParam, openedVideo, videoDismissed]);
 
-  const openVideo = (item: VideoItem) =>
-    navigate({ search: { v: item.id } });
-  const closeVideo = () => navigate({ search: {}, replace: true });
+  const openVideo = (item: VideoItem) => {
+    setVideoDismissed(false);
+    setOpenedVideo(item);
+    void navigate({ search: { v: item.id } });
+  };
+  const closeVideo = () => {
+    setVideoDismissed(true);
+    setOpenedVideo(null);
+    void navigate({ search: {}, replace: true });
+  };
+  const playFromKeyboard = (item: VideoItem) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    openVideo(item);
+  };
   const [aboutOpen, setAboutOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   
@@ -594,6 +616,7 @@ function Home() {
                 <button
                   type="button"
                   onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
+                  onKeyDown={playFromKeyboard({ id: r.id, title: r.title, subtitle: r.artist })}
                   className="relative aspect-video w-full overflow-hidden rounded-t-xl border-0 bg-zinc-950"
                   aria-label={`Play video: ${r.title} by ${r.artist}`}
                 >
@@ -621,6 +644,7 @@ function Home() {
                   <button
                     type="button"
                     onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
+                    onKeyDown={playFromKeyboard({ id: r.id, title: r.title, subtitle: r.artist })}
                     className="block w-full text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b8bff]"
                     aria-label={`Play video: ${r.title} by ${r.artist}`}
                   >

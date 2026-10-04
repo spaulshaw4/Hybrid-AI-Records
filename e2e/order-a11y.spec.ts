@@ -170,11 +170,16 @@ test.describe("Order form axe-core audit", () => {
 
   test("review step has no accessibility violations", async ({ page }) => {
     await openOrderForm(page);
+    // The deep-link focus guard holds #qo-artist until a real click or Tab.
+    // fill() only focuses, so without a click the later keystrokes land in the artist field.
+    await page.locator("#qo-artist").click();
     await page.fill("#qo-artist", "Test Artist");
+    await page.locator("#qo-email").click();
     await page.fill("#qo-email", "artist@example.com");
+    await page.locator("#qo-link").click();
     await page.fill("#qo-link", "https://example.com/demo.wav");
     await page.getByRole("button", { name: /review your order/i }).click();
-    await expect(page.getByText(/review your order/i).first()).toBeVisible();
+    await expect(page.locator("#qo-review-title")).toBeVisible();
 
     const violations = await scan(page, "#order");
     expect(report(violations), report(violations)).toBe("");

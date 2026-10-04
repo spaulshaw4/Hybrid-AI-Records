@@ -704,20 +704,22 @@ footer {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.95rem 1.6rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  /* red-700 on white is ~5.9:1. Brand rose (#e11d48) and its glow hover sit under 4.5:1. */
+  background: #b91c1c;
+  color: #ffffff;
   font-family: var(--font-mono);
   font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  border: 1px solid var(--primary);
+  border: 1px solid #b91c1c;
   box-shadow: var(--shadow-red);
   transition: transform 200ms ease, background 200ms ease, box-shadow 200ms ease;
   &:hover {
-    background: var(--primary-glow);
+    background: #991b1b;
+    color: #ffffff;
     transform: translateY(-1px);
-    box-shadow: 0 0 0 1px var(--primary), 0 8px 24px -12px var(--primary);
+    box-shadow: 0 0 0 1px #b91c1c, 0 8px 24px -12px #b91c1c;
   }
 }
 
