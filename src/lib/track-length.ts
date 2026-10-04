@@ -47,24 +47,27 @@ export const MAX_TARGET_DURATION_SECONDS = 420; // 7:00
 export const TARGET_DURATION_STEP_SECONDS = 15;
 export const DEFAULT_TARGET_DURATION_SECONDS = 210; // 3:30
 
-/** Engine length presets. 180 and 210 are one Lyria pass. 300 and 420 continue once. */
-export const DURATION_PRESET_SECONDS = [180, 210, 300, 420] as const;
-export type DurationPresetSeconds = (typeof DURATION_PRESET_SECONDS)[number];
+/** Engine slider. Any integer from 90 through 420 in steps of 10. */
+export const ENGINE_DURATION_MIN_SECONDS = 90;
+export const ENGINE_DURATION_STEP_SECONDS = 10;
 
-/** Snap any requested length onto 180, 210, 300, or 420. Above 420 becomes 420. */
-export function clampDurationPreset(seconds: number): DurationPresetSeconds {
-  const value = Number.isFinite(seconds) ? seconds : DEFAULT_TARGET_DURATION_SECONDS;
-  if (value > DURATION_PRESET_SECONDS[DURATION_PRESET_SECONDS.length - 1]) return 420;
-  let best: DurationPresetSeconds = DEFAULT_TARGET_DURATION_SECONDS;
-  let bestDist = Number.POSITIVE_INFINITY;
-  for (const preset of DURATION_PRESET_SECONDS) {
-    const dist = Math.abs(preset - value);
-    if (dist < bestDist || (dist === bestDist && preset > best)) {
-      best = preset;
-      bestDist = dist;
-    }
-  }
-  return best;
+/**
+ * Snap a requested length onto the 10-second grid from 90 through 420.
+ * Exact slider values pass through. Above 420 becomes 420. Below 90 becomes 90.
+ * A midpoint rounds up (215 → 220). Price does not depend on this value.
+ */
+export function clampDurationPreset(seconds: number): number {
+  const min = ENGINE_DURATION_MIN_SECONDS;
+  const max = MAX_TARGET_DURATION_SECONDS;
+  const step = ENGINE_DURATION_STEP_SECONDS;
+  if (!Number.isFinite(seconds)) return DEFAULT_TARGET_DURATION_SECONDS;
+  if (seconds >= max) return max;
+  if (seconds <= min) return min;
+  const steps = Math.round((seconds - min) / step);
+  const snapped = min + steps * step;
+  if (snapped >= max) return max;
+  if (snapped <= min) return min;
+  return snapped;
 }
 
 export function trackLengthOption(id: TrackLengthId): TrackLengthOption {

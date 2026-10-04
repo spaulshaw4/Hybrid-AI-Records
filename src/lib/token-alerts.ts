@@ -18,7 +18,7 @@ export const GENERATION_TOKEN_COST = 1;
 /**
  * Hybrid Tokens deducted for one studio generation.
  *
- * 180, 210, 300, and 420 seconds all cost 1. Duration never adds a token.
+ * Every length from 90s through 420s costs 1. Duration never adds a token.
  */
 export function generationTokenCharge(_durationSeconds?: number | null): number {
   return GENERATION_TOKEN_COST;

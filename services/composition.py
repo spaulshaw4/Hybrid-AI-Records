@@ -1,13 +1,17 @@
 """Split, tail extract, and stitch for one Lyria master.
 
 The live render in ``engine.generate_track_headless`` calls these helpers.
-180 and 210 seconds never reach this module. 300 and 420 do.
+Durations of 210 seconds or less never reach the stitch. Longer lengths, up to
+420, do — still exactly two Lyria predictions.
 """
 from __future__ import annotations
 
+import math
 import re
 
-DURATION_PRESETS = (180, 210, 300, 420)
+DURATION_MIN_SEC = 90
+DURATION_MAX_SEC = 420
+DURATION_STEP_SEC = 10
 SINGLE_PASS_MAX_SEC = 210
 PASS1_SEC = 210
 TAIL_MS = 15000
@@ -16,14 +20,20 @@ CONTINUATION_INSTRUCTION = (
     "Continue the same song from its previous 15-second ending. "
     "Do not restart the intro. Treat that ending as the overlap, then continue with the remaining lyrics."
 )
-# One Hybrid Token for every preset, including 300 and 420.
+# One Hybrid Token for every accepted length, including 300s and 420s.
 GENERATION_TOKEN_CHARGE = 1
 
 _SECTION_SPLIT = re.compile(r"(?=^\s*\[[^\]]+\])", re.MULTILINE)
 
 
 def clamp_duration(seconds: float | None) -> int:
-    """Snap onto 180, 210, 300, or 420. Above 420 becomes 420."""
+    """Accept any integer from 90 through 420 in steps of 10.
+
+    Exact slider values (90, 100, … 420) pass through. Above 420 becomes 420.
+    Below 90 becomes 90. A midpoint rounds up (215 → 220). Invalid input
+    becomes the 210-second default. This does not add Lyria calls: callers
+    still use one pass at or below 210 seconds and two passes above that.
+    """
     if seconds is None:
         return PASS1_SEC
     try:
@@ -32,9 +42,17 @@ def clamp_duration(seconds: float | None) -> int:
         return PASS1_SEC
     if value != value or value in (float("inf"), float("-inf")):
         return PASS1_SEC
-    if value > DURATION_PRESETS[-1]:
-        return DURATION_PRESETS[-1]
-    return min(DURATION_PRESETS, key=lambda preset: (abs(preset - value), -preset))
+    if value >= DURATION_MAX_SEC:
+        return DURATION_MAX_SEC
+    if value <= DURATION_MIN_SEC:
+        return DURATION_MIN_SEC
+    steps = math.floor((value - DURATION_MIN_SEC) / DURATION_STEP_SEC + 0.5)
+    snapped = DURATION_MIN_SEC + int(steps) * DURATION_STEP_SEC
+    if snapped >= DURATION_MAX_SEC:
+        return DURATION_MAX_SEC
+    if snapped <= DURATION_MIN_SEC:
+        return DURATION_MIN_SEC
+    return int(snapped)
 
 
 def generation_token_charge(duration_sec: float | None = None) -> int:

@@ -43,8 +43,6 @@ function allowTokenlessGenerate(): boolean {
 
 import { checkEngineHealth } from "@/lib/apiframe-music.functions";
 import { checkStatus } from "@/lib/generate-status-fetch";
-import { streamStudioGenerate } from "@/lib/studio-generate-fetch";
-import { requestVoiceProcess, shouldProcessVoice } from "@/lib/voice-process-client";
 import {
   getEngineBreakerStatus,
   type EngineBreakerStatus,
@@ -164,7 +162,9 @@ import { isLocalVocalProfileId } from "@/lib/vocal-profile-store";
 import { uploadVoiceSample } from "@/lib/voice-sample-upload";
 import {
   DEFAULT_TARGET_DURATION_SECONDS,
-  DURATION_PRESET_SECONDS,
+  ENGINE_DURATION_MIN_SECONDS,
+  ENGINE_DURATION_STEP_SECONDS,
+  MAX_TARGET_DURATION_SECONDS,
   arrangeLyricsForDuration,
   clampDurationPreset,
 } from "@/lib/track-length";
@@ -1441,10 +1441,34 @@ export function AudioStudio() {
     setVocalConsent(readStoredVocalConsent());
   }, []);
 
-  const [customVocalFile, setCustomVocalFile] = useState<File | Blob | null>(null);
+  const [voiceSample, setVoiceSample] = useState<File | Blob | null>(null);
   /** Object URL for the current custom take — mirrors QuickVocalRecorder clip for playback / Fish. */
   const [vocalAudioUrl, setVocalAudioUrl] = useState<string | null>(null);
-  const recordedVoiceBlob = customVocalFile;
+  const recordedVoiceBlob = voiceSample;
+  /** Only an explicit discard (null) or a new take replaces the form file. */
+  const handleCustomVocalFile = useCallback((file: File | Blob | null) => {
+    try {
+      setVoiceSample(file);
+      setVocalAudioUrl((prev) => {
+        if (prev) {
+          try {
+            URL.revokeObjectURL(prev);
+          } catch {
+            /* already revoked */
+          }
+        }
+        if (!file) return null;
+        try {
+          return URL.createObjectURL(file);
+        } catch (error) {
+          console.error("[MIC_RECORD] preview URL failed", error);
+          return null;
+        }
+      });
+    } catch (error) {
+      console.error("[MIC_RECORD] could not keep the take", error);
+    }
+  }, []);
 
 
   const [balance, setBalance] = useState<number | null>(
@@ -2378,7 +2402,7 @@ export function AudioStudio() {
         vocalMode: withVocals ? vocalSource : "default-ai",
         defaultVoiceId: "ai",
         termsAccepted: vocalConsent || readStoredVocalConsent(),
-        customAudioFile: customVocalFile,
+        customAudioFile: voiceSample,
         customVoiceId: voiceId,
       });
     } catch (err) {
@@ -2673,14 +2697,6 @@ export function AudioStudio() {
       });
 
       if (abort.signal.aborted) throw new Error(CANCELLED_MESSAGE);
-      // Optional vocal pass. Not awaited — Lyria starts on the lines below.
-      const voiceScript = lyrics.trim();
-      if (
-        recordedVoiceBlob &&
-        shouldProcessVoice(recordedVoiceBlob, voiceScript)
-      ) {
-        void requestVoiceProcess(recordedVoiceBlob, voiceScript);
-      }
       // Soft pulse only — never advance stage badges ahead of serverGateMask bits.
       setServerGateMask(PipelineGate.NONE);
       const progressStartedAt = Date.now();
@@ -2716,96 +2732,83 @@ export function AudioStudio() {
         tokenSettled?: boolean;
       };
       try {
-        // MusicAPI credentials live only on the server (`AIMUSICAPI_KEY` /
-        // `MUSICAPI_KEY` in `.env.local`). Never gate generate on
-        // `import.meta.env.VITE_*` — SSE generate → `runGenerateEngineTrack`
-        // reads `process.env` in the server. Keepalives prevent idle
-        // "Failed to fetch" drops during Demucs / CWALO / Gate 1 waits.
-        const generatePayload = {
-          prompt: arrangedLyrics || styleLine || genre,
-          tags: styleTags,
-          mv: "sonic-v5",
-          style: genre,
-          genre,
-          ...(subGenre ? { subGenre } : {}),
-          ...(mood ? { mood } : {}),
-          instruments: [],
-          ...(vocalProfile ? { vocalProfile } : {}),
-          ...(withVocals && vocalGender ? { vocalGender } : {}),
-          ...(withVocals && vocalStyle ? { vocalStyle } : {}),
-          title: trackTitle,
-          lyrics: arrangedLyrics,
-          instrumental: !withVocals,
-          // Native pronunciation, diacritics and accent are resolved from this
-          // on the server and injected into the engine prompt.
-          language,
-          customLanguage: customLanguage.trim(),
-          audioFormat: "mp3" as const,
-          ...(withVocals && usesCustomVocal(studioPayload) && voiceId ? { voiceId } : {}),
-          ...(referenceAudioUrl ? { referenceAudioUrl } : {}),
-          termsAccepted:
-            studioPayload.vocal_config.type === "custom"
-              ? studioPayload.vocal_config.terms_accepted
-              : true,
-          customMode: true,
-          idempotencyKey: runId,
-
-          model: "V4_5" as const,
-          duration: clampDurationPreset(targetDuration),
-          durationSeconds: clampDurationPreset(targetDuration),
-          ...(audioVaultId ? { vaultId: audioVaultId } : {}),
-          ...(withVocals && recordedVoiceBlob && recordedVoiceBlob.size > 64
-            ? {
-                vocalAudioBase64: await blobToBase64(recordedVoiceBlob),
-                vocalFileName:
-                  recordedVoiceBlob instanceof File
-                    ? recordedVoiceBlob.name
-                    : "mic_take.webm",
-              }
-            : {}),
-
-          num_outputs: 1,
-          controls: {
-            bpm: clampBpm(bpm),
-            influence: clampInfluence(audioInfluence),
-            weirdness: clampWeirdness(weirdness),
-            styleInfluence: clampStyleInfluence(styleInfluence),
-          },
-        };
-
-        const runStream = () =>
-          streamStudioGenerate({
+        // One multipart create. Do not set Content-Type; the browser adds the boundary.
+        const runStream = async () => {
+          const duration = clampDurationPreset(targetDuration);
+          const form = new FormData();
+          form.append("prompt", (arrangedLyrics || styleLine || genre || trackTitle).slice(0, 2000));
+          form.append("lyrics", (arrangedLyrics || lyrics || "").slice(0, 6000));
+          form.append("duration", String(duration));
+          form.append("tempo", String(clampBpm(bpm)));
+          form.append("bpm", String(clampBpm(bpm)));
+          form.append("weirdness", String(clampWeirdness(weirdness)));
+          form.append("audio_influence", String(clampInfluence(audioInfluence)));
+          form.append("style_influence", String(clampStyleInfluence(styleInfluence)));
+          if (styleTags) form.append("style", styleTags);
+          if (genre) form.append("genre", genre);
+          if (trackTitle) form.append("title", trackTitle);
+          if (voiceSample && voiceSample.size > 64) {
+            const take = new File([voiceSample], "recording.wav", {
+              type: voiceSample.type || "audio/wav",
+            });
+            form.append("voice_sample", take, "recording.wav");
+          }
+          const created = await fetch("/api/tracks/create", {
+            method: "POST",
+            body: form,
             signal: abort.signal,
-            onProgress: (event) => {
-              if (!event || typeof event !== "object") return;
-              const stage = typeof event.stage === "string" ? event.stage : "composition";
-              const percent =
-                typeof event.percent === "number" && Number.isFinite(event.percent)
-                  ? event.percent
-                  : 0;
-              applyPipelineProgress(
-                stage,
-                percent,
-                typeof event.pipelineState === "number" ? event.pipelineState : undefined,
-              );
-            },
-            onTask: (event) => {
-              if (!event?.taskId) return;
-              stageTaskId = event.taskId;
-              stageStartedAt = Date.now();
-              // Persist early so refresh / tab switch can re-attach while Gate 1 polls.
-              savePendingJob({
-                taskId: event.taskId,
-                runId,
-                vaultId: audioVaultId ?? vaultId,
-                title: trackTitle,
-                styleLine,
-                vocalProfile: activeVocalProfile(),
-                startedAt: stageStartedAt,
-              });
-            },
-            data: generatePayload,
           });
+          const createdBody = (await created.json().catch(() => ({}))) as {
+            session_id?: string;
+            detail?: string;
+            error?: string;
+          };
+          if (!created.ok) {
+            throw new Error(
+              createdBody.detail || createdBody.error || `Create failed (${created.status})`,
+            );
+          }
+          const sessionId = (createdBody.session_id || "").trim();
+          if (!sessionId) throw new Error("Create did not return a session id.");
+          stageTaskId = sessionId;
+          stageStartedAt = Date.now();
+          savePendingJob({
+            taskId: sessionId,
+            runId,
+            vaultId: audioVaultId ?? vaultId,
+            title: trackTitle,
+            styleLine,
+            vocalProfile: activeVocalProfile(),
+            startedAt: stageStartedAt,
+          });
+          const deadline = Date.now() + 8 * 60_000;
+          while (Date.now() < deadline) {
+            if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
+            await new Promise((resolve) => window.setTimeout(resolve, 2000));
+            const statusRes = await fetch(`/api/tracks/status/${encodeURIComponent(sessionId)}`, {
+              signal: abort.signal,
+            });
+            const job = (await statusRes.json().catch(() => ({}))) as {
+              status?: string;
+              error?: string;
+              master_url?: string;
+              audio_filename?: string;
+            };
+            if (job.status === "failed") {
+              throw new Error(job.error || "Generation failed.");
+            }
+            if (job.status === "completed") {
+              const audioUrl = job.master_url || (job.audio_filename ? `/api/stream/${job.audio_filename}` : "");
+              if (!audioUrl) throw new Error("Generation finished without a master.");
+              return {
+                taskId: sessionId,
+                tracks: [{ audioUrl, title: trackTitle }],
+                tokenSettled: false,
+              };
+            }
+          }
+          throw new Error("Generation timed out after 6 minutes — no completed track in Vault.");
+        };
 
         try {
           started = (await Promise.race([
@@ -3764,7 +3767,7 @@ export function AudioStudio() {
     setResult(null);
     setPlaybackSrc(null);
     setPlaybackKind("mastered");
-    setCustomVocalFile(null);
+    setVoiceSample(null);
     setVocalAudioUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -4470,40 +4473,34 @@ export function AudioStudio() {
 
             <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
               <div className="flex items-center justify-between gap-3">
-                <Label id="target-duration-label"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">Choose 180, 210, 300, or 420 seconds. Every length costs 1 Hybrid Token.</InlineTip></span></Label>
-                <span className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground">
+                <Label htmlFor="target-duration" id="target-duration-label"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">90 to 420 seconds, in 10-second steps. Every length costs 1 Hybrid Token.</InlineTip></span></Label>
+                <span
+                  id="target-duration-readout"
+                  className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground"
+                >
                   {targetDuration}s
                 </span>
               </div>
 
-              <div
-                role="radiogroup"
-                aria-labelledby="target-duration-label"
-                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
-              >
-                {DURATION_PRESET_SECONDS.map((seconds) => {
-                  const selected = targetDuration === seconds;
-                  const minuteLabel =
-                    seconds === 180 ? "3 min" : seconds === 210 ? "3.5 min" : seconds === 300 ? "5 min" : "7 min";
-                  return (
-                    <button
-                      key={seconds}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setTargetDuration(seconds)}
-                      className={`rounded-md border-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border-strong bg-background text-foreground hover:border-primary/60"
-                      }`}
-                    >
-                      {seconds}
-                      <span className="mt-0.5 block text-xs font-medium opacity-80">{minuteLabel}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <input
+                id="target-duration"
+                type="range"
+                min={ENGINE_DURATION_MIN_SECONDS}
+                max={MAX_TARGET_DURATION_SECONDS}
+                step={ENGINE_DURATION_STEP_SECONDS}
+                value={targetDuration}
+                aria-valuemin={ENGINE_DURATION_MIN_SECONDS}
+                aria-valuemax={MAX_TARGET_DURATION_SECONDS}
+                aria-valuenow={targetDuration}
+                aria-valuetext={`${targetDuration}s`}
+                onChange={(event) => {
+                  setTargetDuration(clampDurationPreset(Number(event.target.value)));
+                }}
+                className="h-2 w-full cursor-pointer accent-primary"
+              />
+              <p id="target-duration-cost" className="text-sm font-semibold text-foreground">
+                1 Hybrid Token · $2.00
+              </p>
               {recordedVoiceBlob && recordedVoiceBlob.size > 64 ? (
                 <p
                   className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300"
@@ -4898,13 +4895,9 @@ export function AudioStudio() {
                       setVocalSource("custom-upload");
                       setVocalOpen(false);
                     }}
-                    onCustomFileChange={(file) => {
-                      setCustomVocalFile(file);
-                      setVocalAudioUrl((prev) => {
-                        if (prev) URL.revokeObjectURL(prev);
-                        return file ? URL.createObjectURL(file) : null;
-                      });
-                    }}
+                    retainedFile={voiceSample}
+                    retainedPreviewUrl={vocalAudioUrl}
+                    onCustomFileChange={handleCustomVocalFile}
                   />
                   </div>
                 </div>

@@ -1192,8 +1192,11 @@ LYRIA_POLL_SEC = 3.0
 LYRIA_GATEWAY_RETRIES = 2
 LYRIA_GATEWAY_RETRY_SLEEP_SEC = 3.0
 LYRIA_MASTER_RATE = 48000
-# Studio presets. 180 and 210 stay one Lyria pass. 300 and 420 continue once.
-LYRIA_DURATION_PRESETS = (180, 210, 300, 420)
+# Studio lengths: 90 through 420 in steps of 10.
+# At or below 210 is one Lyria pass. Above 210 continues once (two predictions).
+LYRIA_DURATION_MIN_SEC = 90
+LYRIA_DURATION_MAX_SEC = 420
+LYRIA_DURATION_STEP_SEC = 10
 LYRIA_SINGLE_PASS_MAX_SEC = 210
 LYRIA_PASS1_SEC = 210
 LYRIA_CONTINUATION_TAIL_SEC = 15.0
@@ -1202,7 +1205,7 @@ LYRIA_CONTINUATION_INSTRUCTION = (
     "Continue the same song from its previous 15-second ending. "
     "Do not restart the intro. Treat that ending as the overlap, then continue with the remaining lyrics."
 )
-# One Hybrid Token ($2.00) for every preset, including 300s and 420s.
+# One Hybrid Token ($2.00) for every accepted length, including 300s and 420s.
 HYBRID_GENERATION_TOKEN_CHARGE = 1
 LYRIC_SANITIZE_URL = "https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions"
 LYRIC_SANITIZE_TIMEOUT_SEC = 5.0
@@ -1565,14 +1568,14 @@ def _lyria_prediction_http(http_json: Any, *args: Any, **kwargs: Any) -> dict:
 
 
 def clamp_lyria_duration(seconds: float | None) -> int:
-    """Snap a requested length onto 180, 210, 300, or 420. Above 420 becomes 420."""
+    """Accept 90 through 420 in steps of 10. Above 420 becomes 420."""
     from services.composition import clamp_duration
 
     return clamp_duration(seconds)
 
 
 def generation_token_charge(duration_sec: float | None = None) -> int:
-    """Hybrid Tokens charged for one generation. 300s and 420s still cost 1."""
+    """Hybrid Tokens charged for one generation. Length never changes the price."""
     from services.composition import generation_token_charge as charge
 
     return charge(duration_sec)
@@ -1701,9 +1704,9 @@ def render_lyria_master(
 ) -> str:
     """Sanitize lyrics, POST lyria-3-pro, poll ``urls.get``, save 48 kHz PCM WAV.
 
-    Durations of 210 seconds or less (including 180) are one prediction and do
-    not write part1/part2. 300 and 420 run a second prediction, extract the
-    trailing 15 seconds of part1.wav, and stitch with
+    Durations of 210 seconds or less (including 90 and 180) are one prediction
+    and do not write part1/part2. Anything above 210, up to 420, runs a second
+    prediction, extracts the trailing 15 seconds of part1.wav, and stitches with
     ``part1.append(part2, crossfade=1000)``. Above 420 clamps to 420.
     ``num_outputs`` is not sent; each prediction body is ``{"input": {"prompt": ...}}``.
 

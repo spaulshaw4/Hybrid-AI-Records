@@ -181,7 +181,13 @@ def _upload_reference(path: str, token: str, timeout: float) -> str:
     return file_url
 
 
-def _run_prediction(token: str, audio_url: str, text: str, deadline: float) -> dict:
+def _run_prediction(
+    token: str,
+    audio_url: str,
+    text: str,
+    deadline: float,
+    prompt: str | None = None,
+) -> dict:
     """Create a pinned-version prediction and poll ``urls.get`` until it finishes."""
     from engine.gemini_arranger import _http_json
 
@@ -191,10 +197,13 @@ def _run_prediction(token: str, audio_url: str, text: str, deadline: float) -> d
             raise TimeoutError("voice processing timed out")
         return left
 
+    model_input: dict[str, str] = {"audio": audio_url, "text": text}
+    if prompt:
+        model_input["prompt"] = prompt
     prediction = _http_json(
         PREDICTIONS_URL,
         token,
-        {"input": {"audio": audio_url, "text": text}},
+        {"input": model_input},
         timeout=min(70.0, remaining()),
         extra_headers={"Prefer": "wait"},
     )
@@ -247,8 +256,8 @@ def _download_output(url: str, timeout: float) -> bytes:
     return body
 
 
-def _write_vocal(dest: str, body: bytes) -> None:
-    root = os.path.abspath(SCRATCH_ROOT)
+def _write_vocal(dest: str, body: bytes, *, scratch_root: str | None = None) -> None:
+    root = os.path.abspath(scratch_root or SCRATCH_ROOT)
     dest_abs = os.path.abspath(dest)
     if not _is_under(dest_abs, root):
         raise VoiceInputError("vocal path escaped scratch")
@@ -268,6 +277,25 @@ def _write_vocal(dest: str, body: bytes) -> None:
         raise
 
 
+def _render_pinned(
+    reference: str,
+    text: str,
+    dest: str,
+    *,
+    scratch_root: str | None = None,
+    prompt: str | None = None,
+) -> str:
+    """One files upload and one pinned HeartMuLa prediction. No other model."""
+    token = _audio_token()
+    deadline = time.monotonic() + VOICE_TIMEOUT_SEC
+    file_url = _upload_reference(reference, token, timeout=min(60.0, max(1.0, deadline - time.monotonic())))
+    prediction = _run_prediction(token, file_url, text, deadline, prompt=prompt)
+    audio_url = _output_url(prediction.get("output"))
+    body = _download_output(audio_url, timeout=min(60.0, max(1.0, deadline - time.monotonic())))
+    _write_vocal(dest, body, scratch_root=scratch_root)
+    return dest
+
+
 def process_voice_track(reference_audio_path: str, lyrics_or_text: str, session_id: str) -> str:
     """Clone/render a vocal and return ``scratch/{session_id}/{session_id}_vocal.wav``.
 
@@ -278,11 +306,66 @@ def process_voice_track(reference_audio_path: str, lyrics_or_text: str, session_
     session = _validate_session_id(session_id)
     reference = _validate_reference(reference_audio_path)
     dest = _destination(session)
-    token = _audio_token()
-    deadline = time.monotonic() + VOICE_TIMEOUT_SEC
-    file_url = _upload_reference(reference, token, timeout=min(60.0, max(1.0, deadline - time.monotonic())))
-    prediction = _run_prediction(token, file_url, text, deadline)
-    audio_url = _output_url(prediction.get("output"))
-    body = _download_output(audio_url, timeout=min(60.0, max(1.0, deadline - time.monotonic())))
-    _write_vocal(dest, body)
-    return dest
+    return _render_pinned(reference, text, dest)
+
+
+def render_heart_mula_vocal(
+    reference_audio_path: str,
+    lyrics_or_text: str,
+    session_id: str,
+    dest_path: str | None = None,
+) -> str:
+    """One HeartMuLa pass on the raw take. Writes ``heart_mula_vocal.wav``.
+
+    Empty lyrics, a missing reference, and an unsafe path raise
+    ``VoiceInputError`` before any Replicate call. The raw file is the ``audio``
+    input. Nothing is sent to a speech model first.
+    """
+    text = _validate_lyrics(lyrics_or_text)
+    session = _validate_session_id(session_id)
+    reference = _validate_reference(reference_audio_path)
+    if dest_path:
+        dest = os.path.abspath(dest_path)
+        if os.path.basename(dest) != "heart_mula_vocal.wav":
+            raise VoiceInputError("invalid vocal path")
+        if os.path.basename(os.path.dirname(dest)) != session:
+            raise VoiceInputError("invalid vocal path")
+        scratch_root = os.path.dirname(os.path.dirname(dest))
+    else:
+        scratch_root = os.path.abspath(SCRATCH_ROOT)
+        dest = os.path.abspath(os.path.join(scratch_root, session, "heart_mula_vocal.wav"))
+    if not _is_under(dest, scratch_root):
+        raise VoiceInputError("vocal path escaped scratch")
+    return _render_pinned(reference, text, dest, scratch_root=scratch_root)
+
+
+def render_heart_mula_master(
+    reference_audio_path: str,
+    lyrics: str,
+    prompt: str,
+    session_id: str,
+    dest_path: str,
+) -> str:
+    """One HeartMuLa song. Writes ``{session_id}_master.wav``.
+
+    ``audio`` is the raw reference file. ``text`` is the lyrics. ``prompt`` is
+    the song prompt. No speech model runs first. Empty lyrics, a missing
+    reference, or an unsafe path raise ``VoiceInputError`` before any HTTP call.
+    """
+    text = _validate_lyrics(lyrics)
+    song_prompt = (prompt or "").strip()
+    if not song_prompt:
+        raise VoiceInputError("prompt is required")
+    if len(song_prompt) > MAX_LYRICS_CHARS:
+        song_prompt = song_prompt[:MAX_LYRICS_CHARS].rstrip()
+    session = _validate_session_id(session_id)
+    reference = _validate_reference(reference_audio_path)
+    dest = os.path.abspath(dest_path)
+    if os.path.basename(dest) != f"{session}_master.wav":
+        raise VoiceInputError("invalid master path")
+    if os.path.basename(os.path.dirname(dest)) != session:
+        raise VoiceInputError("invalid master path")
+    scratch_root = os.path.dirname(os.path.dirname(dest))
+    if not _is_under(dest, scratch_root):
+        raise VoiceInputError("vocal path escaped scratch")
+    return _render_pinned(reference, text, dest, scratch_root=scratch_root, prompt=song_prompt)

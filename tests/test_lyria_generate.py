@@ -688,9 +688,27 @@ def _scripted_lyria(monkeypatch, wavs: list[bytes], *, fail_on_post: int | None 
     return posts
 
 
-@pytest.mark.parametrize("seconds", [180, 210, 300, 420, None])
+@pytest.mark.parametrize("seconds", [90, 180, 210, 240, 300, 420, None])
 def test_generation_token_charge_is_one_for_every_preset(seconds):
     assert generation_token_charge(seconds) == 1
+
+
+def test_clamp_duration_accepts_ten_second_steps_from_90_to_420():
+    from services.composition import clamp_duration
+    from engine.generate_track_headless import clamp_lyria_duration
+
+    for seconds in (90, 100, 180, 210, 240, 300, 410, 420):
+        assert clamp_duration(seconds) == seconds
+        assert clamp_lyria_duration(seconds) == seconds
+    assert clamp_duration(89) == 90
+    assert clamp_duration(50) == 90
+    assert clamp_duration(421) == 420
+    assert clamp_duration(215) == 220
+    assert clamp_duration(None) == 210
+    assert clamp_lyria_duration(None) == 210
+    assert generation_token_charge(90) == 1
+    assert generation_token_charge(240) == 1
+    assert generation_token_charge(420) == 1
 
 
 def test_stitch_helper_uses_pydub_append_crossfade_1000():
@@ -702,7 +720,7 @@ def test_stitch_helper_uses_pydub_append_crossfade_1000():
     assert 'full_master.export(master_output_path, format="wav")' in text
 
 
-@pytest.mark.parametrize("seconds", [180, 210])
+@pytest.mark.parametrize("seconds", [90, 180, 210])
 def test_short_presets_make_one_lyria_prediction(tmp_path, monkeypatch, seconds):
     _prime_lyria(monkeypatch)
     posts = _scripted_lyria(monkeypatch, [_pcm_wav_bytes()])
@@ -727,7 +745,7 @@ def test_short_presets_make_one_lyria_prediction(tmp_path, monkeypatch, seconds)
     assert not (tmp_path / "part2.wav").exists()
 
 
-@pytest.mark.parametrize("seconds", [300, 420])
+@pytest.mark.parametrize("seconds", [240, 300, 420])
 def test_long_presets_make_two_predictions_and_crossfade_1000(tmp_path, monkeypatch, seconds):
     _prime_lyria(monkeypatch)
     _install_fake_pydub(monkeypatch)

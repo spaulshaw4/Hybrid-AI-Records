@@ -55,6 +55,26 @@ const RECOMMENDED_SECONDS = 30;
 const MAX_RECORD_SECONDS = 90;
 const POLL_MS = 4000;
 const MAX_POLLS = 30;
+const RECORDER_TIMESLICE_MS = 1000;
+
+type VocalClip = { blob: Blob; url: string; fileName?: string };
+
+function clipFromTake(
+  file: File | Blob | null | undefined,
+  previewUrl: string | null | undefined,
+): VocalClip | null {
+  if (!file) return null;
+  try {
+    return {
+      blob: file,
+      url: previewUrl || URL.createObjectURL(file),
+      fileName: file instanceof File ? file.name : "vocal-take.wav",
+    };
+  } catch (error) {
+    console.error("[MIC_RECORD] could not restore the take preview", error);
+    return null;
+  }
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -69,8 +89,14 @@ type Props = {
   onTermsAcceptedChange?: (accepted: boolean) => void;
   /** Fired when the user starts a record or upload attempt. */
   onCustomVocalIntent?: () => void;
-  /** Current recorded/uploaded take, or null when discarded. */
+  /** Current recorded/uploaded take, or null when the user discards it. */
   onCustomFileChange?: (file: File | Blob | null) => void;
+  /**
+   * Take already stored on the studio form. A remount (step change) shows it
+   * again and must not clear the form.
+   */
+  retainedFile?: File | Blob | null;
+  retainedPreviewUrl?: string | null;
   selectedGender?: "" | "m" | "f";
   onGenderChange?: (gender: "" | "m" | "f") => void;
 };
@@ -86,6 +112,8 @@ export function QuickVocalRecorder({
   onTermsAcceptedChange,
   onCustomVocalIntent,
   onCustomFileChange,
+  retainedFile = null,
+  retainedPreviewUrl = null,
   selectedGender = "",
   onGenderChange,
 }: Props) {
@@ -97,7 +125,9 @@ export function QuickVocalRecorder({
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [clip, setClip] = useState<{ blob: Blob; url: string; fileName?: string } | null>(null);
+  const [clip, setClip] = useState<VocalClip | null>(() =>
+    clipFromTake(retainedFile, retainedPreviewUrl),
+  );
   const [name, setName] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [clipDuration, setClipDuration] = useState(0);
@@ -110,6 +140,14 @@ export function QuickVocalRecorder({
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const onCustomFileChangeRef = useRef(onCustomFileChange);
+  onCustomFileChangeRef.current = onCustomFileChange;
+  const retainedPreviewUrlRef = useRef(retainedPreviewUrl);
+  retainedPreviewUrlRef.current = retainedPreviewUrl;
+  const clipRef = useRef(clip);
+  clipRef.current = clip;
+  const retainedFileRef = useRef(retainedFile);
+  retainedFileRef.current = retainedFile;
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -155,26 +193,31 @@ export function QuickVocalRecorder({
 
   const applyLocalVoice = useCallback(
     (profile: LocalVocalProfile) => {
-      onCustomVocalIntent?.();
-      onCustomFileChange?.(profile.audioBlob);
-      onVoiceIdChange(vocalProfileStorageKey(profile.id));
-      const nextGender = profile.gender === "m" || profile.gender === "f" ? profile.gender : "";
-      onGenderChange?.(nextGender);
-      setClip((prev) => {
-        if (prev) URL.revokeObjectURL(prev.url);
-        return {
-          blob: profile.audioBlob,
-          url: URL.createObjectURL(profile.audioBlob),
-          fileName: profile.name,
-        };
-      });
-      setClipDuration(profile.duration);
-      setTrimStart(0);
-      setTrimLength(
-        Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, profile.duration || RECOMMENDED_SECONDS)),
-      );
+      try {
+        onCustomVocalIntent?.();
+        publishTake(profile.audioBlob);
+        onVoiceIdChange(vocalProfileStorageKey(profile.id));
+        const nextGender = profile.gender === "m" || profile.gender === "f" ? profile.gender : "";
+        onGenderChange?.(nextGender);
+        const url = URL.createObjectURL(profile.audioBlob);
+        setClip((prev) => {
+          if (prev) releaseOwnedUrl(prev.url);
+          return {
+            blob: profile.audioBlob,
+            url,
+            fileName: profile.name,
+          };
+        });
+        setClipDuration(profile.duration);
+        setTrimStart(0);
+        setTrimLength(
+          Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, profile.duration || RECOMMENDED_SECONDS)),
+        );
+      } catch (error) {
+        console.error("[MIC_RECORD] saved voice apply failed", error);
+      }
     },
-    [onCustomFileChange, onCustomVocalIntent, onGenderChange, onVoiceIdChange],
+    [onCustomVocalIntent, onGenderChange, onVoiceIdChange],
   );
 
   useEffect(() => {
@@ -188,26 +231,36 @@ export function QuickVocalRecorder({
   useEffect(() => {
     if (restoredLocalRef.current) return;
     restoredLocalRef.current = true;
+    if (retainedFileRef.current || clipRef.current) return;
     void (async () => {
-      const lastId = readLastVocalProfileId();
-      if (!lastId) return;
-      const profiles = await listVocalProfiles();
-      const last = profiles.find((row) => row.id === lastId) ?? profiles[0];
-      if (last) applyLocalVoice(last);
+      try {
+        const lastId = readLastVocalProfileId();
+        if (!lastId) return;
+        if (retainedFileRef.current || clipRef.current) return;
+        const profiles = await listVocalProfiles();
+        if (retainedFileRef.current || clipRef.current) return;
+        const last = profiles.find((row) => row.id === lastId) ?? profiles[0];
+        if (last) applyLocalVoice(last);
+      } catch (error) {
+        console.error("[MIC_RECORD] saved voice restore failed", error);
+      }
     })();
   }, [applyLocalVoice]);
-
-  useEffect(() => {
-    onCustomFileChange?.(clip ? clip.blob : null);
-  }, [clip, onCustomFileChange]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
       stopMeter();
-      if (clip) URL.revokeObjectURL(clip.url);
+      const url = clipRef.current?.url;
+      if (url && url !== retainedPreviewUrlRef.current) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          /* already revoked */
+        }
+      }
     };
-    // Cleanup only on unmount; clip URLs are revoked when replaced too.
+    // Cleanup only on unmount. The form take lives on the parent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -284,6 +337,23 @@ export function QuickVocalRecorder({
     timerRef.current = null;
   }
 
+  function releaseOwnedUrl(url: string | null | undefined) {
+    if (!url || url === retainedPreviewUrlRef.current) return;
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* already revoked */
+    }
+  }
+
+  function publishTake(file: File | Blob) {
+    try {
+      onCustomFileChangeRef.current?.(file);
+    } catch (error) {
+      console.error("[MIC_RECORD] form update failed", error);
+    }
+  }
+
   function handleCustomVocalAttempt(actionType: "record" | "upload") {
     // Local mic/file capture must work without a session so guests and local
     // dev can build a preview blob. Cloud clone still checks auth in useMyVoice.
@@ -295,7 +365,7 @@ export function QuickVocalRecorder({
   }
 
   async function startRecording() {
-    if (recording) return;
+    if (recording || recorderRef.current?.state === "recording") return;
     console.log("[MIC_RECORD] Requesting microphone access...");
     let stream: MediaStream;
     try {
@@ -307,32 +377,79 @@ export function QuickVocalRecorder({
     }
 
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream);
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream);
+    } catch (error) {
+      console.error("[MIC_RECORD] MediaRecorder failed", error);
+      stream.getTracks().forEach((track) => track.stop());
+      toast.error("This browser could not start a recording.");
+      return;
+    }
+    // Ref, not state: a parent re-render must not drop the live recorder.
     recorderRef.current = recorder;
     recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data);
+      try {
+        if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
+      } catch (error) {
+        console.error("[MIC_RECORD] chunk failed", error);
+      }
+    };
+    recorder.onerror = (event) => {
+      try {
+        console.error("[MIC_RECORD] recorder error", event);
+        setRecording(false);
+        toast.error("Recording failed. The rest of the studio is unchanged.");
+      } catch (error) {
+        console.error("[MIC_RECORD] onerror handler failed", error);
+      }
     };
     recorder.onstop = () => {
-      console.log("[MIC_RECORD] Recording started / stopped");
-      stream.getTracks().forEach((track) => track.stop());
-      stopMeter();
-      stopTimer();
-      setRecording(false);
-      recordingStartedAtRef.current = null;
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-      console.log("[MIC_RECORD] Audio blob captured:", blob.size, "bytes");
-      if (blob.size < 2048) {
-        toast.error("That take was empty — try again a little closer to the mic.");
-        return;
+      try {
+        console.log("[MIC_RECORD] Recording started / stopped");
+        stream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.error("[MIC_RECORD] track stop failed", error);
+          }
+        });
+        stopMeter();
+        stopTimer();
+        setRecording(false);
+        recordingStartedAtRef.current = null;
+        recorderRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: "audio/wav" });
+        const file = new File([blob], "recording.wav", { type: "audio/wav" });
+        console.log("[MIC_RECORD] Audio blob captured:", file.size, "bytes");
+        if (file.size < 2048) {
+          toast.error("That take was empty — try again a little closer to the mic.");
+          return;
+        }
+        const url = URL.createObjectURL(file);
+        resetTrim();
+        setClip((prev) => {
+          if (prev) releaseOwnedUrl(prev.url);
+          return { blob: file, url, fileName: file.name };
+        });
+        publishTake(file);
+      } catch (error) {
+        console.error("[MIC_RECORD] onstop failed", error);
+        setRecording(false);
+        recorderRef.current = null;
+        toast.error("Could not save that take. The rest of the studio is unchanged.");
       }
-      resetTrim();
-      setClip((prev) => {
-        if (prev) URL.revokeObjectURL(prev.url);
-        return { blob, url: URL.createObjectURL(blob) };
-      });
-      // Preserve immediately for the studio → Fish / stem path.
-      onCustomFileChange?.(blob);
     };
+
+    try {
+      recorder.start(RECORDER_TIMESLICE_MS);
+    } catch (error) {
+      console.error("[MIC_RECORD] start failed", error);
+      recorderRef.current = null;
+      stream.getTracks().forEach((track) => track.stop());
+      toast.error("Recording could not start. Try again.");
+      return;
+    }
 
     setSeconds(0);
     setElapsedMs(0);
@@ -341,30 +458,41 @@ export function QuickVocalRecorder({
     setRecording(true);
     recordingStartedAtRef.current = Date.now();
     startMeter(stream);
-    recorder.start();
     console.log("[MIC_RECORD] Recording started / stopped");
     timerRef.current = window.setInterval(() => {
-      const started = recordingStartedAtRef.current;
-      if (!started) return;
-      const elapsed = (Date.now() - started) / 1000;
-      setElapsedMs(Date.now() - started);
-      setSeconds(Math.floor(elapsed));
-      if (elapsed >= MAX_RECORD_SECONDS) recorder.stop();
+      try {
+        const started = recordingStartedAtRef.current;
+        const active = recorderRef.current;
+        if (!started || !active) return;
+        const elapsed = (Date.now() - started) / 1000;
+        setElapsedMs(Date.now() - started);
+        setSeconds(Math.floor(elapsed));
+        if (elapsed >= MAX_RECORD_SECONDS && active.state !== "inactive") active.stop();
+      } catch (error) {
+        console.error("[MIC_RECORD] timer failed", error);
+      }
     }, 100);
   }
 
   function stopRecording() {
-    const started = recordingStartedAtRef.current;
-    const elapsed = started ? (Date.now() - started) / 1000 : seconds;
-    if (elapsed < MIN_STOP_SECONDS) {
-      toast.error("Keep recording for at least 5 seconds.");
-      return;
+    try {
+      const started = recordingStartedAtRef.current;
+      const elapsed = started ? (Date.now() - started) / 1000 : seconds;
+      if (elapsed < MIN_STOP_SECONDS) {
+        toast.error("Keep recording for at least 5 seconds.");
+        return;
+      }
+      if (elapsed < RECOMMENDED_SECONDS) {
+        toast.warning("Recommended: 30s minimum for vocal fidelity");
+      }
+      console.log("[MIC_RECORD] Recording started / stopped");
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+    } catch (error) {
+      console.error("[MIC_RECORD] stop failed", error);
+      setRecording(false);
+      toast.error("Could not stop the recording. Try again.");
     }
-    if (elapsed < RECOMMENDED_SECONDS) {
-      toast.warning("Recommended: 30s minimum for vocal fidelity");
-    }
-    console.log("[MIC_RECORD] Recording started / stopped");
-    recorderRef.current?.stop();
   }
 
   function resetTrim() {
@@ -384,13 +512,18 @@ export function QuickVocalRecorder({
   }
 
   function discard() {
-    resetTrim();
-    setClip((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url);
-      return null;
-    });
-    setSeconds(0);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    try {
+      resetTrim();
+      setClip((prev) => {
+        if (prev) releaseOwnedUrl(prev.url);
+        return null;
+      });
+      setSeconds(0);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      onCustomFileChangeRef.current?.(null);
+    } catch (error) {
+      console.error("[MIC_RECORD] discard failed", error);
+    }
   }
 
   /** Accepts a pre-recorded WAV/MP3 take instead of recording live. */
@@ -405,10 +538,19 @@ export function QuickVocalRecorder({
       toast.error("Upload a WAV or MP3 audio file.");
       return;
     }
+    let url: string;
+    try {
+      url = URL.createObjectURL(file);
+    } catch (error) {
+      console.error("[MIC_RECORD] upload preview failed", error);
+      toast.error("Could not preview that file.");
+      return;
+    }
     setClip((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url);
-      return { blob: file, url: URL.createObjectURL(file), fileName: file.name };
+      if (prev) releaseOwnedUrl(prev.url);
+      return { blob: file, url, fileName: file.name };
     });
+    publishTake(file);
     resetTrim();
     setSeconds(0);
   }
@@ -610,6 +752,31 @@ export function QuickVocalRecorder({
         </button>
       </div>
 
+      {clip ? (
+        <audio
+          ref={audioRef}
+          src={clip.url}
+          controls
+          aria-label="Recorded take"
+          className="w-full"
+          onLoadedMetadata={(e) => {
+            const total = e.currentTarget.duration;
+            if (Number.isFinite(total) && total > 0) {
+              setClipDuration(total);
+              setTrimStart(0);
+              setTrimLength(Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, total)));
+            }
+          }}
+          onTimeUpdate={(e) => {
+            const stopAt = stopAtRef.current;
+            if (stopAt !== null && e.currentTarget.currentTime >= stopAt) {
+              e.currentTarget.pause();
+              stopAtRef.current = null;
+            }
+          }}
+        />
+      ) : null}
+
       <input
         ref={fileInputRef}
         id={CUSTOM_AUDIO_FILE_INPUT_ID}
@@ -687,28 +854,6 @@ export function QuickVocalRecorder({
 
       {clip ? (
         <div className="space-y-2">
-          <audio
-            ref={audioRef}
-            src={clip.url}
-            controls
-            className="w-full"
-            onLoadedMetadata={(e) => {
-              const total = e.currentTarget.duration;
-              if (Number.isFinite(total) && total > 0) {
-                setClipDuration(total);
-                setTrimStart(0);
-                setTrimLength(Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, total)));
-              }
-            }}
-            onTimeUpdate={(e) => {
-              const stopAt = stopAtRef.current;
-              if (stopAt !== null && e.currentTarget.currentTime >= stopAt) {
-                e.currentTarget.pause();
-                stopAtRef.current = null;
-              }
-            }}
-          />
-
           {clipDuration > 0 ? (
             <div className="space-y-3 rounded-md border border-border/70 bg-background/60 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

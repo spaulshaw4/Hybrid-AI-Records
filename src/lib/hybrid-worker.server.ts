@@ -222,12 +222,23 @@ export async function generateFromHybridWorker(input: {
   const lyricText = input.instrumental ? "" : (input.lyrics || "").trim().slice(0, 6000);
   if (stylePrompt) form.append("style", stylePrompt);
   if (lyricText) form.append("lyrics", lyricText);
-  if (vocal) {
-    const name = input.vocalFileName || vocal.fileName || "mic_take.webm";
-    form.append("vocal_file", new Blob([new Uint8Array(vocal.bytes)]), name);
-    console.log("[HYBRID_WORKER] appended vocal_file", name, vocal.bytes.byteLength);
+  form.append("tempo", String(bpm));
+  if (input.controls) {
+    form.append("weirdness", String(input.controls.weirdness));
+    form.append("audio_influence", String(input.controls.influence));
+    if (input.controls.styleInfluence != null) {
+      form.append("style_influence", String(input.controls.styleInfluence));
+    }
+  }
+  if (vocal && vocal.bytes.byteLength > 64) {
+    form.append(
+      "voice_sample",
+      new Blob([new Uint8Array(vocal.bytes)], { type: "audio/wav" }),
+      "recording.wav",
+    );
+    console.log("[HYBRID_WORKER] appended voice_sample recording.wav", vocal.bytes.byteLength);
   } else {
-    console.log("[HYBRID_WORKER] no vocal_file on this generate");
+    console.log("[HYBRID_WORKER] no voice_sample on this generate");
   }
   let created: Response | undefined;
   let lastFetchError = "";

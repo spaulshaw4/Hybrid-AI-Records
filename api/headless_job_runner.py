@@ -303,6 +303,9 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "requested_bars",
         "requested_bpm",
         "master_duration_sec",
+        "voice_error",
+        "engine_used",
+        "token_cost",
     )
     out: dict[str, Any] = {}
     for key in keys:
@@ -1162,6 +1165,7 @@ def _worker_inner(
     dry_run: bool,
     render_opts: dict[str, Any] | None = None,
 ) -> None:
+    use_heart = False
     try:
         _update_job(session_id, status="running", error=None, note=None)
         if dry_run or _DRY_RUN:
@@ -1173,20 +1177,25 @@ def _worker_inner(
 
         duration_raw = opts.get("duration_sec")
         duration_value = float(duration_raw) if duration_raw is not None else None
-        # Flat price. 300s and 420s do not add a second token.
+        # Flat price. A mic job and a long Lyria job are still one token.
         token_charge = generation_token_charge(duration_value)
         _log(f"[TOKEN] charge={token_charge} duration_sec={duration_raw}")
-        saved = render_lyria_master(
-            os.path.join(SCRATCH_ROOT, session_id),
-            style=str(opts.get("style") or ""),
-            prompt=prompt,
-            lyrics=str(opts.get("lyrics") or ""),
-            session_id=session_id,
-            duration_sec=duration_value,
-        )
+        use_heart = _voice_sample_ready(opts.get("voice_sample_path"))
+        engine = "HeartMuLa" if use_heart else "Lyria"
+        if use_heart:
+            saved = _render_heart_mula_master(session_id, prompt, opts)
+        else:
+            saved = render_lyria_master(
+                os.path.join(SCRATCH_ROOT, session_id),
+                style=_style_with_controls(str(opts.get("style") or ""), opts),
+                prompt=prompt,
+                lyrics=str(opts.get("lyrics") or ""),
+                session_id=session_id,
+                duration_sec=duration_value,
+            )
         published = _publish_lyria_master(session_id, saved)
         _log(
-            f"[LYRIA] session={session_id} genre={genre_hint!r} "
+            f"[{engine}] session={session_id} genre={genre_hint!r} "
             f"file={published.get('audio_filename')} master_url={published.get('master_url')}"
         )
         _update_job(
@@ -1196,13 +1205,30 @@ def _worker_inner(
             note=None,
             delivery_status="completed",
             delivery_error=None,
+            engine_used=engine,
+            token_cost=1,
             **published,
         )
     except Exception as exc:
         _log(f"[worker] {session_id} failed: {exc}")
         _log("[TRACEBACK]\n" + traceback.format_exc())
         try:
-            _update_job(session_id, status="failed", error=_redact(str(exc))[:800])
+            failed_engine = "HeartMuLa" if use_heart else "Lyria"
+            prefix = (
+                "HeartMuLa generation failed"
+                if use_heart
+                else "Lyria generation failed"
+            )
+            detail = _redact(str(exc))[:700]
+            if not detail.startswith(prefix):
+                detail = f"{prefix}: {detail}"
+            _update_job(
+                session_id,
+                status="failed",
+                error=detail[:800],
+                engine_used=failed_engine,
+                token_cost=1,
+            )
         except KeyError:
             pass
 
@@ -1309,6 +1335,104 @@ def _form_int(form: Any, key: str, default: int | None = None) -> int | None:
         return int(float(raw))
     except (TypeError, ValueError):
         return default
+
+
+def _voice_sample_ready(path: Any) -> bool:
+    """True when a saved take is a real file. Missing or empty stays on Lyria."""
+    ref = str(path or "").strip()
+    if not ref or not os.path.isfile(ref):
+        return False
+    try:
+        return os.path.getsize(ref) >= 64
+    except OSError:
+        return False
+
+
+def _control_number(opts: dict[str, Any], key: str) -> float | None:
+    raw = opts.get(key)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _style_with_controls(style: str, opts: dict[str, Any]) -> str:
+    """Fold slider values into the Lyria style string. Lyria itself stays prompt-only."""
+    bpm = _control_number(opts, "bpm")
+    weirdness = _control_number(opts, "weirdness")
+    influence = _control_number(opts, "audio_influence")
+    style_influence = _control_number(opts, "style_influence")
+    directives: list[str] = []
+    if bpm is not None:
+        directives.append(f"[Tempo: {int(round(bpm))} BPM]")
+    if style_influence is not None:
+        directives.append(f"[Style Influence: {int(round(style_influence))}%]")
+    if influence is not None:
+        directives.append(f"[Adherence: {int(round(influence))}%]")
+    if weirdness is not None:
+        clamped = min(100.0, max(0.0, weirdness))
+        temperature = round(0.6 + (clamped / 100.0) * 0.7, 2)
+        directives.append(f"[Temperature: {temperature}]")
+    base = (style or "").strip()
+    if not directives:
+        return base
+    return f"{base} {' '.join(directives)}".strip()
+
+
+def _heart_mula_prompt(prompt: str, opts: dict[str, Any]) -> str:
+    """Song prompt plus style tags and slider directives. Lyrics stay in ``text``."""
+    song = (prompt or "").strip()
+    style = str(opts.get("style") or "").strip()
+    if style and style != song:
+        song = f"{song}\n{style}".strip()
+    return _style_with_controls(song, opts)
+
+
+def _render_heart_mula_master(session_id: str, prompt: str, opts: dict[str, Any]) -> str:
+    """Pinned HeartMuLa only. The download is the Gate 1 master wav."""
+    from services.voice_service import render_heart_mula_master
+
+    ref = str(opts.get("voice_sample_path") or "").strip()
+    dest = os.path.abspath(os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_master.wav"))
+    if not _is_under(dest, os.path.abspath(SCRATCH_ROOT)):
+        raise RuntimeError("HeartMuLa generation failed: master path escaped scratch")
+    try:
+        return render_heart_mula_master(
+            ref,
+            str(opts.get("lyrics") or ""),
+            _heart_mula_prompt(prompt, opts),
+            session_id,
+            dest,
+        )
+    except Exception as exc:
+        detail = str(exc).strip() or "failed"
+        if detail.startswith("HeartMuLa generation failed"):
+            raise RuntimeError(detail) from None
+        raise RuntimeError(f"HeartMuLa generation failed: {detail}") from None
+
+
+def _save_ref_vocal(session_id: str, raw: bytes) -> str:
+    """Write the raw take to ``scratch/{session_id}/ref_vocal.wav``."""
+    root = os.path.abspath(SCRATCH_ROOT)
+    session_dir = os.path.abspath(os.path.join(root, session_id))
+    dest = os.path.abspath(os.path.join(session_dir, "ref_vocal.wav"))
+    if not _is_under(session_dir, root) or not _is_under(dest, root):
+        raise ValueError("invalid session_id")
+    os.makedirs(session_dir, exist_ok=True)
+    tmp = dest + ".part"
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(raw)
+        os.replace(tmp, dest)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return dest
 
 
 async def _read_upload_bytes(upload: Any) -> bytes:
@@ -1430,7 +1554,9 @@ def _enqueue_generate(
             "requested_bars": requested_bars,
             "requested_bpm": requested_bpm,
             "master_duration_sec": render_opts.get("duration_sec"),
-            "vocal_present": bool(render_opts.get("vocal_file")),
+            "vocal_present": bool(render_opts.get("vocal_file") or render_opts.get("voice_sample_path")),
+            "engine_used": render_opts.get("engine_used") or "Lyria",
+            "token_cost": 1,
         }
         _jobs[session_id] = job
     try:
@@ -1450,7 +1576,9 @@ def _enqueue_generate(
     return {
         "session_id": session_id,
         "status": "queued",
-        "vocal_present": bool(render_opts.get("vocal_file")),
+        "vocal_present": bool(render_opts.get("vocal_file") or render_opts.get("voice_sample_path")),
+        "engine_used": render_opts.get("engine_used") or "Lyria",
+        "token_cost": 1,
     }
 
 
@@ -1510,6 +1638,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         if title and not prompt:
             prompt = title
         requested_bpm_value = _form_float(form, "bpm")
+        if requested_bpm_value is None:
+            requested_bpm_value = _form_float(form, "tempo")
         bpm = requested_bpm_value or DEFAULT_RENDER_BPM
         duration_sec = _form_float(form, "duration")
         if duration_sec is None:
@@ -1518,6 +1648,11 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         vocal_mode = _form_text(form, "vocal_mode").lower()
         key = _form_text(form, "key", default="G")
         dry_run = _form_text(form, "dry_run").lower() in {"1", "true", "yes"}
+        weirdness = _form_float(form, "weirdness")
+        audio_influence = _form_float(form, "audio_influence")
+        style_influence = _form_float(form, "style_influence")
+        voice_upload = form.get("voice_sample")
+        voice_name = getattr(voice_upload, "filename", None) if voice_upload is not None else None
         upload = form.get("vocal_file") or form.get("vocal_audio.wav")
         vocal_path, vocal_sec = await _ingest_vocal_upload(upload, key)
     else:
@@ -1534,6 +1669,11 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         ).strip()
         requested_bpm_value = float(body.bpm) if body.bpm is not None else None
         bpm = requested_bpm_value if requested_bpm_value is not None else DEFAULT_RENDER_BPM
+        weirdness = None
+        audio_influence = None
+        style_influence = None
+        voice_name = None
+        voice_upload = None
         duration_sec = body.duration if body.duration is not None else body.duration_sec
         bars = body.bars
         vocal_mode = (body.vocal_mode or "").strip().lower()
@@ -1553,9 +1693,36 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="prompt and genre_hint are empty")
     if bars is not None and requested_bpm_value is None:
         raise HTTPException(status_code=400, detail="bars requires bpm")
-    # One Lyria master. num_outputs above 1 is not a batch.
+    # One master. num_outputs above 1 is not a batch.
     render_opts: dict[str, Any] = {"bpm": float(bpm), "key": key, "num_outputs": 1}
-    if vocal_path and vocal_sec > 0:
+    if weirdness is not None:
+        render_opts["weirdness"] = float(weirdness)
+    if audio_influence is not None:
+        render_opts["audio_influence"] = float(audio_influence)
+    if style_influence is not None:
+        render_opts["style_influence"] = float(style_influence)
+    voice_sample_path: str | None = None
+    if voice_upload is not None and voice_name and hasattr(voice_upload, "read"):
+        raw_take = await _read_upload_bytes(voice_upload)
+        if len(raw_take) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="voice_sample is too large")
+        if len(raw_take) >= 64:
+            try:
+                voice_sample_path = _save_ref_vocal(str(_active_session_id or ""), raw_take)
+            except Exception as exc:
+                _log(f"[HEART_MULA] could not save ref_vocal.wav: {exc}")
+                raise HTTPException(status_code=500, detail=f"HeartMuLa generation failed: {exc}") from exc
+            render_opts["voice_sample_path"] = voice_sample_path
+            render_opts["engine_used"] = "HeartMuLa"
+            _log(f"[HEART_MULA] ref_vocal={voice_sample_path} bytes={len(raw_take)}")
+    if voice_sample_path:
+        if duration_sec is not None:
+            render_opts["duration_sec"] = float(duration_sec)
+        elif bars is not None:
+            render_opts["duration_sec"] = float(bars) * 4.0 * 60.0 / float(bpm)
+        else:
+            render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
+    elif vocal_path and vocal_sec > 0:
         from engine.vocal_ingest import song_length_from_vocal
 
         render_opts["duration_sec"] = song_length_from_vocal(vocal_sec, float(bpm))
