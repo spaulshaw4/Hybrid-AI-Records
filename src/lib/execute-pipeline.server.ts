@@ -380,6 +380,7 @@ export async function executePipeline(
           const local = await withTimeout(
             generateFromHybridWorker({
               prompt: input.prompt || input.style || "",
+              style: input.style || "",
               genreHint: input.style || input.prompt || "",
               durationSeconds: input.durationSeconds,
               instrumental: input.instrumental,

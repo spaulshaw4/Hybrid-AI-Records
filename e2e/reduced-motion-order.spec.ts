@@ -97,20 +97,15 @@ test.describe("Reduced motion — order deep link and focus", () => {
       has: page.getByRole("button", { name: "Close video" }),
     });
     const play = page.locator('button[aria-label^="Play video:"]').first();
-    await expect(play).toBeVisible({ timeout: ORDER_VISIBLE_MS });
-    await play.scrollIntoViewIfNeeded();
-
-    // Retry: home catalog cards can remount once hydration finishes.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    await expect(async () => {
+      await expect(play).toBeVisible({ timeout: 5_000 });
+      await play.scrollIntoViewIfNeeded();
       await play.press("Enter").catch(() => undefined);
-      await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
-      if (await dialog.isVisible().catch(() => false)) break;
-      await play.click({ force: true });
-      await page.waitForURL(/\?v=/, { timeout: 5_000 }).catch(() => undefined);
-      if (await dialog.isVisible().catch(() => false)) break;
-      await page.waitForTimeout(250);
-    }
-
+      if (!(await dialog.isVisible().catch(() => false))) {
+        await play.click({ force: true, noWaitAfter: true });
+      }
+      await expect(dialog).toBeVisible({ timeout: 4_000 });
+    }).toPass({ timeout: ORDER_VISIBLE_MS });
     await expect(dialog).toBeVisible({ timeout: ORDER_VISIBLE_MS });
     await expect(dialog.locator(".modal-panel-solid").first()).toBeVisible();
 

@@ -10,25 +10,22 @@ const MAX_TABS = 48;
 
 /** Focus a play button and open its preview, retrying if hydration re-renders it. */
 async function openPreview(page: Page) {
-  const readyMs = process.env.CI ? 30_000 : 15_000;
+  const readyMs = process.env.CI ? 30_000 : 20_000;
   const dialog = page.locator('[role="dialog"][aria-modal="true"]').filter({
     has: page.getByRole("button", { name: "Close video" }),
   });
+  const play = page.locator('button[aria-label^="Play video:"]').first();
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const play = page.locator('button[aria-label^="Play video:"]').first();
-    await expect(play).toBeVisible({ timeout: readyMs });
+  await expect(async () => {
+    await expect(play).toBeVisible({ timeout: 5_000 });
     await play.scrollIntoViewIfNeeded();
-    // Prefer locator.press / click — bare keyboard Enter is flaky before handlers attach.
+    // Enter is the keyboard path; a DOM click covers hydration that swallowed the key.
     await play.press("Enter").catch(() => undefined);
-    await page.waitForURL(/\?v=/, { timeout: 2_500 }).catch(() => undefined);
-    if (await dialog.isVisible().catch(() => false)) return;
-    await play.click({ force: true });
-    await page.waitForURL(/\?v=/, { timeout: 5_000 }).catch(() => undefined);
-    if (await dialog.isVisible().catch(() => false)) return;
-    await page.waitForTimeout(300);
-  }
-  await expect(dialog).toBeVisible({ timeout: readyMs });
+    if (!(await dialog.isVisible().catch(() => false))) {
+      await play.click({ force: true, noWaitAfter: true });
+    }
+    await expect(dialog).toBeVisible({ timeout: 4_000 });
+  }).toPass({ timeout: readyMs });
 }
 
 /** Describe the focused element in a stable, assertable way. */
@@ -118,18 +115,16 @@ test.describe("Homepage keyboard navigation", () => {
     expect(listen, "Listen & Download CTA should be reachable by Tab").not.toBeNull();
 
     // Submit Your Music navigates to the isolated distribution intake.
-    await submitLink.focus();
-    await page.keyboard.press("Enter");
-    const readyMs = 30_000;
-    // `load` hangs on long-lived analytics sockets; the portal chrome is
-    // present at DOMContentLoaded. Fall back to a click if Enter is swallowed
-    // before the client router attaches.
-    try {
-      await page.waitForURL(/\/portal/, { timeout: readyMs, waitUntil: "domcontentloaded" });
-    } catch {
-      await submitLink.click();
-      await page.waitForURL(/\/portal/, { timeout: readyMs, waitUntil: "domcontentloaded" });
-    }
+    // Poll the URL instead of waiting on one navigation: a cancelled SPA
+    // transition (client router still attaching) otherwise hangs until timeout.
+    const readyMs = process.env.CI ? 30_000 : 20_000;
+    await expect(async () => {
+      if (!/\/portal/.test(page.url())) {
+        await submitLink.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(page).toHaveURL(/\/portal/, { timeout: 4_000 });
+    }).toPass({ timeout: readyMs });
     await expect(page.locator("#order")).toBeVisible({ timeout: readyMs });
     await expect(page.locator("#quick-order-form")).toBeVisible({ timeout: readyMs });
   });

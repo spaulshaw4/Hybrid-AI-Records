@@ -113,6 +113,9 @@ export async function generateFromHybridWorker(input: {
   durationSeconds?: number;
   bpm?: number;
   instrumental?: boolean;
+  /** Style prompt. Studio also sends the Style Prompt textarea as ``tags``. */
+  style?: string;
+  tags?: string;
   lyrics?: string;
   key?: string;
   vocalFile?: Buffer | Uint8Array;
@@ -163,6 +166,14 @@ export async function generateFromHybridWorker(input: {
   form.append("duration_sec", String(durationSeconds));
   form.append("vocal_mode", vocalMode);
   form.append("key", (input.key || "").trim() || "G");
+  const stylePrompt = [input.tags, input.style]
+    .map((part) => (part || "").trim())
+    .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index)
+    .join("\n")
+    .slice(0, 6000);
+  const lyricText = input.instrumental ? "" : (input.lyrics || "").trim().slice(0, 6000);
+  if (stylePrompt) form.append("style", stylePrompt);
+  if (lyricText) form.append("lyrics", lyricText);
   if (vocal) {
     const name = input.vocalFileName || vocal.fileName || "mic_take.webm";
     form.append("vocal_file", new Blob([new Uint8Array(vocal.bytes)]), name);

@@ -902,6 +902,9 @@ footer {
 
 .living-bg-layer {
   opacity: 0;
+  /* Above `.flowing-patriotic-bg::before` (z-index 0). That mesh was covering
+     the crest watermark, so the page read as a solid red/blue wash. */
+  z-index: 1;
   will-change: auto;
   transform: none;
   background-size: min(88vw, 820px) auto;
@@ -949,6 +952,7 @@ footer {
 .living-bg-veil {
   display: block;
   pointer-events: none;
+  z-index: 2;
   background: linear-gradient(
     180deg,
     rgb(18 19 22 / 0.28) 0%,

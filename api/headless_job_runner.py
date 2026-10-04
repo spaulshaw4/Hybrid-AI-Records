@@ -1,16 +1,12 @@
 """Localhost headless track-generation API (127.0.0.1:8880).
 
-POST /api/tracks/create  {prompt, genre_hint} -> {session_id, status: queued}
+POST /api/tracks/create  {prompt, style, lyrics, genre_hint} -> {session_id, status: queued}
 GET  /api/tracks/status/{id}
 GET  /api/stream/{filename}
 
-Runs engine/generate_track_headless.py then scripts/run_master_pipeline.ps1
-on a daemon thread. Does not use FastAPI BackgroundTasks.
-
-Expected headless CLI (do not overwrite that file):
-  --prompt --session --genre [--offline] [--scratch]
-  writes C:\\live_web_outputs\\scratch\\{session}\\unmastered_mix.wav
-  (never writes into C:\\staging_slices)
+The generate job calls Replicate google/lyria-3-pro and publishes that file as
+the session master (/api/stream/{session}_master.mp3). It does not run the
+13-lane assembler or the master pipeline.
 """
 from __future__ import annotations
 
@@ -730,11 +726,10 @@ def _run_headless(
     genre_hint: str,
     render_opts: dict[str, Any] | None = None,
 ) -> None:
-    """Child process: Gemini plan, parallel stem pre-flight, then the tape.
+    """Assembler child process. The live generate job does not call this.
 
-    The blueprint does not exist in this process. ``generate_track_headless``
-    builds it and ``assemble_arranged_buses`` calls
-    ``resolve_blueprint_dependencies`` before any lane is bounced.
+    ``_worker_inner`` calls ``render_lyria_master`` instead. Tests still call
+    ``execute_prompt_pipeline`` / ``assemble_arranged_buses`` directly.
     """
     opts = dict(render_opts or {})
     script = _headless_script()
@@ -896,6 +891,29 @@ def _qc_failure_hint(session_id: str) -> str:
         return f"Failed: {'; '.join(parts)}."
     except (OSError, ValueError, TypeError, AttributeError):
         return generic
+
+
+def _publish_lyria_master(session_id: str, src: str) -> dict[str, Any]:
+    """Copy a Lyria download into the stream assets and return job URL fields."""
+    if not src or not os.path.isfile(src):
+        raise RuntimeError(f"Lyria did not write a master for {session_id}")
+    ext = os.path.splitext(src)[1].lower()
+    if ext not in AUDIO_EXTS:
+        ext = ".mp3"
+    filename = f"{session_id}_master{ext}"
+    dest = os.path.join(ASSETS_ROOT, filename)
+    os.makedirs(ASSETS_ROOT, exist_ok=True)
+    if os.path.abspath(src) != os.path.abspath(dest):
+        shutil.copy2(src, dest)
+    url = f"/api/stream/{filename}"
+    fields: dict[str, Any] = {
+        "audio_filename": filename,
+        "audio_mime": MIME_BY_EXT.get(ext, "audio/mpeg"),
+        "master_url": url,
+    }
+    if ext == ".mp3":
+        fields["mp3_url"] = url
+    return fields
 
 
 def _publish_audio(session_id: str, src: str) -> tuple[str, str]:
@@ -1109,104 +1127,32 @@ def _worker_inner(
         _update_job(session_id, status="running", error=None, note=None)
         if dry_run or _DRY_RUN:
             note = "dry-run: create accepted, pipeline not started"
-            if _headless_script() is None:
-                note += "; generate_track_headless.py not present"
             _update_job(session_id, status="completed", note=note)
             return
-        python = resolve_workstation_python()
-        _log(f"[worker] python={python} session={session_id}")
-        _run_headless(python, session_id, prompt, genre_hint, render_opts)
-        from engine.worker_handoff import assert_handoff_ready
+        opts = dict(render_opts or {})
+        from engine.generate_track_headless import render_lyria_master
 
-        probe = assert_handoff_ready(SCRATCH_ROOT, session_id)
-        _log(
-            f"[HANDOFF] generation -> composition session={session_id} "
-            f"mix_bytes={probe['mix_bytes']} slices={probe['slice_count']} "
-            f"mix={probe['mix']}"
+        saved = render_lyria_master(
+            os.path.join(SCRATCH_ROOT, session_id),
+            style=str(opts.get("style") or ""),
+            prompt=prompt,
+            lyrics=str(opts.get("lyrics") or ""),
+            session_id=session_id,
         )
-        filename, mime = _publish_audio(session_id, str(probe["mix"]))
-        try:
-            _run_master_pipeline(session_id, genre_hint)
-            filename, mime = _attach_master(session_id)
-        except Exception as master_exc:
-            # A master the QC gate quarantined must never be shipped as the
-            # unmastered mix under a "completed" status: the gate exists to
-            # stop exactly that audio from reaching the vault. Other master
-            # failures still fall back, since the unmastered mix is a usable
-            # Gate 1 artefact when nothing judged it defective.
-            detail = _redact(str(master_exc))[:400]
-            if _is_qc_quarantine(master_exc):
-                _log(f"[worker] {session_id} QC gate quarantined the master: {detail}")
-                _log(
-                    f"[worker] {session_id} scratch retained for inspection at "
-                    f"{os.path.join(SCRATCH_ROOT, session_id)}"
-                )
-                _update_job(
-                    session_id,
-                    status="failed",
-                    error=(
-                        "Master failed the QC compliance gate and was quarantined. "
-                        f"{_qc_failure_hint(session_id)} "
-                        "Inspect master_output_qc_report.json under "
-                        f"{RENDERS_ROOT}\\{session_id}, or re-run the master "
-                        "pipeline with -SkipQcGate to ship it anyway."
-                    ),
-                    delivery_status="quarantined",
-                    delivery_error=detail,
-                )
-                # Returns ahead of the delivery-success scratch purge on purpose:
-                # the pipeline retains the quarantined buffers for inspection and
-                # the cleanup pass would otherwise delete the evidence.
-                return
-            _log(f"[worker] master pipeline failed; Gate 1 uses unmastered mix: {detail}")
-
-        try:
-            delivery_fields = _try_module5_delivery(session_id, prompt, genre_hint)
-        except Exception as m5_exc:
-            from engine.mastering_bus import LoudnessComplianceError
-
-            if isinstance(m5_exc, LoudnessComplianceError):
-                detail = f"Loudness compliance failed: {m5_exc.final_lufs:.2f} LUFS"
-                _log(f"[worker] {session_id} {m5_exc}")
-            else:
-                detail = _redact(str(m5_exc))[:400]
-            _log(f"[worker] {session_id} Module 5 delivery failed: {detail}")
-            _log("[TRACEBACK]\n" + traceback.format_exc())
-            # The master stays attached for inspection, but the job is not
-            # "completed": callers must not ship a track without its delivery pack.
-            _update_job(
-                session_id,
-                status="failed",
-                error=f"Module 5 delivery failed: {detail}",
-                audio_filename=filename,
-                audio_mime=mime,
-                delivery_status="failed",
-                delivery_error=detail,
-            )
-            return
-        delivered_name = delivery_fields.pop("audio_filename", None)
-        delivered_mime = delivery_fields.pop("audio_mime", None)
-        if delivered_name:
-            filename = str(delivered_name)
-            mime = str(delivered_mime or mime)
-        delivery_fields["delivery_status"] = "completed"
-        delivery_fields["delivery_error"] = None
-
+        published = _publish_lyria_master(session_id, saved)
+        _log(
+            f"[LYRIA] session={session_id} genre={genre_hint!r} "
+            f"file={published.get('audio_filename')} master_url={published.get('master_url')}"
+        )
         _update_job(
             session_id,
             status="completed",
-            audio_filename=filename,
-            audio_mime=mime,
             error=None,
-            **delivery_fields,
+            note=None,
+            delivery_status="completed",
+            delivery_error=None,
+            **published,
         )
-        # The delivery package is published; intermediate audio is redundant.
-        try:
-            freed = _purge_scratch_audio(session_id)
-            _log(f"[cleanup] {session_id} purged {freed / 1e6:.1f} MB of scratch audio")
-            _update_job(session_id, scratch_purged_bytes=freed)
-        except Exception as cleanup_exc:
-            _log(f"[cleanup] {session_id} scratch purge failed: {cleanup_exc}")
     except Exception as exc:
         _log(f"[worker] {session_id} failed: {exc}")
         _log("[TRACEBACK]\n" + traceback.format_exc())
@@ -1256,7 +1202,8 @@ class CreateTrackBody(BaseModel):
     genre_hint: str | None = Field(default=None, max_length=120)
     genre: str | None = Field(default=None, max_length=120)
     genre_lock: str | None = Field(default=None, max_length=120)
-    style: str | None = Field(default=None, max_length=200)
+    style: str | None = Field(default=None, max_length=6000)
+    lyrics: str | None = Field(default=None, max_length=6000)
     title: str | None = Field(default=None, max_length=200)
     dry_run: bool = False
     # Optional arrangement length: bars (quarter-note 4/4 bars) at ``bpm``.
@@ -1503,8 +1450,12 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
     content_type = (request.headers.get("content-type") or "").lower()
     vocal_path: str | None = None
     vocal_sec = 0.0
+    style = ""
+    lyrics = ""
     if "multipart/form-data" in content_type:
         form = await request.form()
+        style = _form_text(form, "style")
+        lyrics = _form_text(form, "lyrics")
         prompt = _form_text(form, "prompt", "title", "style")
         genre = _form_text(form, "genre_hint", "genre", "genre_lock", "style")
         title = _form_text(form, "title")
@@ -1525,6 +1476,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         except Exception:
             raise HTTPException(status_code=400, detail="prompt is required")
         body = CreateTrackBody.model_validate(payload)
+        style = (body.style or "").strip()
+        lyrics = (body.lyrics or "").strip()
         prompt = (body.prompt or body.title or body.style or "").strip()
         genre = (
             body.genre_hint or body.genre or body.genre_lock or body.style or ""
@@ -1565,6 +1518,10 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
     if vocal_mode in VOCAL_MODES and "vocal_mode" not in render_opts:
         render_opts["vocal_mode"] = vocal_mode
+    if style:
+        render_opts["style"] = style
+    if lyrics:
+        render_opts["lyrics"] = lyrics
     _log(
         f"[API_LENGTH] bpm={float(bpm):.1f} duration_sec={render_opts['duration_sec']:.1f} "
         f"bars={round(render_opts['duration_sec'] * float(bpm) / 240.0)} "

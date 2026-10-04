@@ -174,65 +174,56 @@ def _seed_job(scratch):
     runner._persist_job(job)
 
 
-def test_worker_marks_job_failed_when_module5_fails(live_dirs, monkeypatch):
-    scratch, _assets = live_dirs
-    _seed_job(scratch)
-    import engine.worker_handoff as handoff
+def _forbid_lane_bounce(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("13-lane generate path ran")
 
-    monkeypatch.setattr(runner, "resolve_workstation_python", lambda: sys.executable)
-    monkeypatch.setattr(runner, "_run_headless", lambda *a, **k: None)
-    monkeypatch.setattr(
-        handoff,
-        "assert_handoff_ready",
-        lambda *_a: {"mix": "m.wav", "mix_bytes": 1, "slice_count": 1},
-    )
-    monkeypatch.setattr(runner, "_publish_audio", lambda sid, _p: (f"{sid}.wav", "audio/wav"))
-    monkeypatch.setattr(runner, "_run_master_pipeline", lambda *a: None)
-    monkeypatch.setattr(runner, "_attach_master", lambda sid: (f"{sid}_m.wav", "audio/wav"))
-
-    def boom(*_a):
-        raise RuntimeError("No bus stems found; refusing to package fabricated stems")
-
+    monkeypatch.setattr(runner, "_run_headless", boom)
+    monkeypatch.setattr(runner, "_run_master_pipeline", boom)
     monkeypatch.setattr(runner, "_try_module5_delivery", boom)
-    runner._worker(SESSION, "prompt", "rock", False)
-    job = runner._lookup_job(SESSION)
-    public = runner._public_job(job)
-    assert public["status"] == "failed"
-    assert public["delivery_status"] == "failed"
-    assert "refusing to package fabricated stems" in public["delivery_error"]
-    assert public["error"].startswith("Module 5 delivery failed")
-    assert public["audio_filename"] == f"{SESSION}_m.wav"
+    monkeypatch.setattr(
+        "engine.blueprint_track_assembler.assemble_arranged_buses",
+        boom,
+    )
+    monkeypatch.setattr(
+        "engine.blueprint_track_assembler._bounce_console_lanes",
+        boom,
+    )
+    monkeypatch.setattr("engine.generate_track_headless.assemble_from_blueprint", boom)
 
 
-def test_worker_reports_loudness_compliance_failure(live_dirs, monkeypatch):
+def test_worker_marks_job_failed_when_lyria_fails(live_dirs, monkeypatch):
     scratch, _assets = live_dirs
     _seed_job(scratch)
-    import engine.worker_handoff as handoff
-    from engine.mastering_bus import LoudnessComplianceError
+    _forbid_lane_bounce(monkeypatch)
 
-    monkeypatch.setattr(runner, "resolve_workstation_python", lambda: sys.executable)
-    monkeypatch.setattr(runner, "_run_headless", lambda *a, **k: None)
-    monkeypatch.setattr(
-        handoff,
-        "assert_handoff_ready",
-        lambda *_a: {"mix": "m.wav", "mix_bytes": 1, "slice_count": 1},
-    )
-    monkeypatch.setattr(runner, "_publish_audio", lambda sid, _p: (f"{sid}.wav", "audio/wav"))
-    monkeypatch.setattr(runner, "_run_master_pipeline", lambda *a: None)
-    monkeypatch.setattr(runner, "_attach_master", lambda sid: (f"{sid}_m.wav", "audio/wav"))
+    def fail(*_a, **_k):
+        raise RuntimeError("Lyria prediction failed: mocked")
 
-    def under_driven(*_a):
-        raise LoudnessComplianceError(-15.37, -14.0, 0.5, push_capped=True)
+    monkeypatch.setattr("engine.generate_track_headless.render_lyria_master", fail)
+    runner._worker(SESSION, "prompt", "rock", False, {"style": "dark synth", "lyrics": "line"})
+    public = runner._public_job(runner._lookup_job(SESSION))
+    assert public["status"] == "failed"
+    assert "Lyria prediction failed" in public["error"]
+    assert public.get("master_url") in {None, ""}
+    assert public.get("audio_filename") in {None, ""}
 
-    monkeypatch.setattr(runner, "_try_module5_delivery", under_driven)
-    _touch(str(scratch / SESSION / "unmastered_mix.wav"), b"x" * 10)
+
+def test_worker_does_not_run_the_mastering_bus(live_dirs, monkeypatch):
+    """A Lyria failure must not fall through into Module 5 / the limiter."""
+    scratch, _assets = live_dirs
+    _seed_job(scratch)
+    _forbid_lane_bounce(monkeypatch)
+
+    def fail(*_a, **_k):
+        raise RuntimeError("Lyria prediction canceled: mocked")
+
+    monkeypatch.setattr("engine.generate_track_headless.render_lyria_master", fail)
     runner._worker(SESSION, "prompt", "rock", False)
     public = runner._public_job(runner._lookup_job(SESSION))
     assert public["status"] == "failed"
-    assert public["delivery_status"] == "failed"
-    assert public["delivery_error"] == "Loudness compliance failed: -15.37 LUFS"
-    # Failed jobs keep scratch audio for debugging.
-    assert (scratch / SESSION / "unmastered_mix.wav").is_file()
+    assert "canceled" in public["error"]
+    assert "delivery_status" not in public or public.get("delivery_status") in {None, ""}
 
 
 def test_module5_gate_blocks_packaging_of_non_compliant_master(live_dirs, monkeypatch):
@@ -251,54 +242,38 @@ def test_module5_gate_blocks_packaging_of_non_compliant_master(live_dirs, monkey
     assert not (scratch.parent / "deliveries" / SESSION / "manifest.json").exists()
 
 
-def test_worker_completes_job_with_delivery_fields(live_dirs, monkeypatch):
-    scratch, _assets = live_dirs
+def test_worker_completes_job_with_lyria_master_urls(live_dirs, monkeypatch):
+    scratch, assets = live_dirs
     _seed_job(scratch)
-    import engine.worker_handoff as handoff
+    _forbid_lane_bounce(monkeypatch)
+    master = scratch / "downloaded.mp3"
+    master.write_bytes(b"ID3" + b"\x00" * 32)
 
-    monkeypatch.setattr(runner, "resolve_workstation_python", lambda: sys.executable)
-    monkeypatch.setattr(runner, "_run_headless", lambda *a, **k: None)
-    monkeypatch.setattr(
-        handoff,
-        "assert_handoff_ready",
-        lambda *_a: {"mix": "m.wav", "mix_bytes": 1, "slice_count": 1},
-    )
-    monkeypatch.setattr(runner, "_publish_audio", lambda sid, _p: (f"{sid}.wav", "audio/wav"))
-    monkeypatch.setattr(runner, "_run_master_pipeline", lambda *a: None)
-    monkeypatch.setattr(runner, "_attach_master", lambda sid: (f"{sid}_m.wav", "audio/wav"))
-    # The real _try_module5_delivery returns audio_filename/audio_mime (from
-    # _publish_delivery_package); they must not collide with the explicit kwargs.
-    monkeypatch.setattr(
-        runner,
-        "_try_module5_delivery",
-        lambda *_a: {
-            "audio_filename": f"{SESSION}_master.wav",
-            "audio_mime": "audio/wav",
-            "master_url": f"/api/stream/{SESSION}_master.wav",
-            "zip_url": f"/api/stream/{SESSION}_stems_bundle.zip",
-        },
-    )
-    sdir = scratch / SESSION
-    (sdir / "session_slices").mkdir(parents=True, exist_ok=True)
-    (sdir / "bus_stems").mkdir(exist_ok=True)
-    _touch(str(sdir / "session_slices" / "rhythm_a.wav"), b"x" * 1000)
-    _touch(str(sdir / "bus_stems" / "bass.wav"), b"x" * 2000)
-    _touch(str(sdir / "unmastered_mix.wav"), b"x" * 3000)
-    _touch(str(sdir / f"{SESSION}_blueprint.json"), b"{}")
+    def fake_render(dest_dir, *, style, prompt, lyrics, session_id, **_k):
+        assert style == "dark synth"
+        assert lyrics == "neon rain"
+        assert "sample lyric" not in f"{style}\n{prompt}\n{lyrics}".lower()
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"{session_id}_master.mp3")
+        with open(dest, "wb") as handle:
+            handle.write(master.read_bytes())
+        return dest
 
-    runner._worker(SESSION, "prompt", "rock", False)
+    monkeypatch.setattr("engine.generate_track_headless.render_lyria_master", fake_render)
+    runner._worker(
+        SESSION,
+        "prompt field",
+        "rock",
+        False,
+        {"style": "dark synth", "lyrics": "neon rain"},
+    )
     public = runner._public_job(runner._lookup_job(SESSION))
     assert public["status"] == "completed", public.get("error")
-    assert public["delivery_status"] == "completed"
-    assert public["delivery_error"] is None
-    assert public["audio_filename"] == f"{SESSION}_master.wav"
-    assert public["zip_url"].endswith("_stems_bundle.zip")
-    # Scratch audio purged after delivery; JSON (job, blueprint) retained.
-    assert public["scratch_purged_bytes"] == 6000
-    assert not list(sdir.rglob("*.wav"))
-    assert not (sdir / "session_slices").exists()
-    assert (sdir / f"{SESSION}_blueprint.json").is_file()
-    assert (sdir / "job.json").is_file()
+    assert public["audio_filename"] == f"{SESSION}_master.mp3"
+    assert public["master_url"] == f"/api/stream/{SESSION}_master.mp3"
+    assert public["mp3_url"] == public["master_url"]
+    assert public["audio_mime"] == "audio/mpeg"
+    assert (assets / f"{SESSION}_master.mp3").is_file()
 
 
 def test_scratch_purge_is_skipped_on_request_and_on_failure(live_dirs, monkeypatch):

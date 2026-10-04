@@ -1,8 +1,8 @@
-"""Prompt → blueprint → capped session cache → unmastered mix (no GUI).
+"""Headless generate entry.
 
-Default is offline heuristic. ``--live`` requires a Replicate token. If a token
-is already in the environment and neither ``--offline`` nor ``--live`` was
-passed, one live attempt is allowed and failures fall back offline.
+The live path calls Replicate ``google/lyria-3-pro`` and writes that audio as
+the session master. ``execute_prompt_pipeline`` still assembles the 13-lane
+tape for tests; ``main`` does not call it.
 """
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ import shutil
 import sys
 import time
 import traceback
+import urllib.error
+import urllib.parse
+import urllib.request
 from random import Random
 from typing import Any
 
@@ -1182,6 +1185,144 @@ def _export_mix(src: str, dest: str, duration_sec: float | None, sr: int) -> str
     return dest_abs
 
 
+LYRIA_PREDICTIONS_URL = "https://api.replicate.com/v1/models/google/lyria-3-pro/predictions"
+LYRIA_TIMEOUT_SEC = 180.0
+LYRIA_POLL_SEC = 3.0
+_LYRIA_TERMINAL = frozenset({"succeeded", "failed", "canceled"})
+
+
+def compose_lyria_prompt(style: str = "", prompt: str = "", lyrics: str = "") -> str:
+    """Style prompt, a blank line, then lyrics. Nothing is invented.
+
+    ``style`` is the style prompt. ``prompt`` fills that role when style is
+    empty, and is appended when it carries different text. A prompt that only
+    repeats the lyrics is not written twice.
+    """
+    style_text = (style or "").strip()
+    prompt_text = (prompt or "").strip()
+    lyric_text = (lyrics or "").strip()
+    if lyric_text and prompt_text == lyric_text:
+        prompt_text = ""
+    if style_text and prompt_text and prompt_text != style_text:
+        head = f"{style_text}\n{prompt_text}"
+    else:
+        head = style_text or prompt_text
+    if head and lyric_text:
+        return f"{head}\n\n{lyric_text}"
+    text = head or lyric_text
+    if not text:
+        raise ValueError("Lyria prompt is empty")
+    return text
+
+
+def lyria_output_url(output: Any) -> str:
+    """Replicate output is an audio URL, or a one-item list of one URL."""
+    if isinstance(output, str) and output.strip():
+        return output.strip()
+    if isinstance(output, (list, tuple)) and len(output) == 1:
+        item = output[0]
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+    raise RuntimeError("Lyria output was not an audio URL")
+
+
+def _audio_extension(url: str, content_type: str, body: bytes) -> str:
+    head = body[:16]
+    if head.startswith(b"ID3") or (
+        len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0
+    ):
+        return ".mp3"
+    if len(body) >= 12 and head.startswith(b"RIFF") and body[8:12] == b"WAVE":
+        return ".wav"
+    path = urllib.parse.urlparse(url).path.lower()
+    if path.endswith(".mp3"):
+        return ".mp3"
+    if path.endswith(".wav"):
+        return ".wav"
+    ctype = (content_type or "").lower()
+    if "mpeg" in ctype or "mp3" in ctype:
+        return ".mp3"
+    if "wav" in ctype or "wave" in ctype:
+        return ".wav"
+    return ".mp3"
+
+
+def _download_lyria_audio(url: str, timeout: float) -> tuple[bytes, str]:
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+            content_type = str(resp.headers.get("Content-Type") or "")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Lyria audio download failed: HTTP {exc.code}") from None
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Lyria audio download failed: {exc.reason}") from None
+    if not body:
+        raise RuntimeError("Lyria audio download was empty")
+    return body, content_type
+
+
+def _lyria_token() -> str:
+    """Hybrid Replicate token. Never the lyric engine key."""
+    from engine.gemini_arranger import _load_env_quiet, replicate_token
+
+    _load_env_quiet()
+    return replicate_token()
+
+
+def render_lyria_master(
+    dest_dir: str,
+    *,
+    style: str = "",
+    prompt: str = "",
+    lyrics: str = "",
+    session_id: str = "lyria",
+    timeout_sec: float = LYRIA_TIMEOUT_SEC,
+    poll_sec: float = LYRIA_POLL_SEC,
+) -> str:
+    """POST lyria-3-pro, poll ``urls.get`` until it finishes, save the audio.
+
+    Returns the path of the saved master (``.mp3`` when Lyria returns MP3).
+    """
+    from engine.gemini_arranger import _http_json
+
+    token = _lyria_token()
+    if not token:
+        raise RuntimeError("REPLICATE_API_TOKEN is not set")
+    full_prompt = compose_lyria_prompt(style, prompt, lyrics)
+    deadline = time.monotonic() + float(timeout_sec)
+    prediction = _http_json(
+        LYRIA_PREDICTIONS_URL,
+        token,
+        {"input": {"prompt": full_prompt}},
+        timeout=min(70.0, float(timeout_sec)),
+        extra_headers={"Prefer": "wait"},
+    )
+    while str(prediction.get("status") or "") not in _LYRIA_TERMINAL:
+        if time.monotonic() > deadline:
+            raise RuntimeError("Lyria prediction timed out")
+        urls = prediction.get("urls") if isinstance(prediction.get("urls"), dict) else {}
+        poll_url = str((urls or {}).get("get") or "").strip()
+        if not poll_url:
+            raise RuntimeError("Lyria prediction has no urls.get")
+        time.sleep(float(poll_sec))
+        if time.monotonic() > deadline:
+            raise RuntimeError("Lyria prediction timed out")
+        prediction = _http_json(poll_url, token, None, timeout=60.0)
+    status = str(prediction.get("status") or "")
+    if status != "succeeded":
+        err = prediction.get("error") or status or "failed"
+        raise RuntimeError(f"Lyria prediction {status}: {err}")
+    audio_url = lyria_output_url(prediction.get("output"))
+    body, content_type = _download_lyria_audio(audio_url, timeout=60.0)
+    ext = _audio_extension(audio_url, content_type, body)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, f"{session_id}_master{ext}")
+    with open(dest, "wb") as handle:
+        handle.write(body)
+    return dest
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Headless prompt-to-unmastered mix")
     parser.add_argument("--prompt", required=True)
@@ -1269,66 +1410,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--vocal-file",
         default=None,
-        help="Tuned 44.1 kHz PCM WAV of the recorded take, mixed onto the master bus",
+        help="Ignored by the Lyria path. Kept so older CLI flags still parse.",
     )
+    parser.add_argument("--style", default="", help="Style prompt sent to Lyria")
+    parser.add_argument("--lyrics", default="", help="Lyrics appended after a blank line")
     args = parser.parse_args(argv)
-    corpus = args.corpus
-    if not corpus:
-        try:
-            from engine.worker_handoff import resolve_worker_corpus
-
-            corpus = resolve_worker_corpus()
-        except Exception:
-            corpus = DEFAULT_CORPUS
-    print(f"[CORPUS] {corpus}", flush=True)
+    session_dir = session_scratch_dir(args.scratch, args.session)
     try:
-        from engine.live_index import resolve_worker_index
-
-        db_path = resolve_worker_index(args.db)
-    except Exception:
-        live = r"C:\live_web_outputs\db\corpus_index_live.sqlite"
-        db_path = live if os.path.isfile(live) else (args.db or default_index_db())
-        if os.path.normcase(os.path.abspath(str(db_path))) in {
-            os.path.normcase(r"D:\MusicDatasets\db\corpus_index.sqlite"),
-            os.path.normcase(r"D:\MusicDatasets\database\corpus_index.sqlite"),
-        }:
-            raise RuntimeError(
-                "Live generate refused the D: corpus_index.sqlite lock. "
-                "Refresh C:\\live_web_outputs\\db\\corpus_index_live.sqlite first."
-            )
-    print(f"[LIVE_INDEX] {db_path}", flush=True)
-    try:
-        result = execute_prompt_pipeline(
-            args.prompt,
-            args.session,
-            db_path,
-            args.scratch,
-            genre=args.genre,
-            offline=args.offline,
-            live=args.live,
-            corpus_dir=corpus,
-            max_per_stem=args.max_per_stem,
-            max_stage=args.max_stage,
-            sr=args.sr,
-            duration_sec=args.duration,
-            output_path=args.output,
-            bpm=args.bpm,
-            key=args.key,
-            normalize_lufs=args.normalize_lufs,
-            ceiling_dbtp=args.ceiling_dbtp,
-            seed=args.seed,
-            request_id=args.request_id,
-            arrange=not args.no_arrange,
-            vocal_mode=args.vocal_mode,
-            vocal_file=args.vocal_file,
+        saved = render_lyria_master(
+            session_dir,
+            style=str(args.style or ""),
+            prompt=str(args.prompt or ""),
+            lyrics=str(args.lyrics or ""),
+            session_id=str(args.session),
         )
-    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+    except (ValueError, RuntimeError, OSError) as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)
         return 1
-    print(
-        f"[HEADLESS] mix={result['unmastered_mix']} output={result.get('output_wav')} "
-        f"mode={result['mode']} staged={result['staged']} seed={result.get('seed')}"
-    )
+    print(f"[LYRIA] master={saved}", flush=True)
     return 0
 
 

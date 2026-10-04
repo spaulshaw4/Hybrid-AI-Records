@@ -73,17 +73,22 @@ export function OrderIntakeSection() {
     window.setTimeout(() => window.requestAnimationFrame(correct), behavior === "smooth" ? 450 : 0);
   };
 
-  const jumpToOrderForm = (updateHash = true, pkg?: OrderPackage, instant = false, waitFrames = 180) => {
+  const jumpToOrderForm = (
+    updateHash = true,
+    pkg?: OrderPackage,
+    instant = false,
+    deadline = performance.now() + 15_000,
+  ) => {
     const form = document.getElementById("quick-order-form");
     const field = firstOrderField();
     if (!form || !field) {
-      // Portal content can paint late on cold CI / Vite first-compile loads
-      // (~3s at 60fps). Keep retrying until Escape/back leaves #order.
-      if (waitFrames <= 0) return;
+      // Wall-clock, not frame count: a throttled CI main thread can burn a
+      // frame budget before the intake form commits.
+      if (performance.now() > deadline) return;
       window.requestAnimationFrame(() => {
         // Abort if Escape/back already left #order while we were waiting to mount.
         if (!updateHash && window.location.hash !== "#order") return;
-        jumpToOrderForm(updateHash, pkg, instant, waitFrames - 1);
+        jumpToOrderForm(updateHash, pkg, instant, deadline);
       });
       return;
     }
@@ -107,35 +112,50 @@ export function OrderIntakeSection() {
 
     const gen = ++focusGenRef.current;
     stopFocusGuard();
-    const userMovedToAnotherField = (active: Element | null) =>
-      !!active &&
-      active !== firstOrderField() &&
-      !!form.contains(active) &&
-      (active instanceof HTMLInputElement ||
-        active instanceof HTMLSelectElement ||
-        active instanceof HTMLTextAreaElement);
+    // Programmatic focus (hydration, scroll, a late retry banner) must not
+    // count as the user leaving the first field. Only a real click or Tab does.
+    let userReleased = false;
 
     const restoreField = () => {
       // Escape/back bump `focusGenRef`, which is the cancel signal. Do not also
       // require `#order` here: pushState can lag a frame behind the click, and
       // a hash mismatch would abort the settle loop with focus still on <body>.
-      if (gen !== focusGenRef.current) return false;
+      if (gen !== focusGenRef.current || userReleased) return false;
       const el = firstOrderField();
       if (!el) return true;
-      const active = document.activeElement;
-      if (userMovedToAnotherField(active)) return false;
-      if (active !== el) el.focus({ preventScroll: true });
+      if (document.activeElement !== el) {
+        try {
+          el.focus({ preventScroll: true });
+        } catch {
+          el.focus();
+        }
+      }
       return true;
     };
 
-    const settleStarted = performance.now();
-    const settle = () => {
-      if (!restoreField()) return;
-      // Wall-clock, not frame count: throttled CI / cold Vite compiles can
-      // drop well below 60fps, so 180 rAF was ending before layout finished.
-      if (performance.now() - settleStarted < 8000) window.requestAnimationFrame(settle);
+    const onPointerDown = (event: Event) => {
+      const liveForm = document.getElementById("quick-order-form");
+      const target = event.target;
+      if (!liveForm || !(target instanceof Node) || !liveForm.contains(target)) return;
+      const field = firstOrderField();
+      if (target === field) return;
+      if (target instanceof Element && field?.contains(target)) return;
+      userReleased = true;
     };
-    window.requestAnimationFrame(settle);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Tab") userReleased = true;
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("focusin", restoreField, true);
+
+    // Keep reclaiming until the user actually leaves. An 8s rAF window loses
+    // to late hydration and scroll-restoration on cold headless runs, which
+    // leaves document.activeElement on <body> (id "").
+    const timer = window.setInterval(() => {
+      if (!restoreField()) window.clearInterval(timer);
+    }, 200);
+    restoreField();
 
     const mountedRetryOrError = (node: Node) => {
       if (!(node instanceof HTMLElement)) return false;
@@ -148,7 +168,7 @@ export function OrderIntakeSection() {
       );
     };
 
-    // Late-mounting retry/error chrome can steal focus after the rAF window.
+    // Late-mounting retry/error chrome can steal focus after the first paint.
     const observer = new MutationObserver((mutations) => {
       const added = mutations.some((m) => [...m.addedNodes].some(mountedRetryOrError));
       if (!added) return;
@@ -157,7 +177,14 @@ export function OrderIntakeSection() {
     });
     observer.observe(form, { childList: true, subtree: true });
     focusGuardRef.current = {
-      disconnect: () => observer.disconnect(),
+      disconnect: () => {
+        userReleased = true;
+        window.clearInterval(timer);
+        document.removeEventListener("pointerdown", onPointerDown, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+        document.removeEventListener("focusin", restoreField, true);
+        observer.disconnect();
+      },
     };
 
     setScrollAnnouncement("");

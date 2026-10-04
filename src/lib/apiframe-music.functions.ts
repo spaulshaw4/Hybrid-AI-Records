@@ -266,6 +266,8 @@ export async function runGenerateEngineTrack(
       const local = await workerTimeout(
         generateFromHybridWorker({
           prompt: payload.prompt || genre,
+          style: payload.style || "",
+          tags: payload.tags,
           genreHint: genre,
           durationSeconds,
           bpm,

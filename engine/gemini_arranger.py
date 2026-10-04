@@ -287,9 +287,17 @@ def _join_output(output: Any) -> str:
     return str(output)
 
 
-def _http_json(url: str, token: str | None, payload: dict | None, timeout: float = 120.0) -> dict:
+def _http_json(
+    url: str,
+    token: str | None,
+    payload: dict | None,
+    timeout: float = 120.0,
+    extra_headers: dict[str, str] | None = None,
+) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
+    if extra_headers:
+        headers.update({str(key): str(value) for key, value in extra_headers.items()})
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=data, method="POST" if payload is not None else "GET", headers=headers)
