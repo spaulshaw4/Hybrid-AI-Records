@@ -508,6 +508,23 @@ def _session_mix_path(session_id: str) -> str:
     return os.path.join(SCRATCH_ROOT, session_id, "unmastered_mix.wav")
 
 
+def _lyria_master_path(session_id: str) -> str | None:
+    """WAV or MP3 master in scratch when it exists and is larger than 100KB.
+
+    WAV is checked first. Either file is enough. The child exit code and
+    ``unmastered_mix.wav`` are not consulted once this returns a path.
+    """
+    folder = os.path.join(SCRATCH_ROOT, session_id)
+    for ext in (".wav", ".mp3"):
+        path = os.path.join(folder, f"{session_id}_master{ext}")
+        try:
+            if os.path.isfile(path) and os.path.getsize(path) > 100 * 1024:
+                return path
+        except OSError:
+            continue
+    return None
+
+
 def _replicate_token_set() -> bool:
     return bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip())
 
@@ -725,11 +742,15 @@ def _run_headless(
     prompt: str,
     genre_hint: str,
     render_opts: dict[str, Any] | None = None,
-) -> None:
+) -> str | None:
     """Assembler child process. The live generate job does not call this.
 
     ``_worker_inner`` calls ``render_lyria_master`` instead. Tests still call
     ``execute_prompt_pipeline`` / ``assemble_arranged_buses`` directly.
+
+    A Lyria master (``.wav`` or ``.mp3``) larger than 100KB is returned
+    immediately. That path does not read ``result.returncode`` or require
+    ``unmastered_mix.wav``.
     """
     opts = dict(render_opts or {})
     script = _headless_script()
@@ -794,9 +815,10 @@ def _run_headless(
     _archive_step_output(session_id, "generate", result.stdout, result.stderr)
     if result.stdout:
         _log("[generate] " + _redact(result.stdout.strip()[-1200:]))
-    master = os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_master.wav")
-    # Ensure it checks master, not the missing mix file
-    if result.returncode != 0 or not os.path.isfile(master):
+    master = _lyria_master_path(session_id)
+    if master:
+        return master
+    if result.returncode != 0 or not os.path.isfile(mix):
         detail = _redact((result.stderr or result.stdout or "").strip()[-800:])
         raise RuntimeError(f"Headless generate failed. {detail}")
 

@@ -306,12 +306,13 @@ def test_run_headless_accepts_lyria_master_without_unmastered_mix(live_dirs, mon
         stderr = ""
 
     _stub_headless_child(monkeypatch, _Result())
-    runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    found = runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    assert found == str(master)
     assert not (sdir / "unmastered_mix.wav").is_file()
     assert master.is_file()
 
 
-def test_run_headless_fails_when_child_returncode_is_nonzero(live_dirs, monkeypatch):
+def test_run_headless_accepts_master_over_100kb_despite_nonzero_exit(live_dirs, monkeypatch):
     scratch, _assets = live_dirs
     session = "ht_lyria_bad_rc"
     sdir = scratch / session
@@ -322,6 +323,43 @@ def test_run_headless_fails_when_child_returncode_is_nonzero(live_dirs, monkeypa
     class _Result:
         returncode = 1
         stdout = f"[LYRIA] master={master}\n"
+        stderr = ""
+
+    _stub_headless_child(monkeypatch, _Result())
+    found = runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    assert found == str(master)
+    assert not (sdir / "unmastered_mix.wav").is_file()
+
+
+def test_run_headless_accepts_mp3_master_over_100kb(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    session = "ht_lyria_mp3"
+    sdir = scratch / session
+    sdir.mkdir()
+    master = sdir / f"{session}_master.mp3"
+    master.write_bytes(b"\0" * (100 * 1024 + 1))
+
+    class _Result:
+        returncode = 1
+        stdout = ""
+        stderr = "legacy stem traceback"
+
+    _stub_headless_child(monkeypatch, _Result())
+    found = runner._run_headless(sys.executable, session, "Outlaw Country", "Outlaw Country")
+    assert found == str(master)
+
+
+def test_run_headless_ignores_master_at_or_under_100kb(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    session = "ht_lyria_small"
+    sdir = scratch / session
+    sdir.mkdir()
+    (sdir / f"{session}_master.wav").write_bytes(b"\0" * (100 * 1024))
+    (sdir / f"{session}_master.mp3").write_bytes(b"\0" * (100 * 1024))
+
+    class _Result:
+        returncode = 0
+        stdout = ""
         stderr = ""
 
     _stub_headless_child(monkeypatch, _Result())

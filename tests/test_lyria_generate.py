@@ -320,3 +320,22 @@ def test_write_lyria_wav_allows_short_tones_and_gate_is_size_only(tmp_path):
         assert_lyria_master_wav(str(exact))
     with pytest.raises(RuntimeError, match="missing"):
         assert_lyria_master_wav(str(tmp_path / "absent.wav"))
+
+
+def test_main_exits_zero_after_printing_lyria_master(tmp_path, monkeypatch):
+    from engine.generate_track_headless import main
+
+    saved = tmp_path / "ht_exit_master.wav"
+    saved.write_bytes(b"RIFF" + b"\0" * 32)
+
+    def fake_render(*_args, **_kwargs):
+        return str(saved)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("legacy stem code ran")
+
+    monkeypatch.setattr("engine.generate_track_headless.render_lyria_master", fake_render)
+    monkeypatch.setattr("engine.generate_track_headless.assemble_from_blueprint", boom)
+    with pytest.raises(SystemExit) as exc:
+        main(["--prompt", "Outlaw Country", "--session", "ht_exit", "--scratch", str(tmp_path)])
+    assert exc.value.code == 0
