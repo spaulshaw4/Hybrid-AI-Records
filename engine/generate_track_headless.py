@@ -1282,7 +1282,7 @@ def render_lyria_master(
 ) -> str:
     """POST lyria-3-pro, poll ``urls.get`` until it finishes, save the audio.
 
-    Returns the path of the saved master (``.mp3`` when Lyria returns MP3).
+    Returns the path of the saved master, always ``{session_id}_master.mp3``.
     """
     from engine.gemini_arranger import _http_json
 
@@ -1314,13 +1314,12 @@ def render_lyria_master(
         err = prediction.get("error") or status or "failed"
         raise RuntimeError(f"Lyria prediction {status}: {err}")
     audio_url = lyria_output_url(prediction.get("output"))
-    body, content_type = _download_lyria_audio(audio_url, timeout=60.0)
-    ext = _audio_extension(audio_url, content_type, body)
+    body, _content_type = _download_lyria_audio(audio_url, timeout=60.0)
     os.makedirs(dest_dir, exist_ok=True)
-    dest = os.path.join(dest_dir, f"{session_id}_master{ext}")
-    with open(dest, "wb") as handle:
+    master_path = os.path.join(dest_dir, f"{session_id}_master.mp3")
+    with open(master_path, "wb") as handle:
         handle.write(body)
-    return dest
+    return master_path
 
 
 def main(argv: list[str] | None = None) -> int:

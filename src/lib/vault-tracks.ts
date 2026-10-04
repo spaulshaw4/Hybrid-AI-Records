@@ -193,4 +193,26 @@ export function groupVaultTracksByArtistAlbum(
   });
 }
 
+/** True when a vault row has no artist, or only the Unknown Artist placeholder. */
+export function isPlaceholderVaultArtist(name: string | null | undefined): boolean {
+  const trimmed = name?.trim().toLowerCase() ?? "";
+  return !trimmed || trimmed === DEFAULT_ARTIST.toLowerCase();
+}
+
+/**
+ * Artist heading for the vault UI.
+ * A missing name or the Unknown Artist placeholder uses the signed-in profile
+ * name. Signed-out sessions keep the existing guest label.
+ */
+export function displayVaultArtistName(
+  name: string | null | undefined,
+  options: { signedIn: boolean; profileName?: string | null },
+): string {
+  const trimmed = name?.trim() ?? "";
+  if (trimmed && !isPlaceholderVaultArtist(trimmed)) return trimmed;
+  const profile = options.profileName?.trim() ?? "";
+  if (options.signedIn && profile && !isPlaceholderVaultArtist(profile)) return profile;
+  return DEFAULT_ARTIST;
+}
+
 export { DEFAULT_ALBUM as VAULT_DEFAULT_ALBUM, DEFAULT_ARTIST as VAULT_DEFAULT_ARTIST };

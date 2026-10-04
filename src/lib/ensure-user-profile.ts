@@ -21,7 +21,8 @@ export function takeOAuthNext(): string | undefined {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : undefined;
 }
 
-function displayNameFrom(user: User): string | null {
+/** Profile label already used at sign-in: metadata name, then the email local-part. */
+export function profileNameFromAuthUser(user: User): string | null {
   const meta = user.user_metadata as Record<string, unknown> | undefined;
   for (const key of ["full_name", "name", "display_name"] as const) {
     const value = meta?.[key];
@@ -47,7 +48,7 @@ function avatarFrom(user: User): string | null {
  * production-shaped table (`id`, `email`, `username`).
  */
 export async function ensureUserProfile(user: User): Promise<void> {
-  const displayName = displayNameFrom(user);
+  const displayName = profileNameFromAuthUser(user);
   const avatarUrl = avatarFrom(user);
   const email = user.email?.trim() || null;
   const username = email?.includes("@") ? email.split("@")[0] || null : null;

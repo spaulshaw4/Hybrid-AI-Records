@@ -60,19 +60,6 @@ export const DIVISION_LOGO_TILES = {
   jester: jesterCrest,
 } as const;
 
-const ROTATE_MS: Record<Tier, number> = {
-  full: 8000,
-  lite: 10000,
-  static: 14000,
-};
-
-/** Peak watermark alpha — high enough to read as a hero mark, low enough for copy. */
-const WATERMARK_OPACITY: Record<Tier, number> = {
-  full: 0.42,
-  lite: 0.34,
-  static: 0.3,
-};
-
 function detectTier(): Tier {
   if (typeof window === "undefined") return "static";
   if (isSafeModeActive()) return "static";
@@ -80,15 +67,12 @@ function detectTier(): Tier {
 }
 
 /**
- * Cinematic dark canvas: fluid red/black glow plus one watermark crest
- * that cross-fades through the four divisions. Logos are not tiled.
+ * Cinematic dark canvas: fluid red/blue mesh only. Division logos stay in
+ * the footer and catalog, not on this wallpaper.
  */
 export function LivingBackground() {
   const [tier, setTier] = useState<Tier>("full");
   const [hidden, setHidden] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [active, setActive] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
     setTier(detectTier());
@@ -98,54 +82,11 @@ export function LivingBackground() {
   }, []);
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReduceMotion(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
     const sync = () => setHidden(document.visibilityState === "hidden");
     sync();
     document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
-
-  useEffect(() => {
-    let loaded = 0;
-    let cancelled = false;
-
-    for (const crest of DIVISION_WATERMARKS) {
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => {
-        loaded += 1;
-        if (!cancelled && loaded >= 1) setReady(true);
-      };
-      img.src = crest.src;
-    }
-
-    const timeout = window.setTimeout(() => {
-      if (!cancelled) setReady(true);
-    }, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (reduceMotion || hidden) return;
-    const tick = () => {
-      if (document.documentElement.getAttribute("data-overlay-open") === "true") return;
-      if (document.visibilityState === "hidden") return;
-      setActive((index) => (index + 1) % DIVISION_WATERMARKS.length);
-    };
-    const id = window.setInterval(tick, ROTATE_MS[tier]);
-    return () => window.clearInterval(id);
-  }, [tier, hidden, reduceMotion]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -158,16 +99,13 @@ export function LivingBackground() {
     };
   }, []);
 
-  const peak = WATERMARK_OPACITY[tier];
-
   return (
     <div
       aria-hidden="true"
-      data-ready={ready ? "true" : "false"}
+      data-ready="true"
       data-fallback="false"
       data-tier={tier}
       data-paused={hidden ? "true" : "false"}
-      data-active={DIVISION_WATERMARKS[active]?.name}
       data-testid="logo-wallpaper"
       className="living-bg flowing-patriotic-bg app-bg pointer-events-none fixed inset-0 z-0 min-h-dvh select-none overflow-hidden"
       style={{ pointerEvents: "none" }}
@@ -175,18 +113,6 @@ export function LivingBackground() {
       <div className="living-bg-cinematic pointer-events-none absolute inset-0" />
       <div className="living-bg-glow pointer-events-none absolute inset-0" />
       <div className="living-bg-matrix pointer-events-none absolute inset-0" />
-
-      {DIVISION_WATERMARKS.map((crest, index) => (
-        <div
-          key={crest.name}
-          className={`living-bg-layer living-bg-watermark pointer-events-none absolute inset-0${index === active ? " is-active" : ""}`}
-          style={{
-            backgroundImage: `url("${crest.src}")`,
-            opacity: index === active && ready ? peak : 0,
-          }}
-        />
-      ))}
-
       <div className="living-bg-veil pointer-events-none absolute inset-0" />
     </div>
   );

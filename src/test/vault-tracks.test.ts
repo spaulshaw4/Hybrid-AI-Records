@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asVaultTrackStatus,
+  displayVaultArtistName,
   groupVaultTracksByArtistAlbum,
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
@@ -164,6 +165,36 @@ describe("groupVaultTracksByArtistAlbum", () => {
     expect(grouped[0]?.albums.map((a) => a.album_name)).toEqual(["Night Drive", "Singles"]);
     expect(grouped[0]?.albums[0]?.tracks.map((t) => t.id)).toEqual(["2", "1"]);
     expect(grouped[1]?.albums[0]?.album_name).toBe("Campfire");
+  });
+});
+
+describe("displayVaultArtistName", () => {
+  it("keeps a real artist and replaces the unknown-artist placeholder when signed in", () => {
+    expect(
+      displayVaultArtistName("Hybrid AI", { signedIn: true, profileName: "Stephen" }),
+    ).toBe("Hybrid AI");
+    expect(
+      displayVaultArtistName("Unknown Artist", { signedIn: true, profileName: "Stephen" }),
+    ).toBe("Stephen");
+    expect(
+      displayVaultArtistName("UNKNOWN ARTIST", { signedIn: true, profileName: "Stephen" }),
+    ).toBe("Stephen");
+    expect(displayVaultArtistName("  ", { signedIn: true, profileName: "Stephen" })).toBe(
+      "Stephen",
+    );
+  });
+
+  it("keeps the guest label when signed out or when no profile name exists", () => {
+    expect(
+      displayVaultArtistName("UNKNOWN ARTIST", { signedIn: false, profileName: "Stephen" }),
+    ).toBe(VAULT_DEFAULT_ARTIST);
+    expect(displayVaultArtistName(undefined, { signedIn: false })).toBe(VAULT_DEFAULT_ARTIST);
+    expect(
+      displayVaultArtistName("Unknown Artist", { signedIn: true, profileName: null }),
+    ).toBe(VAULT_DEFAULT_ARTIST);
+    expect(
+      displayVaultArtistName("Unknown Artist", { signedIn: true, profileName: "Unknown Artist" }),
+    ).toBe(VAULT_DEFAULT_ARTIST);
   });
 });
 

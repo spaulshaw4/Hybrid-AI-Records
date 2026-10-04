@@ -20,11 +20,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { VaultMasterDock } from "@/components/VaultMasterDock";
+import { supabase } from "@/integrations/supabase/client";
 import { masterWavFromUrl } from "@/lib/audio-mixdown";
 import {
   playCatalogTrack,
   useCatalogPlayback,
 } from "@/lib/catalog-player";
+import { profileNameFromAuthUser } from "@/lib/ensure-user-profile";
 import { listUserVaultTracks, type UserVaultRow } from "@/lib/user-vault.functions";
 import {
   fetchVaultTracksResult,
@@ -35,7 +37,9 @@ import {
 } from "@/lib/vault-client";
 import { logTransientPollDisconnect } from "@/lib/studio-poll-telemetry";
 import {
+  displayVaultArtistName,
   groupVaultTracksByArtistAlbum,
+  isPlaceholderVaultArtist,
   isPlayableVaultAudioUrl,
   sanitizeVaultTracks,
 } from "@/lib/vault-tracks";
@@ -46,7 +50,6 @@ import {
   formatDurationSeconds,
   resolveCatalogDurationSec,
   resolveCatalogGenre,
-  resolveCatalogKey,
   vaultMasterUrls,
   vaultMp3DownloadUrl,
 } from "@/lib/vault-catalog";
@@ -120,11 +123,11 @@ function upsertProcessing(previous: UserVaultRow[], incoming: UserVaultRow): Use
   return [incoming, ...withoutTemps];
 }
 
-function toPlayable(row: UserVaultRow, src: string) {
+function toPlayable(row: UserVaultRow, src: string, artist: string) {
   return {
     id: row.id,
     title: row.title,
-    artist: row.artistName,
+    artist,
     src,
     audio_url: src,
     album: row.albumName,
@@ -137,6 +140,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   const [rows, setRows] = useState<UserVaultRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const playback = useCatalogPlayback();
   const playFallbackRef = useRef<(() => void) | null>(null);
 
@@ -187,6 +191,36 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
       }
     }
   }, [loadVault, signedIn]);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setProfileName(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.auth.getUser();
+      const user = data.user;
+      if (cancelled) return;
+      if (!user) {
+        setProfileName(null);
+        return;
+      }
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const saved = profile?.display_name?.trim() ?? "";
+      const resolved =
+        saved && !isPlaceholderVaultArtist(saved) ? saved : profileNameFromAuthUser(user);
+      setProfileName(resolved && !isPlaceholderVaultArtist(resolved) ? resolved : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,14 +307,14 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           vocal_url: row.vocalUrl || null,
           raw_audio_url: row.rawAudioUrl || null,
           created_at: row.createdAt,
-          artist_name: row.artistName,
+          artist_name: displayVaultArtistName(row.artistName, { signedIn, profileName }),
           album_name: row.albumName,
           musical_key: row.musicalKey ?? null,
           duration_sec: row.durationSec ?? null,
           mp3_url: row.mp3Url ?? null,
         })),
       ),
-    [rows],
+    [rows, signedIn, profileName],
   );
 
   const defaultOpenAlbums = useMemo(
@@ -294,6 +328,10 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
   useEffect(() => {
     setOpenAlbums(defaultOpenAlbums);
   }, [defaultOpenAlbums]);
+
+  function artistFor(row: UserVaultRow): string {
+    return displayVaultArtistName(row.artistName, { signedIn, profileName });
+  }
 
   function playRow(row: UserVaultRow) {
     const urls = vaultMasterUrls(row);
@@ -312,12 +350,12 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     ) {
       const retry = () => {
         playFallbackRef.current = null;
-        void playCatalogTrack(toPlayable(row, urls.fallbackUrl), "vault");
+        void playCatalogTrack(toPlayable(row, urls.fallbackUrl, artistFor(row)), "vault");
       };
       playFallbackRef.current = retry;
       el.addEventListener("error", retry, { once: true });
     }
-    void playCatalogTrack(toPlayable(row, urls.streamUrl), "vault");
+    void playCatalogTrack(toPlayable(row, urls.streamUrl, artistFor(row)), "vault");
   }
 
   function downloadMasterMp3(row: UserVaultRow) {
@@ -417,9 +455,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                   Genre
                                 </TableHead>
                                 <TableHead className="hidden text-zinc-400 md:table-cell">
-                                  Key
-                                </TableHead>
-                                <TableHead className="hidden text-zinc-400 md:table-cell">
                                   Duration
                                 </TableHead>
                                 <TableHead className="text-zinc-400">Status</TableHead>
@@ -440,11 +475,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                     raw_audio_url: track.raw_audio_url,
                                   });
                                 const genre = resolveCatalogGenre(row.style);
-                                const keyLabel = resolveCatalogKey(
-                                  row.style,
-                                  row.title,
-                                  row.musicalKey,
-                                );
                                 const durationSec = resolveCatalogDurationSec(
                                   row.durationSec,
                                   DEFAULT_CATALOG_DURATION_SEC,
@@ -471,9 +501,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                     </TableCell>
                                     <TableCell className="hidden text-zinc-300 sm:table-cell">
                                       {genre}
-                                    </TableCell>
-                                    <TableCell className="hidden font-mono text-xs text-zinc-300 md:table-cell">
-                                      {keyLabel}
                                     </TableCell>
                                     <TableCell className="hidden tabular-nums text-zinc-300 md:table-cell">
                                       {formatDurationSeconds(durationSec)}

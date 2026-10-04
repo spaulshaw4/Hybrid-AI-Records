@@ -897,23 +897,18 @@ def _publish_lyria_master(session_id: str, src: str) -> dict[str, Any]:
     """Copy a Lyria download into the stream assets and return job URL fields."""
     if not src or not os.path.isfile(src):
         raise RuntimeError(f"Lyria did not write a master for {session_id}")
-    ext = os.path.splitext(src)[1].lower()
-    if ext not in AUDIO_EXTS:
-        ext = ".mp3"
-    filename = f"{session_id}_master{ext}"
+    filename = f"{session_id}_master.mp3"
     dest = os.path.join(ASSETS_ROOT, filename)
     os.makedirs(ASSETS_ROOT, exist_ok=True)
     if os.path.abspath(src) != os.path.abspath(dest):
         shutil.copy2(src, dest)
     url = f"/api/stream/{filename}"
-    fields: dict[str, Any] = {
+    return {
         "audio_filename": filename,
-        "audio_mime": MIME_BY_EXT.get(ext, "audio/mpeg"),
+        "audio_mime": MIME_BY_EXT.get(".mp3", "audio/mpeg"),
         "master_url": url,
+        "mp3_url": url,
     }
-    if ext == ".mp3":
-        fields["mp3_url"] = url
-    return fields
 
 
 def _publish_audio(session_id: str, src: str) -> tuple[str, str]:
