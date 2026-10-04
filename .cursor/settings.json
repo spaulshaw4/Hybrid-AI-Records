@@ -26,6 +26,9 @@
     },
     "grok-voice": {
       "enabled": true
+    },
+    "elastic": {
+      "enabled": true
     }
   }
 }
