@@ -221,7 +221,7 @@ describe("executeGenerationCortex unit", () => {
       userId,
       supabase: {} as never,
       promptPayload: {
-        prompt: "dark synthwave anthem",
+        prompt: "dark synthwave anthem with wide night-drive pads and a driving chorus",
         title: "Test Track",
         lyrics: "hello world lyrics here",
         instrumental: false,

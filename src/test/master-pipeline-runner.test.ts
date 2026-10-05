@@ -117,7 +117,7 @@ describe("MasterPipelineRunner", () => {
     }
   });
 
-  it("grounds genre BPM mismatch as MASTER_PIPELINE_GROUNDED_FAULT", async () => {
+  it("accepts a genre tempo outside the stylistic BPM range", async () => {
     const { PipelineActivatorSwitch } = await import("@/lib/PipelineActivatorSwitch");
     PipelineActivatorSwitch.bustCache();
     vi.spyOn(PipelineInformant, "recordTelemetry").mockResolvedValue();
@@ -155,10 +155,15 @@ describe("MasterPipelineRunner", () => {
       rawPayload: { prompt: "amapiano", genre: "amapiano" },
     });
 
-    expect(result.status).toBe("MASTER_PIPELINE_GROUNDED_FAULT");
-    if (result.status === "MASTER_PIPELINE_GROUNDED_FAULT") {
-      expect(result.groundReference).toMatch(/^ground_drain_/);
-      expect(result.faultSource).toBe("QUARANTINE_NODE");
+    expect(result.status).toBe("MASTER_PIPELINE_SUCCESS");
+    if (result.status === "MASTER_PIPELINE_SUCCESS") {
+      expect(result.blueprints.bpmBlueprint.masterBpm).toBe(160);
+      expect(result.blueprints.genreEntitlement.entitlementStatus).toBe("PASSED_ENTITLEMENT");
+      expect(result.blueprints.genreEntitlement.genreVerified).toBe("AMAPIANO");
+      expect(result.blueprints.genreEntitlement.currentBpm).toBe(160);
+      expect(result.blueprints.genreEntitlement.appliedRules.requiredBpmRange).toEqual([
+        110, 115,
+      ]);
     }
   });
 
