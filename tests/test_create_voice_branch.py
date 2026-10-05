@@ -1,4 +1,4 @@
-"""Create-route branch: HeartMuLa when voice_sample is present, Lyria otherwise.
+"""Create-route branch: pinned music-01 when voice_sample is present, Lyria otherwise.
 
 HTTP is mocked. Nothing is sent to Replicate.
 """
@@ -8,6 +8,7 @@ import io
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -19,7 +20,7 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from api import headless_job_runner as runner  # noqa: E402
-from services.voice_service import HEART_MULA_VERSION, PREDICTIONS_URL  # noqa: E402
+from services.voice_service import PREDICTIONS_URL, VOICE_AUDIO_FIELD, VOICE_LYRICS_FIELD, VOICE_VERSION  # noqa: E402
 
 
 class _Resp:
@@ -103,7 +104,7 @@ def _client(monkeypatch, started: list):
 
 def _fields(**extra: str) -> dict[str, str]:
     body = {
-        "prompt": "night drive",
+        "prompt": "night drive " + ("x" * 50),
         "lyrics": "neon rain",
         "duration": "210",
         "tempo": "110",
@@ -164,7 +165,10 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     assert job["token_cost"] == 1
     urls = [req.full_url for req in calls]
     assert any("lyria-3-pro" in url and url.endswith("/predictions") for url in urls)
-    assert not any("heart_mula" in url or "chatterbox" in url.lower() for url in urls)
+    assert not any(
+        "heart_mula" in url or "music-01" in url or "musicgen" in url or "chatterbox" in url.lower()
+        for url in urls
+    )
     lyria_posts = [
         req
         for req in calls
@@ -175,7 +179,7 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     assert (scratch / session_id / f"{session_id}_master.wav").is_file()
 
 
-def test_create_with_recording_wav_uses_one_heart_mula_call(live_dirs, monkeypatch):
+def test_create_with_recording_wav_writes_master_from_one_prediction(live_dirs, monkeypatch):
     scratch, assets = live_dirs
     audio = _gate_wav()
     take = _reference_bytes()
@@ -214,16 +218,17 @@ def test_create_with_recording_wav_uses_one_heart_mula_call(live_dirs, monkeypat
     assert master.read_bytes() == audio
     assert (assets / f"{session_id}_master.wav").is_file()
     urls = [req.full_url for req in calls]
-    assert not any("lyria" in url.lower() or "chatterbox" in url.lower() for url in urls)
-    heart_posts = [req for req in calls if "heart_mula" in req.full_url and "/predictions" in req.full_url]
-    assert len(heart_posts) == 1
-    assert heart_posts[0].full_url == PREDICTIONS_URL
-    assert HEART_MULA_VERSION in heart_posts[0].full_url
-    sent = json.loads(heart_posts[0].data.decode("utf-8"))
-    assert sent["input"]["audio"] == file_url
-    assert sent["input"]["text"] == "neon rain"
-    assert "night drive" in sent["input"]["prompt"]
-    assert "outlaw country" in sent["input"]["prompt"]
+    assert not any("lyria" in url.lower() or "chatterbox" in url.lower() or "heart_mula" in url for url in urls)
+    voice_posts = [req for req in calls if "music-01" in req.full_url and "/predictions" in req.full_url]
+    assert len(voice_posts) == 1
+    assert voice_posts[0].full_url == PREDICTIONS_URL
+    assert VOICE_VERSION in voice_posts[0].full_url
+    sent = json.loads(voice_posts[0].data.decode("utf-8"))
+    assert sent["input"][VOICE_AUDIO_FIELD] == file_url
+    assert sent["input"][VOICE_LYRICS_FIELD] == "neon rain"
+    assert "prompt" not in sent["input"]
+    assert "audio" not in sent["input"]
+    assert "text" not in sent["input"]
     assert take in calls[0].data
     assert b'filename="ref_vocal.wav"' in calls[0].data
 
@@ -248,7 +253,8 @@ def test_heart_mula_failure_is_a_job_error_and_does_not_crash(live_dirs, monkeyp
     runner._worker(*started[-1])
     job = runner._public_job(runner._lookup_job(session_id))
     assert job["status"] == "failed"
-    assert job["error"].startswith("HeartMuLa generation failed")
+    assert job["error"].startswith("Voice API failed:")
+    assert job["detail"] == job["error"]
     assert "model exploded" in job["error"]
     assert job["engine_used"] == "HeartMuLa"
     assert job["token_cost"] == 1
@@ -256,5 +262,87 @@ def test_heart_mula_failure_is_a_job_error_and_does_not_crash(live_dirs, monkeyp
     assert not (scratch / session_id / f"{session_id}_master.wav").is_file()
     urls = [req.full_url for req in calls]
     assert not any("lyria" in url.lower() or "chatterbox" in url.lower() for url in urls)
+    health = client.get("/health")
+    assert health.status_code == 200
+
+
+def test_missing_token_does_not_call_replicate(live_dirs, monkeypatch, capsys):
+    calls: list = []
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+    monkeypatch.delenv("REPLICATE_API_KEY", raising=False)
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        raise AssertionError("Replicate was called")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    started: list = []
+    client = _client(monkeypatch, started)
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(),
+        files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session_id"]
+    assert session_id.startswith("ht_")
+    assert body["sessionId"] == session_id
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "failed"
+    assert "Voice API failed:" in job["error"]
+    assert "REPLICATE_API_TOKEN" in job["error"]
+    assert job["detail"] == job["error"]
+    assert calls == []
+    captured = capsys.readouterr()
+    assert "CRITICAL REPLICATE ERROR: MissingToken - REPLICATE_API_TOKEN is not configured" in captured.out
+    assert "r8_" not in captured.out
+
+
+def test_model_host_404_is_voice_api_failed(live_dirs, monkeypatch, capsys):
+    calls: list = []
+    monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
+    monkeypatch.setattr("services.voice_service.time.sleep", lambda _seconds: None)
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        if req.full_url.endswith("/files") and req.get_method() == "POST":
+            return _json_resp({"urls": {"get": "https://api.replicate.com/v1/files/file_404"}})
+        raise urllib.error.HTTPError(
+            req.full_url,
+            404,
+            "Not Found",
+            hdrs=None,
+            fp=io.BytesIO(b'{"title":"ModelNotFoundError","detail":"model not found","status":404}'),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    started: list = []
+    client = _client(monkeypatch, started)
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(),
+        files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session_id"]
+    assert session_id.startswith("ht_")
+    assert not body.get("error")
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "failed"
+    assert job["error"].startswith("Voice API failed:")
+    assert "404" in job["error"]
+    assert "ModelNotFoundError" in job["error"]
+    assert "r8_hybrid" not in job["error"]
+    assert job["token_cost"] == 1
+    captured = capsys.readouterr()
+    assert "CRITICAL REPLICATE ERROR:" in captured.out
+    assert "r8_hybrid" not in captured.out
+    assert not any("lyria" in req.full_url.lower() for req in calls)
     health = client.get("/health")
     assert health.status_code == 200

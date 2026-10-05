@@ -319,6 +319,7 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "voice_error",
         "engine_used",
         "token_cost",
+        "detail",
     )
     out: dict[str, Any] = {}
     for key in keys:
@@ -1225,22 +1226,33 @@ def _worker_inner(
     except Exception as exc:
         _console_exception(f"[worker] {session_id} failed: {exc}")
         try:
-            failed_engine = "HeartMuLa" if use_heart else "Lyria"
-            prefix = (
-                "HeartMuLa generation failed"
-                if use_heart
-                else "Lyria generation failed"
-            )
-            detail = _redact(str(exc))[:700]
-            if not detail.startswith(prefix):
-                detail = f"{prefix}: {detail}"
-            _update_job(
-                session_id,
-                status="failed",
-                error=detail[:800],
-                engine_used=failed_engine,
-                token_cost=1,
-            )
+            if use_heart and isinstance(exc, HTTPException):
+                voice_detail = _redact(str(exc.detail or ""))[:800]
+                _update_job(
+                    session_id,
+                    status="failed",
+                    error=voice_detail,
+                    detail=voice_detail,
+                    engine_used="HeartMuLa",
+                    token_cost=1,
+                )
+            else:
+                failed_engine = "HeartMuLa" if use_heart else "Lyria"
+                prefix = (
+                    "HeartMuLa generation failed"
+                    if use_heart
+                    else "Lyria generation failed"
+                )
+                detail = _redact(str(exc))[:700]
+                if not detail.startswith(prefix):
+                    detail = f"{prefix}: {detail}"
+                _update_job(
+                    session_id,
+                    status="failed",
+                    error=detail[:800],
+                    engine_used=failed_engine,
+                    token_cost=1,
+                )
         except KeyError:
             pass
 
@@ -1403,27 +1415,28 @@ def _heart_mula_prompt(prompt: str, opts: dict[str, Any]) -> str:
 
 
 def _render_heart_mula_master(session_id: str, prompt: str, opts: dict[str, Any]) -> str:
-    """Pinned HeartMuLa only. The download is the Gate 1 master wav."""
-    from services.voice_service import render_heart_mula_master
+    """Pinned music-01 prediction. The download is the Gate 1 master wav."""
+    from services.voice_service import VoiceInputError, render_heart_mula_master
 
     ref = str(opts.get("voice_sample_path") or "").strip()
     dest = os.path.abspath(os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_master.wav"))
     if not _is_under(dest, os.path.abspath(SCRATCH_ROOT)):
         raise RuntimeError("HeartMuLa generation failed: master path escaped scratch")
     try:
-        return render_heart_mula_master(
+        output = render_heart_mula_master(
             ref,
             str(opts.get("lyrics") or ""),
             _heart_mula_prompt(prompt, opts),
             session_id,
             dest,
         )
-    except Exception as exc:
-        _console_exception(f"[HEART_MULA] render failed for {session_id}: {exc}")
-        detail = str(exc).strip() or "failed"
-        if detail.startswith("HeartMuLa generation failed"):
-            raise RuntimeError(detail) from exc
-        raise RuntimeError(f"HeartMuLa generation failed: {detail}") from exc
+    except VoiceInputError:
+        raise
+    except Exception as e:
+        print(f"CRITICAL REPLICATE ERROR: {type(e).__name__} - {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"Voice API failed: {str(e)}") from e
+    return output
 
 
 def _save_ref_vocal(session_id: str, raw: bytes) -> str:

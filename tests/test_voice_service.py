@@ -14,8 +14,8 @@ if _REPO not in sys.path:
 
 from services.voice_service import (  # noqa: E402
     FILES_URL,
-    HEART_MULA_VERSION,
     PREDICTIONS_URL,
+    VOICE_VERSION,
     VoiceInputError,
     process_voice_track,
 )
@@ -122,12 +122,13 @@ def test_mocked_output_url_is_saved_under_scratch(tmp_path, monkeypatch):
     assert b'name="content"' in calls[0].data
     assert _reference_bytes() in calls[0].data
     assert calls[1].full_url == PREDICTIONS_URL
-    assert HEART_MULA_VERSION in calls[1].full_url
+    assert VOICE_VERSION in calls[1].full_url
     assert "/versions/" in calls[1].full_url
     assert calls[1].get_header("Authorization") == "Bearer r8_hybrid"
     assert calls[1].get_header("Prefer") == "wait"
+    assert calls[1].get_header("User-agent") == "hybrid-voice/1.0"
     assert json.loads(calls[1].data.decode("utf-8")) == {
-        "input": {"audio": file_url, "text": "neon rain"}
+        "input": {"voice_file": file_url, "lyrics": "neon rain"}
     }
     assert calls[2].full_url == poll_url
     assert calls[2].get_method() == "GET"
@@ -172,7 +173,7 @@ def test_route_returns_ready_and_vocal_path(tmp_path, monkeypatch):
     assert os.path.isfile(body["vocal_path"])
     with open(body["vocal_path"], "rb") as handle:
         assert handle.read() == audio
-    assert HEART_MULA_VERSION in calls[1].full_url
+    assert VOICE_VERSION in calls[1].full_url
 
 
 def test_route_rejects_missing_input_without_calling_the_model(tmp_path, monkeypatch):

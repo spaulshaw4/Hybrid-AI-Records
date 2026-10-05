@@ -1,8 +1,13 @@
-"""Optional vocal render via pinned HeartMuLa on Replicate.
+"""Optional vocal render via a pinned public Replicate audio model.
 
 HTTP only (urllib). This repo does not install the ``replicate`` package or
 ``requests``. Auth is the hybrid ``REPLICATE_API_TOKEN`` (alias
 ``REPLICATE_API_KEY``). Lyric and Gemini keys are never used.
+
+``meta-innovation/heart_mula`` is a public model, but its Input schema has no
+audio/file property, so a saved ``ref_vocal.wav`` cannot be mapped onto it.
+``minimax/music-01`` is the pinned replacement: ``voice_file`` is the voice
+reference and ``lyrics`` is the lyric text. There is no prompt field.
 """
 from __future__ import annotations
 
@@ -17,13 +22,18 @@ import urllib.request
 import uuid
 from typing import Any
 
-# Exact version. Do not call the unversioned "latest" model URL.
-HEART_MULA_VERSION = "f654464a8b2e4824c74cb296b1cb47037037b02adbc6d8f8145fdc3a47ba6790"
-HEART_MULA_MODEL = "meta-innovation/heart_mula"
+# Pinned from GET /v1/models/minimax/music-01 ``latest_version.id``.
+# Do not call the unversioned "latest" model URL.
+VOICE_MODEL = "minimax/music-01"
+VOICE_VERSION = "0254c7e2f54315b667dbae03da7c155822ba29ffe0457be5bc246d564be486bd"
+# OpenAPI Input names from that same GET. Do not invent others.
+VOICE_AUDIO_FIELD = "voice_file"
+VOICE_LYRICS_FIELD = "lyrics"
 PREDICTIONS_URL = (
-    "https://api.replicate.com/v1/models/meta-innovation/heart_mula"
-    f"/versions/{HEART_MULA_VERSION}/predictions"
+    f"https://api.replicate.com/v1/models/{VOICE_MODEL}/versions/{VOICE_VERSION}/predictions"
 )
+# Cloudflare rejects urllib's default User-Agent with a 403 before Replicate.
+_USER_AGENT = "hybrid-voice/1.0"
 FILES_URL = "https://api.replicate.com/v1/files"
 VOICE_TIMEOUT_SEC = 120.0
 VOICE_POLL_SEC = 2.0
@@ -48,6 +58,10 @@ SCRATCH_ROOT = _default_scratch_root()
 
 class VoiceInputError(ValueError):
     """Lyrics, reference audio, or session id is unusable. No HTTP has run."""
+
+
+class MissingToken(RuntimeError):
+    """``REPLICATE_API_TOKEN`` is missing. No Replicate request has been made."""
 
 
 def _is_under(path: str, root: str) -> bool:
@@ -108,14 +122,63 @@ def _destination(session: str) -> str:
 
 
 def _audio_token() -> str:
-    """Hybrid Replicate token only. Never ``LYRIC_ENGINE_API_KEY``."""
+    """Hybrid Replicate token only. Never ``LYRIC_ENGINE_API_KEY``.
+
+    A blank token raises ``MissingToken`` before any socket is opened.
+    The value itself is never returned to logs.
+    """
     from engine.gemini_arranger import _load_env_quiet, replicate_token
 
     _load_env_quiet()
     token = replicate_token()
     if not token:
-        raise RuntimeError("REPLICATE_API_TOKEN is not set")
+        raise MissingToken("REPLICATE_API_TOKEN is not configured")
     return token
+
+
+def _http_error_text(exc: urllib.error.HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except Exception:
+        raw = b""
+    text = raw.decode("utf-8", errors="replace").strip().replace("\r", " ").replace("\n", " ")
+    return text[:500]
+
+
+def _voice_json(
+    url: str,
+    token: str,
+    payload: dict | None,
+    timeout: float,
+    extra_headers: dict[str, str] | None = None,
+) -> dict:
+    """One urllib JSON call. HTTP errors keep the response body, not the token."""
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": _USER_AGENT,
+        "Authorization": f"Bearer {token}",
+    }
+    if extra_headers:
+        headers.update({str(key): str(value) for key, value in extra_headers.items()})
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST" if payload is not None else "GET",
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = _http_error_text(exc)
+        message = f"HTTP {exc.code}"
+        if body:
+            message = f"{message}: {body}"
+        raise RuntimeError(message) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError("Replicate request failed") from exc
 
 
 def _output_url(output: Any) -> str:
@@ -166,14 +229,18 @@ def _upload_reference(path: str, token: str, timeout: float) -> str:
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": _USER_AGENT,
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             uploaded = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        traceback.print_exc()
-        raise RuntimeError(f"Replicate file upload failed: HTTP {exc.code}") from exc
+        body = _http_error_text(exc)
+        message = f"Replicate file upload failed: HTTP {exc.code}"
+        if body:
+            message = f"{message}: {body}"
+        raise RuntimeError(message) from exc
     except urllib.error.URLError as exc:
         traceback.print_exc()
         raise RuntimeError("Replicate file upload failed") from exc
@@ -191,8 +258,12 @@ def _run_prediction(
     deadline: float,
     prompt: str | None = None,
 ) -> dict:
-    """Create a pinned-version prediction and poll ``urls.get`` until it finishes."""
-    from engine.gemini_arranger import _http_json
+    """Create a pinned-version prediction and poll ``urls.get`` until it finishes.
+
+    ``prompt`` is accepted by the caller and not sent: this model's Input
+    schema has no prompt, tags, or style property.
+    """
+    _ = prompt
 
     def remaining() -> float:
         left = deadline - time.monotonic()
@@ -200,10 +271,11 @@ def _run_prediction(
             raise TimeoutError("voice processing timed out")
         return left
 
-    model_input: dict[str, str] = {"audio": audio_url, "text": text}
-    if prompt:
-        model_input["prompt"] = prompt
-    prediction = _http_json(
+    model_input = {
+        VOICE_AUDIO_FIELD: audio_url,
+        VOICE_LYRICS_FIELD: text,
+    }
+    prediction = _voice_json(
         PREDICTIONS_URL,
         token,
         {"input": model_input},
@@ -223,7 +295,7 @@ def _run_prediction(
         time.sleep(delay)
         if time.monotonic() >= deadline:
             raise TimeoutError("voice processing timed out")
-        prediction = _http_json(poll_url, token, None, timeout=min(60.0, remaining()))
+        prediction = _voice_json(poll_url, token, None, timeout=min(60.0, remaining()))
     status = str(prediction.get("status") or "")
     if status != "succeeded":
         detail = str(prediction.get("error") or status or "failed")[:240]
@@ -236,7 +308,7 @@ def _download_output(url: str, timeout: float) -> bytes:
     host = (parsed.hostname or "").lower()
     if parsed.scheme != "https" or host not in _DOWNLOAD_HOSTS:
         raise RuntimeError("voice output URL was not accepted")
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(url, method="GET", headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             chunks: list[bytes] = []
@@ -294,7 +366,7 @@ def _render_pinned(
     scratch_root: str | None = None,
     prompt: str | None = None,
 ) -> str:
-    """One files upload and one pinned HeartMuLa prediction. No other model."""
+    """One files upload and one pinned music-01 prediction. No Lyria, no second model."""
     token = _audio_token()
     deadline = time.monotonic() + VOICE_TIMEOUT_SEC
     file_url = _upload_reference(reference, token, timeout=min(60.0, max(1.0, deadline - time.monotonic())))
@@ -324,11 +396,11 @@ def render_heart_mula_vocal(
     session_id: str,
     dest_path: str | None = None,
 ) -> str:
-    """One HeartMuLa pass on the raw take. Writes ``heart_mula_vocal.wav``.
+    """One music-01 pass on the raw take. Writes ``heart_mula_vocal.wav``.
 
     Empty lyrics, a missing reference, and an unsafe path raise
-    ``VoiceInputError`` before any Replicate call. The raw file is the ``audio``
-    input. Nothing is sent to a speech model first.
+    ``VoiceInputError`` before any Replicate call. The raw file is ``voice_file``.
+    Nothing is sent to a speech model first.
     """
     text = _validate_lyrics(lyrics_or_text)
     session = _validate_session_id(session_id)
@@ -355,11 +427,12 @@ def render_heart_mula_master(
     session_id: str,
     dest_path: str,
 ) -> str:
-    """One HeartMuLa song. Writes ``{session_id}_master.wav``.
+    """One music-01 song. Writes ``{session_id}_master.wav``.
 
-    ``audio`` is the raw reference file. ``text`` is the lyrics. ``prompt`` is
-    the song prompt. No speech model runs first. Empty lyrics, a missing
-    reference, or an unsafe path raise ``VoiceInputError`` before any HTTP call.
+    ``voice_file`` is the raw reference. ``lyrics`` is the lyric text. The song
+    prompt is validated and not sent: the pinned schema has no prompt field.
+    No speech model and no Lyria run first. Empty lyrics, a missing reference,
+    or an unsafe path raise ``VoiceInputError`` before any HTTP call.
     """
     text = _validate_lyrics(lyrics)
     song_prompt = (prompt or "").strip()
