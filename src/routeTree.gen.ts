@@ -27,6 +27,7 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PromptsRouteImport } from './routes/prompts'
 import { Route as ReceiptsRouteImport } from './routes/receipts'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SimpleStudioRouteImport } from './routes/simple-studio'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as StudioRouteImport } from './routes/studio'
 import { Route as TokensRouteImport } from './routes/tokens'
@@ -169,6 +170,11 @@ const ReceiptsRoute = ReceiptsRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SimpleStudioRoute = SimpleStudioRouteImport.update({
+  id: '/simple-studio',
+  path: '/simple-studio',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
@@ -478,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/prompts': typeof PromptsRoute
   '/receipts': typeof ReceiptsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/simple-studio': typeof SimpleStudioRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/studio': typeof StudioRoute
   '/tokens': typeof TokensRoute
@@ -551,6 +558,7 @@ export interface FileRoutesByTo {
   '/prompts': typeof PromptsRoute
   '/receipts': typeof ReceiptsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/simple-studio': typeof SimpleStudioRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/studio': typeof StudioRoute
   '/tokens': typeof TokensRoute
@@ -626,6 +634,7 @@ export interface FileRoutesById {
   '/prompts': typeof PromptsRoute
   '/receipts': typeof ReceiptsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/simple-studio': typeof SimpleStudioRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/studio': typeof StudioRoute
   '/tokens': typeof TokensRoute
@@ -701,6 +710,7 @@ export interface FileRouteTypes {
     | '/prompts'
     | '/receipts'
     | '/reset-password'
+    | '/simple-studio'
     | '/sitemap.xml'
     | '/studio'
     | '/tokens'
@@ -774,6 +784,7 @@ export interface FileRouteTypes {
     | '/prompts'
     | '/receipts'
     | '/reset-password'
+    | '/simple-studio'
     | '/sitemap.xml'
     | '/studio'
     | '/tokens'
@@ -848,6 +859,7 @@ export interface FileRouteTypes {
     | '/prompts'
     | '/receipts'
     | '/reset-password'
+    | '/simple-studio'
     | '/sitemap.xml'
     | '/studio'
     | '/tokens'
@@ -923,6 +935,7 @@ export interface RootRouteChildren {
   PromptsRoute: typeof PromptsRoute
   ReceiptsRoute: typeof ReceiptsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SimpleStudioRoute: typeof SimpleStudioRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StudioRoute: typeof StudioRoute
   TokensRoute: typeof TokensRoute
@@ -1084,6 +1097,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/simple-studio': {
+      id: '/simple-studio'
+      path: '/simple-studio'
+      fullPath: '/simple-studio'
+      preLoaderRoute: typeof SimpleStudioRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sitemap.xml': {
@@ -1583,6 +1603,7 @@ const rootRouteChildren: RootRouteChildren = {
   PromptsRoute: PromptsRoute,
   ReceiptsRoute: ReceiptsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SimpleStudioRoute: SimpleStudioRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   StudioRoute: StudioRoute,
   TokensRoute: TokensRoute,

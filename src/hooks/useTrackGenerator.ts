@@ -64,32 +64,32 @@ export type TrackCreateInput = {
 };
 
 function vocalTake(file: Blob | File | null | undefined): Blob | File | null {
-  if (!file || file.size <= 64) return null;
+  if (!file || file.size <= 0) return null;
   return file;
+}
+
+function bpmField(bpm: number | null | undefined): string {
+  if (bpm == null || !Number.isFinite(bpm) || bpm <= 0) return "86";
+  return String(Math.round(bpm));
+}
+
+function durationField(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return "";
+  return String(Math.round(seconds));
 }
 
 function postCreate(input: TrackCreateInput): Promise<Response> {
   const take = vocalTake(input.vocalFile);
   const form = new FormData();
-  const seconds =
-    input.durationSeconds == null ? "" : String(Math.round(input.durationSeconds));
-  const bpm = input.bpm == null ? "" : String(Math.round(input.bpm));
   form.append("prompt", input.prompt);
-  form.append("bpm", bpm);
-  form.append("duration", seconds);
+  form.append("bpm", bpmField(input.bpm));
+  form.append("duration", durationField(input.durationSeconds));
   if (input.lyrics != null) form.append("lyrics", input.lyrics);
-  if (input.style) form.append("style", input.style);
-  if (input.mood) form.append("mood", input.mood);
-  if (input.genreHint) form.append("genre_hint", input.genreHint);
-  if (seconds) form.append("length", seconds);
-  if (bpm) form.append("tempo", bpm);
-  if (input.weirdness != null) form.append("weirdness", String(input.weirdness));
-  if (input.audioInfluence != null) form.append("audio_influence", String(input.audioInfluence));
-  if (input.styleInfluence != null) form.append("style_influence", String(input.styleInfluence));
   form.append("vocal_present", take ? "true" : "false");
   if (take) {
-    const file = new File([take], "ref_vocal.wav", { type: take.type || "audio/wav" });
-    form.append("vocal_file", file, "ref_vocal.wav");
+    const vocalType = take.type || "audio/wav";
+    form.append("vocal_dna_file", new File([take], "vocal_dna.wav", { type: vocalType }), "vocal_dna.wav");
+    form.append("vocal_file", new File([take], "ref_vocal.wav", { type: vocalType }), "ref_vocal.wav");
   }
   return fetch("/api/tracks/create", { method: "POST", body: form });
 }

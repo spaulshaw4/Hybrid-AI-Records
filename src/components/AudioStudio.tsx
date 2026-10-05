@@ -464,6 +464,27 @@ function masterAttachmentName(title: string | null | undefined): string {
   return `${trackName || "master"}.wav`;
 }
 
+const TRACK_SESSION_RE = /ht_[0-9a-f]{12}/i;
+
+function sessionIdFromRef(value: string | null | undefined): string {
+  const match = TRACK_SESSION_RE.exec(value || "");
+  return match ? match[0].toLowerCase() : "";
+}
+
+/** Finished master for a create session. Stem, mp3, and zip names are not this file. */
+function masterWavUrl(sessionOrUrl: string | null | undefined): string {
+  const sessionId = sessionIdFromRef(sessionOrUrl);
+  return sessionId ? `/api/stream/${sessionId}_master.wav` : "";
+}
+
+function titleFromDownloadLabel(label: string | null | undefined): string {
+  return (label || "")
+    .replace(/\.(mp3|wav|flac|m4a|ogg|aac|zip)$/i, "")
+    .replace(/_master$/i, "")
+    .replace(/_+/g, " ")
+    .trim();
+}
+
 /** Rendering status with a live elapsed clock so the wait never feels stuck. */
 function renderingLabel(startedAt: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
@@ -2377,9 +2398,23 @@ export function AudioStudio() {
   }
 
 
-  /** Direct, immediate download of the generated file. */
-  function downloadTrack(url: string, title: string) {
-    void downloadAudioFile(url, title, applyRepairedUrl);
+  /**
+   * Studio "Download Track" and the vault row share this save:
+   * `/api/stream/{session_id}_master.wav` named with the track title, or master.wav.
+   */
+  function downloadFinishedMaster(urlOrSession: string, label: string) {
+    const url = masterWavUrl(urlOrSession);
+    if (!url) return;
+    const sessionId = sessionIdFromRef(url);
+    const currentSession = sessionIdFromRef(result?.taskId || result?.audioUrl || "");
+    const title =
+      sessionId && sessionId === currentSession && result?.title.trim()
+        ? result.title
+        : titleFromDownloadLabel(label) || label;
+    const fileName = masterAttachmentName(title);
+    void import("@/lib/download-track").then(({ downloadTrack: saveFile }) => {
+      void saveFile(url, fileName);
+    });
   }
 
   async function handleShareResult() {
@@ -2638,8 +2673,10 @@ export function AudioStudio() {
       applyPipelineProgress("sonic", PIPELINE_PROGRESS.sonic);
 
       const selectedStyles = styles.filter(Boolean);
-      // A freeform-only entry still needs a genre for the engine prompt.
-      const genre = selectedStyles[0] || styleLine || stylePrompt.trim();
+      // Visible chips (or the style-prompt box) — the full blend, not only the first genre.
+      const visibleStyle = selectedStyles.join(", ");
+      const styleBox = stylePrompt.trim();
+      const genre = visibleStyle || styleBox;
       const subGenre = selectedStyles.slice(1).join(", ");
       const vocalGender = resolvedVocalGender();
       const vocalStyle = vocalPresets
@@ -2653,8 +2690,8 @@ export function AudioStudio() {
       const arrangedLyrics = withVocals
         ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
         : "";
-      // Textarea → tags verbatim. No genre-lock rebuild, no truncation.
-      const styleTags = stylePrompt.trim() || selectedStyles.join(", ") || styleLine || genre;
+      // Empty style-prompt box: the visible style is the prompt and the style field.
+      const styleTags = styleBox || visibleStyle;
 
       // The recorded take stays in voiceSampleRef. Generate sends it as vocal_file.
 
@@ -2707,16 +2744,18 @@ export function AudioStudio() {
         // One multipart create. Do not set Content-Type; the browser adds the boundary.
         const runStream = async () => {
           const durationSeconds = Math.round(clampDurationPreset(targetDuration));
-          const bpmValue = String(clampBpm(bpm));
-          const takeSource = voiceSampleRef.current;
-          const hasVocal = !!(takeSource && takeSource.size > 64);
+          const bpmValue = Number.isFinite(bpm) && bpm > 0 ? String(clampBpm(bpm)) : "86";
+          const takeSource = voiceSampleRef.current ?? voiceSample;
+          const hasVocal = !!takeSource && takeSource.size > 0;
           const form = new FormData();
-          form.append("prompt", styleTags.slice(0, 5000));
-          const lyricPayload = arrangedLyrics || lyrics || "";
-          if (lyricPayload.trim().length > LYRICS_MAX_CHARS) {
+          const userPrompt = (styleBox || visibleStyle).trim();
+          form.append("prompt", userPrompt.slice(0, 5000));
+          if (visibleStyle || styleBox) form.append("style", visibleStyle || styleBox);
+          const typedLyrics = lyrics.trim();
+          if (typedLyrics.length > LYRICS_MAX_CHARS) {
             throw new Error(LYRICS_TOO_LONG_MESSAGE);
           }
-          form.append("lyrics", lyricPayload);
+          if (typedLyrics) form.append("lyrics", typedLyrics);
           form.append("duration", String(durationSeconds));
           form.append("length", String(durationSeconds));
           form.append("tempo", bpmValue);
@@ -2725,14 +2764,14 @@ export function AudioStudio() {
           form.append("audio_influence", String(clampInfluence(audioInfluence)));
           form.append("style_influence", String(clampStyleInfluence(styleInfluence)));
           form.append("vocal_present", hasVocal ? "true" : "false");
-          if (styleTags) form.append("style", styleTags);
           if (mood) form.append("mood", mood);
           if (genre) form.append("genre", genre);
           if (trackTitle) form.append("title", trackTitle);
           if (hasVocal && takeSource) {
-            const take = new File([takeSource], "ref_vocal.wav", {
-              type: takeSource.type || "audio/wav",
-            });
+            const vocalType = takeSource.type || "audio/wav";
+            const dna = new File([takeSource], "vocal_dna.wav", { type: vocalType });
+            const take = new File([takeSource], "ref_vocal.wav", { type: vocalType });
+            form.append("vocal_dna_file", dna, "vocal_dna.wav");
             form.append("vocal_file", take, "ref_vocal.wav");
           }
           const created = await fetch("/api/tracks/create", {
@@ -3151,6 +3190,7 @@ export function AudioStudio() {
             style: styleLine,
             vocalProfile: activeVocalProfile(),
             audioUrl: recoveredAudio,
+            taskId: stageTaskId,
           });
           setBusy(false);
           updateHistory(runId, {
@@ -3242,6 +3282,7 @@ export function AudioStudio() {
           style: styleLine,
           vocalProfile: activeVocalProfile(),
           audioUrl: recoveredAudio,
+          taskId: stageTaskId,
         });
         setBusy(false);
         updateHistory(runId, { title: recoveredTitle, audioUrl: recoveredAudio, status: "ready" });
@@ -3441,6 +3482,7 @@ export function AudioStudio() {
           style: job.styleLine,
           vocalProfile: job.vocalProfile,
           audioUrl,
+          taskId: job.taskId,
         });
         setBusy(false);
         updateHistory(job.runId, {
@@ -3472,6 +3514,7 @@ export function AudioStudio() {
             style: job.styleLine,
             vocalProfile: job.vocalProfile,
             audioUrl: gotAudio,
+            taskId: job.taskId,
           });
           updateHistory(job.runId, {
             title: gotTitle,
@@ -4850,6 +4893,22 @@ export function AudioStudio() {
                     style={{ pointerEvents: "auto" }}
                     data-pipeline-blocks-recording="false"
                   >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-foreground">Hybrid Vocal DNA</h4>
+                      {recordedVoiceBlob && recordedVoiceBlob.size > 0 ? (
+                        <span
+                          className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-300"
+                          role="status"
+                        >
+                          Vocal Profile Locked
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Record or upload 30 seconds of speech or singing. The engine extracts your vocal timbre to front the track.
+                    </p>
+                  </div>
                   <QuickVocalRecorder
                     voiceId={voiceId}
                     vocalMode={vocalSource}
@@ -5153,31 +5212,35 @@ export function AudioStudio() {
               regenerating={busy && !result}
             />
 
-            {result.audioUrl ? (
+            {masterWavUrl(result.taskId || result.audioUrl) || result.audioUrl ? (
               <div className="flex flex-wrap gap-2">
-                <a
-                  href={result.audioUrl}
-                  download={masterAttachmentName(result.title)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => reportEngineExport(result.taskId)}
-                  className={cn(
-                    buttonVariants({ variant: "default", size: "sm" }),
-                    "inline-flex w-fit items-center gap-2",
-                  )}
-                >
-                  <Download className="size-3.5" aria-hidden />
-                  Download Track
-                </a>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleShareResult()}
-                >
-                  <Share2 className="size-3.5" aria-hidden />
-                  Share
-                </Button>
+                {masterWavUrl(result.taskId || result.audioUrl) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      reportEngineExport(result.taskId);
+                      downloadFinishedMaster(result.taskId || result.audioUrl, result.title);
+                    }}
+                    className={cn(
+                      buttonVariants({ variant: "default", size: "sm" }),
+                      "inline-flex w-fit items-center gap-2",
+                    )}
+                  >
+                    <Download className="size-3.5" aria-hidden />
+                    Download Track
+                  </button>
+                ) : null}
+                {result.audioUrl ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleShareResult()}
+                  >
+                    <Share2 className="size-3.5" aria-hidden />
+                    Share
+                  </Button>
+                ) : null}
               </div>
             ) : null}
 
@@ -5194,7 +5257,7 @@ export function AudioStudio() {
       <AudioVault
         signedIn={signedIn}
         refreshKey={vaultTick}
-        onDownload={(url, name) => void downloadTrack(url, name)}
+        onDownload={(url, name) => downloadFinishedMaster(url, name)}
       />
 
       {/* Top-up modal — opens whenever the balance can't cover a generation. */}
