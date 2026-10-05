@@ -114,7 +114,6 @@ import {
   VAULT_POLL_MAX_MS,
   VAULT_POLL_MS,
 } from "@/lib/vault-client";
-import { hybridTrackDownloadFileName } from "@/lib/track-download-name";
 import { createPlayReporter, reportEngineExport } from "@/lib/engine-feedback";
 import {
   ENGINE_BUSY_REFUNDED_MESSAGE,
@@ -135,7 +134,6 @@ import {
   PipelineGate,
   PIPELINE_COMPLETE,
   PIPELINE_GATE_ORDER,
-  getGateNameFromFlag,
   hasPassedGate,
   percentFromGateMask,
   progressStageFromGateFlag,
@@ -439,6 +437,32 @@ function isStaleJob(job: PendingJob): boolean {
   return Date.now() - job.startedAt > POLL_TIMEOUT_MS;
 }
 
+
+function whiteLabelEngineText(text: string): string {
+  const sonic = "Hybrid Sonic Expressway";
+  const studio = "Hybrid Studio Engine";
+  return text
+    .replace(/google\/lyria-3-pro/gi, sonic)
+    .replace(/lyria-3-pro/gi, sonic)
+    .replace(/google\s+lyria(?:\s*3(?:\s*pro)?)?/gi, sonic)
+    .replace(/lyria\s*3(?:\s*pro)?/gi, sonic)
+    .replace(/\blyria\b/gi, sonic)
+    .replace(/minimax\/music-2\.6/gi, studio)
+    .replace(/minimax\s+music(?:\s*2\.6)?/gi, studio)
+    .replace(/minimax\s*2\.6/gi, studio)
+    .replace(/\bmusic-2\.6\b/gi, studio)
+    .replace(/\bminimax\b/gi, studio);
+}
+
+/** Download filename. Empty titles fall back to master.wav. Quotes and slashes are stripped. */
+function masterAttachmentName(title: string | null | undefined): string {
+  const trackName = (title || "")
+    .replace(/["'`\\/:*?<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.wav$/i, "");
+  return `${trackName || "master"}.wav`;
+}
 
 /** Rendering status with a live elapsed clock so the wait never feels stuck. */
 function renderingLabel(startedAt: number): string {
@@ -2746,7 +2770,7 @@ export function AudioStudio() {
             };
             const stepLabel = (job.step || job.note || "").trim();
             if (stepLabel && job.status !== "completed" && job.status !== "failed") {
-              setStatusText(stepLabel);
+              setStatusText(whiteLabelEngineText(stepLabel));
             }
             if (job.status === "failed") {
               throw new Error(formatValidationError(job.error, "Generation failed."));
@@ -3298,7 +3322,9 @@ export function AudioStudio() {
       }
       // Say exactly what went wrong (payload rejection vs server timeout vs
       // dropped connection) instead of one generic sentence.
-      const explained = explainEngineFailure(raw);
+      const explained = explainEngineFailure(
+        typeof raw === "string" ? whiteLabelEngineText(raw) : raw,
+      );
       const serverMessage = isCreateResponseError(err) ? err.message : null;
       setRollbackNotice(cancelled ? CANCELLED_MESSAGE : serverMessage ?? explained.message);
       if (cancelled) toast.info(CANCELLED_MESSAGE);
@@ -3506,7 +3532,9 @@ export function AudioStudio() {
         } else {
           setRetryPlan({ stage: "render", label: "Retry generation" });
         }
-        const explainedResume = explainEngineFailure(raw);
+        const explainedResume = explainEngineFailure(
+          typeof raw === "string" ? whiteLabelEngineText(raw) : raw,
+        );
         setRollbackNotice(cancelled ? CANCELLED_MESSAGE : explainedResume.message);
         if (cancelled) toast.info(CANCELLED_MESSAGE);
         else toast.error(explainedResume.headline, { description: explainedResume.message });
@@ -3600,7 +3628,7 @@ export function AudioStudio() {
       const message = err instanceof Error ? err.message : GENERATION_FAIL_MESSAGE;
       updateHistory(plan.runId, { status: "failed", error: message });
       setRetryPlan(plan);
-      const explainedRetry = explainEngineFailure(message);
+      const explainedRetry = explainEngineFailure(whiteLabelEngineText(message));
       setRollbackNotice(explainedRetry.message);
       toast.error(explainedRetry.headline, { description: explainedRetry.message });
     } finally {
@@ -3790,11 +3818,13 @@ export function AudioStudio() {
             <div className="flex items-center justify-between gap-3 text-xs">
               <p className="font-semibold text-foreground">
                 {busy
-                  ? labelForProgressStage(
-                      pipelineState?.currentStep === "music" ||
-                      pipelineState?.currentStep === "composition"
-                        ? "sonic"
-                        : pipelineState?.currentStep ?? "composition",
+                  ? whiteLabelEngineText(
+                      labelForProgressStage(
+                        pipelineState?.currentStep === "music" ||
+                        pipelineState?.currentStep === "composition"
+                          ? "sonic"
+                          : pipelineState?.currentStep ?? "composition",
+                      ),
                     )
                   : `Step ${studioStep + 1} of ${STUDIO_STEPS.length}: ${STUDIO_STEPS[studioStep]?.label ?? "Setup"}`}
               </p>
@@ -3813,11 +3843,13 @@ export function AudioStudio() {
               className="pointer-events-none h-1.5"
               aria-label={
                 busy
-                  ? `Generation progress ${pipelineState?.progress ?? 0} percent, ${labelForProgressStage(
-                      pipelineState?.currentStep === "music" ||
-                      pipelineState?.currentStep === "composition"
-                        ? "sonic"
-                        : pipelineState?.currentStep ?? "composition",
+                  ? `Generation progress ${pipelineState?.progress ?? 0} percent, ${whiteLabelEngineText(
+                      labelForProgressStage(
+                        pipelineState?.currentStep === "music" ||
+                        pipelineState?.currentStep === "composition"
+                          ? "sonic"
+                          : pipelineState?.currentStep ?? "composition",
+                      ),
                     )}`
                   : `Form progress, step ${studioStep + 1} of ${STUDIO_STEPS.length}`
               }
@@ -3825,45 +3857,18 @@ export function AudioStudio() {
             {busy || result || conductorSession ? (
               <ConductorTelemetryCard
                 busy={busy}
-                stage={
+                stage={whiteLabelEngineText(
                   pipelineState?.currentStep === "music" ||
                   pipelineState?.currentStep === "composition"
                     ? "composition"
-                    : pipelineState?.currentStep ?? "idle"
-                }
+                    : pipelineState?.currentStep ?? "idle",
+                )}
                 progress={pipelineState?.progress ?? (result ? 100 : 0)}
-                statusText={statusText}
+                statusText={statusText ? whiteLabelEngineText(statusText) : statusText}
                 genre={styles.join(", ")}
                 title={title}
                 sessionId={result?.taskId ?? conductorSession}
               />
-            ) : null}
-            {busy ? (
-              <div
-                className="flex flex-wrap gap-1.5"
-                role="list"
-                aria-label="Pipeline gate status"
-              >
-                {PIPELINE_GATE_ORDER.map((flag) => {
-                  const lit = hasPassedGate(serverGateMask, flag);
-                  const name = getGateNameFromFlag(flag);
-                  return (
-                    <span
-                      key={flag}
-                      role="listitem"
-                      title={name}
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors ${
-                        lit
-                          ? "bg-primary/20 text-primary"
-                          : "bg-muted text-muted-foreground/70"
-                      }`}
-                      aria-current={lit ? "step" : undefined}
-                    >
-                      {name}
-                    </span>
-                  );
-                })}
-              </div>
             ) : null}
             <div className="flex gap-1" role="tablist" aria-label="Generate steps">
               {STUDIO_STEPS.map((step, index) => (
@@ -4982,7 +4987,7 @@ export function AudioStudio() {
                     {busy ? (
                       <>
                         <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
-                        <span className="min-w-0 truncate">{statusText ?? "Working…"}</span>
+                        <span className="min-w-0 truncate">{statusText ? whiteLabelEngineText(statusText) : "Working…"}</span>
                       </>
                     ) : (
                       <>
@@ -5007,7 +5012,7 @@ export function AudioStudio() {
 
           {busy && !result && statusText ? (
             <p className="text-center text-xs text-muted-foreground" role="status">
-              {statusText}
+              {whiteLabelEngineText(statusText)}
             </p>
           ) : null}
 
@@ -5018,15 +5023,18 @@ export function AudioStudio() {
             >
               <p className="font-semibold">
                 Pipeline failed at step:{" "}
-                {displayPipelineStep(
-                  pipelineState.lastError.step ||
-                    readErrorStep(pipelineState.lastError.raw) ||
+                {whiteLabelEngineText(
+                  displayPipelineStep(
+                    pipelineState.lastError.step ||
+                      readErrorStep(pipelineState.lastError.raw) ||
+                      pipelineState.currentStep,
                     pipelineState.currentStep,
-                  pipelineState.currentStep,
+                  ),
                 )}
               </p>
               <p>
-                {createFailureBannerText(pipelineState.lastError) ??
+                {whiteLabelEngineText(
+                  createFailureBannerText(pipelineState.lastError) ??
                   (formatValidationError(
                       String(pipelineState.lastError.message ?? "")
                         .replace(/\bStudioStreamDroppedError\b/gi, "")
@@ -5039,7 +5047,7 @@ export function AudioStudio() {
                       pipelineState.currentStep,
                     ) === "composition"
                       ? "Composition failed. The Worker log (reports/live_api.out.log) has the Python traceback."
-                      : "Something went wrong. Please try again."))}
+                      : "Something went wrong. Please try again.")))}
               </p>
               <Button
                 type="button"
@@ -5088,14 +5096,16 @@ export function AudioStudio() {
                 role="alert"
               >
                 <p>
-                  {createFailureBannerText(pipelineState.lastError) ??
+                  {whiteLabelEngineText(
+                    createFailureBannerText(pipelineState.lastError) ??
                     formatValidationError(
                         rollbackNotice
                           .replace(/\bStudioStreamDroppedError\b/gi, "")
                           .replace(/\s{2,}/g, " ")
                           .trim(),
                         "Something went wrong. Please try again.",
-                      )}
+                      ),
+                  )}
                 </p>
               </div>
               {retryPlan ? (
@@ -5133,43 +5143,6 @@ export function AudioStudio() {
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Playback stem">
-              {(
-                [
-                  ["mastered", "Mastered", result.audioUrl],
-                  ["raw", "Raw mix", result.audioUrl],
-                  ["vocal", "Vocals", result.vocalUrl],
-                  ["instrumental", "Instrumental", result.instrumentalUrl],
-                ] as Array<[StemKind, string, string | null | undefined]>
-              ).map(([kind, label, url]) => (
-                <button
-                  key={kind}
-                  type="button"
-                  role="tab"
-                  aria-selected={playbackKind === kind}
-                  disabled={!url}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                    playbackKind === kind
-                      ? "border-primary bg-primary/15 text-primary"
-                      : "border-zinc-700 text-zinc-300 hover:border-primary/50"
-                  } disabled:cursor-not-allowed disabled:opacity-40`}
-                  onClick={() => {
-                    setPlaybackKind(kind);
-                    const taskId = result.taskId;
-                    if (!taskId || !url) {
-                      setPlaybackSrc(url ?? result.audioUrl);
-                      return;
-                    }
-                    void stemObjectUrl(taskId, kind, url).then((next) => {
-                      if (next) setPlaybackSrc(next);
-                    });
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
             <WaveformPlayer
               key={playbackSrc ?? result.audioUrl}
               src={playbackSrc ?? result.audioUrl}
@@ -5184,7 +5157,7 @@ export function AudioStudio() {
               <div className="flex flex-wrap gap-2">
                 <a
                   href={result.audioUrl}
-                  download={hybridTrackDownloadFileName(result.title)}
+                  download={masterAttachmentName(result.title)}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => reportEngineExport(result.taskId)}
@@ -5210,57 +5183,6 @@ export function AudioStudio() {
 
 
             <div className="flex flex-col gap-2">
-              {(
-                [
-                  { label: "Master Track", url: result.audioUrl, slug: "Master" },
-                  { label: "Raw Pre-Master", url: result.rawAudioUrl, slug: "Raw Pre-Master" },
-                  { label: "Clean Vocal Stem", url: result.vocalUrl, slug: "Clean Vocal" },
-                  {
-                    label: "Instrumental Stem",
-                    url: result.instrumentalUrl,
-                    slug: "Instrumental",
-                  },
-                ] as const
-              ).map(({ label, url, slug }) => (
-                <div
-                  key={label}
-                  className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
-                >
-                  <span className="text-sm text-zinc-200">{label}</span>
-                  <span className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={!url || exporting}
-                      onClick={() => {
-                        if (!url) return;
-                        void downloadWav(url, `${result.title} (${slug})`);
-                      }}
-                    >
-                      {exporting ? (
-                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                      ) : (
-                        <Download className="size-3.5" aria-hidden />
-                      )}
-                      WAV
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={!url}
-                      onClick={() => {
-                        if (!url) return;
-                        void downloadTrack(url, `${result.title} (${slug})`);
-                      }}
-                    >
-                      <Download className="size-3.5" aria-hidden />
-                      MP3
-                    </Button>
-                  </span>
-                </div>
-              ))}
               <Button type="button" variant="ghost" onClick={newTrack} className="self-start">
                 <Plus className="size-4" aria-hidden /> Create New Track
               </Button>

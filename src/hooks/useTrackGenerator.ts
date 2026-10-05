@@ -4,12 +4,6 @@ import { sessionFromCreateResponse } from "@/lib/create-session-id";
 import { formatValidationError } from "@/lib/validation-error";
 import { notifyVaultOfNewGeneration } from "@/lib/vault-client";
 
-const API_BASE = (
-  (typeof import.meta !== "undefined" &&
-    (import.meta as ImportMeta & { env?: { VITE_HYBRID_WORKER_URL?: string } }).env
-      ?.VITE_HYBRID_WORKER_URL) ||
-  "http://127.0.0.1:8880"
-).replace(/\/$/, "");
 const POLL_MS = 3000;
 const POLL_TIMEOUT_MS = 600_000;
 const POLL_TIMEOUT_MESSAGE =
@@ -29,8 +23,30 @@ type StatusPayload = {
   detail?: unknown;
 };
 
-function streamUrl(filename: string): string {
-  return `${API_BASE}/api/stream/${encodeURIComponent(filename)}`;
+function whiteLabelEngineText(text: string): string {
+  const sonic = "Hybrid Sonic Expressway";
+  const studio = "Hybrid Studio Engine";
+  return text
+    .replace(/google\/lyria-3-pro/gi, sonic)
+    .replace(/lyria-3-pro/gi, sonic)
+    .replace(/google\s+lyria(?:\s*3(?:\s*pro)?)?/gi, sonic)
+    .replace(/lyria\s*3(?:\s*pro)?/gi, sonic)
+    .replace(/\blyria\b/gi, sonic)
+    .replace(/minimax\/music-2\.6/gi, studio)
+    .replace(/minimax\s+music(?:\s*2\.6)?/gi, studio)
+    .replace(/minimax\s*2\.6/gi, studio)
+    .replace(/\bmusic-2\.6\b/gi, studio)
+    .replace(/\bminimax\b/gi, studio);
+}
+
+function masterPlaybackUrl(payload: StatusPayload): string | null {
+  const fromMaster = (payload.master_url || "").trim();
+  if (fromMaster.startsWith("http://") || fromMaster.startsWith("https://") || fromMaster.startsWith("/")) {
+    return fromMaster;
+  }
+  if (fromMaster) return `/api/stream/${encodeURIComponent(fromMaster)}`;
+  if (payload.audio_filename) return `/api/stream/${encodeURIComponent(payload.audio_filename)}`;
+  return null;
 }
 
 export type TrackCreateInput = {
@@ -59,18 +75,14 @@ function postCreate(input: TrackCreateInput): Promise<Response> {
     input.durationSeconds == null ? "" : String(Math.round(input.durationSeconds));
   const bpm = input.bpm == null ? "" : String(Math.round(input.bpm));
   form.append("prompt", input.prompt);
+  form.append("bpm", bpm);
+  form.append("duration", seconds);
   if (input.lyrics != null) form.append("lyrics", input.lyrics);
   if (input.style) form.append("style", input.style);
   if (input.mood) form.append("mood", input.mood);
   if (input.genreHint) form.append("genre_hint", input.genreHint);
-  if (seconds) {
-    form.append("duration", seconds);
-    form.append("length", seconds);
-  }
-  if (bpm) {
-    form.append("bpm", bpm);
-    form.append("tempo", bpm);
-  }
+  if (seconds) form.append("length", seconds);
+  if (bpm) form.append("tempo", bpm);
   if (input.weirdness != null) form.append("weirdness", String(input.weirdness));
   if (input.audioInfluence != null) form.append("audio_influence", String(input.audioInfluence));
   if (input.styleInfluence != null) form.append("style_influence", String(input.styleInfluence));
@@ -79,7 +91,7 @@ function postCreate(input: TrackCreateInput): Promise<Response> {
     const file = new File([take], "ref_vocal.wav", { type: take.type || "audio/wav" });
     form.append("vocal_file", file, "ref_vocal.wav");
   }
-  return fetch(`${API_BASE}/api/tracks/create`, { method: "POST", body: form });
+  return fetch("/api/tracks/create", { method: "POST", body: form });
 }
 
 export function useTrackGenerator() {
@@ -120,19 +132,12 @@ export function useTrackGenerator() {
     (payload: StatusPayload) => {
       const next = (payload.status || "").toLowerCase();
       const progress = (payload.step || payload.note || "").trim();
-      if (progress) setStep(progress);
+      if (progress) setStep(whiteLabelEngineText(progress));
       if (next === "completed") {
         inflight.current = false;
         setStatus("completed");
         setStep("completed");
-        const fromMaster = (payload.master_url || "").trim();
-        const publicUrl = fromMaster
-          ? fromMaster.startsWith("http")
-            ? fromMaster
-            : `${API_BASE}${fromMaster.startsWith("/") ? "" : "/"}${fromMaster}`
-          : payload.audio_filename
-            ? streamUrl(payload.audio_filename)
-            : null;
+        const publicUrl = masterPlaybackUrl(payload);
         if (publicUrl) {
           setAudioUrl(publicUrl);
           notifyVaultOfNewGeneration({
@@ -148,7 +153,11 @@ export function useTrackGenerator() {
       if (next === "failed") {
         inflight.current = false;
         setStatus("failed");
-        setError(formatValidationError(payload.error || payload.detail || "Generation failed."));
+        setError(
+          whiteLabelEngineText(
+            formatValidationError(payload.error || payload.detail || "Generation failed."),
+          ),
+        );
         stopPolling();
         return;
       }
@@ -163,7 +172,7 @@ export function useTrackGenerator() {
     async (id: string) => {
       const token = pollToken.current;
       try {
-        const res = await fetch(`${API_BASE}/api/tracks/${encodeURIComponent(id)}/status`);
+        const res = await fetch(`/api/tracks/${encodeURIComponent(id)}/status`);
         if (pollToken.current !== token) return;
         if (res.status === 404) {
           inflight.current = false;
@@ -243,9 +252,11 @@ export function useTrackGenerator() {
         setStatus("failed");
         const message = err instanceof Error ? err.message : "";
         setError(
-          message && !message.toLowerCase().includes("failed to fetch")
-            ? message
-            : "Headless API is not reachable at 127.0.0.1:8880.",
+          whiteLabelEngineText(
+            message && !message.toLowerCase().includes("failed to fetch")
+              ? message
+              : "Track create is not reachable.",
+          ),
         );
       }
     },

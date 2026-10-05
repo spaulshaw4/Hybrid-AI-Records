@@ -32,10 +32,13 @@ type TrackJob = {
   vocalPresent: boolean;
   vocalPath: string | null;
   prompt: string;
+  title: string;
   style: string;
   lyrics: string;
   mood: string;
   bpm: number;
+  /** Requested length. The vocal lane stays one instrumental pass. */
+  durationSeconds: number | null;
   error: string | null;
   masterUrl: string | null;
   audioFilename: string | null;
@@ -88,12 +91,30 @@ function numberField(value: string): number | null {
 type ParsedCreate = {
   prompt: string;
   userPrompt: string;
+  title: string;
   style: string;
   lyrics: string;
   mood: string;
   bpm: number;
+  durationSeconds: number | null;
   vocal: Buffer | null;
 };
+
+/** Title for Content-Disposition. Empty when the job has no user-facing title. */
+function attachmentTrackName(title: string | null | undefined): string {
+  return (title || "")
+    .replace(/["'`\\/:*?<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.wav$/i, "");
+}
+
+function vocalPresentFlag(value: string): boolean | null {
+  const flag = value.trim().toLowerCase();
+  if (flag === "true" || flag === "1" || flag === "yes" || flag === "on") return true;
+  if (flag === "false" || flag === "0" || flag === "no" || flag === "off") return false;
+  return null;
+}
 
 async function vocalBuffer(value: FormDataEntryValue | null): Promise<Buffer | null> {
   if (!(value instanceof Blob) || value.size < 64) return null;
@@ -109,6 +130,8 @@ async function parseCreateRequest(request: Request): Promise<ParsedCreate | Resp
   let mood = "";
   let title = "";
   let bpmRaw: number | null = null;
+  let durationRaw: number | null = null;
+  let vocalFlag: boolean | null = null;
   let vocal: Buffer | null = null;
 
   if (contentType.includes("multipart/form-data")) {
@@ -124,6 +147,9 @@ async function parseCreateRequest(request: Request): Promise<ParsedCreate | Resp
     mood = textField(form.get("mood"));
     title = textField(form.get("title"));
     bpmRaw = numberField(textField(form.get("bpm"))) ?? numberField(textField(form.get("tempo")));
+    durationRaw =
+      numberField(textField(form.get("duration"))) ?? numberField(textField(form.get("length")));
+    vocalFlag = vocalPresentFlag(textField(form.get("vocal_present")));
     vocal = (await vocalBuffer(form.get("vocal_file"))) ?? (await vocalBuffer(form.get("voice_sample")));
   } else {
     let payload: Record<string, unknown>;
@@ -140,15 +166,31 @@ async function parseCreateRequest(request: Request): Promise<ParsedCreate | Resp
     title = read("title");
     const bpmValue = payload.bpm ?? payload.tempo;
     bpmRaw = typeof bpmValue === "number" || typeof bpmValue === "string" ? numberField(String(bpmValue)) : null;
+    const durationValue = payload.duration ?? payload.length ?? payload.duration_sec;
+    durationRaw =
+      typeof durationValue === "number" || typeof durationValue === "string"
+        ? numberField(String(durationValue))
+        : null;
+    const present = payload.vocal_present;
+    vocalFlag =
+      typeof present === "boolean"
+        ? present
+        : typeof present === "string" || typeof present === "number"
+          ? vocalPresentFlag(String(present))
+          : null;
   }
 
+  if (vocalFlag === false) vocal = null;
+  if (vocalFlag === true && !vocal) return reject(400, "ref_vocal.wav is missing");
   if (lyrics.length > LYRICS_MAX_CHARS) return reject(400, LYRICS_TOO_LONG_MESSAGE);
   if (userPrompt && userPrompt.length < MIN_PROMPT && !style) return reject(400, PROMPT_TOO_SHORT);
   const prompt = (userPrompt || title || style).trim();
   if (!prompt) return reject(400, "prompt is required");
   if (prompt.length > MAX_PROMPT) return reject(400, `prompt exceeds ${MAX_PROMPT} characters`);
   const bpm = bpmRaw != null && bpmRaw >= 60 && bpmRaw <= 200 ? bpmRaw : 86;
-  return { prompt, userPrompt, style, lyrics, mood, bpm, vocal };
+  const durationSeconds =
+    durationRaw != null && durationRaw > 0 ? Math.min(420, Math.round(durationRaw)) : null;
+  return { prompt, userPrompt, title, style, lyrics, mood, bpm, durationSeconds, vocal };
 }
 
 async function saveRefVocal(sessionId: string, bytes: Buffer): Promise<string> {
@@ -187,10 +229,12 @@ export async function handleTrackCreate(request: Request): Promise<Response> {
     vocalPresent,
     vocalPath,
     prompt: parsed.prompt,
+    title: parsed.title,
     style: parsed.style,
     lyrics: parsed.lyrics,
     mood: parsed.mood,
     bpm: parsed.bpm,
+    durationSeconds: parsed.durationSeconds,
     error: null,
     masterUrl: null,
     audioFilename: null,
@@ -231,12 +275,13 @@ export async function localMasterResponse(filename: string): Promise<Response | 
   if (!filePath.startsWith(root + path.sep)) return null;
   try {
     const bytes = await readFile(filePath);
+    const trackName = attachmentTrackName(jobs.get(sessionId)?.title);
+    const headers = new Headers();
+    headers.set("Content-Disposition", `attachment; filename="${trackName || "master"}.wav"`);
+    headers.set("Content-Type", "audio/wav");
     return new Response(new Uint8Array(bytes), {
       status: 200,
-      headers: {
-        "content-type": "audio/wav",
-        "content-disposition": `inline; filename="${name}"`,
-      },
+      headers,
     });
   } catch {
     return null;
