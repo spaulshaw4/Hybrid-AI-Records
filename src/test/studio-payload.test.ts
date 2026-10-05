@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   STUDIO_CUSTOM_CONSENT_REQUIRED,
   STUDIO_CUSTOM_FILE_REQUIRED,
-  STUDIO_CUSTOM_VOICE_UNSAVED,
   STUDIO_STYLE_REQUIRED,
   STUDIO_VOCAL_SOURCE_REQUIRED,
   getValidatedStudioPayload,
@@ -67,15 +66,20 @@ describe("getValidatedStudioPayload", () => {
     ).toThrow(STUDIO_CUSTOM_FILE_REQUIRED);
   });
 
-  it("blocks a take that was not saved as a voice", () => {
-    expect(() =>
-      getValidatedStudioPayload({
-        ...base,
-        vocalMode: "custom-upload",
-        termsAccepted: true,
-        customAudioFile: new Blob(["x"]),
-      }),
-    ).toThrow(STUDIO_CUSTOM_VOICE_UNSAVED);
+  it("accepts a local recording.wav without a remote clip url or voice id", () => {
+    const file = new File([new Uint8Array(128)], "recording.wav", { type: "audio/wav" });
+    const payload = getValidatedStudioPayload({
+      ...base,
+      vocalMode: "custom-upload",
+      termsAccepted: true,
+      customAudioFile: file,
+    });
+    expect(payload.vocal_config).toEqual({
+      type: "custom",
+      file,
+      terms_accepted: true,
+    });
+    expect(usesCustomVocal(payload)).toBe(true);
   });
 
   it("accepts custom-upload with consent and a saved voice", () => {

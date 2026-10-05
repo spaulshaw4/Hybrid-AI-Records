@@ -65,6 +65,11 @@ import {
 } from "@/lib/lyric-languages";
 import { explainEngineFailure } from "@/lib/engine-failure";
 import {
+  LYRICS_MAX_CHARS,
+  LYRICS_TOO_LONG_MESSAGE,
+  formatValidationError,
+} from "@/lib/validation-error";
+import {
   readStoredVocalConsent,
   VOCAL_CONSENT_CHECK_ID,
   VOCAL_SOURCE_NAME,
@@ -77,13 +82,11 @@ import {
   getValidatedStudioPayload,
   SONG_LYRICS_INPUT_ID,
   STUDIO_CUSTOM_CONSENT_REQUIRED,
-  usesCustomVocal,
   usesDefaultAiVocal,
   AI_VOCAL_STYLING_ID,
   VOCAL_SOUND_CONTROLS_ID,
   VOCAL_GENDER_GROUP_ID,
   VIDEO_PROMPT_INPUT_ID,
-  type ValidatedStudioPayload,
 } from "@/lib/studio-payload";
 import { refreshTrackAudioUrl } from "@/lib/track-refresh.functions";
 import {
@@ -158,8 +161,6 @@ import {
   formatLyricBlocks,
   vocalProfileLabel,
 } from "@/lib/vocal-presets";
-import { isLocalVocalProfileId } from "@/lib/vocal-profile-store";
-import { uploadVoiceSample } from "@/lib/voice-sample-upload";
 import {
   DEFAULT_TARGET_DURATION_SECONDS,
   ENGINE_DURATION_MIN_SECONDS,
@@ -167,6 +168,8 @@ import {
   MAX_TARGET_DURATION_SECONDS,
   arrangeLyricsForDuration,
   clampDurationPreset,
+  durationPresetFromDraft,
+  formatDuration,
 } from "@/lib/track-length";
 import {
   DEFAULT_BPM,
@@ -357,7 +360,6 @@ function vocalGenderTagLabel(value: string | undefined): string {
 }
 
 
-const PROMPT_MAX = 6000;
 /** Matches vault short-poll cadence (4s). */
 const POLL_INTERVAL_MS = VAULT_POLL_MS;
 /** Client generate / status / vault poll ceiling — 6 minutes (360_000 ms). */
@@ -1420,7 +1422,7 @@ export function AudioStudio() {
     setStyles(draft.styles);
     setStylePrompt(draft.stylePrompt);
     setWithVocals(draft.withVocals);
-    setTargetDuration(clampDurationPreset(draft.targetDuration));
+    setTargetDuration(durationPresetFromDraft(draft.targetDuration));
     setBpm(draft.bpm);
     setAudioInfluence(draft.audioInfluence);
     setWeirdness(draft.weirdness);
@@ -1696,12 +1698,7 @@ export function AudioStudio() {
       });
       return null;
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "object" && error && "message" in error
-          ? String((error as { message?: unknown }).message ?? "Pipeline execution failed")
-          : String(error ?? "Pipeline execution failed");
+    const message = formatValidationError(error, "Pipeline execution failed");
     // Never surface class names / stacks in the artist-facing notice.
     const safeMessage = message
       .replace(/\bStudioStreamDroppedError\b/gi, "")
@@ -1817,7 +1814,12 @@ export function AudioStudio() {
       setVocalPrompt(out.vocalPrompt.slice(0, 400));
       toast.success("Co-Producer wrote your vocal prompt.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The Co-Producer could not write a vocal prompt.");
+      toast.error(
+        formatValidationError(
+          error instanceof Error ? error.message : error,
+          "The Co-Producer could not write a vocal prompt.",
+        ),
+      );
     } finally {
       setAiBusy(null);
     }
@@ -1856,7 +1858,7 @@ export function AudioStudio() {
         error?: string;
       };
       if (!res.ok) {
-        toast.error(data.error || "Style optimization failed.");
+        toast.error(formatValidationError(data.error, "Style optimization failed."));
         return;
       }
       const next = (data.optimizedPrompt || data.prompt || "").trim();
@@ -2392,9 +2394,12 @@ export function AudioStudio() {
       toast.error("Please select a core style or genre for the track.");
       return;
     }
-    let studioPayload: ValidatedStudioPayload;
+    if (lyrics.trim().length > LYRICS_MAX_CHARS) {
+      toast.error(LYRICS_TOO_LONG_MESSAGE);
+      return;
+    }
     try {
-      studioPayload = getValidatedStudioPayload({
+      getValidatedStudioPayload({
         style: styleLine,
         lyrics,
         videoPrompt: withVocals && vocalSource === "default-ai" ? vocalPrompt : "",
@@ -2613,78 +2618,8 @@ export function AudioStudio() {
       // Textarea → tags verbatim. No genre-lock rebuild, no truncation.
       const styleTags = stylePrompt.trim() || selectedStyles.join(", ") || styleLine || genre;
 
-      // Resolve custom vocal sample before the music step so an auth miss
-      // never looks like a Sonic failure. Null session → local object URL only;
-      // never abort the pipeline for guest / local-dev takes.
-      let referenceAudioUrl: string | undefined;
-      if (
-        withVocals &&
-        usesCustomVocal(studioPayload) &&
-        voiceId &&
-        isLocalVocalProfileId(voiceId) &&
-        recordedVoiceBlob
-      ) {
-        const { data: auth } = await supabase.auth.getUser();
-        const sessionUser = auth.user;
-        console.log(
-          "[VOICE_UPLOAD] Checking user session:",
-          sessionUser ? sessionUser.id : "GUEST/LOCAL",
-        );
-        console.log("[VOICE_UPLOAD] Proceeding with audio blob size:", recordedVoiceBlob.size);
-
-        const localPreviewUrl = URL.createObjectURL(recordedVoiceBlob);
-        setVocalAudioUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return localPreviewUrl;
-        });
-        console.log("[VOICE_UPLOAD] Local vocal preview ready:", localPreviewUrl.slice(0, 48));
-
-        if (!sessionUser) {
-          console.log(
-            "[VOICE_UPLOAD] No session — skipping remote upload; advancing to music with local preview",
-          );
-        } else {
-          console.log("[MIC_RECORD] Uploading recorded take for Fish / stem pipeline…", {
-            bytes: recordedVoiceBlob.size,
-            vocalAudioUrl: localPreviewUrl,
-          });
-          const file =
-            recordedVoiceBlob instanceof File
-              ? recordedVoiceBlob
-              : new File([recordedVoiceBlob], `vocal-take-${Date.now()}.webm`, {
-                  type: recordedVoiceBlob.type || "audio/webm",
-                });
-          try {
-            const uploaded = await uploadVoiceSample(file);
-            if (!uploaded.ok) {
-              // Auth / guest soft-fail: keep local preview and continue to Sonic.
-              if (/sign in/i.test(uploaded.message)) {
-                console.warn("[VOICE_UPLOAD]", uploaded.message, "— continuing with local preview");
-              } else {
-                console.warn(
-                  "[VOICE_UPLOAD] Upload failed — continuing with local preview:",
-                  uploaded.message,
-                );
-              }
-            } else if (/^https?:\/\//i.test(uploaded.url)) {
-              referenceAudioUrl = uploaded.url;
-            } else {
-              console.log(
-                "[VOICE_UPLOAD] Local object/data URL kept client-side; omitting from generate payload",
-              );
-              setVocalAudioUrl((prev) => {
-                if (prev && prev !== uploaded.url) URL.revokeObjectURL(prev);
-                return uploaded.url;
-              });
-            }
-          } catch (uploadError) {
-            console.warn(
-              "[VOICE_UPLOAD] Upload threw — continuing with local preview:",
-              uploadError instanceof Error ? uploadError.message : uploadError,
-            );
-          }
-        }
-      }
+      // The recorded take stays a local recording.wav. Generate appends it as
+      // multipart voice_sample and does not create a remote clip link first.
 
       // Linear handoff: lyrics → Sonic prompt; Style Prompt textarea → tags.
       beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
@@ -2737,7 +2672,11 @@ export function AudioStudio() {
           const duration = clampDurationPreset(targetDuration);
           const form = new FormData();
           form.append("prompt", (arrangedLyrics || styleLine || genre || trackTitle).slice(0, 2000));
-          form.append("lyrics", (arrangedLyrics || lyrics || "").slice(0, 6000));
+          const lyricPayload = arrangedLyrics || lyrics || "";
+          if (lyricPayload.trim().length > LYRICS_MAX_CHARS) {
+            throw new Error(LYRICS_TOO_LONG_MESSAGE);
+          }
+          form.append("lyrics", lyricPayload);
           form.append("duration", String(duration));
           form.append("tempo", String(clampBpm(bpm)));
           form.append("bpm", String(clampBpm(bpm)));
@@ -2760,12 +2699,12 @@ export function AudioStudio() {
           });
           const createdBody = (await created.json().catch(() => ({}))) as {
             session_id?: string;
-            detail?: string;
-            error?: string;
+            detail?: unknown;
+            error?: unknown;
           };
           if (!created.ok) {
             throw new Error(
-              createdBody.detail || createdBody.error || `Create failed (${created.status})`,
+              formatValidationError(createdBody, `Create failed (${created.status})`),
             );
           }
           const sessionId = (createdBody.session_id || "").trim();
@@ -2795,7 +2734,7 @@ export function AudioStudio() {
               audio_filename?: string;
             };
             if (job.status === "failed") {
-              throw new Error(job.error || "Generation failed.");
+              throw new Error(formatValidationError(job.error, "Generation failed."));
             }
             if (job.status === "completed") {
               const audioUrl = job.master_url || (job.audio_filename ? `/api/stream/${job.audio_filename}` : "");
@@ -4009,7 +3948,7 @@ export function AudioStudio() {
               name="lyrics"
               value={lyrics}
               rows={8}
-              maxLength={PROMPT_MAX}
+              maxLength={LYRICS_MAX_CHARS}
               placeholder="Enter your custom lyrics here…"
               onChange={(e) => {
                 setLyrics(e.target.value);
@@ -4036,9 +3975,11 @@ export function AudioStudio() {
                 </div>
               </div>
             ) : null}
-            <p className="text-right text-xs text-muted-foreground">
-              {lyrics.length.toLocaleString()} / {PROMPT_MAX.toLocaleString()} characters —
-              use [Verse] / [Chorus] / [Bridge] tags to shape the structure.
+            <p
+              className={`text-right text-xs ${lyrics.length > LYRICS_MAX_CHARS ? "text-destructive" : "text-muted-foreground"}`}
+              aria-live="polite"
+            >
+              {lyrics.length} / {LYRICS_MAX_CHARS} characters — use [Verse] / [Chorus] / [Bridge] tags to shape the structure.
             </p>
           </div>
           </div>
@@ -4473,12 +4414,12 @@ export function AudioStudio() {
 
             <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="target-duration" id="target-duration-label"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">90 to 420 seconds, in 10-second steps. Every length costs 1 Hybrid Token.</InlineTip></span></Label>
+                <Label htmlFor="target-duration" id="target-duration-label"><span className="inline-flex items-center gap-1.5">Track Length <InlineTip label="Track length">From 1 min 30 sec to 7 min, in half-minute steps. Every length costs 1 Hybrid Token.</InlineTip></span></Label>
                 <span
                   id="target-duration-readout"
-                  className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-sm font-semibold tabular-nums text-foreground"
+                  className="inline-flex items-center rounded-full border border-border-strong bg-muted/40 px-3 py-1 text-base font-bold tabular-nums text-foreground"
                 >
-                  {targetDuration}s
+                  {formatDuration(targetDuration)}
                 </span>
               </div>
 
@@ -4492,7 +4433,7 @@ export function AudioStudio() {
                 aria-valuemin={ENGINE_DURATION_MIN_SECONDS}
                 aria-valuemax={MAX_TARGET_DURATION_SECONDS}
                 aria-valuenow={targetDuration}
-                aria-valuetext={`${targetDuration}s`}
+                aria-valuetext={formatDuration(targetDuration)}
                 onChange={(event) => {
                   setTargetDuration(clampDurationPreset(Number(event.target.value)));
                 }}
@@ -5061,10 +5002,13 @@ export function AudioStudio() {
                 )}
               </p>
               <p>
-                {String(pipelineState.lastError.message ?? "")
-                  .replace(/\bStudioStreamDroppedError\b/gi, "")
-                  .replace(/\s{2,}/g, " ")
-                  .trim() ||
+                {formatValidationError(
+                  String(pipelineState.lastError.message ?? "")
+                    .replace(/\bStudioStreamDroppedError\b/gi, "")
+                    .replace(/\s{2,}/g, " ")
+                    .trim(),
+                  "",
+                ) ||
                   (displayPipelineStep(
                     pipelineState.lastError.step || pipelineState.currentStep,
                     pipelineState.currentStep,
@@ -5119,10 +5063,13 @@ export function AudioStudio() {
                 role="alert"
               >
                 <p>
-                  {rollbackNotice
-                    .replace(/\bStudioStreamDroppedError\b/gi, "")
-                    .replace(/\s{2,}/g, " ")
-                    .trim()}
+                  {formatValidationError(
+                    rollbackNotice
+                      .replace(/\bStudioStreamDroppedError\b/gi, "")
+                      .replace(/\s{2,}/g, " ")
+                      .trim(),
+                    "Something went wrong. Please try again.",
+                  )}
                 </p>
               </div>
               {retryPlan ? (

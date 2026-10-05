@@ -47,14 +47,16 @@ export const MAX_TARGET_DURATION_SECONDS = 420; // 7:00
 export const TARGET_DURATION_STEP_SECONDS = 15;
 export const DEFAULT_TARGET_DURATION_SECONDS = 210; // 3:30
 
-/** Engine slider. Any integer from 90 through 420 in steps of 10. */
+/** Engine slider. Integers from 90 through 420 in steps of 30. */
 export const ENGINE_DURATION_MIN_SECONDS = 90;
-export const ENGINE_DURATION_STEP_SECONDS = 10;
+export const ENGINE_DURATION_STEP_SECONDS = 30;
 
 /**
- * Snap a requested length onto the 10-second grid from 90 through 420.
- * Exact slider values pass through. Above 420 becomes 420. Below 90 becomes 90.
- * A midpoint rounds up (215 → 220). Price does not depend on this value.
+ * Accept 90 through 420 in steps of 30 (90, 120, … 420).
+ * Exact grid values pass through. Above 420 becomes 420. Below 90 becomes 90.
+ * Invalid input becomes 210. In-range values off that grid are rejected.
+ * Price does not depend on this value. At or below 210 is one Lyria pass;
+ * above 210 up to 420 is the two-pass stitch.
  */
 export function clampDurationPreset(seconds: number): number {
   const min = ENGINE_DURATION_MIN_SECONDS;
@@ -63,22 +65,48 @@ export function clampDurationPreset(seconds: number): number {
   if (!Number.isFinite(seconds)) return DEFAULT_TARGET_DURATION_SECONDS;
   if (seconds >= max) return max;
   if (seconds <= min) return min;
-  const steps = Math.round((seconds - min) / step);
-  const snapped = min + steps * step;
-  if (snapped >= max) return max;
-  if (snapped <= min) return min;
-  return snapped;
+  const rounded = Math.round(seconds);
+  const onGrid =
+    Math.abs(seconds - rounded) <= 1e-6 &&
+    rounded >= min &&
+    rounded <= max &&
+    (rounded - min) % step === 0;
+  if (!onGrid) {
+    throw new Error(`Duration must be ${min}–${max} seconds in steps of ${step}.`);
+  }
+  return rounded;
+}
+
+/** Draft restore. An off-grid saved length falls back to 3 min 30 sec. */
+export function durationPresetFromDraft(seconds: number): number {
+  try {
+    return clampDurationPreset(seconds);
+  } catch {
+    return DEFAULT_TARGET_DURATION_SECONDS;
+  }
 }
 
 export function trackLengthOption(id: TrackLengthId): TrackLengthOption {
   return TRACK_LENGTHS.find((o) => o.id === id) ?? TRACK_LENGTHS[1]!;
 }
 
-/** Format a duration in seconds as mm:ss. */
+/**
+ * Spoken length for the engine slider.
+ * Whole minutes are "2 min"; anything else is "1 min 30 sec".
+ */
 export function formatDuration(totalSeconds: number): string {
+  const safe = Number.isFinite(totalSeconds) ? Math.max(0, Math.round(totalSeconds)) : 0;
+  const mins = Math.floor(safe / 60);
+  const remainingSecs = safe % 60;
+  if (remainingSecs === 0) return `${mins} min`;
+  return `${mins} min ${remainingSecs} sec`;
+}
+
+/** Clock form kept for style prompts ("3:30"), not the slider label. */
+function formatDurationClock(totalSeconds: number): string {
   const clamped = Math.max(
     MIN_TARGET_DURATION_SECONDS,
-    Math.min(MAX_TARGET_DURATION_SECONDS, Math.round(totalSeconds)),
+    Math.min(MAX_TARGET_DURATION_SECONDS, Math.round(Number.isFinite(totalSeconds) ? totalSeconds : 0)),
   );
   const m = Math.floor(clamped / 60);
   const s = Math.floor(clamped % 60);
@@ -178,7 +206,7 @@ export function applyLengthToPrompt(prompt: string, id: TrackLengthId): string {
 /** Numeric-duration variant: precise target length + derived category tags. */
 export function applyDurationToPrompt(prompt: string, seconds: number): string {
   const id = durationToTrackLengthId(seconds);
-  const formatted = formatDuration(seconds);
+  const formatted = formatDurationClock(seconds);
   const base = trackLengthOption(id).styleTags;
   return [prompt, `target duration ${formatted} minutes`, base].filter(Boolean).join(" | ");
 }

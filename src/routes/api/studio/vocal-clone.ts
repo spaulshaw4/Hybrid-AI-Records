@@ -6,7 +6,8 @@ import {
   unauthorizedSessionResponse,
 } from "@/lib/studio-request-auth.server";
 
-const LYRICS_MAX = 6000;
+import { LYRICS_MAX_CHARS, LYRICS_TOO_LONG_MESSAGE } from "@/lib/validation-error";
+
 /** Minimum abort window for studio vocal dispatch HTTP calls. */
 export const STUDIO_VOCAL_FETCH_TIMEOUT_MS = 60_000;
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -73,7 +74,7 @@ async function handleVocalClone({ request }: { request: Request }): Promise<Resp
 
   const lyrics = String(form.get("lyrics_to_sing") ?? "").trim();
   if (lyrics.length < 1) return fail(400, "Add lyrics before cloning vocals from your take.");
-  if (lyrics.length > LYRICS_MAX) return fail(400, "Those lyrics are too long.");
+  if (lyrics.length > LYRICS_MAX_CHARS) return fail(400, LYRICS_TOO_LONG_MESSAGE);
 
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) {

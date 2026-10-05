@@ -2,6 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { LYRIC_LANGUAGES } from "@/lib/lyric-languages";
 import { friendlyAiError } from "@/lib/ai-error";
+import { LYRICS_MAX_CHARS, LYRICS_SCHEMA_MESSAGE, formatValidationError } from "@/lib/validation-error";
+
+function parseSchema<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw new Error(formatValidationError(parsed.error));
+  return parsed.data;
+}
 
 const allowedLanguageInstructions = LYRIC_LANGUAGES.map((l) => l.instruction);
 
@@ -16,7 +23,7 @@ const Input = z.object({
  * Writes song lyrics through the Replicate instruction-tuned LLM.
  */
 export const generateLyrics = createServerFn({ method: "POST" })
-  .validator((input: unknown) => Input.parse(input))
+  .validator((input: unknown) => parseSchema(Input, input))
   .handler(async ({ data }) => {
     console.log("[CO_PRODUCER]", {
       title: data.title ?? null,
@@ -49,7 +56,7 @@ const CoProducerInput = z.object({
  * The Replicate client stays inside the handler so it never ships to the browser.
  */
 export const generateLyricsServerFn = createServerFn({ method: "POST" })
-  .validator((data: unknown) => CoProducerInput.parse(data ?? {}))
+  .validator((data: unknown) => parseSchema(CoProducerInput, data ?? {}))
   .handler(async ({ data }) => {
     const { isLyricEngineTimeout, LYRIC_ENGINE_TIMEOUT_MESSAGE, writeLyricsWithStudio } = await import("@/lib/coproducer");
     try {
@@ -72,7 +79,7 @@ const ConceptInput = z.object({
 
 /** Writes or expands a song concept through the unified Replicate text engine. */
 export const generateConcept = createServerFn({ method: "POST" })
-  .validator((input: unknown) => ConceptInput.parse(input))
+  .validator((input: unknown) => parseSchema(ConceptInput, input))
   .handler(async ({ data }) => {
     try {
       const { writeConcept } = await import("./lyrics.server");
@@ -91,7 +98,7 @@ export const generateConcept = createServerFn({ method: "POST" })
 
 const VocalPromptInput = z.object({
   concept: z.string().trim().min(3).max(600),
-  lyrics: z.string().trim().max(2000).optional(),
+  lyrics: z.string().trim().max(LYRICS_MAX_CHARS, LYRICS_SCHEMA_MESSAGE).optional(),
   style: z.string().trim().max(2000).optional(),
   title: z.string().trim().max(120).optional(),
   language: z.union([z.enum(allowedLanguageInstructions as [string, ...string[]]), z.string().trim().max(120)]).optional(),
@@ -99,7 +106,7 @@ const VocalPromptInput = z.object({
 
 /** Writes a vocal performance prompt through the unified Replicate text engine. */
 export const generateVocalPrompt = createServerFn({ method: "POST" })
-  .validator((input: unknown) => VocalPromptInput.parse(input))
+  .validator((input: unknown) => parseSchema(VocalPromptInput, input))
   .handler(async ({ data }) => {
     try {
       const { writeVocalPrompt } = await import("./lyrics.server");
@@ -119,14 +126,14 @@ export const generateVocalPrompt = createServerFn({ method: "POST" })
 
 const StyleTagsInput = z.object({
   concept: z.string().trim().min(3).max(600),
-  lyrics: z.string().trim().max(2000).optional(),
+  lyrics: z.string().trim().max(LYRICS_MAX_CHARS, LYRICS_SCHEMA_MESSAGE).optional(),
   style: z.string().trim().max(2000).optional(),
   title: z.string().trim().max(120).optional(),
 });
 
 /** Writes production style tags through the unified Replicate text engine. */
 export const generateStyleTags = createServerFn({ method: "POST" })
-  .validator((input: unknown) => StyleTagsInput.parse(input))
+  .validator((input: unknown) => parseSchema(StyleTagsInput, input))
   .handler(async ({ data }) => {
     try {
       const { writeStyleTags } = await import("./lyrics.server");

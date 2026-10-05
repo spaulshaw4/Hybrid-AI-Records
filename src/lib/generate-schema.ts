@@ -18,6 +18,11 @@ import {
 } from "@/lib/engine-controls";
 import { lyricLanguageFieldSchema } from "@/lib/lyric-languages";
 import { MINIMAX_MAX_SECONDS } from "@/lib/engine-routing";
+import {
+  LYRICS_MAX_CHARS,
+  LYRICS_SCHEMA_MESSAGE,
+  formatValidationError,
+} from "@/lib/validation-error";
 
 export const SUNO_MODELS = ["V3_5", "V4", "V4_5"] as const;
 
@@ -47,7 +52,7 @@ export const generateSchema = z.object({
   prompt: z.string().trim().min(3).max(6000),
   title: z.string().trim().max(120).default(""),
   style: z.string().trim().max(6000).default(""),
-  lyrics: z.string().trim().max(6000).default(""),
+  lyrics: z.string().trim().max(LYRICS_MAX_CHARS, LYRICS_SCHEMA_MESSAGE).default(""),
   // Full AI track (vocals) by default; true renders an instrumental backing track.
   instrumental: z.boolean().default(false),
 
@@ -145,7 +150,5 @@ export type GenerateEngineTrackInput = z.infer<typeof generateSchema>;
 export function parseGenerateEngineTrackInput(data: unknown): GenerateEngineTrackInput {
   const parsed = generateSchema.safeParse(data);
   if (parsed.success) return parsed.data;
-  const issue = parsed.error.issues[0];
-  const path = issue?.path?.length ? issue.path.join(".") : "payload";
-  throw new Error(`Track setup: ${path} ${issue?.message ?? "was out of range"}`);
+  throw new Error(formatValidationError(parsed.error));
 }

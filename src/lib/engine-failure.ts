@@ -1,3 +1,5 @@
+import { LYRICS_TOO_LONG_MESSAGE, formatValidationError } from "@/lib/validation-error";
+
 /**
  * Turns a raw engine/server error into a precise, user-readable explanation.
  *
@@ -36,7 +38,7 @@ function hasHttpStatus(lower: string, code: number): boolean {
 }
 
 export function explainEngineFailure(raw: unknown): EngineFailure {
-  const text = (raw instanceof Error ? raw.message : String(raw ?? "")).trim();
+  const text = formatValidationError(raw instanceof Error ? raw.message : raw, "").trim();
   const lower = text.toLowerCase();
 
   if (lower.includes("canceled") || lower.includes("cancelled")) {
@@ -97,6 +99,15 @@ export function explainEngineFailure(raw: unknown): EngineFailure {
       kind: "payload",
       headline: "Lyrics are missing",
       message: `Add lyrics (or a title so we can write them) and run it again. ${TOKEN_SAFE}`,
+      retryable: true,
+    };
+  }
+
+  if (lower.includes("lyrics are too long") || lower.includes("lyrics cannot exceed")) {
+    return {
+      kind: "payload",
+      headline: "Lyrics are too long",
+      message: `${LYRICS_TOO_LONG_MESSAGE} ${TOKEN_SAFE}`,
       retryable: true,
     };
   }

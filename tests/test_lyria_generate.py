@@ -693,19 +693,23 @@ def test_generation_token_charge_is_one_for_every_preset(seconds):
     assert generation_token_charge(seconds) == 1
 
 
-def test_clamp_duration_accepts_ten_second_steps_from_90_to_420():
+def test_clamp_duration_accepts_thirty_second_steps_from_90_to_420():
     from services.composition import clamp_duration
     from engine.generate_track_headless import clamp_lyria_duration
 
-    for seconds in (90, 100, 180, 210, 240, 300, 410, 420):
+    for seconds in range(90, 421, 30):
         assert clamp_duration(seconds) == seconds
         assert clamp_lyria_duration(seconds) == seconds
     assert clamp_duration(89) == 90
     assert clamp_duration(50) == 90
     assert clamp_duration(421) == 420
-    assert clamp_duration(215) == 220
     assert clamp_duration(None) == 210
     assert clamp_lyria_duration(None) == 210
+    for off_grid in (100, 215, 410):
+        with pytest.raises(ValueError, match="steps of 30"):
+            clamp_duration(off_grid)
+        with pytest.raises(ValueError, match="steps of 30"):
+            clamp_lyria_duration(off_grid)
     assert generation_token_charge(90) == 1
     assert generation_token_charge(240) == 1
     assert generation_token_charge(420) == 1

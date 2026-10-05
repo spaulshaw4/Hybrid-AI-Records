@@ -1,5 +1,6 @@
 import { Clock, TriangleAlert } from "lucide-react";
 import { cleanErrorMessage, isQuotaError, QUOTA_BODY, QUOTA_HEADLINE } from "@/lib/ai-quota";
+import { formatValidationError } from "@/lib/validation-error";
 
 /**
  * Friendly failure state for AI calls. A rate-limit / quota failure gets a calm
@@ -31,7 +32,7 @@ export function AiErrorNotice({ error }: { error: string | null }) {
         AI request failed
       </p>
       <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-        {cleanErrorMessage(error)}
+        {formatValidationError(cleanErrorMessage(error))}
       </p>
       <p className="mt-2 text-[11px] text-muted-foreground">
         Nothing was generated — no placeholder script is shown.

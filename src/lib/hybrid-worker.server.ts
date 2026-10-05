@@ -7,6 +7,7 @@
 
 import { applyEngineControlsToPrompt, type EngineControls } from "@/lib/engine-controls";
 import { clampDurationPreset } from "@/lib/track-length";
+import { LYRICS_MAX_CHARS, LYRICS_TOO_LONG_MESSAGE, formatValidationError } from "@/lib/validation-error";
 
 export const HYBRID_WORKER_PORT = 8880;
 export const DEFAULT_HYBRID_WORKER_URL = `http://127.0.0.1:${HYBRID_WORKER_PORT}`;
@@ -219,7 +220,10 @@ export async function generateFromHybridWorker(input: {
   form.append("key", (input.key || "").trim() || "G");
   form.append("num_outputs", String(SINGLE_TRACK_OUTPUTS));
   const stylePrompt = composeWorkerStylePrompt(input.tags, input.style, input.controls);
-  const lyricText = input.instrumental ? "" : (input.lyrics || "").trim().slice(0, 6000);
+  const lyricText = input.instrumental ? "" : (input.lyrics || "").trim();
+  if (lyricText.length > LYRICS_MAX_CHARS) {
+    throw new Error(LYRICS_TOO_LONG_MESSAGE);
+  }
   if (stylePrompt) form.append("style", stylePrompt);
   if (lyricText) form.append("lyrics", lyricText);
   form.append("tempo", String(bpm));
@@ -266,10 +270,7 @@ export async function generateFromHybridWorker(input: {
 
   const createdBody = await readJson(created);
   if (!created.ok) {
-    const detail =
-      typeof createdBody.detail === "string"
-        ? createdBody.detail
-        : `HTTP ${created.status}`;
+    const detail = formatValidationError(createdBody, `HTTP ${created.status}`);
     console.error("[HYBRID_WORKER] create rejected", created.status, detail);
     throw new Error(`[Circuit Breaker] Gate 1 failed: ${detail}`);
   }

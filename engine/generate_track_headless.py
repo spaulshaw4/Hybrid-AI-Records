@@ -1192,11 +1192,11 @@ LYRIA_POLL_SEC = 3.0
 LYRIA_GATEWAY_RETRIES = 2
 LYRIA_GATEWAY_RETRY_SLEEP_SEC = 3.0
 LYRIA_MASTER_RATE = 48000
-# Studio lengths: 90 through 420 in steps of 10.
+# Studio lengths: 90 through 420 in steps of 30.
 # At or below 210 is one Lyria pass. Above 210 continues once (two predictions).
 LYRIA_DURATION_MIN_SEC = 90
 LYRIA_DURATION_MAX_SEC = 420
-LYRIA_DURATION_STEP_SEC = 10
+LYRIA_DURATION_STEP_SEC = 30
 LYRIA_SINGLE_PASS_MAX_SEC = 210
 LYRIA_PASS1_SEC = 210
 LYRIA_CONTINUATION_TAIL_SEC = 15.0
@@ -1568,7 +1568,7 @@ def _lyria_prediction_http(http_json: Any, *args: Any, **kwargs: Any) -> dict:
 
 
 def clamp_lyria_duration(seconds: float | None) -> int:
-    """Accept 90 through 420 in steps of 10. Above 420 becomes 420."""
+    """Accept 90 through 420 in steps of 30. Off-grid values are rejected. Above 420 becomes 420."""
     from services.composition import clamp_duration
 
     return clamp_duration(seconds)

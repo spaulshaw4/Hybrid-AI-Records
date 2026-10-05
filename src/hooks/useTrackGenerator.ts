@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatValidationError } from "@/lib/validation-error";
 
 const API_BASE = (
   (typeof import.meta !== "undefined" &&
@@ -17,7 +18,7 @@ type StatusPayload = {
   error?: string | null;
   audio_filename?: string | null;
   audio_mime?: string | null;
-  detail?: string;
+  detail?: unknown;
 };
 
 function streamUrl(filename: string): string {
@@ -44,9 +45,7 @@ export function useTrackGenerator() {
         session_id?: string;
       };
       if (!res.ok) {
-        throw new Error(
-          typeof payload.detail === "string" ? payload.detail : "Could not queue the track.",
-        );
+        throw new Error(formatValidationError(payload, "Could not queue the track."));
       }
       if (!payload.session_id) {
         throw new Error("Create did not return a session id.");
@@ -79,7 +78,7 @@ export function useTrackGenerator() {
       if (next === "failed") {
         inflight.current = false;
         setStatus("failed");
-        setError(payload.error || payload.detail || "Generation failed.");
+        setError(formatValidationError(payload.error || payload.detail || "Generation failed."));
         stopPolling();
         return;
       }

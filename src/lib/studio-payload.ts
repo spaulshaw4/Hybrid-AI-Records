@@ -21,8 +21,6 @@ export const STUDIO_CUSTOM_CONSENT_REQUIRED =
   "Legal Action Required: You must check the liability acknowledgment box to use custom-cloned or uploaded vocals.";
 export const STUDIO_CUSTOM_FILE_REQUIRED =
   "No custom vocal audio file selected for upload.";
-export const STUDIO_CUSTOM_VOICE_UNSAVED =
-  "Save your recorded or uploaded take with Use my voice before generating.";
 
 export type DefaultVocalConfig = {
   type: "default";
@@ -108,11 +106,10 @@ export function getValidatedStudioPayload(input: StudioPayloadInput): ValidatedS
     }
     const file = input.customAudioFile ?? null;
     const voiceId = (input.customVoiceId ?? "").trim();
+    // A local take (recording.wav) is enough. No remote clip URL, upload id,
+    // or storage path is required before Continue / generate.
     if (!file && !voiceId) {
       throw new Error(STUDIO_CUSTOM_FILE_REQUIRED);
-    }
-    if (file && !voiceId) {
-      throw new Error(STUDIO_CUSTOM_VOICE_UNSAVED);
     }
     return {
       style,

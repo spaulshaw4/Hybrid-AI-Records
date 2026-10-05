@@ -6,12 +6,11 @@ Durations of 210 seconds or less never reach the stitch. Longer lengths, up to
 """
 from __future__ import annotations
 
-import math
 import re
 
 DURATION_MIN_SEC = 90
 DURATION_MAX_SEC = 420
-DURATION_STEP_SEC = 10
+DURATION_STEP_SEC = 30
 SINGLE_PASS_MAX_SEC = 210
 PASS1_SEC = 210
 TAIL_MS = 15000
@@ -27,12 +26,13 @@ _SECTION_SPLIT = re.compile(r"(?=^\s*\[[^\]]+\])", re.MULTILINE)
 
 
 def clamp_duration(seconds: float | None) -> int:
-    """Accept any integer from 90 through 420 in steps of 10.
+    """Accept 90 through 420 in steps of 30.
 
-    Exact slider values (90, 100, … 420) pass through. Above 420 becomes 420.
-    Below 90 becomes 90. A midpoint rounds up (215 → 220). Invalid input
-    becomes the 210-second default. This does not add Lyria calls: callers
-    still use one pass at or below 210 seconds and two passes above that.
+    Exact grid values (90, 120, … 420) pass through. Above 420 becomes 420.
+    Below 90 becomes 90. Invalid input becomes the 210-second default.
+    In-range values off that grid are rejected. This does not add Lyria calls:
+    callers still use one pass at or below 210 seconds and two passes above
+    that, up to 420.
     """
     if seconds is None:
         return PASS1_SEC
@@ -46,19 +46,26 @@ def clamp_duration(seconds: float | None) -> int:
         return DURATION_MAX_SEC
     if value <= DURATION_MIN_SEC:
         return DURATION_MIN_SEC
-    steps = math.floor((value - DURATION_MIN_SEC) / DURATION_STEP_SEC + 0.5)
-    snapped = DURATION_MIN_SEC + int(steps) * DURATION_STEP_SEC
-    if snapped >= DURATION_MAX_SEC:
-        return DURATION_MAX_SEC
-    if snapped <= DURATION_MIN_SEC:
-        return DURATION_MIN_SEC
-    return int(snapped)
+    nearest = round(value)
+    if abs(value - nearest) > 1e-6:
+        raise ValueError(
+            f"duration must be {DURATION_MIN_SEC}–{DURATION_MAX_SEC} in steps of {DURATION_STEP_SEC}"
+        )
+    snapped = int(nearest)
+    if (snapped - DURATION_MIN_SEC) % DURATION_STEP_SEC != 0:
+        raise ValueError(
+            f"duration must be {DURATION_MIN_SEC}–{DURATION_MAX_SEC} in steps of {DURATION_STEP_SEC}"
+        )
+    return snapped
 
 
 def generation_token_charge(duration_sec: float | None = None) -> int:
     """Tokens deducted for one generation. Length never changes the price."""
     if duration_sec is not None:
-        clamp_duration(duration_sec)
+        try:
+            clamp_duration(duration_sec)
+        except ValueError:
+            pass
     return GENERATION_TOKEN_CHARGE
 
 

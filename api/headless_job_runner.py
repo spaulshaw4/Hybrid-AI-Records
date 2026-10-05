@@ -62,6 +62,8 @@ DELIVERIES_ROOT = os.environ.get("HYBRID_DELIVERIES_ROOT") or os.path.join(
 )
 _API_LOG = os.path.join(_REPO_ROOT, "reports", "live_api.out.log")
 MAX_PROMPT = 2000
+LYRICS_MAX = 5000
+LYRICS_TOO_LONG = "Lyrics are too long. Maximum allowed is 5,000 characters."
 BIND_HOST = "127.0.0.1"
 BIND_PORT = 8880
 CORS_ORIGINS = (
@@ -1274,7 +1276,7 @@ class CreateTrackBody(BaseModel):
     genre: str | None = Field(default=None, max_length=120)
     genre_lock: str | None = Field(default=None, max_length=120)
     style: str | None = Field(default=None, max_length=6000)
-    lyrics: str | None = Field(default=None, max_length=6000)
+    lyrics: str | None = Field(default=None, max_length=LYRICS_MAX)
     title: str | None = Field(default=None, max_length=200)
     dry_run: bool = False
     # Optional arrangement length: bars (quarter-note 4/4 bars) at ``bpm``.
@@ -1621,6 +1623,24 @@ def _boot_production_brain() -> dict[str, Any]:
         raise
 
 
+def _readable_body_error(exc: Any) -> str:
+    """Pydantic's error list is a JSON dump. Return one sentence instead."""
+    errors = exc.errors() if hasattr(exc, "errors") else []
+    for err in errors:
+        loc = err.get("loc") or ()
+        loc_text = ".".join(str(part) for part in loc)
+        kind = str(err.get("type") or "")
+        if "lyrics" in loc_text and (
+            "too_long" in kind or "too_big" in kind or "string_too_long" in kind
+        ):
+            return LYRICS_TOO_LONG
+    if errors:
+        msg = str(errors[0].get("msg") or "").strip()
+        if msg:
+            return msg
+    return "The track setup was invalid."
+
+
 async def _fulfill_create_track(request: Request) -> dict[str, Any]:
     """Read the create body and queue the session claimed by ``_join_active_generation``."""
     content_type = (request.headers.get("content-type") or "").lower()
@@ -1660,7 +1680,12 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="prompt is required")
-        body = CreateTrackBody.model_validate(payload)
+        try:
+            body = CreateTrackBody.model_validate(payload)
+        except Exception as exc:
+            if type(exc).__name__ == "ValidationError" and hasattr(exc, "errors"):
+                raise HTTPException(status_code=400, detail=_readable_body_error(exc)) from exc
+            raise
         style = (body.style or "").strip()
         lyrics = (body.lyrics or "").strip()
         prompt = (body.prompt or body.title or body.style or "").strip()
@@ -1681,6 +1706,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         dry_run = bool(body.dry_run)
         _log("[VOICE] Upload received: None")
         _log("[VOICE INGEST] No vocal payload received on /generate.")
+    if len(lyrics) > LYRICS_MAX:
+        raise HTTPException(status_code=400, detail=LYRICS_TOO_LONG)
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     if len(prompt) > MAX_PROMPT:

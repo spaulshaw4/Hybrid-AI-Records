@@ -17,15 +17,10 @@ import {
   VOICE_CAPTURE_CONSTRAINTS,
   VOICE_SAMPLE_ACCEPT,
   VOICE_SAMPLE_MAX_BYTES,
-  uploadVoiceSample,
 } from "@/lib/voice-sample-upload";
 
 import {
-  getVoiceCloneJob,
   listVoiceProfiles,
-  parseVoiceProfileSaveError,
-  saveVoiceProfile,
-  startVoiceCloneJob,
   type VoiceProfile,
 } from "@/lib/voice-library.functions";
 import {
@@ -53,8 +48,6 @@ import {
 const MIN_STOP_SECONDS = 5;
 const RECOMMENDED_SECONDS = 30;
 const MAX_RECORD_SECONDS = 90;
-const POLL_MS = 4000;
-const MAX_POLLS = 30;
 const RECORDER_TIMESLICE_MS = 1000;
 
 type VocalClip = { blob: Blob; url: string; fileName?: string };
@@ -75,8 +68,6 @@ function clipFromTake(
     return null;
   }
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type Props = {
   /** Cloned voice currently applied to the generation, or "" for the AI voice. */
@@ -167,9 +158,6 @@ export function QuickVocalRecorder({
   const maxStart = Math.max(0, (clipDuration || 0) - effectiveLength);
 
   const listVoices = useServerFn(listVoiceProfiles);
-  const startClone = useServerFn(startVoiceCloneJob);
-  const pollClone = useServerFn(getVoiceCloneJob);
-  const saveVoice = useServerFn(saveVoiceProfile);
 
   const loadVoices = useCallback(async () => {
     try {
@@ -564,79 +552,26 @@ export function QuickVocalRecorder({
       });
       const trimmed = await trimVoiceSample(file, trimStart, effectiveLength);
       if (!trimmed.ok) throw new Error(trimmed.message);
-      onCustomFileChange?.(trimmed.file);
+      const localTake = new File([trimmed.file], "recording.wav", { type: "audio/wav" });
+      onCustomFileChange?.(localTake);
 
       const gender: VocalProfileGender =
         selectedGender === "m" || selectedGender === "f" ? selectedGender : "auto";
       const savedLocal = await saveVocalProfile({
         name: name.trim() || undefined,
-        audioBlob: trimmed.file,
+        audioBlob: localTake,
         gender,
         duration: trimmed.duration || clipDuration || effectiveLength,
       });
       onVoiceIdChange(vocalProfileStorageKey(savedLocal.id));
       await loadLocalVoices();
-
-      if (isDevAuthBypass() || !canUseVoice) {
-        toast.success(
-          canUseVoice
-            ? "Voice saved on this device — ready for generate."
-            : "Voice saved locally — sign in later to sync a cloud clone.",
-        );
-        return;
-      }
-
-      setStatus("Uploading your take…");
-      const upload = await uploadVoiceSample(trimmed.file);
-      if (!upload.ok) throw new Error(upload.message);
-
-      // Local object URLs are not fetchable by the clone job — stop after local save.
-      if (!/^https?:\/\//i.test(upload.url)) {
-        toast.success("Voice saved on this device — ready for generate.");
-        return;
-      }
-
-      setStatus("Saving your take…");
-      let job = await startClone({ data: { sampleUrl: upload.url } });
-      for (let i = 0; i < MAX_POLLS && !job.voiceId; i += 1) {
-        if (job.status === "failed" || job.status === "canceled") {
-          throw new Error(job.error ?? "That take could not be cloned. Try a cleaner one.");
-        }
-        await sleep(POLL_MS);
-        if (!job.id) break;
-        job = await pollClone({ data: { id: job.id } });
-      }
-      if (!job.voiceId) throw new Error("Your voice took too long to build. Try again.");
-
-      setStatus("Saving your voice…");
-      // Local profile + storage URL are already enough for generate. Library
-      // sync is best-effort and must not block the studio flow.
-      try {
-        const saved = await saveVoice({
-          data: {
-            label: name.trim() || `My voice ${new Date().toLocaleDateString()}`,
-            voiceId: job.voiceId,
-            sampleUrl: upload.url,
-          },
-        });
-        onVoiceIdChange(saved.voice_id);
-        await loadVoices();
-        toast.success("Custom vocals ready — your next track sings in your voice.");
-      } catch (libraryError) {
-        const postgrest = parseVoiceProfileSaveError(libraryError);
-        console.error(
-          "[voice_profiles] save failed — continuing with uploaded sampleUrl",
-          postgrest ?? libraryError,
-        );
-        // Keep the local vocal profile id set earlier; AudioStudio re-uploads /
-        // uses the blob when the cloud library row is missing.
-        toast.warning(
-          "Voice uploaded and ready to generate. Library sync failed — see browser console for the PostgREST error.",
-        );
-      }
-      setName("");
-      discard();
-      await loadLocalVoices();
+      // The take is already a local object URL + recording.wav. Do not upload
+      // it or ask storage for a signed clip link.
+      toast.success(
+        canUseVoice
+          ? "Voice saved on this device — ready for generate."
+          : "Voice saved locally — sign in later to sync a cloud clone.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not use that take.");
     } finally {
@@ -789,8 +724,8 @@ export function QuickVocalRecorder({
 
       <p className="text-center text-xs text-zinc-300">
         {canUseVoice
-          ? "Record or upload a take, then tap Use my voice — or pick a saved voice above."
-          : "Record a local take anytime. Sign in to sync a cloud voice clone."}
+          ? "Record or upload a take. It stays on this device — Continue does not need a remote clip link."
+          : "Record a local take anytime. It stays on this device for Continue."}
       </p>
 
       {clip ? (

@@ -73,11 +73,17 @@ function Harness() {
 describe("QuickVocalRecorder", () => {
   const fetchSpy = vi.fn();
   let now = 1_000_000;
+  let createObjectUrl: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     cleanup();
     now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
+    createObjectUrl = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      const size = blob instanceof Blob ? blob.size : 0;
+      return `blob:local-recording-${size}`;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     sessionStorage.setItem(VOCAL_LIABILITY_SESSION_KEY, "true");
     FakeMediaRecorder.instances = [];
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
@@ -121,6 +127,10 @@ describe("QuickVocalRecorder", () => {
     const player = await screen.findByLabelText("Recorded take");
     expect(player.tagName).toBe("AUDIO");
     expect(player).toHaveAttribute("controls");
+    expect(createObjectUrl).toHaveBeenCalled();
+    const previewSource = createObjectUrl.mock.calls.at(-1)?.[0];
+    expect(previewSource).toBeInstanceOf(Blob);
+    expect(player).toHaveAttribute("src", "blob:local-recording-4096");
     await waitFor(() => {
       expect(screen.getByTestId("held-bytes").textContent).toBe("4096");
     });
@@ -137,6 +147,8 @@ describe("QuickVocalRecorder", () => {
     expect(screen.getByLabelText("Recorded take")).toBeInTheDocument();
     expect(screen.getByTestId("held-bytes").textContent).toBe("4096");
     expect(fetchSpy).not.toHaveBeenCalled();
+    const requested = fetchSpy.mock.calls.map((call) => String(call[0] ?? ""));
+    expect(requested.join(" ")).not.toMatch(/voice-samples|storage\/v1|clip-upload|uploadVoiceSample/i);
 
     fireEvent.click(screen.getByRole("button", { name: /discard take/i }));
     await waitFor(() => {
