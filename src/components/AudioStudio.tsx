@@ -2702,6 +2702,7 @@ export function AudioStudio() {
           form.append("style_influence", String(clampStyleInfluence(styleInfluence)));
           form.append("vocal_present", hasVocal ? "true" : "false");
           if (styleTags) form.append("style", styleTags);
+          if (mood) form.append("mood", mood);
           if (genre) form.append("genre", genre);
           if (trackTitle) form.append("title", trackTitle);
           if (hasVocal && takeSource) {
@@ -2731,8 +2732,8 @@ export function AudioStudio() {
           const deadline = Date.now() + 8 * 60_000;
           while (Date.now() < deadline) {
             if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
-            await new Promise((resolve) => window.setTimeout(resolve, 2000));
-            const statusRes = await fetch(`/api/tracks/status/${encodeURIComponent(sessionId)}`, {
+            await new Promise((resolve) => window.setTimeout(resolve, 3000));
+            const statusRes = await fetch(`/api/tracks/${encodeURIComponent(sessionId)}/status`, {
               signal: abort.signal,
             });
             const job = (await statusRes.json().catch(() => ({}))) as {
@@ -2740,7 +2741,13 @@ export function AudioStudio() {
               error?: string;
               master_url?: string;
               audio_filename?: string;
+              step?: string;
+              note?: string;
             };
+            const stepLabel = (job.step || job.note || "").trim();
+            if (stepLabel && job.status !== "completed" && job.status !== "failed") {
+              setStatusText(stepLabel);
+            }
             if (job.status === "failed") {
               throw new Error(formatValidationError(job.error, "Generation failed."));
             }

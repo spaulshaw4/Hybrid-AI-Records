@@ -2,6 +2,7 @@
 
 POST /api/tracks/create  {prompt, style, lyrics, genre_hint} -> {session_id, sessionId, track_id, id, status: pending}
 GET  /api/tracks/status/{id}
+GET  /api/tracks/{id}/status
 GET  /api/stream/{filename}
 
 The generate job publishes ``{session}_master.wav`` (/api/stream/{session}_master.wav).
@@ -329,6 +330,8 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "token_cost",
         "detail",
         "vocal_present",
+        "master_path",
+        "step",
     )
     out: dict[str, Any] = {}
     for key in keys:
@@ -1198,15 +1201,16 @@ def _worker_inner(
 ) -> None:
     use_vocal = False
     try:
-        _update_job(session_id, status="running", error=None, note=None)
+        _update_job(session_id, status="running", error=None, note=None, step="running")
         if dry_run or _DRY_RUN:
             note = "dry-run: create accepted, pipeline not started"
-            _update_job(session_id, status="completed", note=note)
+            _update_job(session_id, status="completed", note=note, step="completed")
             return
         opts = dict(render_opts or {})
-        use_vocal = _voice_sample_ready(opts.get("voice_sample_path")) or _voice_sample_ready(
-            opts.get("vocal_file")
-        )
+        vocal_path = opts.get("voice_sample_path") or opts.get("vocal_file")
+        file_ready = _voice_sample_ready(vocal_path)
+        vocal_requested = bool(opts.get("vocal_requested")) or file_ready
+        use_vocal = vocal_requested
         from engine.generate_track_headless import (
             LYRIA_MODEL_ID as _PINNED_LYRIA_MODEL_ID,
             MINIMAX_MODEL_ID as _PINNED_MINIMAX_MODEL_ID,
@@ -1228,9 +1232,12 @@ def _worker_inner(
         token_charge = generation_token_charge(duration_value)
         _log(f"[TOKEN] charge={token_charge} duration_sec={duration_raw}")
         engine = "Lyria"
-        route_model = MINIMAX_MODEL_ID if use_vocal else LYRIA_MODEL_ID
-        _log(f"[ROUTE] model={route_model} vocal={use_vocal}")
-        if use_vocal:
+        if vocal_requested and not file_ready:
+            raise RuntimeError("ref_vocal.wav is missing")
+        if file_ready:
+            route_model = MINIMAX_MODEL_ID
+            _update_job(session_id, step="Gate 2 — prompt", note="Gate 2 — prompt")
+            _log(f"[ROUTE] model={route_model} vocal=True")
             saved = _render_minimax_master(
                 session_id,
                 prompt,
@@ -1239,6 +1246,9 @@ def _worker_inner(
                 render_minimax_master,
             )
         else:
+            route_model = LYRIA_MODEL_ID
+            _update_job(session_id, step="Lyria", note="Lyria")
+            _log(f"[ROUTE] model={route_model} vocal=False")
             saved = render_lyria_master(
                 os.path.join(SCRATCH_ROOT, session_id),
                 style=_style_with_controls(str(opts.get("style") or ""), opts),
@@ -1248,6 +1258,7 @@ def _worker_inner(
                 duration_sec=duration_value,
             )
         published = _publish_lyria_master(session_id, saved)
+        published["master_path"] = saved
         _log(
             f"[{engine}] session={session_id} genre={genre_hint!r} "
             f"file={published.get('audio_filename')} master_url={published.get('master_url')}"
@@ -1257,6 +1268,7 @@ def _worker_inner(
             status="completed",
             error=None,
             note=None,
+            step="completed",
             delivery_status="completed",
             delivery_error=None,
             engine_used=engine,
@@ -1355,6 +1367,7 @@ class CreateTrackBody(BaseModel):
     # lead = lyrics expected, adlib = no lyrics, none = instrumental.
     vocal_mode: str | None = Field(default=None, max_length=16)
     key: str | None = Field(default=None, max_length=24)
+    mood: str | None = Field(default=None, max_length=600)
     # Accepted and ignored. Generation is always one master.
     num_outputs: int | None = Field(default=1)
 
@@ -1471,6 +1484,17 @@ def _style_with_controls(style: str, opts: dict[str, Any]) -> str:
     return f"{base} {' '.join(directives)}".strip()
 
 
+def _bed_style_prompt(prompt: str, opts: dict[str, Any]) -> str:
+    """Submitted prompt plus mood tags. No canned genre and no acoustic default."""
+    user = (prompt or "").strip()
+    mood = str(opts.get("mood") or "").strip()
+    if not mood or mood.lower() in user.lower():
+        return user
+    if not user:
+        return mood
+    return f"{user}, {mood}"
+
+
 def _render_minimax_master(
     session_id: str,
     prompt: str,
@@ -1481,10 +1505,16 @@ def _render_minimax_master(
     """One music-2.6 instrumental bed, then ffmpeg-mix ``ref_vocal.wav`` onto it.
 
     The take is not uploaded. Lyria is not called. ``ref_vocal.wav`` is not deleted.
+    A missing take fails this lane. It does not switch to Lyria.
+    ``genre_hint`` is stored on the job and is not written into the model prompt.
     """
     from engine.generate_track_headless import mix_ref_vocal_onto_bed
 
-    vocal_path = os.path.abspath(str(opts.get("voice_sample_path") or opts.get("vocal_file") or ""))
+    del genre_hint
+    vocal_raw = str(opts.get("voice_sample_path") or opts.get("vocal_file") or "").strip()
+    vocal_path = os.path.abspath(vocal_raw) if vocal_raw else ""
+    if not vocal_path or not _voice_sample_ready(vocal_path):
+        raise RuntimeError("ref_vocal.wav is missing")
     root = os.path.abspath(SCRATCH_ROOT)
     session_dir = os.path.abspath(os.path.join(root, session_id))
     master_path = os.path.abspath(os.path.join(session_dir, f"{session_id}_master.wav"))
@@ -1498,20 +1528,20 @@ def _render_minimax_master(
         raise RuntimeError("vocal job expected ref_vocal.wav")
     if os.path.abspath(vocal_path) == master_path:
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
-    style = str(opts.get("style") or "").strip()
-    genre = (genre_hint or "").strip()
-    genre_prompt = style or genre or (prompt or "").strip()
+    style_prompt = _bed_style_prompt(prompt, opts)
     bpm = _control_number(opts, "bpm")
     if bpm is None:
         bpm = DEFAULT_RENDER_BPM
+    _update_job(session_id, step="Gate 3 — bed", note="Gate 3 — bed")
     bed = render_minimax_master(
         session_dir,
-        genre_prompt=genre_prompt,
+        genre_prompt=style_prompt,
         bpm=bpm,
         session_id=session_id,
     )
     if os.path.abspath(bed) == vocal_path or os.path.abspath(master_path) == vocal_path:
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
+    _update_job(session_id, step="Gate 4 — composite", note="Gate 4 — composite")
     return mix_ref_vocal_onto_bed(bed, vocal_path, master_path)
 
 
@@ -1780,10 +1810,13 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
     vocal_path: str | None = None
     style = ""
     lyrics = ""
+    mood = ""
+    vocal_requested = False
     if "multipart/form-data" in content_type:
         form = await request.form()
         style = _form_text(form, "style")
         lyrics = _form_text(form, "lyrics")
+        mood = _form_text(form, "mood")
         user_prompt = _form_text(form, "prompt")
         prompt = user_prompt or _form_text(form, "title", "style")
         genre = _form_text(form, "genre_hint", "genre", "genre_lock", "style")
@@ -1809,6 +1842,7 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         # vocal_file is canonical. voice_sample is the same take under the old name.
         upload = _upload_file(form.get("vocal_file")) or _upload_file(form.get("voice_sample"))
         vocal_flag = _form_vocal_present(form.get("vocal_present"))
+        vocal_requested = vocal_flag
         if vocal_flag and upload is not None:
             raw_take = await _read_upload_bytes(upload)
             if len(raw_take) > 25 * 1024 * 1024:
@@ -1838,6 +1872,7 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             raise
         style = (body.style or "").strip()
         lyrics = (body.lyrics or "").strip()
+        mood = (body.mood or "").strip()
         user_prompt = (body.prompt or "").strip()
         prompt = (user_prompt or body.title or body.style or "").strip()
         genre = (
@@ -1903,6 +1938,10 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         render_opts["style"] = style
     if lyrics:
         render_opts["lyrics"] = lyrics
+    if mood:
+        render_opts["mood"] = mood
+    if vocal_requested:
+        render_opts["vocal_requested"] = True
     _log(
         f"[API_LENGTH] bpm={float(bpm):.1f} duration_sec={render_opts['duration_sec']:.1f} "
         f"bars={round(render_opts['duration_sec'] * float(bpm) / 240.0)} "
@@ -2006,6 +2045,7 @@ def create_app() -> Any:
         return {"status": "deleted", "session_id": session_id}
 
     @app.get("/api/tracks/status/{session_id}")
+    @app.get("/api/tracks/{session_id}/status")
     @app.get("/api/jobs/{session_id}")
     def track_status(session_id: str, request: Request) -> dict[str, Any]:
         _require_worker_token(request)

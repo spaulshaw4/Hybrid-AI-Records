@@ -72,6 +72,12 @@ def test_lyria_create_payload_includes_every_session_alias(client):
     status_body = polled.json()
     for key in _ALIASES:
         assert status_body[key] == session_id
+    nested = client.get(f"/api/tracks/{session_id}/status")
+    assert nested.status_code == 200
+    nested_body = nested.json()
+    for key in _ALIASES:
+        assert nested_body[key] == session_id
+    assert nested_body["status"] == status_body["status"]
 
 
 def test_vocal_create_payload_includes_every_session_alias(client):
@@ -92,6 +98,13 @@ def test_vocal_create_payload_includes_every_session_alias(client):
     for key in _ALIASES:
         assert status_body[key] == session_id
     assert status_body["vocal_present"] is True
+    nested = client.get(f"/api/tracks/{session_id}/status")
+    assert nested.status_code == 200
+    nested_body = nested.json()
+    for key in _ALIASES:
+        assert nested_body[key] == session_id
+    assert nested_body["status"] == status_body["status"]
+    assert nested_body["vocal_present"] is True
 
 
 def test_scratch_persist_failure_logs_traceback_and_stays_up(client, monkeypatch, capsys):

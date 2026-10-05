@@ -1,4 +1,4 @@
-"""Create-route branch: Lyria for text, pinned music-2.6 plus an ffmpeg mix when a take is present.
+"""Two lanes: Lyria when there is no take, pinned music-2.6 plus ffmpeg when there is.
 
 HTTP is mocked. Nothing is sent to Replicate. ffmpeg is a stub.
 """
@@ -209,7 +209,6 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     _forbid_ffmpeg(monkeypatch)
     started: list = []
     client = _client(monkeypatch, started)
-    # Multipart with no voice_sample field. Filename recording.wav is not sent.
     response = client.post(
         "/api/tracks/create",
         data=_fields(vocal_present="false"),
@@ -217,6 +216,7 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
+    assert calls == []
     assert body["success"] is True
     assert body["engine_used"] == "Lyria"
     assert body["token_cost"] == 1
@@ -233,7 +233,12 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     assert job["status"] == "completed", job.get("error")
     assert job["engine_used"] == "Lyria"
     assert job["token_cost"] == 1
+    assert job["master_url"].endswith(f"/api/stream/{session_id}_master.wav")
     _aliases(job, session_id)
+    alias = client.get(f"/api/tracks/{session_id}/status").json()
+    _aliases(alias, session_id)
+    assert alias["status"] == "completed"
+    assert alias["master_url"] == job["master_url"]
     urls = [req.full_url for req in calls]
     assert any("lyria-3-pro" in url and url.endswith("/predictions") for url in urls)
     assert not any(
@@ -271,7 +276,7 @@ def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch, 
     _stub_ffmpeg(monkeypatch, ffmpeg_calls)
     started: list = []
     client = _client(monkeypatch, started)
-    # 420 is two Lyria passes on the text path. A take is one music-2.6 call.
+    # 420 is above the single-pass cap. A take is still one music-2.6 call.
     response = client.post(
         "/api/tracks/create",
         data=_fields(duration="420", vocal_present="true"),
@@ -356,7 +361,13 @@ def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch, 
     assert sent["input"]["sample_rate"] == 44100
     assert sent["input"]["bitrate"] == 256000
     prompt_text = sent["input"]["prompt"]
-    assert prompt_text == "outlaw country, 110 BPM, instrumental, studio production"
+    assert "night drive" in prompt_text
+    assert "110 BPM" in prompt_text
+    assert "instrumental" in prompt_text
+    assert "studio production" in prompt_text
+    assert "Acoustic" not in prompt_text
+    assert "Upright Bass" not in prompt_text
+    assert "outlaw country" not in prompt_text
     assert "110" in prompt_text
     assert "instrumental" in prompt_text
     assert "studio production" in prompt_text
@@ -628,7 +639,76 @@ def test_omitted_bpm_defaults_to_86(live_dirs, monkeypatch):
     posts = [req for req in calls if "music-2.6" in req.full_url and req.full_url.endswith("/predictions")]
     assert len(posts) == 1
     sent = json.loads(posts[0].data.decode("utf-8"))
-    assert sent["input"]["prompt"] == "outlaw country, 86 BPM, instrumental, studio production"
+    assert "night drive" in sent["input"]["prompt"]
+    assert "86 BPM, instrumental, studio production" in sent["input"]["prompt"]
+    assert "duration" not in sent["input"]
+    assert "Acoustic" not in sent["input"]["prompt"]
     assert not any("lyria" in req.full_url for req in calls)
     assert (scratch / session_id / "ref_vocal.wav").is_file()
     assert ffmpeg_calls
+
+
+def test_noir_jazz_trio_is_not_replaced_with_acoustic(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    audio = _gate_wav()
+    responses = [
+        _json_resp({"id": "pred_music26", "status": "succeeded", "output": "https://replicate.delivery/pb/bed.wav"}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
+    ]
+    calls: list = []
+    ffmpeg_calls: list = []
+    _install_http(monkeypatch, responses, calls)
+    _stub_ffmpeg(monkeypatch, ffmpeg_calls)
+    started: list = []
+    client = _client(monkeypatch, started)
+    prompt = "noir jazz trio"
+    take = _reference_bytes()
+    response = client.post(
+        "/api/tracks/create",
+        data={
+            "prompt": prompt + (" x" * 20),
+            "bpm": "92",
+            "duration": "300",
+            "vocal_present": "true",
+            "mood": "smoky room",
+        },
+        files={"vocal_file": ("ref_vocal.wav", take, "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == []
+    assert body["status"] == "pending"
+    assert body["success"] is True
+    assert body["token_cost"] == 1
+    assert body["vocal_present"] is True
+    session_id = body["session_id"]
+    _aliases(body, session_id)
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "completed", job.get("error")
+    assert "/api/stream/" in job["master_url"]
+    posts = [
+        req
+        for req in calls
+        if "music-2.6" in req.full_url and req.full_url.endswith("/predictions")
+    ]
+    assert len(posts) == 1
+    sent = json.loads(posts[0].data.decode("utf-8"))
+    assert set(sent["input"]) == {
+        "prompt",
+        "is_instrumental",
+        "lyrics_optimizer",
+        "audio_format",
+        "sample_rate",
+        "bitrate",
+    }
+    prompt_text = sent["input"]["prompt"]
+    assert prompt_text.startswith("noir jazz trio")
+    assert "smoky room" in prompt_text
+    assert "92 BPM, instrumental, studio production" in prompt_text
+    assert "Acoustic" not in prompt_text
+    assert "Upright Bass, warm, resonant" not in prompt_text
+    assert not any("lyria" in req.full_url for req in calls)
+    assert ffmpeg_calls
+    assert (scratch / session_id / "ref_vocal.wav").read_bytes() == take
+    assert (scratch / session_id / f"{session_id}_master.wav").is_file()

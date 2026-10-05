@@ -1706,8 +1706,33 @@ def _render_lyria_two_pass(
     return master_path
 
 
+# Pinned music-2.6 has no duration maximum below 180 in this lane.
+# 150 is the fallback only if a future pin publishes a lower maximum.
+MINIMAX_DURATION_CAP_SEC = 180
+
+
+def clamp_minimax_duration(seconds: float | None) -> int:
+    """Single-pass length sent to music-2.6. Above the cap becomes the cap."""
+    cap = MINIMAX_DURATION_CAP_SEC
+    if seconds is None:
+        return cap
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return cap
+    if value != value or value in (float("inf"), float("-inf")) or value <= 0:
+        return cap
+    if value > cap:
+        return cap
+    return int(round(value))
+
+
 def compose_minimax_prompt(genre_prompt: str, bpm: float) -> str:
-    """Style or genre, the requested tempo, and Stephen's production line."""
+    """User prompt, the requested tempo, and the instrumental production line.
+
+    Callers pass the submitted prompt plus mood tags. This function does not
+    invent a genre.
+    """
     tempo = float(bpm)
     tempo_text = str(int(tempo)) if tempo.is_integer() else str(tempo)
     return f"{(genre_prompt or '').strip()}, {tempo_text} BPM, instrumental, studio production"
@@ -1803,13 +1828,15 @@ def render_minimax_master(
     genre_prompt: str,
     bpm: float,
     session_id: str,
+    duration_sec: float | None = None,
     timeout_sec: float = LYRIA_TIMEOUT_SEC,
     poll_sec: float = LYRIA_POLL_SEC,
 ) -> str:
     """One pinned music-2.6 prediction. Writes ``bed_instrumental.wav``.
 
     The input keys are fixed. ``ref_vocal.wav`` is not uploaded and is not an
-    input. Lyria is not called. The caller mixes the take onto this bed.
+    input. Lyria is not called. Duration above the single-pass cap is clamped.
+    The caller mixes a take onto this bed, or copies the bed to the master.
     """
     if not str(session_id or "").strip():
         raise RuntimeError("invalid session_id")
@@ -1824,6 +1851,8 @@ def render_minimax_master(
         "sample_rate": 44100,
         "bitrate": 256000,
     }
+    # Duration is not an input key. The vocal lane still refuses a second pass.
+    del duration_sec
     deadline = time.monotonic() + float(timeout_sec)
     prediction = _minimax_http(
         MINIMAX_PREDICTIONS_URL,
