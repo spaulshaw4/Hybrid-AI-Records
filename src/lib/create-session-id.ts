@@ -27,8 +27,8 @@ function createBodyRecord(data: unknown): CreateSessionBody & Record<string, unk
 }
 
 /**
- * Text for a non-OK create body.
- * A string `detail` is returned unchanged. A FastAPI issue list becomes one sentence.
+ * Text for a failed create body.
+ * A string `detail` wins over `error` and `message`. A FastAPI issue list becomes one sentence.
  */
 export function messageFromCreateFailure(data: unknown, status: number): string {
   const body = createBodyRecord(data);
@@ -41,17 +41,20 @@ export function messageFromCreateFailure(data: unknown, status: number): string 
 
 /**
  * Session id from a create response.
- * Checks HTTP status before any id alias. The missing-id error is only for an OK body.
+ * A non-OK status, `success: false`, or a truthy `error` fails before any id alias.
+ * `success: true` and a missing `success` are not failures by themselves.
+ * The missing-id error is only for an otherwise successful body.
  */
 export function sessionFromCreateResponse(
   res: { ok: boolean; status: number },
   data: unknown,
 ): string {
-  if (!res.ok) {
-    throw createResponseError(messageFromCreateFailure(data, res.status));
+  const body = createBodyRecord(data);
+  if (!res.ok || body.success === false || body.error) {
+    throw createResponseError(messageFromCreateFailure(body, res.status));
   }
   try {
-    return sessionIdFromCreate(createBodyRecord(data));
+    return sessionIdFromCreate(body);
   } catch (error) {
     if (error instanceof Error) throw createResponseError(error.message);
     throw error;

@@ -96,6 +96,53 @@ describe("sessionFromCreateResponse", () => {
     );
   });
 
+  it("returns session_id when a 200 body has success true", () => {
+    expect(
+      sessionFromCreateResponse({ ok: true, status: 200 }, { success: true, session_id: "ht_success_true" }),
+    ).toBe("ht_success_true");
+  });
+
+  it("throws a 200 success false detail and does not return a session id", () => {
+    const error = thrownCreate(
+      { ok: true, status: 200 },
+      { success: false, detail: "queue rejected the prompt", session_id: "ht_should_not_return" },
+    );
+    expect(isCreateResponseError(error)).toBe(true);
+    expect(error.message).toBe("queue rejected the prompt");
+    expect(error.message).not.toBe("Create did not return a session id.");
+  });
+
+  it("throws a 200 success false error and does not return a session id", () => {
+    const error = thrownCreate(
+      { ok: true, status: 200 },
+      { success: false, error: "engine refused the job", sessionId: "ht_should_not_return" },
+    );
+    expect(error.message).toBe("engine refused the job");
+    expect(error.message).not.toBe("ht_should_not_return");
+  });
+
+  it("prefers a string detail over error on a 200 success false body", () => {
+    const error = thrownCreate(
+      { ok: true, status: 200 },
+      { success: false, detail: "detail wins", error: "error loses", session_id: "ht_should_not_return" },
+    );
+    expect(error.message).toBe("detail wins");
+  });
+
+  it("throws a 200 error string even when the status is ok", () => {
+    const error = thrownCreate(
+      { ok: true, status: 200 },
+      { error: "HeartMuLa generation failed: timeout", session_id: "ht_should_not_return" },
+    );
+    expect(error.message).toBe("HeartMuLa generation failed: timeout");
+  });
+
+  it("stringifies an object error on a 200 body", () => {
+    const errorBody = { reason: "timeout", attempt: 2 };
+    const error = thrownCreate({ ok: true, status: 200 }, { error: errorBody });
+    expect(error.message).toBe(JSON.stringify(errorBody));
+  });
+
   it("throws the session-id error when a 200 body has no id", () => {
     const error = thrownCreate({ ok: true, status: 200 }, { status: "pending" });
     expect(error.message).toBe("Create did not return a session id.");
