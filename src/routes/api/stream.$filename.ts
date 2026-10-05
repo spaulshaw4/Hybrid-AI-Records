@@ -1,12 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { proxyToHybridWorker } from "@/lib/hybrid-worker-proxy.server";
+import { localMasterResponse } from "@/lib/track-create.server";
 
-/** GET /api/stream/$filename → FastAPI worker on 127.0.0.1:8880 */
+/** GET /api/stream/$filename — local master if this process wrote it. */
 export const Route = createFileRoute("/api/stream/$filename")({
   server: {
     handlers: {
-      GET: ({ request, params }) =>
-        proxyToHybridWorker(request, `/api/stream/${encodeURIComponent(params.filename)}`),
+      GET: async ({ request, params }) => {
+        const local = await localMasterResponse(params.filename);
+        if (local) return local;
+        return proxyToHybridWorker(request, `/api/stream/${encodeURIComponent(params.filename)}`);
+      },
     },
   },
 });

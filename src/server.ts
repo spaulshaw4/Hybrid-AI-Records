@@ -132,6 +132,12 @@ export default {
         return POST(request);
       }
 
+      const trackStatus = pathname.match(/^\/api\/tracks\/([^/]+)\/status$/);
+      if (trackStatus && (request.method === "GET" || request.method === "HEAD")) {
+        const { trackStatusResponse } = await import("./lib/track-create.server");
+        return trackStatusResponse(decodeURIComponent(trackStatus[1]));
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response, request);
