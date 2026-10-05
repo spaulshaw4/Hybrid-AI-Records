@@ -1,12 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { proxyToHybridWorker } from "@/lib/hybrid-worker-proxy.server";
+import { handleTrackCreate } from "@/lib/track-create.server";
 
-/** POST /api/tracks/create → FastAPI worker on 127.0.0.1:8880 */
+/**
+ * POST /api/tracks/create on the port-3000 Bun server.
+ * Returns pending JSON before any Replicate call. Does not proxy to :8880.
+ */
 export const Route = createFileRoute("/api/tracks/create")({
   server: {
     handlers: {
-      POST: ({ request }) => proxyToHybridWorker(request, "/api/tracks/create"),
-      OPTIONS: ({ request }) => proxyToHybridWorker(request, "/api/tracks/create"),
+      POST: ({ request }) => handleTrackCreate(request),
+      OPTIONS: () => new Response(null, { status: 204 }),
     },
   },
 });
