@@ -63,7 +63,7 @@ import {
   lyricLanguageInstruction,
   type LyricLanguage,
 } from "@/lib/lyric-languages";
-import { sessionIdFromCreate } from "@/lib/create-session-id";
+import { isCreateResponseError, sessionFromCreateResponse } from "@/lib/create-session-id";
 import { explainEngineFailure } from "@/lib/engine-failure";
 import {
   LYRICS_MAX_CHARS,
@@ -513,6 +513,12 @@ type PipelineLastError = {
   message: string;
   raw: unknown;
 };
+
+/** Server text from a rejected create. Null for every other failure. */
+function createFailureBannerText(failure: PipelineLastError | null | undefined): string | null {
+  if (!failure || !isCreateResponseError(failure.raw)) return null;
+  return failure.message;
+}
 
 type PipelineState = {
   currentStep: PipelineStepId;
@@ -1699,12 +1705,16 @@ export function AudioStudio() {
       });
       return null;
     }
-    const message = formatValidationError(error, "Pipeline execution failed");
+    const exactServerMessage = isCreateResponseError(error) ? error.message : null;
+    const message = exactServerMessage ?? formatValidationError(error, "Pipeline execution failed");
     // Never surface class names / stacks in the artist-facing notice.
-    const safeMessage = message
-      .replace(/\bStudioStreamDroppedError\b/gi, "")
-      .replace(/\s{2,}/g, " ")
-      .trim();
+    // Create responses already carry the server sentence — show that text unchanged.
+    const safeMessage = exactServerMessage
+      ? exactServerMessage
+      : message
+          .replace(/\bStudioStreamDroppedError\b/gi, "")
+          .replace(/\s{2,}/g, " ")
+          .trim();
     const resolvedStep = displayPipelineStep(
       step || readErrorStep(error),
       pipelineStepRef.current,
@@ -1721,7 +1731,7 @@ export function AudioStudio() {
       status: "error",
       lastError,
     }));
-    setRollbackNotice(`${resolvedStep}: ${lastError.message}`);
+    setRollbackNotice(exactServerMessage ?? `${resolvedStep}: ${lastError.message}`);
     return lastError;
   }, []);
 
@@ -2698,20 +2708,8 @@ export function AudioStudio() {
             body: form,
             signal: abort.signal,
           });
-          const createdBody = (await created.json().catch(() => ({}))) as {
-            sessionId?: string;
-            session_id?: string;
-            id?: string;
-            track_id?: string;
-            detail?: unknown;
-            error?: unknown;
-          };
-          if (!created.ok) {
-            throw new Error(
-              formatValidationError(createdBody, `Create failed (${created.status})`),
-            );
-          }
-          const sessionId = sessionIdFromCreate(createdBody);
+          const data = await created.json().catch(() => ({}));
+          const sessionId = sessionFromCreateResponse(created, data);
           stageTaskId = sessionId;
           stageStartedAt = Date.now();
           savePendingJob({
@@ -2767,8 +2765,11 @@ export function AudioStudio() {
           ) {
             throw streamErr;
           }
+          // A rejected create already has a server message. Words like "500" or
+          // "timeout" inside that text are not a dropped stream.
           const recoverableDrop =
-            isStudioStreamDroppedError(streamErr) || isTransientUpstreamError(streamErr);
+            !isCreateResponseError(streamErr) &&
+            (isStudioStreamDroppedError(streamErr) || isTransientUpstreamError(streamErr));
           if (!recoverableDrop) throw streamErr;
 
           const pollVaultId = audioVaultId ?? vaultId;
@@ -3284,8 +3285,10 @@ export function AudioStudio() {
       // Say exactly what went wrong (payload rejection vs server timeout vs
       // dropped connection) instead of one generic sentence.
       const explained = explainEngineFailure(raw);
-      setRollbackNotice(cancelled ? CANCELLED_MESSAGE : explained.message);
+      const serverMessage = isCreateResponseError(err) ? err.message : null;
+      setRollbackNotice(cancelled ? CANCELLED_MESSAGE : serverMessage ?? explained.message);
       if (cancelled) toast.info(CANCELLED_MESSAGE);
+      else if (serverMessage) toast.error(serverMessage);
       else toast.error(explained.headline, { description: explained.message });
 
       // Mirror the notice to the artist's inbox (in-app + email when set up).
@@ -5008,19 +5011,20 @@ export function AudioStudio() {
                 )}
               </p>
               <p>
-                {formatValidationError(
-                  String(pipelineState.lastError.message ?? "")
-                    .replace(/\bStudioStreamDroppedError\b/gi, "")
-                    .replace(/\s{2,}/g, " ")
-                    .trim(),
-                  "",
-                ) ||
-                  (displayPipelineStep(
-                    pipelineState.lastError.step || pipelineState.currentStep,
-                    pipelineState.currentStep,
-                  ) === "composition"
-                    ? "Composition failed. The Worker log (reports/live_api.out.log) has the Python traceback."
-                    : "Something went wrong. Please try again.")}
+                {createFailureBannerText(pipelineState.lastError) ??
+                  (formatValidationError(
+                      String(pipelineState.lastError.message ?? "")
+                        .replace(/\bStudioStreamDroppedError\b/gi, "")
+                        .replace(/\s{2,}/g, " ")
+                        .trim(),
+                      "",
+                    ) ||
+                    (displayPipelineStep(
+                      pipelineState.lastError.step || pipelineState.currentStep,
+                      pipelineState.currentStep,
+                    ) === "composition"
+                      ? "Composition failed. The Worker log (reports/live_api.out.log) has the Python traceback."
+                      : "Something went wrong. Please try again."))}
               </p>
               <Button
                 type="button"
@@ -5069,13 +5073,14 @@ export function AudioStudio() {
                 role="alert"
               >
                 <p>
-                  {formatValidationError(
-                    rollbackNotice
-                      .replace(/\bStudioStreamDroppedError\b/gi, "")
-                      .replace(/\s{2,}/g, " ")
-                      .trim(),
-                    "Something went wrong. Please try again.",
-                  )}
+                  {createFailureBannerText(pipelineState.lastError) ??
+                    formatValidationError(
+                        rollbackNotice
+                          .replace(/\bStudioStreamDroppedError\b/gi, "")
+                          .replace(/\s{2,}/g, " ")
+                          .trim(),
+                        "Something went wrong. Please try again.",
+                      )}
                 </p>
               </div>
               {retryPlan ? (
