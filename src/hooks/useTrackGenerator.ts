@@ -26,6 +26,64 @@ function streamUrl(filename: string): string {
   return `${API_BASE}/api/stream/${encodeURIComponent(filename)}`;
 }
 
+export type TrackCreateInput = {
+  prompt: string;
+  genreHint?: string;
+  lyrics?: string;
+  durationSeconds?: number;
+  bpm?: number;
+  weirdness?: number;
+  audioInfluence?: number;
+  styleInfluence?: number;
+  style?: string;
+  vocalFile?: Blob | File | null;
+};
+
+function vocalTake(file: Blob | File | null | undefined): Blob | File | null {
+  if (!file || file.size <= 64) return null;
+  return file;
+}
+
+function postCreate(input: TrackCreateInput): Promise<Response> {
+  const take = vocalTake(input.vocalFile);
+  if (take) {
+    const form = new FormData();
+    const seconds =
+      input.durationSeconds == null ? "" : String(Math.round(input.durationSeconds));
+    const bpm = input.bpm == null ? "" : String(input.bpm);
+    form.append("prompt", input.prompt);
+    if (input.lyrics != null) form.append("lyrics", input.lyrics);
+    if (input.style) form.append("style", input.style);
+    if (input.genreHint) form.append("genre_hint", input.genreHint);
+    if (seconds) {
+      form.append("duration", seconds);
+      form.append("length", seconds);
+    }
+    if (bpm) {
+      form.append("bpm", bpm);
+      form.append("tempo", bpm);
+    }
+    if (input.weirdness != null) form.append("weirdness", String(input.weirdness));
+    if (input.audioInfluence != null) form.append("audio_influence", String(input.audioInfluence));
+    if (input.styleInfluence != null) form.append("style_influence", String(input.styleInfluence));
+    form.append("vocal_present", "true");
+    const file = new File([take], "ref_vocal.wav", { type: take.type || "audio/wav" });
+    form.append("vocal_file", file, "ref_vocal.wav");
+    return fetch(`${API_BASE}/api/tracks/create`, { method: "POST", body: form });
+  }
+  return fetch(`${API_BASE}/api/tracks/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      genre_hint: input.genreHint?.trim() || undefined,
+      lyrics: input.lyrics,
+      duration: input.durationSeconds,
+      bpm: input.bpm,
+    }),
+  });
+}
+
 export function useTrackGenerator() {
   const [status, setStatus] = useState<TrackGeneratorStatus>("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -36,12 +94,8 @@ export function useTrackGenerator() {
 
   const createJob = useMutation({
     retry: false,
-    mutationFn: async (body: { prompt: string; genre_hint?: string }) => {
-      const res = await fetch(`${API_BASE}/api/tracks/create`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+    mutationFn: async (body: TrackCreateInput) => {
+      const res = await postCreate(body);
       const data = await res.json().catch(() => ({}));
       return sessionFromCreateResponse(res, data);
     },
@@ -106,14 +160,17 @@ export function useTrackGenerator() {
   );
 
   const generateTrack = useCallback(
-    async (prompt: string, genreHint?: string) => {
-      const trimmed = prompt.trim();
+    async (promptOrInput: string | TrackCreateInput, genreHint?: string) => {
+      const input: TrackCreateInput =
+        typeof promptOrInput === "string" ? { prompt: promptOrInput, genreHint } : promptOrInput;
+      const trimmed = input.prompt.trim();
+      const take = vocalTake(input.vocalFile);
       if (!trimmed) {
         setError("Prompt is required.");
         setStatus("failed");
         return;
       }
-      if (trimmed.length < 50) {
+      if (!take && trimmed.length < 50) {
         setError("Prompt must be at least 50 characters.");
         setStatus("failed");
         return;
@@ -133,8 +190,10 @@ export function useTrackGenerator() {
       setStatus("queued");
       try {
         const id = await createJob.mutateAsync({
+          ...input,
           prompt: trimmed,
-          genre_hint: genreHint?.trim() || undefined,
+          genreHint: input.genreHint ?? genreHint,
+          vocalFile: take,
         });
         setSessionId(id);
         setStatus("queued");

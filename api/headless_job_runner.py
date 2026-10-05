@@ -7,10 +7,10 @@ GET  /api/stream/{filename}
 The generate job publishes ``{session}_master.wav`` (/api/stream/{session}_master.wav).
 It does not run the 13-lane assembler or the master pipeline.
 
-No voice sample calls google/lyria-3-pro: one pass at or below 210 seconds,
+No vocal file calls google/lyria-3-pro: one pass at or below 210 seconds,
 two-pass stitch above that. A saved ref_vocal.wav calls pinned minimax/music-2.6
-and downloads that output as the master. The take stays on disk and is not an
-input. ffmpeg does not mix a Lyria bed.
+for an instrumental bed only, then ffmpeg mixes the take onto that bed.
+Lyria is not used on the vocal branch. The take stays on disk.
 """
 from __future__ import annotations
 
@@ -1204,7 +1204,9 @@ def _worker_inner(
             _update_job(session_id, status="completed", note=note)
             return
         opts = dict(render_opts or {})
-        use_vocal = _voice_sample_ready(opts.get("voice_sample_path"))
+        use_vocal = _voice_sample_ready(opts.get("voice_sample_path")) or _voice_sample_ready(
+            opts.get("vocal_file")
+        )
         from engine.generate_track_headless import (
             LYRIA_MODEL_ID as _PINNED_LYRIA_MODEL_ID,
             MINIMAX_MODEL_ID as _PINNED_MINIMAX_MODEL_ID,
@@ -1358,7 +1360,7 @@ class CreateTrackBody(BaseModel):
 
 
 DEFAULT_RENDER_SECONDS = 210.0
-DEFAULT_RENDER_BPM = 110.0
+DEFAULT_RENDER_BPM = 86.0
 VOCAL_MODES = frozenset({"lead", "adlib", "none"})
 _VOCAL_CACHE_PREFERRED = r"D:\audio_cache\vocals"
 
@@ -1402,6 +1404,27 @@ def _form_int(form: Any, key: str, default: int | None = None) -> int | None:
         return int(float(raw))
     except (TypeError, ValueError):
         return default
+
+
+def _form_vocal_present(raw: Any) -> bool:
+    """Form strings ``true`` / ``false``. Missing or unknown stays False."""
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    return False
+
+
+def _upload_file(value: Any) -> Any | None:
+    """A multipart file with a filename. Plain form strings are not files."""
+    if value is None or not hasattr(value, "read"):
+        return None
+    if not getattr(value, "filename", None):
+        return None
+    return value
 
 
 def _voice_sample_ready(path: Any) -> bool:
@@ -1455,11 +1478,13 @@ def _render_minimax_master(
     opts: dict[str, Any],
     render_minimax_master: Any,
 ) -> str:
-    """One music-2.6 prediction. ``ref_vocal.wav`` stays on disk and is not sent.
+    """One music-2.6 instrumental bed, then ffmpeg-mix ``ref_vocal.wav`` onto it.
 
-    Duration does not add a second call. Lyria and ffmpeg are not used.
+    The take is not uploaded. Lyria is not called. ``ref_vocal.wav`` is not deleted.
     """
-    vocal_path = os.path.abspath(str(opts.get("voice_sample_path") or ""))
+    from engine.generate_track_headless import mix_ref_vocal_onto_bed
+
+    vocal_path = os.path.abspath(str(opts.get("voice_sample_path") or opts.get("vocal_file") or ""))
     root = os.path.abspath(SCRATCH_ROOT)
     session_dir = os.path.abspath(os.path.join(root, session_id))
     master_path = os.path.abspath(os.path.join(session_dir, f"{session_id}_master.wav"))
@@ -1479,15 +1504,15 @@ def _render_minimax_master(
     bpm = _control_number(opts, "bpm")
     if bpm is None:
         bpm = DEFAULT_RENDER_BPM
-    saved = render_minimax_master(
+    bed = render_minimax_master(
         session_dir,
         genre_prompt=genre_prompt,
         bpm=bpm,
         session_id=session_id,
     )
-    if os.path.abspath(saved) == vocal_path:
+    if os.path.abspath(bed) == vocal_path or os.path.abspath(master_path) == vocal_path:
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
-    return saved
+    return mix_ref_vocal_onto_bed(bed, vocal_path, master_path)
 
 
 def _save_ref_vocal(session_id: str, raw: bytes) -> str:
@@ -1753,7 +1778,6 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
     """Read the create body and queue the session claimed by ``_join_active_generation``."""
     content_type = (request.headers.get("content-type") or "").lower()
     vocal_path: str | None = None
-    vocal_sec = 0.0
     style = ""
     lyrics = ""
     if "multipart/form-data" in content_type:
@@ -1773,6 +1797,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         duration_sec = _form_float(form, "duration")
         if duration_sec is None:
             duration_sec = _form_float(form, "duration_sec")
+        if duration_sec is None:
+            duration_sec = _form_float(form, "length")
         bars = _form_int(form, "bars")
         vocal_mode = _form_text(form, "vocal_mode").lower()
         key = _form_text(form, "key", default="G")
@@ -1780,10 +1806,25 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         weirdness = _form_float(form, "weirdness")
         audio_influence = _form_float(form, "audio_influence")
         style_influence = _form_float(form, "style_influence")
-        voice_upload = form.get("voice_sample")
-        voice_name = getattr(voice_upload, "filename", None) if voice_upload is not None else None
-        upload = form.get("vocal_file") or form.get("vocal_audio.wav")
-        vocal_path, vocal_sec = await _ingest_vocal_upload(upload, key)
+        # vocal_file is canonical. voice_sample is the same take under the old name.
+        upload = _upload_file(form.get("vocal_file")) or _upload_file(form.get("voice_sample"))
+        vocal_flag = _form_vocal_present(form.get("vocal_present"))
+        if vocal_flag and upload is not None:
+            raw_take = await _read_upload_bytes(upload)
+            if len(raw_take) > 25 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="voice_sample is too large")
+            if len(raw_take) >= 64:
+                try:
+                    vocal_path = _save_ref_vocal(str(_active_session_id or ""), raw_take)
+                except Exception as exc:
+                    _console_exception(f"[VOCAL] could not save ref_vocal.wav: {exc}")
+                    raise HTTPException(
+                        status_code=500, detail=f"could not save ref_vocal.wav: {exc}"
+                    ) from exc
+                print(
+                    f"[AUDIO_ENGINE] Saved vocal input to {vocal_path} ({len(raw_take)} bytes)",
+                    flush=True,
+                )
     else:
         try:
             payload = await request.json()
@@ -1807,8 +1848,6 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         weirdness = None
         audio_influence = None
         style_influence = None
-        voice_name = None
-        voice_upload = None
         duration_sec = body.duration if body.duration is not None else body.duration_sec
         bars = body.bars
         vocal_mode = (body.vocal_mode or "").strip().lower()
@@ -1818,7 +1857,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         _log("[VOICE INGEST] No vocal payload received on /generate.")
     if len(lyrics) > LYRICS_MAX:
         raise HTTPException(status_code=400, detail=LYRICS_TOO_LONG)
-    if user_prompt and len(user_prompt) < MIN_PROMPT:
+    # Prompt-only creates stay at 50 characters. A separate style line may be short.
+    if user_prompt and len(user_prompt) < MIN_PROMPT and not (style or "").strip():
         raise HTTPException(status_code=400, detail=PROMPT_TOO_SHORT)
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
@@ -1840,33 +1880,17 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         render_opts["audio_influence"] = float(audio_influence)
     if style_influence is not None:
         render_opts["style_influence"] = float(style_influence)
-    voice_sample_path: str | None = None
-    if voice_upload is not None and voice_name and hasattr(voice_upload, "read"):
-        raw_take = await _read_upload_bytes(voice_upload)
-        if len(raw_take) > 25 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="voice_sample is too large")
-        if len(raw_take) >= 64:
-            try:
-                voice_sample_path = _save_ref_vocal(str(_active_session_id or ""), raw_take)
-            except Exception as exc:
-                _console_exception(f"[VOCAL] could not save ref_vocal.wav: {exc}")
-                raise HTTPException(status_code=500, detail=f"could not save ref_vocal.wav: {exc}") from exc
-            render_opts["voice_sample_path"] = voice_sample_path
-            render_opts["engine_used"] = "Lyria"
-            _log(f"[VOCAL] ref_vocal={voice_sample_path} bytes={len(raw_take)}")
+    voice_sample_path = vocal_path if vocal_path and _voice_sample_ready(vocal_path) else None
     if voice_sample_path:
+        render_opts["voice_sample_path"] = voice_sample_path
+        render_opts["vocal_file"] = voice_sample_path
+        render_opts["engine_used"] = "Lyria"
         if duration_sec is not None:
             render_opts["duration_sec"] = float(duration_sec)
         elif bars is not None:
             render_opts["duration_sec"] = float(bars) * 4.0 * 60.0 / float(bpm)
         else:
             render_opts["duration_sec"] = DEFAULT_RENDER_SECONDS
-    elif vocal_path and vocal_sec > 0:
-        from engine.vocal_ingest import song_length_from_vocal
-
-        render_opts["duration_sec"] = song_length_from_vocal(vocal_sec, float(bpm))
-        render_opts["vocal_file"] = vocal_path
-        render_opts["vocal_mode"] = "lead"
     elif duration_sec is not None:
         render_opts["duration_sec"] = float(duration_sec)
     elif bars is not None:

@@ -1,7 +1,8 @@
 """Headless generate entry.
 
 Text songs call Replicate ``google/lyria-3-pro`` and write that audio as the
-session master. A saved vocal take calls pinned ``minimax/music-2.6`` instead.
+session master. A saved vocal take calls pinned ``minimax/music-2.6`` for an
+instrumental bed, then ffmpeg mixes ``ref_vocal.wav`` onto that bed.
 ``execute_prompt_pipeline`` still assembles the 13-lane tape for tests; ``main``
 does not call it.
 """
@@ -13,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -1771,6 +1773,30 @@ def _download_minimax_audio(url: str, timeout: float) -> bytes:
     return body
 
 
+def mix_ref_vocal_onto_bed(instrumental_path: str, vocal_path: str, master_path: str) -> str:
+    """ffmpeg-mix the saved take onto the instrumental bed. Does not delete the take."""
+    if os.path.abspath(master_path) == os.path.abspath(vocal_path):
+        raise RuntimeError("refusing to overwrite ref_vocal.wav")
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-i", instrumental_path,
+        "-i", vocal_path,
+        "-filter_complex",
+        "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voc];[0:a]volume=0.85[bed];[bed][voc]amix=inputs=2:duration=first:dropout_transition=2[out]",
+        "-map", "[out]",
+        "-ar", "44100",
+        "-ac", "2",
+        master_path,
+    ]
+    completed = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        raise RuntimeError(stderr or f"ffmpeg exited {completed.returncode}")
+    if not os.path.isfile(master_path):
+        raise RuntimeError("ffmpeg did not write the master")
+    return master_path
+
+
 def render_minimax_master(
     dest_dir: str,
     *,
@@ -1780,11 +1806,13 @@ def render_minimax_master(
     timeout_sec: float = LYRIA_TIMEOUT_SEC,
     poll_sec: float = LYRIA_POLL_SEC,
 ) -> str:
-    """One pinned music-2.6 prediction. Writes ``{session_id}_master.wav``.
+    """One pinned music-2.6 prediction. Writes ``bed_instrumental.wav``.
 
     The input keys are fixed. ``ref_vocal.wav`` is not uploaded and is not an
-    input. Lyria is not called.
+    input. Lyria is not called. The caller mixes the take onto this bed.
     """
+    if not str(session_id or "").strip():
+        raise RuntimeError("invalid session_id")
     token = _lyria_token()
     if not token:
         raise RuntimeError("REPLICATE_API_TOKEN is not configured")
@@ -1821,21 +1849,21 @@ def render_minimax_master(
     audio_url = lyria_output_url(prediction.get("output"))
     body = _download_minimax_audio(audio_url, timeout=60.0)
     os.makedirs(dest_dir, exist_ok=True)
-    master_path = os.path.join(dest_dir, f"{session_id}_master.wav")
-    if os.path.basename(master_path) == "ref_vocal.wav":
+    bed_path = os.path.join(dest_dir, "bed_instrumental.wav")
+    if os.path.abspath(bed_path) == os.path.abspath(os.path.join(dest_dir, "ref_vocal.wav")):
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
-    tmp = master_path + ".part"
+    tmp = bed_path + ".part"
     try:
         with open(tmp, "wb") as handle:
             handle.write(body)
-        os.replace(tmp, master_path)
+        os.replace(tmp, bed_path)
     except Exception:
         try:
             os.remove(tmp)
         except OSError:
             pass
         raise
-    return master_path
+    return bed_path
 
 
 def render_lyria_master(

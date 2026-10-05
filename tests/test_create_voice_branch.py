@@ -1,6 +1,6 @@
-"""Create-route branch: Lyria for text, pinned music-2.6 when a take is present.
+"""Create-route branch: Lyria for text, pinned music-2.6 plus an ffmpeg mix when a take is present.
 
-HTTP is mocked. Nothing is sent to Replicate. ffmpeg is not part of either path.
+HTTP is mocked. Nothing is sent to Replicate. ffmpeg is a stub.
 """
 from __future__ import annotations
 
@@ -167,9 +167,31 @@ def _aliases(body: dict, session_id: str) -> None:
     assert "Create did not return a session id" not in str(body.get("error") or "")
 
 
+_MIX_BYTES = b"MIXDOWN" + (b"\x11" * (120 * 1024))
+_FFMPEG_FILTER = (
+    "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voc];"
+    "[0:a]volume=0.85[bed];"
+    "[bed][voc]amix=inputs=2:duration=first:dropout_transition=2[out]"
+)
+
+
 def _forbid_ffmpeg(monkeypatch) -> None:
     def fake_run(*args, **kwargs):
         raise AssertionError(f"ffmpeg mix ran: {args[0] if args else kwargs}")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+
+def _stub_ffmpeg(monkeypatch, calls: list, *, code: int = 0, stderr: str = "") -> None:
+    def fake_run(cmd, **kwargs):
+        argv = list(cmd)
+        if not argv or os.path.basename(str(argv[0])).lower() not in {"ffmpeg", "ffmpeg.exe"}:
+            raise AssertionError(f"unexpected subprocess: {argv}")
+        calls.append(argv)
+        if code == 0:
+            with open(argv[-1], "wb") as handle:
+                handle.write(_MIX_BYTES)
+        return type("Result", (), {"returncode": code, "stderr": stderr, "stdout": ""})()
 
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
 
@@ -188,7 +210,11 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     started: list = []
     client = _client(monkeypatch, started)
     # Multipart with no voice_sample field. Filename recording.wav is not sent.
-    response = client.post("/api/tracks/create", data=_fields(), files={"note": (None, "")})
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(vocal_present="false"),
+        files={"note": (None, "")},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -230,7 +256,7 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     assert (scratch / session_id / f"{session_id}_master.wav").is_file()
 
 
-def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch):
+def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch, capsys):
     scratch, assets = live_dirs
     audio = _gate_wav()
     take = _reference_bytes()
@@ -240,15 +266,16 @@ def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch):
         _Resp(audio, {"Content-Type": "audio/wav"}),
     ]
     calls: list = []
+    ffmpeg_calls: list = []
     _install_http(monkeypatch, responses, calls)
-    _forbid_ffmpeg(monkeypatch)
+    _stub_ffmpeg(monkeypatch, ffmpeg_calls)
     started: list = []
     client = _client(monkeypatch, started)
     # 420 is two Lyria passes on the text path. A take is one music-2.6 call.
     response = client.post(
         "/api/tracks/create",
-        data=_fields(duration="420"),
-        files={"voice_sample": ("recording.wav", take, "audio/wav")},
+        data=_fields(duration="420", vocal_present="true"),
+        files={"vocal_file": ("ref_vocal.wav", take, "audio/wav")},
     )
     assert response.status_code == 200
     body = response.json()
@@ -263,6 +290,8 @@ def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch):
     assert ref.is_file()
     assert ref.read_bytes() == take
     assert not (scratch / session_id / "recording.wav").exists()
+    saved_line = f"[AUDIO_ENGINE] Saved vocal input to {os.path.abspath(ref)} ({len(take)} bytes)"
+    assert saved_line in capsys.readouterr().out
     runner._worker(*started[-1])
     job = runner._public_job(runner._lookup_job(session_id))
     assert job["status"] == "completed", job.get("error")
@@ -273,11 +302,21 @@ def test_create_with_recording_wav_calls_music_2_6_once(live_dirs, monkeypatch):
     polled = client.get(f"/api/tracks/status/{session_id}").json()
     _aliases(polled, session_id)
     master = scratch / session_id / f"{session_id}_master.wav"
-    assert not (scratch / session_id / "bed_instrumental.wav").is_file()
+    bed = scratch / session_id / "bed_instrumental.wav"
+    assert bed.is_file()
+    assert bed.read_bytes() == audio
     assert master.is_file()
-    assert master.read_bytes() == audio
+    assert master.read_bytes() == _MIX_BYTES
+    assert master.read_bytes() != audio
     assert ref.read_bytes() == take
-    assert (assets / f"{session_id}_master.wav").read_bytes() == audio
+    assert (assets / f"{session_id}_master.wav").read_bytes() == _MIX_BYTES
+    assert len(ffmpeg_calls) == 1
+    ffmpeg_cmd = ffmpeg_calls[0]
+    ffmpeg_inputs = [ffmpeg_cmd[index + 1] for index, arg in enumerate(ffmpeg_cmd) if arg == "-i"]
+    assert ffmpeg_inputs[0].endswith("bed_instrumental.wav")
+    assert ffmpeg_inputs[1].endswith("ref_vocal.wav")
+    assert ffmpeg_cmd[ffmpeg_cmd.index("-filter_complex") + 1] == _FFMPEG_FILTER
+    assert ffmpeg_cmd[-1].endswith(f"{session_id}_master.wav")
     assert MINIMAX_MODEL_ID == "minimax/music-2.6"
     assert LYRIA_MODEL_ID == "google/lyria-3-pro"
     assert runner.MINIMAX_MODEL_ID == MINIMAX_MODEL_ID
@@ -351,7 +390,7 @@ def test_music_2_6_exception_is_a_job_error_and_keeps_the_session(live_dirs, mon
     client = _client(monkeypatch, started)
     response = client.post(
         "/api/tracks/create",
-        data=_fields(),
+        data=_fields(vocal_present="true"),
         files={"voice_sample": ("recording.wav", take, "audio/wav")},
     )
     assert response.status_code == 200
@@ -403,7 +442,7 @@ def test_missing_token_does_not_call_replicate(live_dirs, monkeypatch, capsys):
     client = _client(monkeypatch, started)
     response = client.post(
         "/api/tracks/create",
-        data=_fields(),
+        data=_fields(vocal_present="true"),
         files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
     )
     assert response.status_code == 200
@@ -451,7 +490,7 @@ def test_music_2_6_404_fails_the_job_without_dropping_the_session(live_dirs, mon
     client = _client(monkeypatch, started)
     response = client.post(
         "/api/tracks/create",
-        data=_fields(),
+        data=_fields(vocal_present="true"),
         files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
     )
     assert response.status_code == 200
@@ -488,3 +527,108 @@ def test_music_2_6_404_fails_the_job_without_dropping_the_session(live_dirs, mon
         assert b"audio_url" not in payload
     health = client.get("/health")
     assert health.status_code == 200
+
+
+def test_vocal_present_false_does_not_save_or_mix(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    _forbid_ffmpeg(monkeypatch)
+    started: list = []
+    client = _client(monkeypatch, started)
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(vocal_present="false"),
+        files={"vocal_file": ("ref_vocal.wav", _reference_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["vocal_present"] is False
+    assert body["status"] == "pending"
+    session_id = body["session_id"]
+    _aliases(body, session_id)
+    assert not (scratch / session_id / "ref_vocal.wav").is_file()
+    opts = started[-1][-1]
+    assert "voice_sample_path" not in opts
+    assert "vocal_file" not in opts
+
+
+def test_ffmpeg_mix_failure_keeps_the_session_and_the_take(live_dirs, monkeypatch, capsys):
+    scratch, _assets = live_dirs
+    audio = _gate_wav()
+    take = _reference_bytes()
+    responses = [
+        _json_resp({"id": "pred_music26", "status": "succeeded", "output": "https://replicate.delivery/pb/bed.wav"}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
+    ]
+    calls: list = []
+    ffmpeg_calls: list = []
+    _install_http(monkeypatch, responses, calls)
+    _stub_ffmpeg(monkeypatch, ffmpeg_calls, code=1, stderr="amix failed: invalid data")
+    started: list = []
+    client = _client(monkeypatch, started)
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(vocal_present="true", length="180"),
+        files={"vocal_file": ("ref_vocal.wav", take, "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session_id"]
+    _aliases(body, session_id)
+    assert body["vocal_present"] is True
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "failed"
+    assert job["error"] == "Voice API failed: amix failed: invalid data"
+    assert "Create did not return a session id" not in job["error"]
+    _aliases(job, session_id)
+    ref = scratch / session_id / "ref_vocal.wav"
+    assert ref.is_file()
+    assert ref.read_bytes() == take
+    assert (scratch / session_id / "bed_instrumental.wav").read_bytes() == audio
+    assert ffmpeg_calls
+    assert not any("lyria" in req.full_url for req in calls)
+    captured = capsys.readouterr()
+    assert "CRITICAL REPLICATE ERROR" in captured.out
+    assert "Traceback" in captured.err
+    assert client.get("/health").status_code == 200
+
+
+def test_omitted_bpm_defaults_to_86(live_dirs, monkeypatch):
+    scratch, _assets = live_dirs
+    audio = _gate_wav()
+    responses = [
+        _json_resp({"id": "pred_music26", "status": "succeeded", "output": "https://replicate.delivery/pb/bed.wav"}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
+    ]
+    calls: list = []
+    ffmpeg_calls: list = []
+    _install_http(monkeypatch, responses, calls)
+    _stub_ffmpeg(monkeypatch, ffmpeg_calls)
+    started: list = []
+    client = _client(monkeypatch, started)
+    fields = _fields(vocal_present="true", length="200")
+    fields.pop("tempo")
+    fields.pop("duration")
+    response = client.post(
+        "/api/tracks/create",
+        data=fields,
+        files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session_id"]
+    assert body["vocal_present"] is True
+    opts = started[-1][-1]
+    assert opts["bpm"] == pytest.approx(86.0)
+    assert opts["duration_sec"] == pytest.approx(200.0)
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "completed", job.get("error")
+    posts = [req for req in calls if "music-2.6" in req.full_url and req.full_url.endswith("/predictions")]
+    assert len(posts) == 1
+    sent = json.loads(posts[0].data.decode("utf-8"))
+    assert sent["input"]["prompt"] == "outlaw country, 86 BPM, instrumental, studio production"
+    assert not any("lyria" in req.full_url for req in calls)
+    assert (scratch / session_id / "ref_vocal.wav").is_file()
+    assert ffmpeg_calls

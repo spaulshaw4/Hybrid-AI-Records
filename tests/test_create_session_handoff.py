@@ -77,7 +77,7 @@ def test_lyria_create_payload_includes_every_session_alias(client):
 def test_vocal_create_payload_includes_every_session_alias(client):
     response = client.post(
         "/api/tracks/create",
-        data={"prompt": _PROMPT, "lyrics": "neon rain", "duration": "210"},
+        data={"prompt": _PROMPT, "lyrics": "neon rain", "duration": "210", "vocal_present": "true"},
         files={"voice_sample": ("recording.wav", b"RIFF" + b"\x00" * 80, "audio/wav")},
     )
     assert response.status_code == 200, response.text

@@ -1451,12 +1451,15 @@ export function AudioStudio() {
   }, []);
 
   const [voiceSample, setVoiceSample] = useState<File | Blob | null>(null);
+  /** Survives a parent re-render. Cleared only by an explicit discard. */
+  const voiceSampleRef = useRef<File | Blob | null>(null);
   /** Object URL for the current custom take — mirrors QuickVocalRecorder clip for playback / Fish. */
   const [vocalAudioUrl, setVocalAudioUrl] = useState<string | null>(null);
   const recordedVoiceBlob = voiceSample;
   /** Only an explicit discard (null) or a new take replaces the form file. */
   const handleCustomVocalFile = useCallback((file: File | Blob | null) => {
     try {
+      voiceSampleRef.current = file;
       setVoiceSample(file);
       setVocalAudioUrl((prev) => {
         if (prev) {
@@ -2629,8 +2632,7 @@ export function AudioStudio() {
       // Textarea → tags verbatim. No genre-lock rebuild, no truncation.
       const styleTags = stylePrompt.trim() || selectedStyles.join(", ") || styleLine || genre;
 
-      // The recorded take stays a local recording.wav. Generate appends it as
-      // multipart voice_sample and does not create a remote clip link first.
+      // The recorded take stays in voiceSampleRef. Generate sends it as vocal_file.
 
       // Linear handoff: lyrics → Sonic prompt; Style Prompt textarea → tags.
       beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
@@ -2680,28 +2682,33 @@ export function AudioStudio() {
       try {
         // One multipart create. Do not set Content-Type; the browser adds the boundary.
         const runStream = async () => {
-          const duration = clampDurationPreset(targetDuration);
+          const durationSeconds = Math.round(clampDurationPreset(targetDuration));
+          const bpmValue = String(clampBpm(bpm));
+          const takeSource = voiceSampleRef.current;
+          const hasVocal = !!(takeSource && takeSource.size > 64);
           const form = new FormData();
-          form.append("prompt", (arrangedLyrics || styleLine || genre || trackTitle).slice(0, 5000));
+          form.append("prompt", styleTags.slice(0, 5000));
           const lyricPayload = arrangedLyrics || lyrics || "";
           if (lyricPayload.trim().length > LYRICS_MAX_CHARS) {
             throw new Error(LYRICS_TOO_LONG_MESSAGE);
           }
           form.append("lyrics", lyricPayload);
-          form.append("duration", String(duration));
-          form.append("tempo", String(clampBpm(bpm)));
-          form.append("bpm", String(clampBpm(bpm)));
+          form.append("duration", String(durationSeconds));
+          form.append("length", String(durationSeconds));
+          form.append("tempo", bpmValue);
+          form.append("bpm", bpmValue);
           form.append("weirdness", String(clampWeirdness(weirdness)));
           form.append("audio_influence", String(clampInfluence(audioInfluence)));
           form.append("style_influence", String(clampStyleInfluence(styleInfluence)));
+          form.append("vocal_present", hasVocal ? "true" : "false");
           if (styleTags) form.append("style", styleTags);
           if (genre) form.append("genre", genre);
           if (trackTitle) form.append("title", trackTitle);
-          if (voiceSample && voiceSample.size > 64) {
-            const take = new File([voiceSample], "recording.wav", {
-              type: voiceSample.type || "audio/wav",
+          if (hasVocal && takeSource) {
+            const take = new File([takeSource], "ref_vocal.wav", {
+              type: takeSource.type || "audio/wav",
             });
-            form.append("voice_sample", take, "recording.wav");
+            form.append("vocal_file", take, "ref_vocal.wav");
           }
           const created = await fetch("/api/tracks/create", {
             method: "POST",
@@ -3712,6 +3719,7 @@ export function AudioStudio() {
     setResult(null);
     setPlaybackSrc(null);
     setPlaybackKind("mastered");
+    voiceSampleRef.current = null;
     setVoiceSample(null);
     setVocalAudioUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
