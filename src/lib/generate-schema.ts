@@ -49,7 +49,11 @@ const controlsSchema = z.object({
 
 /** Studio generate payload — also the In-Gate flux shield surface. */
 export const generateSchema = z.object({
-  prompt: z.string().trim().min(3).max(6000),
+  prompt: z
+    .string()
+    .trim()
+    .min(50, "Prompt must be at least 50 characters.")
+    .max(5000, "prompt exceeds 5000 characters"),
   title: z.string().trim().max(120).default(""),
   style: z.string().trim().max(6000).default(""),
   lyrics: z.string().trim().max(LYRICS_MAX_CHARS, LYRICS_SCHEMA_MESSAGE).default(""),

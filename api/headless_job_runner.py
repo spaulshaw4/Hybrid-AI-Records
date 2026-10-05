@@ -61,7 +61,9 @@ DELIVERIES_ROOT = os.environ.get("HYBRID_DELIVERIES_ROOT") or os.path.join(
     _LIVE["root"], "deliveries"
 )
 _API_LOG = os.path.join(_REPO_ROOT, "reports", "live_api.out.log")
-MAX_PROMPT = 2000
+MIN_PROMPT = 50
+MAX_PROMPT = 5000
+PROMPT_TOO_SHORT = "Prompt must be at least 50 characters."
 LYRICS_MAX = 5000
 LYRICS_TOO_LONG = "Lyrics are too long. Maximum allowed is 5,000 characters."
 BIND_HOST = "127.0.0.1"
@@ -1652,7 +1654,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         form = await request.form()
         style = _form_text(form, "style")
         lyrics = _form_text(form, "lyrics")
-        prompt = _form_text(form, "prompt", "title", "style")
+        user_prompt = _form_text(form, "prompt")
+        prompt = user_prompt or _form_text(form, "title", "style")
         genre = _form_text(form, "genre_hint", "genre", "genre_lock", "style")
         title = _form_text(form, "title")
         if title and not prompt:
@@ -1688,7 +1691,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             raise
         style = (body.style or "").strip()
         lyrics = (body.lyrics or "").strip()
-        prompt = (body.prompt or body.title or body.style or "").strip()
+        user_prompt = (body.prompt or "").strip()
+        prompt = (user_prompt or body.title or body.style or "").strip()
         genre = (
             body.genre_hint or body.genre or body.genre_lock or body.style or ""
         ).strip()
@@ -1708,6 +1712,8 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         _log("[VOICE INGEST] No vocal payload received on /generate.")
     if len(lyrics) > LYRICS_MAX:
         raise HTTPException(status_code=400, detail=LYRICS_TOO_LONG)
+    if user_prompt and len(user_prompt) < MIN_PROMPT:
+        raise HTTPException(status_code=400, detail=PROMPT_TOO_SHORT)
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     if len(prompt) > MAX_PROMPT:

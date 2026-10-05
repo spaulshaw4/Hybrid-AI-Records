@@ -120,6 +120,16 @@ export function useTrackGenerator() {
         setStatus("failed");
         return;
       }
+      if (trimmed.length < 50) {
+        setError("Prompt must be at least 50 characters.");
+        setStatus("failed");
+        return;
+      }
+      if (trimmed.length > 5000) {
+        setError("prompt exceeds 5000 characters");
+        setStatus("failed");
+        return;
+      }
       // Same-tick double clicks both see the old status. The ref closes that gap.
       if (inflight.current) return;
       inflight.current = true;
@@ -130,7 +140,7 @@ export function useTrackGenerator() {
       setStatus("queued");
       try {
         const id = await createJob.mutateAsync({
-          prompt: trimmed.slice(0, 2000),
+          prompt: trimmed,
           genre_hint: genreHint?.trim() || undefined,
         });
         setSessionId(id);

@@ -2671,7 +2671,7 @@ export function AudioStudio() {
         const runStream = async () => {
           const duration = clampDurationPreset(targetDuration);
           const form = new FormData();
-          form.append("prompt", (arrangedLyrics || styleLine || genre || trackTitle).slice(0, 2000));
+          form.append("prompt", (arrangedLyrics || styleLine || genre || trackTitle).slice(0, 5000));
           const lyricPayload = arrangedLyrics || lyrics || "";
           if (lyricPayload.trim().length > LYRICS_MAX_CHARS) {
             throw new Error(LYRICS_TOO_LONG_MESSAGE);
@@ -4386,6 +4386,9 @@ export function AudioStudio() {
                   placeholder="Alternative Rock, grunge revival, 101 BPM, raw dynamic mood, overdriven electric guitar leads carry the hook while heavy live punchy drums and distorted bass fill the space"
                   className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 text-sm text-zinc-100 placeholder:text-zinc-500 shadow-none focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"
                 />
+                <p className="text-right text-xs text-muted-foreground" aria-live="polite">
+                  {stylePrompt.length} / 5000 characters
+                </p>
                 <Button
                   type="button"
                   variant="outline"

@@ -13,7 +13,7 @@ import {
 describe("PipelineFluxCoating", () => {
   it("parses stringified prompt_payload for In-Gate coating", () => {
     const payload = {
-      prompt: "neon rain over chrome streets",
+      prompt: "neon rain over chrome streets".padEnd(50, "."),
       title: "Chrome Rain",
       instrumental: true,
     };
@@ -33,12 +33,14 @@ describe("PipelineFluxCoating", () => {
 
   it("validates InGateLiteSchema (prompt + genreHint)", () => {
     const ok = InGateLiteSchema.safeParse({
-      prompt: "acid jazz nocturne",
+      prompt: "a".repeat(50),
       genreHint: "jazz",
     });
     expect(ok.success).toBe(true);
-    const bad = InGateLiteSchema.safeParse({ prompt: "ab" });
+    expect(InGateLiteSchema.safeParse({ prompt: "a".repeat(5000) }).success).toBe(true);
+    const bad = InGateLiteSchema.safeParse({ prompt: "a".repeat(49) });
     expect(bad.success).toBe(false);
+    expect(InGateLiteSchema.safeParse({ prompt: "a".repeat(5001) }).success).toBe(false);
   });
 
   it("coats Fluctuator envelopes and rejects bad UUIDs", () => {

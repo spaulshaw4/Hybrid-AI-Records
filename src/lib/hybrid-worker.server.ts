@@ -183,6 +183,12 @@ export async function generateFromHybridWorker(input: {
       "[Circuit Breaker] Gate 1 failed: API payload dropped prompt/style — nothing to generate.",
     );
   }
+  if (prompt.length < 50) {
+    throw new Error("Prompt must be at least 50 characters.");
+  }
+  if (prompt.length > 5000) {
+    throw new Error("prompt exceeds 5000 characters");
+  }
   console.log("[HYBRID_WORKER] routing Gate 1 to", base);
 
   const bpmRaw = Number(input.bpm);
@@ -208,7 +214,7 @@ export async function generateFromHybridWorker(input: {
 
   // Multipart — do NOT set Content-Type; fetch supplies the boundary.
   const form = new FormData();
-  form.append("prompt", prompt.slice(0, 2000));
+  form.append("prompt", prompt);
   form.append("title", prompt.slice(0, 120));
   form.append("genre", (input.genreHint || "").trim());
   form.append("genre_hint", (input.genreHint || "").trim());

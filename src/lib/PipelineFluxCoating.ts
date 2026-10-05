@@ -39,8 +39,8 @@ export const InGateLiteSchema = z.object({
   prompt: z
     .string()
     .trim()
-    .min(3, "Prompt must be at least 3 characters.")
-    .max(1000, "Prompt exceeds maximum length."),
+    .min(50, "Prompt must be at least 50 characters.")
+    .max(5000, "prompt exceeds 5000 characters"),
   genreHint: z.string().trim().max(6000).optional(),
 });
 

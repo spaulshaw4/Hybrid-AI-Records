@@ -15,7 +15,8 @@ export const LIMITS = {
   titleMax: 255,
   genreMax: 64,
   keyMax: 32,
-  promptMax: 2000,
+  promptMin: 50,
+  promptMax: 5000,
   bpmMin: 60,
   bpmMax: 200,
   barsMin: 4,
@@ -52,8 +53,14 @@ export function validateCreateTrack(req: CreateTrackInput): string | null {
   if (!Number.isInteger(req.bars) || req.bars < LIMITS.barsMin || req.bars > LIMITS.barsMax) {
     return `bars must be an integer in [${LIMITS.barsMin}, ${LIMITS.barsMax}]`;
   }
-  if (req.prompt !== undefined && req.prompt.length > LIMITS.promptMax) {
-    return `prompt exceeds ${LIMITS.promptMax} characters`;
+  if (req.prompt !== undefined) {
+    const prompt = req.prompt.trim();
+    if (prompt.length > 0 && prompt.length < LIMITS.promptMin) {
+      return "Prompt must be at least 50 characters.";
+    }
+    if (prompt.length > LIMITS.promptMax) {
+      return `prompt exceeds ${LIMITS.promptMax} characters`;
+    }
   }
   return null;
 }

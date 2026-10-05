@@ -7,7 +7,7 @@ import {
   formatValidationError,
 } from "@/lib/validation-error";
 
-const prompt = "night drive through the city";
+const prompt = "n".repeat(50);
 
 describe("lyrics length validation", () => {
   it("accepts 5000 characters and rejects 5001 with a readable message", () => {

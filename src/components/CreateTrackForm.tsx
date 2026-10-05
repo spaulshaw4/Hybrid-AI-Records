@@ -39,12 +39,15 @@ export function CreateTrackForm() {
         <Textarea
           id="headless-prompt"
           value={prompt}
-          maxLength={2000}
+          maxLength={5000}
           rows={4}
           disabled={disabled}
           placeholder="Describe the track you want to generate."
           onChange={(event) => setPrompt(event.target.value)}
         />
+        <p className="text-right text-xs text-muted-foreground" aria-live="polite">
+          {prompt.length} / 5000 characters
+        </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="headless-genre" className="text-xs text-muted-foreground">
