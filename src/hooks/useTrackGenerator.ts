@@ -11,6 +11,9 @@ const API_BASE = (
   "http://127.0.0.1:8880"
 ).replace(/\/$/, "");
 const POLL_MS = 3000;
+const POLL_TIMEOUT_MS = 600_000;
+const POLL_TIMEOUT_MESSAGE =
+  "Generation timed out after 10 minutes — no completed track in Vault.";
 
 export type TrackGeneratorStatus = "idle" | "queued" | "running" | "completed" | "failed";
 
@@ -86,6 +89,8 @@ export function useTrackGenerator() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [step, setStep] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollToken = useRef(0);
   const inflight = useRef(false);
   const titleRef = useRef("");
 
@@ -102,6 +107,10 @@ export function useTrackGenerator() {
     if (pollRef.current !== null) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+    if (watchdogRef.current !== null) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
     }
   }, []);
 
@@ -152,8 +161,10 @@ export function useTrackGenerator() {
 
   const pollStatus = useCallback(
     async (id: string) => {
+      const token = pollToken.current;
       try {
         const res = await fetch(`${API_BASE}/api/tracks/${encodeURIComponent(id)}/status`);
+        if (pollToken.current !== token) return;
         if (res.status === 404) {
           inflight.current = false;
           setStatus("failed");
@@ -165,6 +176,7 @@ export function useTrackGenerator() {
           return;
         }
         const payload = (await res.json()) as StatusPayload;
+        if (pollToken.current !== token) return;
         applyStatus(payload);
       } catch {
         // Daemon may be mid-restart; keep polling until unmount or a terminal status.
@@ -196,6 +208,7 @@ export function useTrackGenerator() {
       }
       // Same-tick double clicks both see the old status. The ref closes that gap.
       if (inflight.current) return;
+      const token = ++pollToken.current;
       inflight.current = true;
       stopPolling();
       setError(null);
@@ -217,6 +230,14 @@ export function useTrackGenerator() {
         pollRef.current = setInterval(() => {
           void pollStatus(id);
         }, POLL_MS);
+        watchdogRef.current = setTimeout(() => {
+          if (pollToken.current !== token) return;
+          pollToken.current += 1;
+          inflight.current = false;
+          setStatus("failed");
+          setError(POLL_TIMEOUT_MESSAGE);
+          stopPolling();
+        }, POLL_TIMEOUT_MS);
       } catch (err) {
         inflight.current = false;
         setStatus("failed");

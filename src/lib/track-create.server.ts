@@ -7,7 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -372,17 +372,42 @@ function mixRefVocal(bedPath: string, vocalPath: string, masterPath: string): Pr
     masterPath,
   ];
   return new Promise((resolve, rejectMix) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      rejectMix(error);
+    };
     const child = spawn("ffmpeg", args, { windowsHide: true });
     let stderr = "";
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
     });
-    child.on("error", rejectMix);
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") fail(new Error("ffmpeg is not installed"));
+      else fail(error instanceof Error ? error : new Error("ffmpeg is not installed"));
+    });
     child.on("close", (code) => {
-      if (code === 0) resolve();
-      else rejectMix(new Error(stderr.trim() || `ffmpeg exited ${code}`));
+      if (settled) return;
+      if (code === 0) {
+        settled = true;
+        resolve();
+        return;
+      }
+      const detail = stderr.trim();
+      fail(new Error(detail || `ffmpeg exited ${code}`));
     });
   });
+}
+
+async function requireMasterFile(masterPath: string): Promise<void> {
+  let info;
+  try {
+    info = await stat(masterPath);
+  } catch {
+    throw new Error("master wav is missing");
+  }
+  if (!info.isFile() || info.size <= 0) throw new Error("master wav is missing");
 }
 
 async function runTrackJob(sessionId: string): Promise<void> {
@@ -411,6 +436,7 @@ async function runTrackJob(sessionId: string): Promise<void> {
     } else {
       await writeFile(masterPath, bytes);
     }
+    await requireMasterFile(masterPath);
     job.status = "completed";
     job.step = "completed";
     job.error = null;
