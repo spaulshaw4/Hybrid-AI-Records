@@ -25,7 +25,12 @@ export type RelationalSnap = {
 
 const SESSION_RE = /^ht_[a-f0-9]{8,}$/i;
 
-export function isWorkerSessionId(value: unknown): value is string {
+declare const workerSessionIdBrand: unique symbol;
+
+/** A string that matches a local worker session id. Not every string is one. */
+export type WorkerSessionId = string & { readonly [workerSessionIdBrand]: true };
+
+export function isWorkerSessionId(value: unknown): value is WorkerSessionId {
   return typeof value === "string" && SESSION_RE.test(value.trim());
 }
 

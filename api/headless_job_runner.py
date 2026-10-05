@@ -5,8 +5,12 @@ GET  /api/tracks/status/{id}
 GET  /api/stream/{filename}
 
 The generate job calls Replicate google/lyria-3-pro and publishes that file as
-the session master (/api/stream/{session}_master.mp3). It does not run the
+the session master (/api/stream/{session}_master.wav). It does not run the
 13-lane assembler or the master pipeline.
+
+A saved ref_vocal.wav is not sent to a voice model. That job is one instrumental
+Lyria bed, then ffmpeg lays the user's take on top. No voice sample keeps the
+text Lyria path: one pass at or below 210 seconds, two-pass stitch above that.
 """
 from __future__ import annotations
 
@@ -320,6 +324,7 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "engine_used",
         "token_cost",
         "detail",
+        "vocal_present",
     )
     out: dict[str, Any] = {}
     for key in keys:
@@ -334,6 +339,14 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
                 out["master_duration_sec"] = round(float(bars) * 240.0 / float(bpm), 3)
         except (TypeError, ValueError):
             pass
+    sid = str(out.get("session_id") or "").strip()
+    if sid:
+        out["session_id"] = sid
+        out["sessionId"] = sid
+        out["track_id"] = sid
+        out["id"] = sid
+    if "vocal_present" in job:
+        out["vocal_present"] = bool(job.get("vocal_present"))
     return out
 
 
@@ -1179,7 +1192,7 @@ def _worker_inner(
     dry_run: bool,
     render_opts: dict[str, Any] | None = None,
 ) -> None:
-    use_heart = False
+    use_vocal = False
     try:
         _update_job(session_id, status="running", error=None, note=None)
         if dry_run or _DRY_RUN:
@@ -1194,10 +1207,10 @@ def _worker_inner(
         # Flat price. A mic job and a long Lyria job are still one token.
         token_charge = generation_token_charge(duration_value)
         _log(f"[TOKEN] charge={token_charge} duration_sec={duration_raw}")
-        use_heart = _voice_sample_ready(opts.get("voice_sample_path"))
-        engine = "HeartMuLa" if use_heart else "Lyria"
-        if use_heart:
-            saved = _render_heart_mula_master(session_id, prompt, opts)
+        use_vocal = _voice_sample_ready(opts.get("voice_sample_path"))
+        engine = "Lyria"
+        if use_vocal:
+            saved = _render_vocal_overlay_master(session_id, prompt, genre_hint, opts)
         else:
             saved = render_lyria_master(
                 os.path.join(SCRATCH_ROOT, session_id),
@@ -1226,23 +1239,18 @@ def _worker_inner(
     except Exception as exc:
         _console_exception(f"[worker] {session_id} failed: {exc}")
         try:
-            if use_heart and isinstance(exc, HTTPException):
+            if use_vocal and isinstance(exc, HTTPException):
                 voice_detail = _redact(str(exc.detail or ""))[:800]
                 _update_job(
                     session_id,
                     status="failed",
                     error=voice_detail,
                     detail=voice_detail,
-                    engine_used="HeartMuLa",
+                    engine_used="Lyria",
                     token_cost=1,
                 )
             else:
-                failed_engine = "HeartMuLa" if use_heart else "Lyria"
-                prefix = (
-                    "HeartMuLa generation failed"
-                    if use_heart
-                    else "Lyria generation failed"
-                )
+                prefix = "Lyria generation failed"
                 detail = _redact(str(exc))[:700]
                 if not detail.startswith(prefix):
                     detail = f"{prefix}: {detail}"
@@ -1250,7 +1258,7 @@ def _worker_inner(
                     session_id,
                     status="failed",
                     error=detail[:800],
-                    engine_used=failed_engine,
+                    engine_used="Lyria",
                     token_cost=1,
                 )
         except KeyError:
@@ -1405,38 +1413,112 @@ def _style_with_controls(style: str, opts: dict[str, Any]) -> str:
     return f"{base} {' '.join(directives)}".strip()
 
 
-def _heart_mula_prompt(prompt: str, opts: dict[str, Any]) -> str:
-    """Song prompt plus style tags and slider directives. Lyrics stay in ``text``."""
+_VOCAL_MIX_FILTER = (
+    "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voc];"
+    "[0:a]volume=0.85[bed];"
+    "[bed][voc]amix=inputs=2:duration=first:dropout_transition=2[out]"
+)
+_FFMPEG_STDERR_TAIL = 400
+
+
+def _prompt_without_sung_lyrics(prompt: str, lyrics: str) -> str:
+    """Drop sung lyrics so the bed model cannot invent a singer from them."""
     song = (prompt or "").strip()
-    style = str(opts.get("style") or "").strip()
-    if style and style != song:
-        song = f"{song}\n{style}".strip()
-    return _style_with_controls(song, opts)
+    lyric_text = (lyrics or "").strip()
+    if not song or not lyric_text:
+        return song
+    if song == lyric_text:
+        return ""
+    if lyric_text in song:
+        song = " ".join(song.replace(lyric_text, " ").split())
+    return song
 
 
-def _render_heart_mula_master(session_id: str, prompt: str, opts: dict[str, Any]) -> str:
-    """Pinned music-01 prediction. The download is the Gate 1 master wav."""
-    from services.voice_service import VoiceInputError, render_heart_mula_master
+def _stderr_tail(text: str, limit: int = _FFMPEG_STDERR_TAIL) -> str:
+    flat = " ".join((text or "").replace("\r", " ").split())
+    if len(flat) <= limit:
+        return flat
+    return flat[-limit:]
 
-    ref = str(opts.get("voice_sample_path") or "").strip()
-    dest = os.path.abspath(os.path.join(SCRATCH_ROOT, session_id, f"{session_id}_master.wav"))
-    if not _is_under(dest, os.path.abspath(SCRATCH_ROOT)):
-        raise RuntimeError("HeartMuLa generation failed: master path escaped scratch")
+
+def _ffmpeg_mix_vocal(instrumental_path: str, vocal_path: str, master_path: str) -> None:
+    """Lay ``ref_vocal.wav`` on the instrumental bed. The take is only an input."""
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-i", instrumental_path,
+        "-i", vocal_path,
+        "-filter_complex",
+        _VOCAL_MIX_FILTER,
+        "-map", "[out]",
+        "-ar", "44100",
+        "-ac", "2",
+        master_path,
+    ]
     try:
-        output = render_heart_mula_master(
-            ref,
-            str(opts.get("lyrics") or ""),
-            _heart_mula_prompt(prompt, opts),
-            session_id,
-            dest,
+        completed = subprocess.run(
+            ffmpeg_cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
         )
-    except VoiceInputError:
-        raise
-    except Exception as e:
-        print(f"CRITICAL REPLICATE ERROR: {type(e).__name__} - {str(e)}")
+    except Exception as exc:
         traceback.print_exc()
-        raise HTTPException(status_code=502, detail=f"Voice API failed: {str(e)}") from e
-    return output
+        raise HTTPException(status_code=502, detail=f"Voice API failed: {exc}") from exc
+    if completed.returncode != 0 or not os.path.isfile(master_path):
+        tail = _stderr_tail(completed.stderr or completed.stdout or "")
+        if not tail:
+            tail = f"ffmpeg exited {completed.returncode}"
+        try:
+            raise RuntimeError(tail)
+        except RuntimeError:
+            traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"Voice API failed: {tail}")
+
+
+def _render_vocal_overlay_master(
+    session_id: str,
+    prompt: str,
+    genre_hint: str,
+    opts: dict[str, Any],
+) -> str:
+    """One instrumental Lyria bed, then ffmpeg mixes the user's take on top.
+
+    ``ref_vocal.wav`` is not uploaded and is not overwritten. Sung lyrics are
+    not sent. Duration above 210 stays one generation call on this path.
+    """
+    from engine.generate_track_headless import render_lyria_instrumental_bed
+
+    vocal_path = os.path.abspath(str(opts.get("voice_sample_path") or ""))
+    root = os.path.abspath(SCRATCH_ROOT)
+    session_dir = os.path.abspath(os.path.join(root, session_id))
+    master_path = os.path.abspath(os.path.join(session_dir, f"{session_id}_master.wav"))
+    if (
+        not _is_under(session_dir, root)
+        or not _is_under(master_path, root)
+        or not _is_under(vocal_path, root)
+    ):
+        raise RuntimeError("vocal mix path escaped scratch")
+    if os.path.basename(vocal_path) != "ref_vocal.wav":
+        raise RuntimeError("vocal mix expected ref_vocal.wav")
+    if os.path.abspath(vocal_path) == master_path:
+        raise RuntimeError("refusing to overwrite ref_vocal.wav")
+    lyrics = str(opts.get("lyrics") or "")
+    song = _prompt_without_sung_lyrics(prompt, lyrics)
+    style = _style_with_controls(str(opts.get("style") or ""), opts)
+    genre = (genre_hint or "").strip()
+    if genre and genre not in style:
+        style = f"{genre} {style}".strip()
+    bed_path = render_lyria_instrumental_bed(
+        session_dir,
+        style=style,
+        prompt=song,
+        bpm=_control_number(opts, "bpm"),
+    )
+    if os.path.abspath(bed_path) == vocal_path:
+        raise RuntimeError("refusing to overwrite ref_vocal.wav")
+    _ffmpeg_mix_vocal(bed_path, vocal_path, master_path)
+    return master_path
 
 
 def _save_ref_vocal(session_id: str, raw: bytes) -> str:
@@ -1513,15 +1595,19 @@ def _accepted_create_body(session_id: str | None, **fields: Any) -> dict[str, An
 
     A newly queued render is ``pending`` until the wav exists. Callers may pass
     a more specific status when joining a job that is already in flight.
+    ``token_cost`` stays 1. ``vocal_present`` is always a boolean.
     """
     sid = str(session_id or "").strip()
+    status = str(fields.get("status") or "").strip() or "pending"
     body: dict[str, Any] = {
         "success": True,
-        "status": "pending",
+        "status": status,
         "session_id": sid,
         "sessionId": sid,
         "track_id": sid,
         "id": sid,
+        "token_cost": 1,
+        "vocal_present": bool(fields.get("vocal_present", False)),
     }
     body.update(fields)
     body["success"] = True
@@ -1529,7 +1615,9 @@ def _accepted_create_body(session_id: str | None, **fields: Any) -> dict[str, An
     body["sessionId"] = sid
     body["track_id"] = sid
     body["id"] = sid
-    if "status" not in fields or not str(fields.get("status") or "").strip():
+    body["token_cost"] = 1
+    body["vocal_present"] = bool(body.get("vocal_present"))
+    if not str(body.get("status") or "").strip():
         body["status"] = "pending"
     return body
 
@@ -1792,11 +1880,11 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             try:
                 voice_sample_path = _save_ref_vocal(str(_active_session_id or ""), raw_take)
             except Exception as exc:
-                _console_exception(f"[HEART_MULA] could not save ref_vocal.wav: {exc}")
-                raise HTTPException(status_code=500, detail=f"HeartMuLa generation failed: {exc}") from exc
+                _console_exception(f"[VOCAL] could not save ref_vocal.wav: {exc}")
+                raise HTTPException(status_code=500, detail=f"could not save ref_vocal.wav: {exc}") from exc
             render_opts["voice_sample_path"] = voice_sample_path
-            render_opts["engine_used"] = "HeartMuLa"
-            _log(f"[HEART_MULA] ref_vocal={voice_sample_path} bytes={len(raw_take)}")
+            render_opts["engine_used"] = "Lyria"
+            _log(f"[VOCAL] ref_vocal={voice_sample_path} bytes={len(raw_take)}")
     if voice_sample_path:
         if duration_sec is not None:
             render_opts["duration_sec"] = float(duration_sec)
@@ -1826,7 +1914,7 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
         f"[API_LENGTH] bpm={float(bpm):.1f} duration_sec={render_opts['duration_sec']:.1f} "
         f"bars={round(render_opts['duration_sec'] * float(bpm) / 240.0)} "
         f"vocal_mode={render_opts.get('vocal_mode', 'auto')} "
-        f"vocal_present={bool(vocal_path)}"
+        f"vocal_present={bool(render_opts.get('vocal_file') or render_opts.get('voice_sample_path'))}"
     )
     computed_bars = round(render_opts["duration_sec"] * float(bpm) / 240.0)
     return _enqueue_generate(

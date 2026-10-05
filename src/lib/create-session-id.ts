@@ -22,8 +22,10 @@ function createResponseError(message: string): Error {
 }
 
 function createBodyRecord(data: unknown): CreateSessionBody & Record<string, unknown> {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
-  return data as CreateSessionBody & Record<string, unknown>;
+  if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+    return data as CreateSessionBody & Record<string, unknown>;
+  }
+  return {};
 }
 
 /**

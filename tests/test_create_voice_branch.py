@@ -1,12 +1,13 @@
-"""Create-route branch: pinned music-01 when voice_sample is present, Lyria otherwise.
+"""Create-route branch: instrumental Lyria bed plus ffmpeg when a take is present.
 
-HTTP is mocked. Nothing is sent to Replicate.
+HTTP is mocked and ffmpeg is stubbed. Nothing is sent to Replicate.
 """
 from __future__ import annotations
 
 import io
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -20,7 +21,6 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from api import headless_job_runner as runner  # noqa: E402
-from services.voice_service import PREDICTIONS_URL, VOICE_AUDIO_FIELD, VOICE_LYRICS_FIELD, VOICE_VERSION  # noqa: E402
 
 
 class _Resp:
@@ -134,6 +134,41 @@ def live_dirs(tmp_path, monkeypatch):
     return scratch, assets
 
 
+_SINGER_FIELDS = {
+    "voice_file",
+    "voice",
+    "singer",
+    "singer_id",
+    "reference_audio",
+    "audio",
+    "audio_file",
+    "vocal",
+    "vocal_file",
+    "speaker",
+    "speaker_wav",
+    "voice_id",
+    "lyrics",
+    "text",
+    "ref_audio",
+    "voice_sample",
+}
+
+
+def _aliases(body: dict, session_id: str) -> None:
+    assert body["session_id"] == session_id
+    assert body["sessionId"] == session_id
+    assert body["track_id"] == session_id
+    assert body["id"] == session_id
+    assert "Create did not return a session id" not in str(body.get("error") or "")
+
+
+def _forbid_ffmpeg(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        raise AssertionError(f"ffmpeg mix ran: {args[0] if args else kwargs}")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+
 def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     scratch, _assets = live_dirs
     audio = _gate_wav()
@@ -144,16 +179,20 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     ]
     calls: list = []
     _install_http(monkeypatch, responses, calls)
+    _forbid_ffmpeg(monkeypatch)
     started: list = []
     client = _client(monkeypatch, started)
     # Multipart with no voice_sample field. Filename recording.wav is not sent.
     response = client.post("/api/tracks/create", data=_fields(), files={"note": (None, "")})
     assert response.status_code == 200
     body = response.json()
+    assert body["success"] is True
     assert body["engine_used"] == "Lyria"
     assert body["token_cost"] == 1
+    assert body["vocal_present"] is False
     assert body["status"] == "pending"
     session_id = body["session_id"]
+    _aliases(body, session_id)
     assert session_id.startswith("ht_") and len(session_id) == 15
     opts = started[-1][-1]
     assert "voice_sample_path" not in opts
@@ -163,6 +202,7 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     assert job["status"] == "completed", job.get("error")
     assert job["engine_used"] == "Lyria"
     assert job["token_cost"] == 1
+    _aliases(job, session_id)
     urls = [req.full_url for req in calls]
     assert any("lyria-3-pro" in url and url.endswith("/predictions") for url in urls)
     assert not any(
@@ -176,22 +216,129 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     ]
     assert len(lyria_posts) == 1
     assert not (scratch / session_id / "ref_vocal.wav").is_file()
+    assert not (scratch / session_id / "bed_instrumental.wav").is_file()
     assert (scratch / session_id / f"{session_id}_master.wav").is_file()
 
 
-def test_create_with_recording_wav_writes_master_from_one_prediction(live_dirs, monkeypatch):
+def _stub_ffmpeg(monkeypatch, ffmpeg_calls: list, *, code: int = 0, stderr: str = "", write_master: bool = True):
+    mixed = _gate_wav()
+
+    def fake_run(cmd, **kwargs):
+        ffmpeg_calls.append(list(cmd))
+        if write_master and cmd:
+            with open(cmd[-1], "wb") as handle:
+                handle.write(mixed)
+        return subprocess.CompletedProcess(cmd, code, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    return mixed
+
+
+def test_create_with_recording_wav_mixes_the_take_over_one_instrumental_bed(live_dirs, monkeypatch):
     scratch, assets = live_dirs
     audio = _gate_wav()
     take = _reference_bytes()
-    file_url = "https://api.replicate.com/v1/files/file_take"
-    audio_url = "https://replicate.delivery/pb/heart.wav"
+    audio_url = "https://replicate.delivery/pb/bed.wav"
     responses = [
-        _json_resp({"id": "file_take", "urls": {"get": file_url}}),
-        _json_resp({"id": "pred_heart", "status": "succeeded", "output": audio_url}),
+        _json_resp({"id": "pred_bed", "status": "succeeded", "output": audio_url}),
         _Resp(audio, {"Content-Type": "audio/wav"}),
     ]
     calls: list = []
+    ffmpeg_calls: list = []
     _install_http(monkeypatch, responses, calls)
+    mixed = _stub_ffmpeg(monkeypatch, ffmpeg_calls)
+    started: list = []
+    client = _client(monkeypatch, started)
+    # 420 would be two Lyria passes on the text path. A take stays one call.
+    response = client.post(
+        "/api/tracks/create",
+        data=_fields(duration="420"),
+        files={"voice_sample": ("recording.wav", take, "audio/wav")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["status"] == "pending"
+    assert body["engine_used"] == "Lyria"
+    assert body["token_cost"] == 1
+    assert body["vocal_present"] is True
+    session_id = body["session_id"]
+    _aliases(body, session_id)
+    ref = scratch / session_id / "ref_vocal.wav"
+    assert ref.is_file()
+    assert ref.read_bytes() == take
+    assert not (scratch / session_id / "recording.wav").exists()
+    runner._worker(*started[-1])
+    job = runner._public_job(runner._lookup_job(session_id))
+    assert job["status"] == "completed", job.get("error")
+    assert job["engine_used"] == "Lyria"
+    assert job["token_cost"] == 1
+    assert job["vocal_present"] is True
+    _aliases(job, session_id)
+    polled = client.get(f"/api/tracks/status/{session_id}").json()
+    _aliases(polled, session_id)
+    bed = scratch / session_id / "bed_instrumental.wav"
+    master = scratch / session_id / f"{session_id}_master.wav"
+    assert bed.is_file()
+    assert master.is_file()
+    assert master.read_bytes() == mixed
+    assert ref.read_bytes() == take
+    assert (assets / f"{session_id}_master.wav").read_bytes() == mixed
+    assert len(ffmpeg_calls) == 1
+    cmd = ffmpeg_calls[0]
+    inputs = [cmd[index + 1] for index, flag in enumerate(cmd) if flag == "-i"]
+    assert inputs[0].endswith("bed_instrumental.wav")
+    assert inputs[1].endswith("ref_vocal.wav")
+    assert cmd[-1].endswith(f"{session_id}_master.wav")
+    assert runner._VOCAL_MIX_FILTER in cmd
+    urls = [req.full_url for req in calls]
+    assert not any(
+        "music-01" in url or "heart_mula" in url or "chatterbox" in url.lower() or url.rstrip("/").endswith("/files")
+        for url in urls
+    )
+    lyria_posts = [
+        req
+        for req in calls
+        if "lyria-3-pro" in req.full_url and req.full_url.endswith("/predictions")
+    ]
+    assert len(lyria_posts) == 1
+    sent = json.loads(lyria_posts[0].data.decode("utf-8"))
+    assert set(sent["input"]) == {"prompt"}
+    for field in _SINGER_FIELDS:
+        assert field not in sent["input"]
+    prompt_text = sent["input"]["prompt"].lower()
+    assert "neon rain" not in prompt_text
+    assert "instrumental" in prompt_text
+    assert "no singer" in prompt_text
+    assert "110" in sent["input"]["prompt"]
+    assert "outlaw country" in prompt_text
+    assert "ref_vocal" not in prompt_text
+    for req in calls:
+        payload = getattr(req, "data", None) or b""
+        if isinstance(payload, str):
+            payload = payload.encode()
+        assert take not in payload
+
+
+def test_ffmpeg_mix_failure_is_a_job_error_and_keeps_the_session(live_dirs, monkeypatch, capsys):
+    scratch, _assets = live_dirs
+    audio = _gate_wav()
+    take = _reference_bytes()
+    audio_url = "https://replicate.delivery/pb/bed.wav"
+    responses = [
+        _json_resp({"id": "pred_bed", "status": "succeeded", "output": audio_url}),
+        _Resp(audio, {"Content-Type": "audio/wav"}),
+    ]
+    calls: list = []
+    ffmpeg_calls: list = []
+    _install_http(monkeypatch, responses, calls)
+    _stub_ffmpeg(
+        monkeypatch,
+        ffmpeg_calls,
+        code=1,
+        stderr="filter graph failed: Invalid argument\n",
+        write_master=False,
+    )
     started: list = []
     client = _client(monkeypatch, started)
     response = client.post(
@@ -201,67 +348,30 @@ def test_create_with_recording_wav_writes_master_from_one_prediction(live_dirs, 
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["engine_used"] == "HeartMuLa"
-    assert body["token_cost"] == 1
     session_id = body["session_id"]
-    ref = scratch / session_id / "ref_vocal.wav"
-    assert ref.is_file()
-    assert ref.read_bytes() == take
-    assert not (scratch / session_id / "recording.wav").exists()
-    runner._worker(*started[-1])
-    job = runner._public_job(runner._lookup_job(session_id))
-    assert job["status"] == "completed", job.get("error")
-    assert job["engine_used"] == "HeartMuLa"
-    assert job["token_cost"] == 1
-    master = scratch / session_id / f"{session_id}_master.wav"
-    assert master.is_file()
-    assert master.read_bytes() == audio
-    assert (assets / f"{session_id}_master.wav").is_file()
-    urls = [req.full_url for req in calls]
-    assert not any("lyria" in url.lower() or "chatterbox" in url.lower() or "heart_mula" in url for url in urls)
-    voice_posts = [req for req in calls if "music-01" in req.full_url and "/predictions" in req.full_url]
-    assert len(voice_posts) == 1
-    assert voice_posts[0].full_url == PREDICTIONS_URL
-    assert VOICE_VERSION in voice_posts[0].full_url
-    sent = json.loads(voice_posts[0].data.decode("utf-8"))
-    assert sent["input"][VOICE_AUDIO_FIELD] == file_url
-    assert sent["input"][VOICE_LYRICS_FIELD] == "neon rain"
-    assert "prompt" not in sent["input"]
-    assert "audio" not in sent["input"]
-    assert "text" not in sent["input"]
-    assert take in calls[0].data
-    assert b'filename="ref_vocal.wav"' in calls[0].data
-
-
-def test_heart_mula_failure_is_a_job_error_and_does_not_crash(live_dirs, monkeypatch):
-    scratch, _assets = live_dirs
-    responses = [
-        _json_resp({"urls": {"get": "https://api.replicate.com/v1/files/file_fail"}}),
-        _json_resp({"id": "pred_fail", "status": "failed", "error": "model exploded"}),
-    ]
-    calls: list = []
-    _install_http(monkeypatch, responses, calls)
-    started: list = []
-    client = _client(monkeypatch, started)
-    response = client.post(
-        "/api/tracks/create",
-        data=_fields(),
-        files={"voice_sample": ("recording.wav", _reference_bytes(), "audio/wav")},
-    )
-    assert response.status_code == 200
-    session_id = response.json()["session_id"]
+    _aliases(body, session_id)
+    assert body["vocal_present"] is True
+    assert body["token_cost"] == 1
     runner._worker(*started[-1])
     job = runner._public_job(runner._lookup_job(session_id))
     assert job["status"] == "failed"
     assert job["error"].startswith("Voice API failed:")
+    assert "Invalid argument" in job["error"]
     assert job["detail"] == job["error"]
-    assert "model exploded" in job["error"]
-    assert job["engine_used"] == "HeartMuLa"
+    assert "Create did not return a session id" not in job["error"]
+    assert job["engine_used"] == "Lyria"
     assert job["token_cost"] == 1
-    assert (scratch / session_id / "ref_vocal.wav").is_file()
-    assert not (scratch / session_id / f"{session_id}_master.wav").is_file()
-    urls = [req.full_url for req in calls]
-    assert not any("lyria" in url.lower() or "chatterbox" in url.lower() for url in urls)
+    _aliases(job, session_id)
+    polled = client.get(f"/api/tracks/status/{session_id}")
+    assert polled.status_code == 200
+    _aliases(polled.json(), session_id)
+    ref = scratch / session_id / "ref_vocal.wav"
+    assert ref.is_file()
+    assert ref.read_bytes() == take
+    assert (scratch / session_id / "bed_instrumental.wav").is_file()
+    assert len(ffmpeg_calls) == 1
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
     health = client.get("/health")
     assert health.status_code == 200
 
@@ -271,6 +381,7 @@ def test_missing_token_does_not_call_replicate(live_dirs, monkeypatch, capsys):
     monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
     monkeypatch.delenv("REPLICATE_API_KEY", raising=False)
+    _forbid_ffmpeg(monkeypatch)
 
     def fake_urlopen(req, timeout=None):
         calls.append(req)
@@ -288,29 +399,32 @@ def test_missing_token_does_not_call_replicate(live_dirs, monkeypatch, capsys):
     body = response.json()
     session_id = body["session_id"]
     assert session_id.startswith("ht_")
-    assert body["sessionId"] == session_id
+    _aliases(body, session_id)
+    assert body["vocal_present"] is True
+    assert body["token_cost"] == 1
     runner._worker(*started[-1])
     job = runner._public_job(runner._lookup_job(session_id))
     assert job["status"] == "failed"
-    assert "Voice API failed:" in job["error"]
     assert "REPLICATE_API_TOKEN" in job["error"]
-    assert job["detail"] == job["error"]
+    assert "Create did not return a session id" not in job["error"]
+    _aliases(job, session_id)
     assert calls == []
     captured = capsys.readouterr()
-    assert "CRITICAL REPLICATE ERROR: MissingToken - REPLICATE_API_TOKEN is not configured" in captured.out
+    assert "Traceback" in captured.err
     assert "r8_" not in captured.out
+    health = client.get("/health")
+    assert health.status_code == 200
 
 
-def test_model_host_404_is_voice_api_failed(live_dirs, monkeypatch, capsys):
+def test_lyria_404_fails_the_job_without_dropping_the_session(live_dirs, monkeypatch, capsys):
     calls: list = []
     monkeypatch.setattr("engine.gemini_arranger._load_env_quiet", lambda: None)
     monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_hybrid")
-    monkeypatch.setattr("services.voice_service.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("engine.generate_track_headless.time.sleep", lambda _seconds: None)
+    _forbid_ffmpeg(monkeypatch)
 
     def fake_urlopen(req, timeout=None):
         calls.append(req)
-        if req.full_url.endswith("/files") and req.get_method() == "POST":
-            return _json_resp({"urls": {"get": "https://api.replicate.com/v1/files/file_404"}})
         raise urllib.error.HTTPError(
             req.full_url,
             404,
@@ -330,19 +444,26 @@ def test_model_host_404_is_voice_api_failed(live_dirs, monkeypatch, capsys):
     assert response.status_code == 200
     body = response.json()
     session_id = body["session_id"]
-    assert session_id.startswith("ht_")
+    _aliases(body, session_id)
+    assert body["vocal_present"] is True
     assert not body.get("error")
     runner._worker(*started[-1])
     job = runner._public_job(runner._lookup_job(session_id))
     assert job["status"] == "failed"
-    assert job["error"].startswith("Voice API failed:")
     assert "404" in job["error"]
-    assert "ModelNotFoundError" in job["error"]
+    assert "Create did not return a session id" not in job["error"]
     assert "r8_hybrid" not in job["error"]
     assert job["token_cost"] == 1
+    _aliases(job, session_id)
     captured = capsys.readouterr()
-    assert "CRITICAL REPLICATE ERROR:" in captured.out
+    assert "Traceback" in captured.err
     assert "r8_hybrid" not in captured.out
-    assert not any("lyria" in req.full_url.lower() for req in calls)
+    assert any("lyria-3-pro" in req.full_url for req in calls)
+    for req in calls:
+        assert "music-01" not in req.full_url
+        payload = getattr(req, "data", None) or b""
+        if isinstance(payload, str):
+            payload = payload.encode()
+        assert b"voice_file" not in payload
     health = client.get("/health")
     assert health.status_code == 200

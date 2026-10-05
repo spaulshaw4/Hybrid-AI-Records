@@ -44,10 +44,11 @@ def client(tmp_path, monkeypatch):
     runner._active_session_id = None
 
 
-def _assert_handoff(body: dict) -> str:
+def _assert_handoff(body: dict, *, vocal_present: bool) -> str:
     assert body["success"] is True
     assert body["status"] == "pending"
     assert body["token_cost"] == 1
+    assert body["vocal_present"] is vocal_present
     session_id = body["session_id"]
     assert isinstance(session_id, str) and session_id.startswith("ht_")
     for key in _ALIASES:
@@ -60,15 +61,20 @@ def test_lyria_create_payload_includes_every_session_alias(client):
     response = client.post("/api/tracks/create", json={"prompt": _PROMPT, "duration_sec": 60})
     assert response.status_code == 200, response.text
     body = response.json()
-    session_id = _assert_handoff(body)
+    session_id = _assert_handoff(body, vocal_present=False)
     assert body["engine_used"] == "Lyria"
     job = runner._lookup_job(session_id)
     assert job is not None
     assert job["status"] == "queued"
     assert not os.path.isfile(os.path.join(runner.SCRATCH_ROOT, session_id, f"{session_id}_master.wav"))
+    polled = client.get(f"/api/tracks/status/{session_id}")
+    assert polled.status_code == 200
+    status_body = polled.json()
+    for key in _ALIASES:
+        assert status_body[key] == session_id
 
 
-def test_heartmula_create_payload_includes_every_session_alias(client):
+def test_vocal_create_payload_includes_every_session_alias(client):
     response = client.post(
         "/api/tracks/create",
         data={"prompt": _PROMPT, "lyrics": "neon rain", "duration": "210"},
@@ -76,10 +82,16 @@ def test_heartmula_create_payload_includes_every_session_alias(client):
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    session_id = _assert_handoff(body)
-    assert body["engine_used"] == "HeartMuLa"
+    session_id = _assert_handoff(body, vocal_present=True)
+    assert body["engine_used"] == "Lyria"
     assert os.path.isfile(os.path.join(runner.SCRATCH_ROOT, session_id, "ref_vocal.wav"))
     assert not os.path.isfile(os.path.join(runner.SCRATCH_ROOT, session_id, f"{session_id}_master.wav"))
+    polled = client.get(f"/api/tracks/status/{session_id}")
+    assert polled.status_code == 200
+    status_body = polled.json()
+    for key in _ALIASES:
+        assert status_body[key] == session_id
+    assert status_body["vocal_present"] is True
 
 
 def test_scratch_persist_failure_logs_traceback_and_stays_up(client, monkeypatch, capsys):

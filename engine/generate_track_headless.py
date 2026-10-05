@@ -1693,6 +1693,74 @@ def _render_lyria_two_pass(
     return master_path
 
 
+# google/lyria-3-pro, as called in this repo, accepts {"input": {"prompt": ...}} only.
+# The live schema has no is_instrumental field and no audio input, so a vocal
+# take is never uploaded. An instrumental instruction lives in the prompt.
+BED_INSTRUMENTAL_NAME = "bed_instrumental.wav"
+_INSTRUMENTAL_INSTRUCTION = (
+    "Instrumental backing track only. No singer, no vocals, no choir, "
+    "no humming, and no sung lyrics."
+)
+
+
+def compose_instrumental_bed_prompt(
+    style: str = "",
+    prompt: str = "",
+    bpm: float | None = None,
+) -> str:
+    """Genre, tempo, and style, plus an explicit instrumental instruction.
+
+    Sung lyrics are not accepted here. Callers must omit them before this runs.
+    """
+    style_text = (style or "").strip()
+    prompt_text = (prompt or "").strip()
+    if prompt_text and prompt_text == style_text:
+        prompt_text = ""
+    tempo = ""
+    if bpm is not None:
+        try:
+            tempo_value = float(bpm)
+        except (TypeError, ValueError):
+            tempo_value = 0.0
+        if tempo_value > 0:
+            tempo = f"{int(round(tempo_value))} BPM"
+    parts = [part for part in (style_text, prompt_text, tempo, _INSTRUMENTAL_INSTRUCTION) if part]
+    text = "\n".join(parts).strip()
+    if not text:
+        raise ValueError("Lyria prompt is empty")
+    return text
+
+
+def render_lyria_instrumental_bed(
+    dest_dir: str,
+    *,
+    style: str = "",
+    prompt: str = "",
+    bpm: float | None = None,
+    timeout_sec: float = LYRIA_TIMEOUT_SEC,
+    poll_sec: float = LYRIA_POLL_SEC,
+) -> str:
+    """One lyria-3-pro prediction. Writes ``bed_instrumental.wav``.
+
+    No lyric sanitize and no second model call. The vocal file is not an input.
+    """
+    token = _lyria_token()
+    if not token:
+        raise RuntimeError("REPLICATE_API_TOKEN is not set")
+    full_prompt = compose_instrumental_bed_prompt(style, prompt, bpm)
+    audio, _body, _content_type, _audio_url = _lyria_prompt_audio(
+        token,
+        full_prompt,
+        timeout_sec=timeout_sec,
+        poll_sec=poll_sec,
+    )
+    os.makedirs(dest_dir, exist_ok=True)
+    bed_path = os.path.join(dest_dir, BED_INSTRUMENTAL_NAME)
+    _write_lyria_wav(bed_path, audio)
+    print(f"[LYRIA] instrumental bed {bed_path}", flush=True)
+    return bed_path
+
+
 def render_lyria_master(
     dest_dir: str,
     *,
