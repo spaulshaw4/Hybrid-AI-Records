@@ -1,13 +1,15 @@
 """Headless generate entry.
 
-The live path calls Replicate ``google/lyria-3-pro`` and writes that audio as
-the session master. ``execute_prompt_pipeline`` still assembles the 13-lane
-tape for tests; ``main`` does not call it.
+Text songs call Replicate ``google/lyria-3-pro`` and write that audio as the
+session master. A saved vocal take calls pinned ``minimax/music-2.6`` instead.
+``execute_prompt_pipeline`` still assembles the 13-lane tape for tests; ``main``
+does not call it.
 """
 from __future__ import annotations
 
 import argparse
 import http.client
+import json
 import os
 import re
 import shutil
@@ -1186,7 +1188,16 @@ def _export_mix(src: str, dest: str, duration_sec: float | None, sr: int) -> str
     return dest_abs
 
 
-LYRIA_PREDICTIONS_URL = "https://api.replicate.com/v1/models/google/lyria-3-pro/predictions"
+MINIMAX_MODEL_ID = "minimax/music-2.6"
+LYRIA_MODEL_ID = "google/lyria-3-pro"
+# Pinned from one GET /v1/models/minimax/music-2.6 ``latest_version.id``.
+# The request uses this id. It does not look up "latest" again.
+MINIMAX_VERSION_ID = "dcd69b2c83c63ed612af65fc9842781fd7cf86db555e0b12ded7c6292bff8b7a"
+LYRIA_PREDICTIONS_URL = f"https://api.replicate.com/v1/models/{LYRIA_MODEL_ID}/predictions"
+MINIMAX_PREDICTIONS_URL = (
+    f"https://api.replicate.com/v1/models/{MINIMAX_MODEL_ID}/versions/{MINIMAX_VERSION_ID}/predictions"
+)
+_REPLICATE_USER_AGENT = "hybrid-voice/1.0"
 LYRIA_TIMEOUT_SEC = 180.0
 LYRIA_POLL_SEC = 3.0
 LYRIA_GATEWAY_RETRIES = 2
@@ -1693,72 +1704,138 @@ def _render_lyria_two_pass(
     return master_path
 
 
-# google/lyria-3-pro, as called in this repo, accepts {"input": {"prompt": ...}} only.
-# The live schema has no is_instrumental field and no audio input, so a vocal
-# take is never uploaded. An instrumental instruction lives in the prompt.
-BED_INSTRUMENTAL_NAME = "bed_instrumental.wav"
-_INSTRUMENTAL_INSTRUCTION = (
-    "Instrumental backing track only. No singer, no vocals, no choir, "
-    "no humming, and no sung lyrics."
-)
+def compose_minimax_prompt(genre_prompt: str, bpm: float) -> str:
+    """Style or genre, the requested tempo, and Stephen's production line."""
+    tempo = float(bpm)
+    tempo_text = str(int(tempo)) if tempo.is_integer() else str(tempo)
+    return f"{(genre_prompt or '').strip()}, {tempo_text} BPM, instrumental, studio production"
 
 
-def compose_instrumental_bed_prompt(
-    style: str = "",
-    prompt: str = "",
-    bpm: float | None = None,
-) -> str:
-    """Genre, tempo, and style, plus an explicit instrumental instruction.
-
-    Sung lyrics are not accepted here. Callers must omit them before this runs.
-    """
-    style_text = (style or "").strip()
-    prompt_text = (prompt or "").strip()
-    if prompt_text and prompt_text == style_text:
-        prompt_text = ""
-    tempo = ""
-    if bpm is not None:
+def _minimax_http(url: str, token: str, payload: dict | None, timeout: float) -> dict:
+    """One urllib JSON call with the hybrid Bearer token. The token is not logged."""
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": _REPLICATE_USER_AGENT,
+        "Authorization": f"Bearer {token}",
+    }
+    if payload is not None:
+        headers["Prefer"] = "wait"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST" if payload is not None else "GET",
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
         try:
-            tempo_value = float(bpm)
-        except (TypeError, ValueError):
-            tempo_value = 0.0
-        if tempo_value > 0:
-            tempo = f"{int(round(tempo_value))} BPM"
-    parts = [part for part in (style_text, prompt_text, tempo, _INSTRUMENTAL_INSTRUCTION) if part]
-    text = "\n".join(parts).strip()
-    if not text:
-        raise ValueError("Lyria prompt is empty")
-    return text
+            raw = exc.read()
+        except Exception:
+            raw = b""
+        text = raw.decode("utf-8", errors="replace").strip().replace("\r", " ").replace("\n", " ")
+        message = f"HTTP {exc.code}"
+        if text:
+            message = f"{message}: {text[:500]}"
+        raise RuntimeError(message) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Replicate request failed: {exc.reason}") from exc
 
 
-def render_lyria_instrumental_bed(
+def _download_minimax_audio(url: str, timeout: float) -> bytes:
+    req = urllib.request.Request(
+        url,
+        method="GET",
+        headers={"User-Agent": _REPLICATE_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read()
+        except Exception:
+            raw = b""
+        text = raw.decode("utf-8", errors="replace").strip().replace("\r", " ").replace("\n", " ")
+        message = f"HTTP {exc.code}"
+        if text:
+            message = f"{message}: {text[:500]}"
+        raise RuntimeError(f"MiniMax audio download failed: {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"MiniMax audio download failed: {exc.reason}") from exc
+    if not body:
+        raise RuntimeError("MiniMax audio download was empty")
+    return body
+
+
+def render_minimax_master(
     dest_dir: str,
     *,
-    style: str = "",
-    prompt: str = "",
-    bpm: float | None = None,
+    genre_prompt: str,
+    bpm: float,
+    session_id: str,
     timeout_sec: float = LYRIA_TIMEOUT_SEC,
     poll_sec: float = LYRIA_POLL_SEC,
 ) -> str:
-    """One lyria-3-pro prediction. Writes ``bed_instrumental.wav``.
+    """One pinned music-2.6 prediction. Writes ``{session_id}_master.wav``.
 
-    No lyric sanitize and no second model call. The vocal file is not an input.
+    The input keys are fixed. ``ref_vocal.wav`` is not uploaded and is not an
+    input. Lyria is not called.
     """
     token = _lyria_token()
     if not token:
-        raise RuntimeError("REPLICATE_API_TOKEN is not set")
-    full_prompt = compose_instrumental_bed_prompt(style, prompt, bpm)
-    audio, _body, _content_type, _audio_url = _lyria_prompt_audio(
+        raise RuntimeError("REPLICATE_API_TOKEN is not configured")
+    model_input = {
+        "prompt": compose_minimax_prompt(genre_prompt, bpm),
+        "is_instrumental": True,
+        "lyrics_optimizer": False,
+        "audio_format": "wav",
+        "sample_rate": 44100,
+        "bitrate": 256000,
+    }
+    deadline = time.monotonic() + float(timeout_sec)
+    prediction = _minimax_http(
+        MINIMAX_PREDICTIONS_URL,
         token,
-        full_prompt,
-        timeout_sec=timeout_sec,
-        poll_sec=poll_sec,
+        {"input": model_input},
+        timeout=min(70.0, float(timeout_sec)),
     )
+    while str(prediction.get("status") or "") not in _LYRIA_TERMINAL:
+        if time.monotonic() > deadline:
+            raise RuntimeError("MiniMax prediction timed out")
+        urls = prediction.get("urls") if isinstance(prediction.get("urls"), dict) else {}
+        poll_url = str((urls or {}).get("get") or "").strip()
+        if not poll_url:
+            raise RuntimeError("MiniMax prediction has no urls.get")
+        time.sleep(float(poll_sec))
+        if time.monotonic() > deadline:
+            raise RuntimeError("MiniMax prediction timed out")
+        prediction = _minimax_http(poll_url, token, None, timeout=60.0)
+    status = str(prediction.get("status") or "")
+    if status != "succeeded":
+        err = prediction.get("error") or status or "failed"
+        raise RuntimeError(f"MiniMax prediction {status}: {err}")
+    audio_url = lyria_output_url(prediction.get("output"))
+    body = _download_minimax_audio(audio_url, timeout=60.0)
     os.makedirs(dest_dir, exist_ok=True)
-    bed_path = os.path.join(dest_dir, BED_INSTRUMENTAL_NAME)
-    _write_lyria_wav(bed_path, audio)
-    print(f"[LYRIA] instrumental bed {bed_path}", flush=True)
-    return bed_path
+    master_path = os.path.join(dest_dir, f"{session_id}_master.wav")
+    if os.path.basename(master_path) == "ref_vocal.wav":
+        raise RuntimeError("refusing to overwrite ref_vocal.wav")
+    tmp = master_path + ".part"
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(body)
+        os.replace(tmp, master_path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return master_path
 
 
 def render_lyria_master(

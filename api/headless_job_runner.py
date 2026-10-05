@@ -4,13 +4,13 @@ POST /api/tracks/create  {prompt, style, lyrics, genre_hint} -> {session_id, ses
 GET  /api/tracks/status/{id}
 GET  /api/stream/{filename}
 
-The generate job calls Replicate google/lyria-3-pro and publishes that file as
-the session master (/api/stream/{session}_master.wav). It does not run the
-13-lane assembler or the master pipeline.
+The generate job publishes ``{session}_master.wav`` (/api/stream/{session}_master.wav).
+It does not run the 13-lane assembler or the master pipeline.
 
-A saved ref_vocal.wav is not sent to a voice model. That job is one instrumental
-Lyria bed, then ffmpeg lays the user's take on top. No voice sample keeps the
-text Lyria path: one pass at or below 210 seconds, two-pass stitch above that.
+No voice sample calls google/lyria-3-pro: one pass at or below 210 seconds,
+two-pass stitch above that. A saved ref_vocal.wav calls pinned minimax/music-2.6
+and downloads that output as the master. The take stays on disk and is not an
+input. ffmpeg does not mix a Lyria bed.
 """
 from __future__ import annotations
 
@@ -65,6 +65,10 @@ DELIVERIES_ROOT = os.environ.get("HYBRID_DELIVERIES_ROOT") or os.path.join(
     _LIVE["root"], "deliveries"
 )
 _API_LOG = os.path.join(_REPO_ROOT, "reports", "live_api.out.log")
+MINIMAX_MODEL_ID = "minimax/music-2.6"
+LYRIA_MODEL_ID = "google/lyria-3-pro"
+# Same pin as engine.generate_track_headless.MINIMAX_VERSION_ID.
+MINIMAX_VERSION_ID = "dcd69b2c83c63ed612af65fc9842781fd7cf86db555e0b12ded7c6292bff8b7a"
 MIN_PROMPT = 50
 MAX_PROMPT = 5000
 PROMPT_TOO_SHORT = "Prompt must be at least 50 characters."
@@ -1200,17 +1204,38 @@ def _worker_inner(
             _update_job(session_id, status="completed", note=note)
             return
         opts = dict(render_opts or {})
-        from engine.generate_track_headless import generation_token_charge, render_lyria_master
+        use_vocal = _voice_sample_ready(opts.get("voice_sample_path"))
+        from engine.generate_track_headless import (
+            LYRIA_MODEL_ID as _PINNED_LYRIA_MODEL_ID,
+            MINIMAX_MODEL_ID as _PINNED_MINIMAX_MODEL_ID,
+            MINIMAX_VERSION_ID as _PINNED_MINIMAX_VERSION_ID,
+            generation_token_charge,
+            render_lyria_master,
+            render_minimax_master,
+        )
 
+        if (
+            LYRIA_MODEL_ID != _PINNED_LYRIA_MODEL_ID
+            or MINIMAX_MODEL_ID != _PINNED_MINIMAX_MODEL_ID
+            or MINIMAX_VERSION_ID != _PINNED_MINIMAX_VERSION_ID
+        ):
+            raise RuntimeError("generation model ids drifted")
         duration_raw = opts.get("duration_sec")
         duration_value = float(duration_raw) if duration_raw is not None else None
         # Flat price. A mic job and a long Lyria job are still one token.
         token_charge = generation_token_charge(duration_value)
         _log(f"[TOKEN] charge={token_charge} duration_sec={duration_raw}")
-        use_vocal = _voice_sample_ready(opts.get("voice_sample_path"))
         engine = "Lyria"
+        route_model = MINIMAX_MODEL_ID if use_vocal else LYRIA_MODEL_ID
+        _log(f"[ROUTE] model={route_model} vocal={use_vocal}")
         if use_vocal:
-            saved = _render_vocal_overlay_master(session_id, prompt, genre_hint, opts)
+            saved = _render_minimax_master(
+                session_id,
+                prompt,
+                genre_hint,
+                opts,
+                render_minimax_master,
+            )
         else:
             saved = render_lyria_master(
                 os.path.join(SCRATCH_ROOT, session_id),
@@ -1237,10 +1262,16 @@ def _worker_inner(
             **published,
         )
     except Exception as exc:
-        _console_exception(f"[worker] {session_id} failed: {exc}")
-        try:
-            if use_vocal and isinstance(exc, HTTPException):
-                voice_detail = _redact(str(exc.detail or ""))[:800]
+        if use_vocal:
+            raw = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            raw = _redact(str(raw or ""))
+            prefix = "Voice API failed:"
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):].strip()
+            print(f"CRITICAL REPLICATE ERROR: {type(exc).__name__} - {raw}", flush=True)
+            traceback.print_exc()
+            voice_detail = f"{prefix} {raw}"[:800]
+            try:
                 _update_job(
                     session_id,
                     status="failed",
@@ -1249,7 +1280,11 @@ def _worker_inner(
                     engine_used="Lyria",
                     token_cost=1,
                 )
-            else:
+            except KeyError:
+                pass
+        else:
+            _console_exception(f"[worker] {session_id} failed: {exc}")
+            try:
                 prefix = "Lyria generation failed"
                 detail = _redact(str(exc))[:700]
                 if not detail.startswith(prefix):
@@ -1261,8 +1296,8 @@ def _worker_inner(
                     engine_used="Lyria",
                     token_cost=1,
                 )
-        except KeyError:
-            pass
+            except KeyError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -1413,82 +1448,17 @@ def _style_with_controls(style: str, opts: dict[str, Any]) -> str:
     return f"{base} {' '.join(directives)}".strip()
 
 
-_VOCAL_MIX_FILTER = (
-    "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voc];"
-    "[0:a]volume=0.85[bed];"
-    "[bed][voc]amix=inputs=2:duration=first:dropout_transition=2[out]"
-)
-_FFMPEG_STDERR_TAIL = 400
-
-
-def _prompt_without_sung_lyrics(prompt: str, lyrics: str) -> str:
-    """Drop sung lyrics so the bed model cannot invent a singer from them."""
-    song = (prompt or "").strip()
-    lyric_text = (lyrics or "").strip()
-    if not song or not lyric_text:
-        return song
-    if song == lyric_text:
-        return ""
-    if lyric_text in song:
-        song = " ".join(song.replace(lyric_text, " ").split())
-    return song
-
-
-def _stderr_tail(text: str, limit: int = _FFMPEG_STDERR_TAIL) -> str:
-    flat = " ".join((text or "").replace("\r", " ").split())
-    if len(flat) <= limit:
-        return flat
-    return flat[-limit:]
-
-
-def _ffmpeg_mix_vocal(instrumental_path: str, vocal_path: str, master_path: str) -> None:
-    """Lay ``ref_vocal.wav`` on the instrumental bed. The take is only an input."""
-    ffmpeg_cmd = [
-        "ffmpeg", "-y",
-        "-i", instrumental_path,
-        "-i", vocal_path,
-        "-filter_complex",
-        _VOCAL_MIX_FILTER,
-        "-map", "[out]",
-        "-ar", "44100",
-        "-ac", "2",
-        master_path,
-    ]
-    try:
-        completed = subprocess.run(
-            ffmpeg_cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=502, detail=f"Voice API failed: {exc}") from exc
-    if completed.returncode != 0 or not os.path.isfile(master_path):
-        tail = _stderr_tail(completed.stderr or completed.stdout or "")
-        if not tail:
-            tail = f"ffmpeg exited {completed.returncode}"
-        try:
-            raise RuntimeError(tail)
-        except RuntimeError:
-            traceback.print_exc()
-        raise HTTPException(status_code=502, detail=f"Voice API failed: {tail}")
-
-
-def _render_vocal_overlay_master(
+def _render_minimax_master(
     session_id: str,
     prompt: str,
     genre_hint: str,
     opts: dict[str, Any],
+    render_minimax_master: Any,
 ) -> str:
-    """One instrumental Lyria bed, then ffmpeg mixes the user's take on top.
+    """One music-2.6 prediction. ``ref_vocal.wav`` stays on disk and is not sent.
 
-    ``ref_vocal.wav`` is not uploaded and is not overwritten. Sung lyrics are
-    not sent. Duration above 210 stays one generation call on this path.
+    Duration does not add a second call. Lyria and ffmpeg are not used.
     """
-    from engine.generate_track_headless import render_lyria_instrumental_bed
-
     vocal_path = os.path.abspath(str(opts.get("voice_sample_path") or ""))
     root = os.path.abspath(SCRATCH_ROOT)
     session_dir = os.path.abspath(os.path.join(root, session_id))
@@ -1498,27 +1468,26 @@ def _render_vocal_overlay_master(
         or not _is_under(master_path, root)
         or not _is_under(vocal_path, root)
     ):
-        raise RuntimeError("vocal mix path escaped scratch")
+        raise RuntimeError("vocal path escaped scratch")
     if os.path.basename(vocal_path) != "ref_vocal.wav":
-        raise RuntimeError("vocal mix expected ref_vocal.wav")
+        raise RuntimeError("vocal job expected ref_vocal.wav")
     if os.path.abspath(vocal_path) == master_path:
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
-    lyrics = str(opts.get("lyrics") or "")
-    song = _prompt_without_sung_lyrics(prompt, lyrics)
-    style = _style_with_controls(str(opts.get("style") or ""), opts)
+    style = str(opts.get("style") or "").strip()
     genre = (genre_hint or "").strip()
-    if genre and genre not in style:
-        style = f"{genre} {style}".strip()
-    bed_path = render_lyria_instrumental_bed(
+    genre_prompt = style or genre or (prompt or "").strip()
+    bpm = _control_number(opts, "bpm")
+    if bpm is None:
+        bpm = DEFAULT_RENDER_BPM
+    saved = render_minimax_master(
         session_dir,
-        style=style,
-        prompt=song,
-        bpm=_control_number(opts, "bpm"),
+        genre_prompt=genre_prompt,
+        bpm=bpm,
+        session_id=session_id,
     )
-    if os.path.abspath(bed_path) == vocal_path:
+    if os.path.abspath(saved) == vocal_path:
         raise RuntimeError("refusing to overwrite ref_vocal.wav")
-    _ffmpeg_mix_vocal(bed_path, vocal_path, master_path)
-    return master_path
+    return saved
 
 
 def _save_ref_vocal(session_id: str, raw: bytes) -> str:
