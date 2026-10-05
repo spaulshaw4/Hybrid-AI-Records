@@ -1286,9 +1286,11 @@ def _download_lyria_audio(url: str, timeout: float) -> tuple[bytes, str]:
             body = resp.read()
             content_type = str(resp.headers.get("Content-Type") or "")
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Lyria audio download failed: HTTP {exc.code}") from None
+        traceback.print_exc()
+        raise RuntimeError(f"Lyria audio download failed: HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Lyria audio download failed: {exc.reason}") from None
+        traceback.print_exc()
+        raise RuntimeError(f"Lyria audio download failed: {exc.reason}") from exc
     if not body:
         raise RuntimeError("Lyria audio download was empty")
     return body, content_type

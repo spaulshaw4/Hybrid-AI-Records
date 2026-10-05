@@ -1,6 +1,6 @@
 """Localhost headless track-generation API (127.0.0.1:8880).
 
-POST /api/tracks/create  {prompt, style, lyrics, genre_hint} -> {session_id, status: queued}
+POST /api/tracks/create  {prompt, style, lyrics, genre_hint} -> {session_id, sessionId, track_id, id, status: pending}
 GET  /api/tracks/status/{id}
 GET  /api/stream/{filename}
 
@@ -142,6 +142,15 @@ def _log(msg: str) -> None:
             handle.write(line + "\n")
     except OSError:
         pass
+
+
+def _console_exception(message: str) -> None:
+    """Print the active exception. Call from inside ``except``; do not re-raise here."""
+    _log(message)
+    traceback.print_exc()
+    traced = traceback.format_exc()
+    if traced and not traced.startswith("NoneType: None"):
+        _log("[TRACEBACK]\n" + traced)
 
 
 def _utc_now() -> str:
@@ -1214,8 +1223,7 @@ def _worker_inner(
             **published,
         )
     except Exception as exc:
-        _log(f"[worker] {session_id} failed: {exc}")
-        _log("[TRACEBACK]\n" + traceback.format_exc())
+        _console_exception(f"[worker] {session_id} failed: {exc}")
         try:
             failed_engine = "HeartMuLa" if use_heart else "Lyria"
             prefix = (
@@ -1411,10 +1419,11 @@ def _render_heart_mula_master(session_id: str, prompt: str, opts: dict[str, Any]
             dest,
         )
     except Exception as exc:
+        _console_exception(f"[HEART_MULA] render failed for {session_id}: {exc}")
         detail = str(exc).strip() or "failed"
         if detail.startswith("HeartMuLa generation failed"):
-            raise RuntimeError(detail) from None
-        raise RuntimeError(f"HeartMuLa generation failed: {detail}") from None
+            raise RuntimeError(detail) from exc
+        raise RuntimeError(f"HeartMuLa generation failed: {detail}") from exc
 
 
 def _save_ref_vocal(session_id: str, raw: bytes) -> str:
@@ -1486,6 +1495,32 @@ async def _ingest_vocal_upload(upload: Any, root_key: str) -> tuple[str | None, 
         return None, 0.0
 
 
+def _accepted_create_body(session_id: str | None, **fields: Any) -> dict[str, Any]:
+    """Accepted create payload. The same session id is exposed under every alias.
+
+    A newly queued render is ``pending`` until the wav exists. Callers may pass
+    a more specific status when joining a job that is already in flight.
+    """
+    sid = str(session_id or "").strip()
+    body: dict[str, Any] = {
+        "success": True,
+        "status": "pending",
+        "session_id": sid,
+        "sessionId": sid,
+        "track_id": sid,
+        "id": sid,
+    }
+    body.update(fields)
+    body["success"] = True
+    body["session_id"] = sid
+    body["sessionId"] = sid
+    body["track_id"] = sid
+    body["id"] = sid
+    if "status" not in fields or not str(fields.get("status") or "").strip():
+        body["status"] = "pending"
+    return body
+
+
 def _join_active_generation() -> dict[str, Any] | None:
     """Claim the worker, or join the session that already owns it.
 
@@ -1495,22 +1530,22 @@ def _join_active_generation() -> dict[str, Any] | None:
     global _active_session_id
     with _registry_lock:
         if not _generation_lock.acquire(blocking=False):
-            return {
-                "session_id": _active_session_id,
-                "status": "already_running",
-                "vocal_present": False,
-                "deduped": True,
-            }
+            return _accepted_create_body(
+                _active_session_id,
+                status="already_running",
+                vocal_present=False,
+                deduped=True,
+            )
         for existing in _jobs.values():
             if str(existing.get("status") or "") in {"queued", "running"}:
                 _active_session_id = str(existing["session_id"])
                 _generation_lock.release()
-                return {
-                    "session_id": _active_session_id,
-                    "status": str(existing.get("status") or "queued"),
-                    "vocal_present": bool(existing.get("vocal_present")),
-                    "deduped": True,
-                }
+                return _accepted_create_body(
+                    _active_session_id,
+                    status=str(existing.get("status") or "queued"),
+                    vocal_present=bool(existing.get("vocal_present")),
+                    deduped=True,
+                )
         _active_session_id = "ht_" + uuid.uuid4().hex[:12]
         return None
 
@@ -1537,12 +1572,12 @@ def _enqueue_generate(
     with _registry_lock:
         for existing in _jobs.values():
             if str(existing.get("status") or "") in {"queued", "running"}:
-                return {
-                    "session_id": existing["session_id"],
-                    "status": str(existing.get("status") or "queued"),
-                    "vocal_present": bool(existing.get("vocal_present")),
-                    "deduped": True,
-                }
+                return _accepted_create_body(
+                    str(existing["session_id"]),
+                    status=str(existing.get("status") or "queued"),
+                    vocal_present=bool(existing.get("vocal_present")),
+                    deduped=True,
+                )
         session_id = session_id or ("ht_" + uuid.uuid4().hex[:12])
         _active_session_id = session_id
         job = {
@@ -1565,10 +1600,10 @@ def _enqueue_generate(
         _jobs[session_id] = job
     try:
         _persist_job(job)
-    except OSError as exc:
+    except Exception as exc:
         with _registry_lock:
             _jobs.pop(session_id, None)
-        _log(f"[create] persist failed: {exc}")
+        _console_exception(f"[create] persist failed: {exc}")
         raise HTTPException(status_code=500, detail="could not persist job") from exc
     thread = threading.Thread(
         target=_worker,
@@ -1577,13 +1612,14 @@ def _enqueue_generate(
         daemon=True,
     )
     thread.start()
-    return {
-        "session_id": session_id,
-        "status": "queued",
-        "vocal_present": bool(render_opts.get("vocal_file") or render_opts.get("voice_sample_path")),
-        "engine_used": render_opts.get("engine_used") or "Lyria",
-        "token_cost": 1,
-    }
+    return _accepted_create_body(
+        session_id,
+        status="pending",
+        vocal_present=bool(render_opts.get("vocal_file") or render_opts.get("voice_sample_path")),
+        engine_used=render_opts.get("engine_used") or "Lyria",
+        token_cost=1,
+        status_url=f"/api/tracks/status/{session_id}",
+    )
 
 
 def _boot_production_brain() -> dict[str, Any]:
@@ -1743,7 +1779,7 @@ async def _fulfill_create_track(request: Request) -> dict[str, Any]:
             try:
                 voice_sample_path = _save_ref_vocal(str(_active_session_id or ""), raw_take)
             except Exception as exc:
-                _log(f"[HEART_MULA] could not save ref_vocal.wav: {exc}")
+                _console_exception(f"[HEART_MULA] could not save ref_vocal.wav: {exc}")
                 raise HTTPException(status_code=500, detail=f"HeartMuLa generation failed: {exc}") from exc
             render_opts["voice_sample_path"] = voice_sample_path
             render_opts["engine_used"] = "HeartMuLa"

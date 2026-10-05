@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from typing import Any
@@ -305,8 +306,9 @@ def _http_json(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:240]
-        raise RuntimeError(f"HTTP {exc.code}") from None
+        exc.read()
+        traceback.print_exc()
+        raise RuntimeError(f"HTTP {exc.code}") from exc
 
 
 def _call_replicate(prompt: str, genre: str | None, token: str, model: str) -> dict:

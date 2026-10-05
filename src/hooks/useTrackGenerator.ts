@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { sessionIdFromCreate } from "@/lib/create-session-id";
 import { formatValidationError } from "@/lib/validation-error";
 
 const API_BASE = (
@@ -42,15 +43,15 @@ export function useTrackGenerator() {
         body: JSON.stringify(body),
       });
       const payload = (await res.json().catch(() => ({}))) as StatusPayload & {
+        sessionId?: string;
         session_id?: string;
+        id?: string;
+        track_id?: string;
       };
       if (!res.ok) {
         throw new Error(formatValidationError(payload, "Could not queue the track."));
       }
-      if (!payload.session_id) {
-        throw new Error("Create did not return a session id.");
-      }
-      return payload.session_id;
+      return sessionIdFromCreate(payload);
     },
   });
 

@@ -5,6 +5,7 @@
  * (default in non-production), create/poll/stream stay on the workstation.
  */
 
+import { sessionIdFromCreate } from "@/lib/create-session-id";
 import { applyEngineControlsToPrompt, type EngineControls } from "@/lib/engine-controls";
 import { clampDurationPreset } from "@/lib/track-length";
 import { LYRICS_MAX_CHARS, LYRICS_TOO_LONG_MESSAGE, formatValidationError } from "@/lib/validation-error";
@@ -280,8 +281,10 @@ export async function generateFromHybridWorker(input: {
     console.error("[HYBRID_WORKER] create rejected", created.status, detail);
     throw new Error(`[Circuit Breaker] Gate 1 failed: ${detail}`);
   }
-  const sessionId = String(createdBody.session_id || "").trim();
-  if (!sessionId) {
+  let sessionId: string;
+  try {
+    sessionId = sessionIdFromCreate(createdBody);
+  } catch {
     throw new Error("[Circuit Breaker] Gate 1 failed: Worker create returned no session_id.");
   }
   console.log("[HYBRID_WORKER] queued", sessionId);

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -171,9 +172,11 @@ def _upload_reference(path: str, token: str, timeout: float) -> str:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             uploaded = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Replicate file upload failed: HTTP {exc.code}") from None
+        traceback.print_exc()
+        raise RuntimeError(f"Replicate file upload failed: HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError("Replicate file upload failed") from None
+        traceback.print_exc()
+        raise RuntimeError("Replicate file upload failed") from exc
     urls = uploaded.get("urls") if isinstance(uploaded.get("urls"), dict) else {}
     file_url = str((urls or {}).get("get") or "").strip()
     if not file_url:
@@ -247,9 +250,11 @@ def _download_output(url: str, timeout: float) -> bytes:
                     raise RuntimeError("voice audio download was too large")
                 chunks.append(block)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"voice audio download failed: HTTP {exc.code}") from None
-    except urllib.error.URLError:
-        raise RuntimeError("voice audio download failed") from None
+        traceback.print_exc()
+        raise RuntimeError(f"voice audio download failed: HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        traceback.print_exc()
+        raise RuntimeError("voice audio download failed") from exc
     body = b"".join(chunks)
     if not body:
         raise RuntimeError("voice audio download was empty")
@@ -261,7 +266,11 @@ def _write_vocal(dest: str, body: bytes, *, scratch_root: str | None = None) -> 
     dest_abs = os.path.abspath(dest)
     if not _is_under(dest_abs, root):
         raise VoiceInputError("vocal path escaped scratch")
-    os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
+    except OSError:
+        traceback.print_exc()
+        raise
     tmp = dest_abs + ".part"
     if not _is_under(tmp, root):
         raise VoiceInputError("vocal path escaped scratch")

@@ -63,6 +63,7 @@ import {
   lyricLanguageInstruction,
   type LyricLanguage,
 } from "@/lib/lyric-languages";
+import { sessionIdFromCreate } from "@/lib/create-session-id";
 import { explainEngineFailure } from "@/lib/engine-failure";
 import {
   LYRICS_MAX_CHARS,
@@ -2698,7 +2699,10 @@ export function AudioStudio() {
             signal: abort.signal,
           });
           const createdBody = (await created.json().catch(() => ({}))) as {
+            sessionId?: string;
             session_id?: string;
+            id?: string;
+            track_id?: string;
             detail?: unknown;
             error?: unknown;
           };
@@ -2707,8 +2711,7 @@ export function AudioStudio() {
               formatValidationError(createdBody, `Create failed (${created.status})`),
             );
           }
-          const sessionId = (createdBody.session_id || "").trim();
-          if (!sessionId) throw new Error("Create did not return a session id.");
+          const sessionId = sessionIdFromCreate(createdBody);
           stageTaskId = sessionId;
           stageStartedAt = Date.now();
           savePendingJob({

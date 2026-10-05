@@ -151,7 +151,7 @@ def test_create_without_voice_sample_uses_lyria_only(live_dirs, monkeypatch):
     body = response.json()
     assert body["engine_used"] == "Lyria"
     assert body["token_cost"] == 1
-    assert body["status"] == "queued"
+    assert body["status"] == "pending"
     session_id = body["session_id"]
     assert session_id.startswith("ht_") and len(session_id) == 15
     opts = started[-1][-1]
