@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
 
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
+import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import LyricEditorModal from "@/components/studio/LyricEditorModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
@@ -8,8 +9,6 @@ import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
-const ENGINE_CANVAS =
-  "#070508 radial-gradient(circle at 50% 0%, rgba(225, 29, 72, 0.12) 0%, #0d0910 40%, #070508 100%)";
 const FALLBACK_PROMPT = "Heavy dynamic acoustic rock with raspy vocals";
 const VAULT_EMPTY = "No ready masters yet. Create a track and it will show up here.";
 
@@ -26,9 +25,11 @@ interface VaultTrack {
 }
 
 const cardStyle: CSSProperties = {
-  backgroundColor: "#121826",
-  border: "1px solid #1e293b",
-  borderRadius: 10,
+  backgroundColor: "rgba(15, 10, 20, 0.55)",
+  backdropFilter: "blur(16px)",
+  WebkitBackdropFilter: "blur(16px)",
+  border: "1px solid rgba(255, 255, 255, 0.08)",
+  borderRadius: 12,
   padding: 14,
 };
 
@@ -209,6 +210,8 @@ export function EnginePage() {
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [hasProLicense, setHasProLicense] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState(1);
   const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
@@ -323,7 +326,6 @@ export function EnginePage() {
     setGender(tmpl.recommendedGender);
     setIsInstrumental(tmpl.isInstrumentalDefault);
     setGenre(tmpl.category);
-    setActiveTab("custom");
   };
 
   const saveRecords = (updated: SavedPromptItem[]) => {
@@ -359,7 +361,7 @@ export function EnginePage() {
     );
   };
 
-  const handleGenerate = async (event: FormEvent) => {
+  const handleGenerate = async (event: FormEvent | MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (isGenerating) return;
     const effectivePrompt = prompt.trim() || FALLBACK_PROMPT;
@@ -446,7 +448,7 @@ export function EnginePage() {
         colorScheme: "dark",
         position: "relative",
         zIndex: 1,
-        background: ENGINE_CANVAS,
+        background: "transparent",
         padding: "24px 16px 120px",
       }}
     >
@@ -484,10 +486,12 @@ export function EnginePage() {
                 whiteSpace: "nowrap",
               }}
             >
-              <span style={{ fontWeight: 900 }}>Ⓗ</span> 1 Hybrid Token
+              <span style={{ fontWeight: 900 }}>Ⓗ</span>{" "}
+              {tokenBalance === 1 ? `${tokenBalance} Hybrid Token` : `${tokenBalance} Hybrid Tokens`}
             </span>
             <button
               type="button"
+              onClick={() => setIsBuyTokensOpen(true)}
               style={{
                 background: "transparent",
                 border: "none",
@@ -534,32 +538,169 @@ export function EnginePage() {
         ) : null}
 
         {activeTab === "easy" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {MUREKA_TEMPLATES.map((tmpl) => (
-              <article key={tmpl.id} style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 10 }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{tmpl.title}</h2>
-                  <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8", lineHeight: 1.4 }}>{tmpl.subtitle}</p>
-                </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <h2
+                style={{
+                  margin: 0,
+                  background: "transparent",
+                  color: "#94a3b8",
+                  WebkitTextFillColor: "#94a3b8",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: 0,
+                  textShadow: "none",
+                }}
+              >
+                Start with a template
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsTemplatesOpen(true)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                View more ›
+              </button>
+            </div>
+            <div
+              aria-label="Template carousel"
+              style={{
+                display: "flex",
+                gap: 10,
+                overflowX: "auto",
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
+              }}
+            >
+              {MUREKA_TEMPLATES.slice(0, 5).map((tmpl) => (
                 <button
+                  key={tmpl.id}
                   type="button"
                   onClick={() => handleApplyTemplate(tmpl)}
                   style={{
-                    marginTop: "auto",
-                    backgroundColor: "#9f1239",
-                    color: "#ffffff",
-                    border: "1px solid #4c0519",
-                    borderRadius: 8,
-                    padding: "8px 0",
+                    minWidth: 175,
+                    maxWidth: 175,
+                    flex: "0 0 auto",
+                    backgroundColor: "rgba(20, 12, 22, 0.6)",
+                    backdropFilter: "blur(12px)",
+                    WebkitBackdropFilter: "blur(12px)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 10,
+                    padding: 12,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: "#f8fafc",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {tmpl.title}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: "#94a3b8",
+                      lineHeight: 1.35,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {tmpl.subtitle}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div
+              style={{
+                backgroundColor: "rgba(18, 12, 22, 0.65)",
+                backdropFilter: "blur(16px)",
+                WebkitBackdropFilter: "blur(16px)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 12,
+                padding: 14,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <input
+                aria-label="What's the vibe?"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="What's the vibe?"
+                style={{
+                  width: "100%",
+                  background: "transparent",
+                  backgroundColor: "transparent",
+                  border: "none",
+                  color: "#f8fafc",
+                  fontSize: 14,
+                  outline: "none",
+                  padding: 0,
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsInstrumental(true);
+                    setPrompt((prev) =>
+                      prev ? `${prev}, punchy instrumental beat` : "Heavy 808 acoustic hybrid beat, hard drums",
+                    );
+                  }}
+                  style={{
+                    backgroundColor: isInstrumental ? "rgba(225, 29, 72, 0.2)" : "rgba(255,255,255,0.05)",
+                    border: isInstrumental ? "1px solid #e11d48" : "1px solid rgba(255,255,255,0.1)",
+                    color: isInstrumental ? "#fda4af" : "#cbd5e1",
+                    borderRadius: 20,
+                    padding: "8px 12px",
                     fontSize: 12,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     cursor: "pointer",
                   }}
                 >
-                  Load into Custom
+                  + 🎹 Make a beat
                 </button>
-              </article>
-            ))}
+                <button
+                  type="button"
+                  aria-label="Send"
+                  disabled={isGenerating || !prompt.trim()}
+                  onClick={(event) => void handleGenerate(event)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    flex: "0 0 auto",
+                    border: "none",
+                    borderRadius: 8,
+                    background: prompt.trim() ? "#0284c7" : "rgba(255,255,255,0.08)",
+                    color: "#f8fafc",
+                    fontSize: 16,
+                    fontWeight: 700,
+                    cursor: isGenerating || !prompt.trim() ? "not-allowed" : "pointer",
+                  }}
+                >
+                  ↑
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <form onSubmit={(event) => void handleGenerate(event)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -877,6 +1018,11 @@ export function EnginePage() {
         </section>
 
         <TemplatesModal isOpen={isTemplatesOpen} onClose={() => setIsTemplatesOpen(false)} onSelectTemplate={handleApplyTemplate} />
+        <BuyTokensModal
+          isOpen={isBuyTokensOpen}
+          onClose={() => setIsBuyTokensOpen(false)}
+          onSuccessCredit={(amount) => setTokenBalance((prev) => prev + amount)}
+        />
         <LyricEditorModal
           isOpen={isLyricModalOpen}
           onClose={() => setIsLyricModalOpen(false)}
