@@ -126,24 +126,18 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const endpoint = isInstrumental ? GENERATE_BGM_URL : GENERATE_SONG_URL;
-    const payload: {
-      prompt: string;
-      output_format: "wav";
-      lyrics?: string;
-      gender?: string;
-      vocal_id?: string;
-    } = {
-      prompt,
-      output_format: "wav",
-    };
-    if (!isInstrumental) {
-      payload.lyrics = lyrics;
-      if (vocalUsed) {
-        payload.vocal_id = vocalUsed;
-      } else {
-        payload.gender = typeof gender === "string" && gender.trim() ? gender.trim() : "male";
-      }
-    }
+    const resolvedGender = (typeof gender === "string" ? gender.trim() : "") || "male";
+    const payload = isInstrumental
+      ? {
+          prompt,
+          output_format: "wav" as const,
+        }
+      : {
+          prompt,
+          lyrics,
+          gender: resolvedGender,
+          output_format: "wav" as const,
+        };
 
     const submitRes = await fetch(endpoint, {
       method: "POST",
@@ -153,10 +147,20 @@ export async function POST(req: Request): Promise<Response> {
       },
       body: JSON.stringify(payload),
     });
-    const submitData = (await submitRes.json()) as { data?: { id?: string } };
+    const submitData = (await submitRes.json()) as {
+      data?: { id?: string };
+      message?: string;
+      error?: string;
+    };
     const taskId = submitData.data?.id;
     if (!taskId) {
-      return Response.json({ error: "Task submission rejected by upstream" }, { status: 500 });
+      console.error("WaveSpeed Raw Rejection:", JSON.stringify(submitData, null, 2));
+      return Response.json(
+        {
+          error: `WaveSpeed rejected: ${submitData.message || submitData.error || JSON.stringify(submitData)}`,
+        },
+        { status: 500 },
+      );
     }
     if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
       throw new Error("Task submission rejected by upstream");

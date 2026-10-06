@@ -95,7 +95,9 @@ describe("POST /api/generate", () => {
     const res = await POST(generateRequest());
 
     expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({ error: "Task submission rejected by upstream" });
+    await expect(res.json()).resolves.toEqual({
+      error: `WaveSpeed rejected: ${JSON.stringify({ data: {} })}`,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(SONG_URL);
@@ -266,13 +268,18 @@ describe("POST /api/generate", () => {
     await expect(res.json()).resolves.toEqual({ error: "socket hang up" });
   });
 
-  it("sends vocal_id or gender on vocal songs and neither on instrumental", async () => {
+  it("sends exactly prompt, lyrics, gender, and output_format on vocal songs", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
     const vocal = await POST(
-      generateRequest({ gender: "female", title: "Heavy Sky Arrival", isInstrumental: false }),
+      generateRequest({
+        gender: "female",
+        title: "Heavy Sky Arrival",
+        userId: "user-1",
+        isInstrumental: false,
+      }),
     );
     expect(vocal.status).toBe(500);
     const [songUrl, songInit] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -281,10 +288,12 @@ describe("POST /api/generate", () => {
     expect(songBody).toEqual({
       prompt: "Acoustic, heavy rock",
       lyrics: "[Verse]\nline\n[inst-short]",
-      output_format: "wav",
       gender: "female",
+      output_format: "wav",
     });
+    expect(Object.keys(songBody).sort()).toEqual(["gender", "lyrics", "output_format", "prompt"]);
     expect(songBody).not.toHaveProperty("title");
+    expect(songBody).not.toHaveProperty("userId");
     expect(songBody).not.toHaveProperty("reference_id");
     expect(songBody).not.toHaveProperty("vocal_id");
 
@@ -294,6 +303,7 @@ describe("POST /api/generate", () => {
         gender: "female",
         vocalId: "  artist-voice-9  ",
         title: "Heavy Sky Arrival",
+        userId: "user-1",
         isInstrumental: false,
       }),
     );
@@ -304,20 +314,29 @@ describe("POST /api/generate", () => {
     expect(voicedBody).toEqual({
       prompt: "Acoustic, heavy rock",
       lyrics: "[Verse]\nline\n[inst-short]",
+      gender: "female",
       output_format: "wav",
-      vocal_id: "artist-voice-9",
     });
-    expect(voicedBody).not.toHaveProperty("gender");
+    expect(voicedBody).not.toHaveProperty("vocal_id");
+    expect(voicedBody).not.toHaveProperty("title");
+    expect(voicedBody).not.toHaveProperty("userId");
     expect(voicedBody).not.toHaveProperty("reference_id");
 
     fetchMock.mockClear();
-    const blankVoice = await POST(generateRequest({ gender: "female", vocalId: "   " }));
+    const blankVoice = await POST(
+      generateRequest({ gender: "   ", vocalId: "   ", title: "Heavy Sky Arrival", userId: "user-1" }),
+    );
     expect(blankVoice.status).toBe(500);
     const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
-    expect(blankBody.gender).toBe("female");
+    expect(blankBody).toEqual({
+      prompt: "Acoustic, heavy rock",
+      lyrics: "[Verse]\nline\n[inst-short]",
+      gender: "male",
+      output_format: "wav",
+    });
     expect(blankBody).not.toHaveProperty("vocal_id");
 
     fetchMock.mockClear();
