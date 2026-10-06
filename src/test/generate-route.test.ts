@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { uploadMock, insertMock } = vi.hoisted(() => ({
-  uploadMock: vi.fn(async () => ({ data: { path: "masters/task" }, error: null })),
+  uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
   insertMock: vi.fn(async () => ({ error: null })),
 }));
 
@@ -99,7 +99,7 @@ describe("POST /api/generate", () => {
       error: `WaveSpeed rejected: ${JSON.stringify({ data: {} })}`,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SONG_URL);
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
@@ -155,7 +155,11 @@ describe("POST /api/generate", () => {
         throw new Error("vocal-clone must not run on generate");
       }
       if (url === SONG_URL) return jsonResponse({ data: { id: "task-3" } });
-      if (url === cloudfront) return new Response(wav, { status: 200 });
+      if (url === cloudfront) {
+        const copy = new Uint8Array(wav.byteLength);
+        copy.set(wav);
+        return new Response(new Blob([copy]), { status: 200 });
+      }
       polls += 1;
       if (polls === 1) return new Response("unavailable", { status: 502 });
       return jsonResponse({
@@ -282,7 +286,7 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(vocal.status).toBe(500);
-    const [songUrl, songInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(songUrl).toBe(SONG_URL);
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
     expect(songBody).toEqual({
@@ -308,7 +312,7 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(withVoice.status).toBe(500);
-    const [voicedUrl, voicedInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [voicedUrl, voicedInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(voicedUrl).toBe(SONG_URL);
     const voicedBody = JSON.parse(String(voicedInit.body)) as Record<string, unknown>;
     expect(voicedBody).toEqual({
@@ -327,7 +331,7 @@ describe("POST /api/generate", () => {
       generateRequest({ gender: "   ", vocalId: "   ", title: "Heavy Sky Arrival", userId: "user-1" }),
     );
     expect(blankVoice.status).toBe(500);
-    const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
@@ -350,7 +354,7 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(instrumental.status).toBe(500);
-    const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(bgmUrl).toBe(BGM_URL);
     const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
     expect(bgmBody).toEqual({
@@ -372,7 +376,7 @@ describe("POST /api/generate", () => {
 
     const vocal = await POST(generateRequest({ gender: "male", referenceId: "  ref-swamp  " }));
     expect(vocal.status).toBe(500);
-    const vocalBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const vocalBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
@@ -394,7 +398,7 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(withVoice.status).toBe(500);
-    const voicedBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const voicedBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
@@ -419,7 +423,7 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(instrumental.status).toBe(500);
-    const bgmBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const bgmBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
@@ -435,7 +439,7 @@ describe("POST /api/generate", () => {
     fetchMock.mockClear();
     const blank = await POST(generateRequest({ gender: "male", referenceId: "   " }));
     expect(blank.status).toBe(500);
-    const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
@@ -460,7 +464,7 @@ describe("POST /api/generate", () => {
     );
 
     expect(res.status).toBe(500);
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;

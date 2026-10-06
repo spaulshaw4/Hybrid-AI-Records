@@ -211,7 +211,7 @@ export function EnginePage() {
   const [hasProLicense, setHasProLicense] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
-  const [tokenBalance, setTokenBalance] = useState(1);
+  const [tokenBalance] = useState(1);
   const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
@@ -281,12 +281,12 @@ export function EnginePage() {
 
   useEffect(() => {
     if (!isEnhanceMenuOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
+    const onPointerDown = (event: globalThis.MouseEvent) => {
       if (!enhanceMenuRef.current?.contains(event.target as Node)) {
         setIsEnhanceMenuOpen(false);
       }
     };
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") setIsEnhanceMenuOpen(false);
     };
     document.addEventListener("mousedown", onPointerDown);
@@ -1018,11 +1018,7 @@ export function EnginePage() {
         </section>
 
         <TemplatesModal isOpen={isTemplatesOpen} onClose={() => setIsTemplatesOpen(false)} onSelectTemplate={handleApplyTemplate} />
-        <BuyTokensModal
-          isOpen={isBuyTokensOpen}
-          onClose={() => setIsBuyTokensOpen(false)}
-          onSuccessCredit={(amount) => setTokenBalance((prev) => prev + amount)}
-        />
+        <BuyTokensModal isOpen={isBuyTokensOpen} onClose={() => setIsBuyTokensOpen(false)} />
         <LyricEditorModal
           isOpen={isLyricModalOpen}
           onClose={() => setIsLyricModalOpen(false)}

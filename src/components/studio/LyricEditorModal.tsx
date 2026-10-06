@@ -31,6 +31,7 @@ export default function LyricEditorModal({
   const [draftLyrics, setDraftLyrics] = useState(initialLyrics);
   const [topic, setTopic] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,9 +56,9 @@ export default function LyricEditorModal({
           topic,
         }),
       });
-      const data = (await res.json()) as { success?: boolean; result?: string; error?: string };
+      const data = (await res.json()) as { success?: boolean; result?: string; lyrics?: string; error?: string };
       if (!res.ok || !data.success) throw new Error(data.error || "Action failed");
-      const result = data.result ?? "";
+      const result = data.lyrics || data.result || "";
       if (action === "next_line") {
         setDraftLyrics((prev) => `${prev.trim()}\n${result}`);
       } else {
@@ -71,7 +72,39 @@ export default function LyricEditorModal({
     }
   };
 
-  const toolsDisabled = isLoading || !draftLyrics.trim();
+  const handleGenerateLyricsClick = async () => {
+    setIsGeneratingLyrics(true);
+    setStatusMessage(null);
+    try {
+      const effectiveTopic = topic.trim() || draftLyrics.trim() || "the moon in my eyes color the night";
+      const res = await fetch("/api/ai/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate_lyrics",
+          topic: effectiveTopic,
+          lyrics: draftLyrics,
+          title: currentTitle.trim() || "Untitled Track",
+        }),
+      });
+      const data = (await res.json()) as { lyrics?: string; result?: string; error?: string };
+      if (!res.ok) {
+        setStatusMessage(data.error || "Could not generate lyrics.");
+        return;
+      }
+      const generated = data.lyrics || data.result || "";
+      if (generated) {
+        setDraftLyrics(generated);
+        setTopic("");
+      }
+    } catch {
+      setStatusMessage("Network connection error.");
+    } finally {
+      setIsGeneratingLyrics(false);
+    }
+  };
+
+  const toolsDisabled = isLoading || isGeneratingLyrics || !draftLyrics.trim();
 
   return (
     <div
@@ -222,22 +255,24 @@ export default function LyricEditorModal({
             />
             <button
               type="button"
-              disabled={isLoading}
-              onClick={() => void handleAction("generate_topic")}
+              onClick={() => void handleGenerateLyricsClick()}
+              disabled={isGeneratingLyrics || isLoading}
               style={{
-                background: "linear-gradient(90deg, #0284c7 0%, #06b6d4 100%)",
                 backgroundColor: "#0284c7",
-                border: "none",
-                borderRadius: 6,
-                padding: "8px 14px",
                 color: "#ffffff",
+                border: "none",
+                borderRadius: 8,
+                padding: "8px 16px",
                 fontSize: 12,
                 fontWeight: 700,
-                cursor: isLoading ? "not-allowed" : "pointer",
+                cursor: isGeneratingLyrics || isLoading ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
                 whiteSpace: "nowrap",
               }}
             >
-              {isLoading ? "Writing..." : "🪄 Generate random lyrics"}
+              {isGeneratingLyrics ? "Writing..." : "✨ Generate random lyrics"}
             </button>
           </div>
           {statusMessage ? <div style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{statusMessage}</div> : null}

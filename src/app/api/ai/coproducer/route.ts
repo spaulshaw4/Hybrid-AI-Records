@@ -1,6 +1,14 @@
 const EXTEND_LYRICS_SLUG = "mureka-ai/extend-lyrics";
 const GENERATE_LYRICS_SLUG = "mureka-ai/generate-lyrics";
 
+const RANDOM_LYRIC_THEMES = [
+  "Late night drive under neon lights and moonlit skies",
+  "A soulful ballad about letting go of what held you back",
+  "Gritty Southern rock story about dusty roads and second chances",
+  "Vulnerable bedroom pop about keeping feelings hidden in the dark",
+  "An anthemic acoustic rock track about breaking out of routine",
+];
+
 type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -74,7 +82,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
     if (!apiKey) {
-      return Response.json({ error: "Missing WAVESPEED_API_KEY." }, { status: 500 });
+      return Response.json({ error: "Missing WAVESPEED_API_KEY in environment variables." }, { status: 500 });
     }
 
     const rawRequest = await req.text();
@@ -92,15 +100,20 @@ export async function POST(req: Request): Promise<Response> {
     const prompt = textField(body.prompt);
     const topic = textField(body.topic);
     const text = textField(body.text);
-    const modelSlug = action === "next_line" ? EXTEND_LYRICS_SLUG : GENERATE_LYRICS_SLUG;
-    const payload =
-      action === "next_line"
-        ? { lyrics: lyrics || text || "", num_lines: 2 }
-        : {
-            title: title || "Untitled Track",
-            style: prompt || text || "Acoustic Rock",
-            theme: topic || lyrics || text || "Emotional narrative",
-          };
+    const isExtend = action === "next_line";
+    const modelSlug = isExtend ? EXTEND_LYRICS_SLUG : GENERATE_LYRICS_SLUG;
+    const randomFallback = RANDOM_LYRIC_THEMES[Math.floor(Math.random() * RANDOM_LYRIC_THEMES.length)] ?? RANDOM_LYRIC_THEMES[0];
+    const rawInput = [topic, prompt, text, lyrics].map((value) => value.trim()).find((value) => value.length > 0) ?? "";
+    const effectivePrompt = rawInput || randomFallback;
+    const payload = isExtend
+      ? {
+          lyrics: lyrics.trim() || effectivePrompt,
+          num_lines: 2,
+        }
+      : {
+          prompt: effectivePrompt,
+          title: title.trim() || "Untitled Track",
+        };
 
     const res = await fetch(`https://api.wavespeed.ai/api/v3/${modelSlug}`, {
       method: "POST",
@@ -135,7 +148,7 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    return Response.json({ success: true, result });
+    return Response.json({ success: true, lyrics: result, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Request failed";
     return Response.json({ error: message }, { status: 500 });

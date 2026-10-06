@@ -22,6 +22,12 @@ const AUTOTUNE_VERSION_HASH = "53d58aea27ccd949e5f9d77e4b2a74ffe90e1fa534295b257
 const GUIDE_URL = "https://replicate.delivery/pb/guide.wav";
 const TUNED_URL = "https://replicate.delivery/pb/tuned.wav";
 const MASTER_URL = "https://replicate.delivery/pb/master.wav";
+
+function audioBlob(bytes: Uint8Array): Blob {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new Blob([copy]);
+}
 const RVC_LOOKUP_URL = "https://api.replicate.com/v1/models/cjwbw/rvc";
 const RVC_VERSION = "test-rvc-version-from-schema";
 const STYLE_PROMPT = "Acoustic, Heavy Rock";
@@ -719,13 +725,13 @@ async function runVocalJob(
         return Response.json({ id: "pred_rvc", status: "succeeded", output: MASTER_URL });
       }
       if (url === TUNED_URL) {
-        return new Response(Uint8Array.from([4, 4, 4, 4]), { status: 200 });
+        return new Response(audioBlob(Uint8Array.from([4, 4, 4, 4])), { status: 200 });
       }
       if (url === GUIDE_URL) {
-        return new Response(options.guideBytes ?? Uint8Array.from([1, 2, 3, 4]), { status: 200 });
+        return new Response(audioBlob(options.guideBytes ?? Uint8Array.from([1, 2, 3, 4])), { status: 200 });
       }
       if (url === MASTER_URL) {
-        return new Response(options.masterBytes ?? Uint8Array.from([9, 8, 7, 6]), { status: 200 });
+        return new Response(audioBlob(options.masterBytes ?? Uint8Array.from([9, 8, 7, 6])), { status: 200 });
       }
       throw new Error(`unexpected HTTP ${url}`);
     });

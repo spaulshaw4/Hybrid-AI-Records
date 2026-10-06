@@ -1,15 +1,22 @@
+import { useState } from "react";
+
 interface BuyTokensModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccessCredit: (amount: number) => void;
 }
+
+const STRIPE_LINKS = {
+  single: process.env.NEXT_PUBLIC_STRIPE_LINK_1_TOKEN || "https://buy.stripe.com/test_single_token",
+  ep: process.env.NEXT_PUBLIC_STRIPE_LINK_5_TOKENS || "https://buy.stripe.com/test_5_tokens",
+  album: process.env.NEXT_PUBLIC_STRIPE_LINK_12_TOKENS || "https://buy.stripe.com/test_12_tokens",
+};
 
 const PACKS: Array<{
   name: string;
   detail: string;
   detailColor: string;
   price: string;
-  tokens: number;
+  url: string;
   featured: boolean;
 }> = [
   {
@@ -17,7 +24,7 @@ const PACKS: Array<{
     detail: "1 Hybrid Token",
     detailColor: "#94a3b8",
     price: "$2.00",
-    tokens: 1,
+    url: STRIPE_LINKS.single,
     featured: false,
   },
   {
@@ -25,7 +32,7 @@ const PACKS: Array<{
     detail: "5 Hybrid Tokens",
     detailColor: "#94a3b8",
     price: "$10.00",
-    tokens: 5,
+    url: STRIPE_LINKS.ep,
     featured: true,
   },
   {
@@ -33,24 +40,26 @@ const PACKS: Array<{
     detail: "Includes 2 Free Tokens",
     detailColor: "#34d399",
     price: "$20.00",
-    tokens: 12,
+    url: STRIPE_LINKS.album,
     featured: false,
   },
 ];
 
-export default function BuyTokensModal({ isOpen, onClose, onSuccessCredit }: BuyTokensModalProps) {
+export default function BuyTokensModal({ isOpen, onClose }: BuyTokensModalProps) {
+  const [isRedirecting, setIsRedirecting] = useState(false);
   if (!isOpen) return null;
 
-  const handleCheckout = (tokenCount: number, price: string) => {
-    onSuccessCredit(tokenCount);
-    window.alert(`Added ${tokenCount} Hybrid Tokens (${price}) to your vault balance!`);
-    onClose();
+  const handleCheckoutRedirect = (url: string) => {
+    setIsRedirecting(true);
+    window.location.href = url;
   };
 
   return (
     <div
       role="presentation"
-      onClick={onClose}
+      onClick={() => {
+        if (!isRedirecting) onClose();
+      }}
       style={{
         position: "fixed",
         inset: 0,
@@ -80,6 +89,7 @@ export default function BuyTokensModal({ isOpen, onClose, onSuccessCredit }: Buy
           display: "flex",
           flexDirection: "column",
           gap: 14,
+          boxShadow: "0 24px 60px rgba(0, 0, 0, 0.8)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -89,13 +99,14 @@ export default function BuyTokensModal({ isOpen, onClose, onSuccessCredit }: Buy
           <button
             type="button"
             onClick={onClose}
+            disabled={isRedirecting}
             aria-label="Close"
             style={{
               background: "transparent",
               border: "none",
-              color: "#f8fafc",
-              fontSize: 18,
-              cursor: "pointer",
+              color: "#94a3b8",
+              fontSize: 20,
+              cursor: isRedirecting ? "not-allowed" : "pointer",
               padding: 0,
               lineHeight: 1,
             }}
@@ -103,50 +114,56 @@ export default function BuyTokensModal({ isOpen, onClose, onSuccessCredit }: Buy
             ✕
           </button>
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 }}>
-          1 Token = 1 Master Release Track synthesized on Mureka 9.5 (WAV + MP3).
+        <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", lineHeight: 1.45 }}>
+          1 Token = 1 Master Release Track (WAV + MP3).
         </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {PACKS.map((pack) => (
-            <button
-              key={pack.name}
-              type="button"
-              onClick={() => handleCheckout(pack.tokens, pack.price)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                width: "100%",
-                textAlign: "left",
-                cursor: "pointer",
-                borderRadius: 10,
-                padding: "12px 14px",
-                backgroundColor: pack.featured ? "rgba(225, 29, 72, 0.08)" : "rgba(255,255,255,0.03)",
-                border: pack.featured ? "1px solid rgba(225, 29, 72, 0.3)" : "1px solid rgba(255,255,255,0.08)",
-                color: "#f8fafc",
-              }}
-            >
-              <span style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{pack.name}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: pack.detailColor }}>{pack.detail}</span>
-              </span>
-              <span style={{ color: "#fda4af", fontWeight: 800, fontSize: 14, whiteSpace: "nowrap" }}>{pack.price}</span>
-            </button>
-          ))}
-        </div>
+        {isRedirecting ? (
+          <div style={{ padding: "32px 0", textAlign: "center", color: "#fda4af", fontSize: 14, fontWeight: 600 }}>
+            Redirecting to secure checkout...
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {PACKS.map((pack) => (
+              <button
+                key={pack.name}
+                type="button"
+                onClick={() => handleCheckoutRedirect(pack.url)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  width: "100%",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  borderRadius: 8,
+                  padding: "14px 16px",
+                  backgroundColor: pack.featured ? "rgba(225, 29, 72, 0.08)" : "rgba(255,255,255,0.03)",
+                  border: pack.featured ? "1px solid rgba(225, 29, 72, 0.3)" : "1px solid rgba(255,255,255,0.1)",
+                  color: "#f8fafc",
+                }}
+              >
+                <span style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{pack.name}</span>
+                  <span style={{ fontSize: 11, color: pack.detailColor }}>{pack.detail}</span>
+                </span>
+                <span style={{ color: "#fda4af", fontWeight: 800, fontSize: 15, whiteSpace: "nowrap" }}>{pack.price}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={onClose}
+          disabled={isRedirecting}
           style={{
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,0.12)",
-            color: "#94a3b8",
-            borderRadius: 10,
+            width: "100%",
             padding: "10px 0",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
+            background: "transparent",
+            border: "none",
+            color: "#64748b",
+            fontSize: 12,
+            cursor: isRedirecting ? "not-allowed" : "pointer",
           }}
         >
           Cancel

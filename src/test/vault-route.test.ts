@@ -5,7 +5,7 @@ const { createClientMock, fromMock, selectMock, orderMock, limitMock } = vi.hois
   const orderMock = vi.fn(() => ({ limit: limitMock }));
   const selectMock = vi.fn(() => ({ order: orderMock }));
   const fromMock = vi.fn(() => ({ select: selectMock }));
-  const createClientMock = vi.fn(() => ({ from: fromMock }));
+  const createClientMock = vi.fn((..._args: unknown[]) => ({ from: fromMock }));
   return { createClientMock, fromMock, selectMock, orderMock, limitMock };
 });
 

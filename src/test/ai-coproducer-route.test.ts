@@ -51,7 +51,7 @@ describe("POST /api/ai/coproducer", () => {
     const res = await POST(aiRequest({ action: "optimize", lyrics: "line one", title: "Night" }));
 
     expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({ error: "Missing WAVESPEED_API_KEY." });
+    await expect(res.json()).resolves.toEqual({ error: "Missing WAVESPEED_API_KEY in environment variables." });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -71,9 +71,13 @@ describe("POST /api/ai/coproducer", () => {
     );
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ success: true, result: "the porch light stays on" });
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      lyrics: "the porch light stays on",
+      result: "the porch light stays on",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(EXTEND_URL);
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
@@ -91,7 +95,7 @@ describe("POST /api/ai/coproducer", () => {
     expect(logged).not.toContain("Authorization");
   });
 
-  it("posts optimize to generate-lyrics with title, style from prompt, and theme from topic", async () => {
+  it("prefers topic over prompt and lyrics for the generate-lyrics prompt", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ lyrics: "[Verse]\nkept line" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -107,19 +111,22 @@ describe("POST /api/ai/coproducer", () => {
     );
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ success: true, result: "[Verse]\nkept line" });
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      lyrics: "[Verse]\nkept line",
+      result: "[Verse]\nkept line",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(GENERATE_URL);
     expect(requestBody(fetchMock.mock.calls[0] as unknown[])).toEqual({
+      prompt: "rain",
       title: "Night",
-      style: "dark trap",
-      theme: "rain",
     });
     assertChatNotCalled(fetchMock);
   });
 
-  it("sends style from text when enhance_match_vibe posts only action, text, and title", async () => {
+  it("sends prompt from text when enhance_match_vibe posts only action, text, and title", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ lyrics: "brush drums, wider room" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -133,16 +140,57 @@ describe("POST /api/ai/coproducer", () => {
     );
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ success: true, result: "brush drums, wider room" });
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      lyrics: "brush drums, wider room",
+      result: "brush drums, wider room",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(GENERATE_URL);
     const payload = requestBody(fetchMock.mock.calls[0] as unknown[]);
-    expect(payload.style).toBe("brush drums and dusty baritone");
+    expect(payload.prompt).toBe("brush drums and dusty baritone");
     expect(payload).toEqual({
+      prompt: "brush drums and dusty baritone",
       title: "Night Drive",
-      style: "brush drums and dusty baritone",
-      theme: "brush drums and dusty baritone",
+    });
+    assertChatNotCalled(fetchMock);
+  });
+
+  it("uses the lyric draft when topic, prompt, and text are empty", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ lyrics: "[Chorus]\nmoonlit" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await POST(
+      aiRequest({
+        action: "generate_lyrics",
+        topic: "   ",
+        lyrics: "the moon in my eyes color the night",
+        title: "Night",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(requestBody(fetchMock.mock.calls[0] as unknown[])).toEqual({
+      prompt: "the moon in my eyes color the night",
+      title: "Night",
+    });
+    assertChatNotCalled(fetchMock);
+  });
+
+  it("picks a random theme when every input is blank", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ lyrics: "[Verse]\nneon" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const res = await POST(aiRequest({ action: "generate_lyrics", topic: "", lyrics: "", title: "" }));
+
+    expect(res.status).toBe(200);
+    expect(requestBody(fetchMock.mock.calls[0] as unknown[])).toEqual({
+      prompt: "Late night drive under neon lights and moonlit skies",
+      title: "Untitled Track",
     });
     assertChatNotCalled(fetchMock);
   });
@@ -188,7 +236,7 @@ describe("POST /api/ai/coproducer", () => {
     expect(body.error).toContain("WaveSpeed Mureka returned no lyrics.");
     expect(body.error).toContain("pred_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(GENERATE_URL);
     assertChatNotCalled(fetchMock);
   });

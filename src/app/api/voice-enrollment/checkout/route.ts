@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { resolveStudioSession, unauthorizedSessionResponse } from "@/lib/studio-request-auth.server";
 import { defaultSiteOrigin } from "@/lib/site-origin.server";
 
-const STRIPE_API_VERSION = "2026-03-25.dahlia" as Stripe.LatestApiVersion;
+const STRIPE_API_VERSION = "2026-03-25.dahlia" as const;
 const PRODUCT_NAME = "Artist Voice Profile Activation";
 
 function serviceClient() {

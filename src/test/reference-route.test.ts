@@ -65,7 +65,7 @@ describe("POST /api/reference", () => {
       filename: "swamp.wav",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(UPLOAD_URL);
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ Authorization: "Bearer test-key" });

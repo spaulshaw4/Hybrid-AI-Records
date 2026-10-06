@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
 const VOCAL_CLONE_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/vocal-clone";
-const STRIPE_API_VERSION = "2026-03-25.dahlia" as Stripe.LatestApiVersion;
+const STRIPE_API_VERSION = "2026-03-25.dahlia" as const;
 
 type EnrollmentSession = {
   metadata?: {
