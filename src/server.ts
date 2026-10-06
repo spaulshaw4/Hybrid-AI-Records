@@ -209,6 +209,21 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/ai/wavespeed-webhook") {
+        if (request.method === "GET" || request.method === "HEAD") {
+          const { GET } = await import("./app/api/ai/wavespeed-webhook/route");
+          return GET(request);
+        }
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "GET, HEAD, POST" },
+          });
+        }
+        const { POST } = await import("./app/api/ai/wavespeed-webhook/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/vault") {
         if (request.method !== "GET" && request.method !== "HEAD") {
           return new Response("Method not allowed", {

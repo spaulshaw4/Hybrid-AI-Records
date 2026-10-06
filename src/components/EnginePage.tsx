@@ -8,6 +8,7 @@ import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyProm
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
+import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
 const FALLBACK_PROMPT = "Heavy dynamic acoustic rock with raspy vocals";
@@ -450,10 +451,13 @@ export function EnginePage() {
           gender,
           isInstrumental,
           vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
+          ...(authUserId ? { userId: authUserId } : {}),
         }),
       });
       const data = (await res.json()) as {
         success?: boolean;
+        status?: string;
+        taskId?: string;
         error?: string;
         wavUrl?: string;
         mp3Url?: string;
@@ -461,16 +465,46 @@ export function EnginePage() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Generation rejected by upstream engine");
       }
+      let wavUrl = data.wavUrl ?? "";
+      let mp3Url = data.mp3Url ?? "";
+      const localId = data.taskId ? `local-${data.taskId}` : `local-${Date.now()}`;
+      if (data.status === "pending" && data.taskId) {
+        setVaultTracks((current) => [
+          {
+            id: localId,
+            title: effectiveTitle,
+            genre: effectivePrompt.slice(0, 24),
+            duration: "210s",
+            status: "Rendering",
+            wav_url: "",
+            mp3_url: "",
+          },
+          ...current,
+        ]);
+        try {
+          const ready = await waitForVaultedTrack(data.taskId);
+          wavUrl = ready.wavUrl;
+          mp3Url = ready.mp3Url;
+        } catch (waitErr: unknown) {
+          setVaultTracks((current) =>
+            current.map((row) => (row.id === localId ? { ...row, status: "Failed" } : row)),
+          );
+          throw waitErr;
+        }
+      }
+      if (!wavUrl) {
+        throw new Error(data.error || "Generation rejected by upstream engine");
+      }
       const created: VaultTrack = {
-        id: `local-${Date.now()}`,
+        id: localId,
         title: effectiveTitle,
         genre: effectivePrompt.slice(0, 24),
         duration: "210s",
         status: "Ready",
-        wav_url: data.wavUrl ?? "",
-        mp3_url: data.mp3Url ?? "",
+        wav_url: wavUrl,
+        mp3_url: mp3Url,
       };
-      setVaultTracks((current) => [created, ...current]);
+      setVaultTracks((current) => [created, ...current.filter((row) => row.id !== localId)]);
       try {
         const vaultRes = await fetch("/api/vault");
         if (vaultRes.ok) {
@@ -1074,7 +1108,19 @@ export function EnginePage() {
                   <li key={track.id} style={{ borderTop: "1px solid #1e293b", paddingTop: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
                       <strong style={{ fontSize: 14 }}>{track.title}</strong>
-                      <span style={{ fontSize: 12, color: "#86efac" }}>{track.status}</span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color:
+                            track.status === "Failed"
+                              ? "#f87171"
+                              : track.status === "Ready"
+                                ? "#86efac"
+                                : "#fbbf24",
+                        }}
+                      >
+                        {track.status}
+                      </span>
                     </div>
                     <p style={{ margin: "4px 0 8px", fontSize: 12, color: "#94a3b8" }}>
                       {track.genre || "Untitled style"} · {track.duration}
@@ -1096,6 +1142,7 @@ export function EnginePage() {
           currentPrompt={prompt}
           initialLyrics={lyrics}
           onApplyLyrics={(newLyrics) => setLyrics(newLyrics)}
+          onTitleChange={setTitle}
         />
 
         {openModal === "reference" ? (

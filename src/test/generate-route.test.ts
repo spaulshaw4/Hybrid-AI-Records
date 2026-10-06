@@ -12,7 +12,8 @@ vi.mock("@supabase/supabase-js", () => ({
   }),
 }));
 
-import { maxDuration, POST } from "@/app/api/generate/route";
+import { maxDuration, POST, watchTrack } from "@/app/api/generate/route";
+import { readTrackJob, resetTrackJobs, WAVESPEED_TRACK_WEBHOOK_URL } from "@/lib/wavespeed-track-jobs.server";
 
 const SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
@@ -22,28 +23,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
-}
-
-function silentWav(): Buffer {
-  const channels = 1;
-  const sampleRate = 44100;
-  const frames = 1152;
-  const dataLen = frames * channels * 2;
-  const buffer = Buffer.alloc(44 + dataLen);
-  buffer.write("RIFF", 0);
-  buffer.writeUInt32LE(36 + dataLen, 4);
-  buffer.write("WAVE", 8);
-  buffer.write("fmt ", 12);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(channels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(sampleRate * channels * 2, 28);
-  buffer.writeUInt16LE(channels * 2, 32);
-  buffer.writeUInt16LE(16, 34);
-  buffer.write("data", 36);
-  buffer.writeUInt32LE(dataLen, 40);
-  return buffer;
 }
 
 function generateRequest(extra: Record<string, unknown> = {}): Request {
@@ -66,6 +45,7 @@ describe("POST /api/generate", () => {
     vi.unstubAllGlobals();
     uploadMock.mockClear();
     insertMock.mockClear();
+    resetTrackJobs();
     if (originalKey === undefined) delete process.env.WAVESPEED_API_KEY;
     else process.env.WAVESPEED_API_KEY = originalKey;
   });
@@ -108,130 +88,38 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       output_format: "wav",
       gender: "male",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
   });
 
-  it("returns 500 when upstream reports failed or cancelled", async () => {
+  it("returns pending with the task id and does not hold the request open", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url === SONG_URL) return jsonResponse({ data: { id: "task-1" } });
-        return jsonResponse({ data: { status: "failed" } });
-      }),
-    );
-
-    const pending = POST(generateRequest());
-    await vi.advanceTimersByTimeAsync(3000);
-    const failed = await pending;
-    expect(failed.status).toBe(500);
-    await expect(failed.json()).resolves.toEqual({ error: "Generation failed upstream" });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url === SONG_URL) return jsonResponse({ data: { id: "task-2" } });
-        return jsonResponse({ data: { status: "cancelled" } });
-      }),
-    );
-    const cancelledPending = POST(generateRequest());
-    await vi.advanceTimersByTimeAsync(3000);
-    const cancelled = await cancelledPending;
-    expect(cancelled.status).toBe(500);
-    await expect(cancelled.json()).resolves.toEqual({ error: "Generation failed upstream" });
-  });
-
-  it("skips a non-ok poll, vaults WAV and MP3, and does not return the CloudFront URL", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
-    const wav = silentWav();
-    const cloudfront = "https://cdn.example/master.wav";
-    vi.useFakeTimers();
-    let polls = 0;
-    const fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes("vocal-clone")) {
-        throw new Error("vocal-clone must not run on generate");
-      }
-      if (url === SONG_URL) return jsonResponse({ data: { id: "task-3" } });
-      if (url === cloudfront) {
-        const copy = new Uint8Array(wav.byteLength);
-        copy.set(wav);
-        return new Response(new Blob([copy]), { status: 200 });
-      }
-      polls += 1;
-      if (polls === 1) return new Response("unavailable", { status: 502 });
-      return jsonResponse({
-        data: { status: "completed", outputs: [cloudfront] },
-      });
-    });
+    const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "task-9" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const pending = POST(generateRequest({ title: "Heavy Sky", userId: "user-1" }));
-    await vi.advanceTimersByTimeAsync(3000);
-    await vi.advanceTimersByTimeAsync(3000);
-    const res = await pending;
+    const res = await POST(generateRequest({ title: "Heavy Sky", userId: "user-1" }));
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    const wavUrl =
-      "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/task-3.wav";
-    const mp3Url =
-      "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/task-3.mp3";
-    expect(body).toEqual({ success: true, wavUrl, mp3Url });
-    expect(body).not.toHaveProperty("audioUrl");
-    expect(body).not.toHaveProperty("duration");
-    expect(JSON.stringify(body)).not.toContain("cloudfront");
-    expect(JSON.stringify(body)).not.toContain("cdn.example");
-
-    const wavCall = uploadMock.mock.calls.find((call) => call[0] === "masters/task-3.wav");
-    const mp3Call = uploadMock.mock.calls.find((call) => call[0] === "masters/task-3.mp3");
-    expect(wavCall?.[2]).toMatchObject({ contentType: "audio/wav", upsert: true });
-    expect(mp3Call?.[2]).toMatchObject({ contentType: "audio/mpeg", upsert: true });
-    expect(Buffer.compare(Buffer.from(wavCall?.[1] as Uint8Array), wav)).toBe(0);
-    expect((mp3Call?.[1] as Uint8Array).byteLength).toBeGreaterThan(0);
-    expect(insertMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        user_id: "user-1",
-        title: "Heavy Sky",
-        wav_url: wavUrl,
-        mp3_url: mp3Url,
-        task_id: "task-3",
-      }),
-    );
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("vocal-clone"))).toBe(false);
-  });
-
-  it("returns 500 when WAV transcode throws", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url === SONG_URL) return jsonResponse({ data: { id: "task-bad" } });
-        if (url === "https://cdn.example/bad.wav") return new Response("not-a-wav", { status: 200 });
-        return jsonResponse({
-          data: { status: "completed", outputs: ["https://cdn.example/bad.wav"] },
-        });
-      }),
-    );
-
-    const pending = POST(generateRequest());
-    await vi.advanceTimersByTimeAsync(3000);
-    const res = await pending;
-
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error?: string; wavUrl?: string; audioUrl?: string };
-    expect(body.error).toBeTruthy();
-    expect(body.wavUrl).toBeUndefined();
-    expect(body.audioUrl).toBeUndefined();
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      status: "pending",
+      taskId: "task-9",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
+    expect(readTrackJob("task-9")).toMatchObject({
+      status: "processing",
+      title: "Heavy Sky",
+      userId: "user-1",
+    });
     expect(uploadMock).not.toHaveBeenCalled();
   });
 
-  it("returns 504 after 120 polls", async () => {
+  it("marks the job failed after 120 background result polls", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     vi.useFakeTimers();
     let polls = 0;
@@ -244,15 +132,17 @@ describe("POST /api/generate", () => {
       }),
     );
 
-    const pending = POST(generateRequest());
+    const accepted = await POST(generateRequest());
+    expect(accepted.status).toBe(200);
+    const pending = watchTrack("task-4");
     for (let attempt = 0; attempt < 120; attempt++) {
       await vi.advanceTimersByTimeAsync(3000);
     }
-    const res = await pending;
+    await pending;
 
     expect(polls).toBe(120);
-    expect(res.status).toBe(504);
-    await expect(res.json()).resolves.toEqual({
+    expect(readTrackJob("task-4")).toMatchObject({
+      status: "failed",
       error: "Task hit the 6-minute engine ceiling",
     });
   });
@@ -272,7 +162,7 @@ describe("POST /api/generate", () => {
     await expect(res.json()).resolves.toEqual({ error: "socket hang up" });
   });
 
-  it("sends exactly prompt, lyrics, gender, and output_format on vocal songs", async () => {
+  it("sends the vocal song fields plus the production webhook", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
@@ -294,8 +184,9 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "female",
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
-    expect(Object.keys(songBody).sort()).toEqual(["gender", "lyrics", "output_format", "prompt"]);
+    expect(Object.keys(songBody).sort()).toEqual(["gender", "lyrics", "output_format", "prompt", "webhook"]);
     expect(songBody).not.toHaveProperty("title");
     expect(songBody).not.toHaveProperty("userId");
     expect(songBody).not.toHaveProperty("reference_id");
@@ -320,6 +211,7 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       vocal_id: "artist-voice-9",
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(voicedBody).not.toHaveProperty("gender");
     expect(voicedBody).not.toHaveProperty("title");
@@ -340,6 +232,7 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "male",
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(blankBody).not.toHaveProperty("vocal_id");
 
@@ -360,6 +253,7 @@ describe("POST /api/generate", () => {
     expect(bgmBody).toEqual({
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(bgmBody.prompt).toBe("Heavy southern rock, 74 BPM");
     expect(String(bgmBody.prompt).match(/74 BPM/g)).toEqual(["74 BPM"]);
@@ -386,6 +280,7 @@ describe("POST /api/generate", () => {
       gender: "male",
       output_format: "wav",
       reference_id: "ref-swamp",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(vocalBody).not.toHaveProperty("vocal_id");
 
@@ -408,6 +303,7 @@ describe("POST /api/generate", () => {
       vocal_id: "artist-voice-9",
       output_format: "wav",
       reference_id: "ref-voice",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(voicedBody).not.toHaveProperty("gender");
 
@@ -431,6 +327,7 @@ describe("POST /api/generate", () => {
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
       reference_id: "ref-bgm",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(bgmBody).not.toHaveProperty("lyrics");
     expect(bgmBody).not.toHaveProperty("gender");
@@ -482,6 +379,7 @@ describe("POST /api/generate", () => {
       lyrics: "The room stays quiet",
       gender: "male",
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
   });
 });

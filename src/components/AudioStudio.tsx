@@ -26,6 +26,7 @@ import { QuickVocalRecorder } from "@/components/QuickVocalRecorder";
 import { AudioVault } from "@/components/AudioVault";
 import { fetchLocalReleaseSessionIds, rememberWorkerSession } from "@/lib/vault-catalog";
 import { replaceBareConflictingPrompt } from "@/lib/mureka-format";
+import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 import { supabase } from "@/integrations/supabase/client";
 import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
@@ -2776,12 +2777,30 @@ export function AudioStudio() {
           });
           const data = (await response.json().catch(() => ({}))) as {
             success?: boolean;
+            status?: string;
+            taskId?: string;
             wavUrl?: string;
             mp3Url?: string | null;
             error?: string;
           };
-          const wavUrl = typeof data.wavUrl === "string" ? data.wavUrl.trim() : "";
-          const mp3Url = typeof data.mp3Url === "string" ? data.mp3Url.trim() : "";
+          let wavUrl = typeof data.wavUrl === "string" ? data.wavUrl.trim() : "";
+          let mp3Url = typeof data.mp3Url === "string" ? data.mp3Url.trim() : "";
+          if (response.ok && data.success && data.status === "pending" && data.taskId) {
+            try {
+              const ready = await waitForVaultedTrack(data.taskId, { signal: abort.signal });
+              wavUrl = ready.wavUrl;
+              mp3Url = ready.mp3Url;
+            } catch (waitErr: unknown) {
+              if (abort.signal.aborted) throw waitErr;
+              const failure = new Error(
+                waitErr instanceof Error && waitErr.message.trim()
+                  ? waitErr.message
+                  : "Generation failed.",
+              );
+              failure.name = "CreateResponseError";
+              throw failure;
+            }
+          }
           if (!response.ok || !wavUrl) {
             const failure = new Error(
               typeof data.error === "string" && data.error.trim() ? data.error : "Generation failed.",

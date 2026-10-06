@@ -5,6 +5,15 @@ import {
   formatMurekaPrompt,
   replaceBareConflictingPrompt,
 } from "@/lib/mureka-format";
+import {
+  beginDelivery,
+  completeTrackJob,
+  failTrackJob,
+  readTrackJob,
+  rememberTrackJob,
+  WAVESPEED_TRACK_WEBHOOK_URL,
+  type TrackJob,
+} from "@/lib/wavespeed-track-jobs.server";
 // @ts-ignore lamejs has no published @types/lamejs package
 import lamejs from "lamejs";
 
@@ -114,6 +123,162 @@ export function transcodeWavToMp3(wavBuffer: Buffer): Buffer {
   return Buffer.concat(mp3Data.map((chunk) => Buffer.from(chunk)));
 }
 
+const TERMINAL_FAIL = new Set(["failed", "cancelled", "timeout", "deleted"]);
+
+function resultUrl(taskId: string): string {
+  return `https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(taskId)}/result`;
+}
+
+function readResultStatus(body: {
+  data?: { status?: string };
+  status?: string;
+}): string {
+  const status = body.data?.status ?? body.status;
+  return typeof status === "string" ? status.trim().toLowerCase() : "";
+}
+
+function readResultOutput(body: {
+  data?: { outputs?: unknown[] };
+  outputs?: unknown[];
+}): string {
+  const outputs = body.data?.outputs ?? body.outputs;
+  const first = Array.isArray(outputs) ? outputs[0] : undefined;
+  return typeof first === "string" ? first.trim() : "";
+}
+
+async function vaultCompletedWav(
+  job: TrackJob,
+  outputUrl: string,
+): Promise<{ wavUrl: string; mp3Url: string }> {
+  const wavRes = await fetch(outputUrl);
+  if (!wavRes.ok) {
+    throw new Error("Generation failed upstream");
+  }
+  const wavBuffer = Buffer.from(await wavRes.arrayBuffer());
+  const mp3Buffer = transcodeWavToMp3(wavBuffer);
+
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
+  const supabase = vaultClient();
+  const wavPath = `masters/${job.taskId}.wav`;
+  const mp3Path = `masters/${job.taskId}.mp3`;
+  const [wavUpload, mp3Upload] = await Promise.all([
+    supabase.storage.from(VAULT_BUCKET).upload(wavPath, wavBuffer, {
+      contentType: "audio/wav",
+      upsert: true,
+    }),
+    supabase.storage.from(VAULT_BUCKET).upload(mp3Path, mp3Buffer, {
+      contentType: "audio/mpeg",
+      upsert: true,
+    }),
+  ]);
+  if (wavUpload.error || mp3Upload.error) {
+    throw new Error(wavUpload.error?.message || mp3Upload.error?.message || "Vault upload failed");
+  }
+
+  const cdnBase = `${supabaseUrl}/storage/v1/object/public/${VAULT_BUCKET}`;
+  const wavUrl = `${cdnBase}/${wavPath}`;
+  const mp3Url = `${cdnBase}/${mp3Path}`;
+
+  if (job.userId) {
+    const { error: insertError } = await supabase.from("vaulted_tracks").insert({
+      user_id: job.userId,
+      title: job.title,
+      prompt: job.prompt,
+      lyrics: job.lyrics,
+      vocal_id_used: job.vocalId,
+      wav_url: wavUrl,
+      mp3_url: mp3Url,
+      task_id: job.taskId,
+    });
+    if (insertError) throw new Error(insertError.message);
+  }
+
+  return { wavUrl, mp3Url };
+}
+
+/**
+ * Confirm the prediction with WaveSpeed, then vault once.
+ * The webhook body is not trusted for the audio URL.
+ */
+export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
+  const existing = readTrackJob(taskId);
+  if (!existing || existing.status !== "processing" || existing.delivering) return;
+
+  const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
+  if (!apiKey) {
+    failTrackJob(taskId, "Missing WaveSpeed API key");
+    return;
+  }
+
+  const pollRes = await fetch(resultUrl(taskId), {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!pollRes.ok) {
+    console.log(`[generate] task ${taskId} result http ${pollRes.status}`);
+    return;
+  }
+
+  let pollData: {
+    data?: { status?: string; outputs?: unknown[] };
+    status?: string;
+    outputs?: unknown[];
+  };
+  try {
+    pollData = (await pollRes.json()) as typeof pollData;
+  } catch {
+    return;
+  }
+
+  const status = readResultStatus(pollData);
+  console.log(`[generate] task ${taskId} status ${status || "pending"}`);
+  if (!status || status === "processing" || status === "created" || status === "pending") return;
+  if (TERMINAL_FAIL.has(status)) {
+    failTrackJob(taskId, "Generation failed upstream");
+    return;
+  }
+  if (status !== "completed") return;
+
+  const outputUrl = readResultOutput(pollData);
+  if (!outputUrl.startsWith("https://")) {
+    failTrackJob(taskId, "Generation failed upstream");
+    return;
+  }
+
+  const job = beginDelivery(taskId);
+  if (!job) return;
+  try {
+    const urls = await vaultCompletedWav(job, outputUrl);
+    completeTrackJob(taskId, urls);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "";
+    failTrackJob(taskId, message || "Generation failed upstream");
+  }
+}
+
+/** Keep checking after the HTTP response has already returned. */
+export async function watchTrack(taskId: string): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await sleep(POLL_INTERVAL_MS);
+    const current = readTrackJob(taskId);
+    if (!current || current.status !== "processing") return;
+    try {
+      await settleTrackFromWaveSpeed(taskId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      console.error("[generate] watch error", message || "error");
+    }
+    const after = readTrackJob(taskId);
+    if (!after || after.status !== "processing") return;
+  }
+  failTrackJob(taskId, "Task hit the 6-minute engine ceiling");
+}
+
+function startTrackWatch(taskId: string): void {
+  // Unit tests drive delivery through the webhook. The live server watches in the background.
+  if (process.env.VITEST === "true") return;
+  void watchTrack(taskId);
+}
+
 export async function POST(req: Request): Promise<Response> {
   try {
     const {
@@ -146,6 +311,7 @@ export async function POST(req: Request): Promise<Response> {
     const payload: {
       prompt: string;
       output_format: "wav";
+      webhook: string;
       reference_id?: string;
       lyrics?: string;
       gender?: string;
@@ -153,6 +319,7 @@ export async function POST(req: Request): Promise<Response> {
     } = {
       prompt,
       output_format: "wav",
+      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     };
     if (referenceId) payload.reference_id = referenceId;
     if (!isInstrumental) {
@@ -188,85 +355,23 @@ export async function POST(req: Request): Promise<Response> {
       throw new Error("Task submission rejected by upstream");
     }
     console.log(`[generate] WaveSpeed accepted task ${taskId}`);
+    rememberTrackJob({
+      taskId,
+      title,
+      prompt,
+      lyrics: isInstrumental ? null : lyrics,
+      vocalId: vocalUsed || null,
+      userId,
+      status: "processing",
+      delivering: false,
+    });
+    startTrackWatch(taskId);
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await sleep(POLL_INTERVAL_MS);
-      const pollRes = await fetch(
-        `https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(taskId)}/result`,
-        { headers: { Authorization: `Bearer ${apiKey}` } },
-      );
-      if (!pollRes.ok) {
-        console.log(`[generate] poll ${attempt + 1} task ${taskId} http ${pollRes.status}`);
-        continue;
-      }
-
-      const pollData = (await pollRes.json()) as {
-        data?: { status?: string; outputs?: unknown[] };
-      };
-      const status = pollData.data?.status;
-      console.log(`[generate] poll ${attempt + 1} task ${taskId} status ${status ?? "pending"}`);
-      if (status === "completed") {
-        const outputUrl = pollData.data?.outputs?.[0];
-        if (typeof outputUrl !== "string" || !outputUrl) {
-          throw new Error("Generation failed upstream");
-        }
-        const wavRes = await fetch(outputUrl);
-        if (!wavRes.ok) {
-          throw new Error("Generation failed upstream");
-        }
-        const wavBuffer = Buffer.from(await wavRes.arrayBuffer());
-        const mp3Buffer = transcodeWavToMp3(wavBuffer);
-
-        const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
-        const supabase = vaultClient();
-        const wavPath = `masters/${taskId}.wav`;
-        const mp3Path = `masters/${taskId}.mp3`;
-        const [wavUpload, mp3Upload] = await Promise.all([
-          supabase.storage.from(VAULT_BUCKET).upload(wavPath, wavBuffer, {
-            contentType: "audio/wav",
-            upsert: true,
-          }),
-          supabase.storage.from(VAULT_BUCKET).upload(mp3Path, mp3Buffer, {
-            contentType: "audio/mpeg",
-            upsert: true,
-          }),
-        ]);
-        if (wavUpload.error || mp3Upload.error) {
-          throw new Error(
-            wavUpload.error?.message || mp3Upload.error?.message || "Vault upload failed",
-          );
-        }
-
-        const cdnBase = `${supabaseUrl}/storage/v1/object/public/${VAULT_BUCKET}`;
-        const wavUrl = `${cdnBase}/${wavPath}`;
-        const mp3Url = `${cdnBase}/${mp3Path}`;
-
-        if (userId) {
-          const { error: insertError } = await supabase.from("vaulted_tracks").insert({
-            user_id: userId,
-            title,
-            prompt,
-            lyrics: isInstrumental ? null : lyrics,
-            vocal_id_used: vocalUsed || null,
-            wav_url: wavUrl,
-            mp3_url: mp3Url,
-            task_id: taskId,
-          });
-          if (insertError) throw new Error(insertError.message);
-        }
-
-        return Response.json({
-          success: true,
-          wavUrl,
-          mp3Url,
-        });
-      }
-      if (status === "failed" || status === "cancelled") {
-        return Response.json({ error: "Generation failed upstream" }, { status: 500 });
-      }
-    }
-
-    return Response.json({ error: "Task hit the 6-minute engine ceiling" }, { status: 504 });
+    return Response.json({
+      success: true,
+      status: "pending",
+      taskId,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
     return Response.json({ error: message || "Internal server error" }, { status: 500 });

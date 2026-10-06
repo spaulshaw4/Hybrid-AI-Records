@@ -61,16 +61,131 @@ function upstreamError(data: JsonRecord, rawText: string): string {
   return "WaveSpeed Mureka call failed.";
 }
 
+function lyricsFromValue(value: unknown): string {
+  const direct = nonEmpty(value);
+  if (direct) return direct;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = lyricsFromValue(item);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (!isRecord(value)) return "";
+  return (
+    nonEmpty(value.lyrics) ||
+    nonEmpty(value.text) ||
+    nonEmpty(value.content) ||
+    lyricsFromValue(value.output) ||
+    lyricsFromValue(value.outputs) ||
+    nonEmpty(value.result)
+  );
+}
+
 function lyricsFrom(data: JsonRecord): string {
   const nested = isRecord(data.data) ? data.data : undefined;
   return (
     nonEmpty(data.lyrics) ||
-    nonEmpty(nested?.lyrics) ||
+    lyricsFromValue(data.output) ||
+    lyricsFromValue(data.outputs) ||
     nonEmpty(data.result) ||
-    nonEmpty(data.output) ||
-    nonEmpty(nested?.output) ||
-    nonEmpty(nested?.result)
+    (nested
+      ? nonEmpty(nested.lyrics) ||
+        lyricsFromValue(nested.output) ||
+        lyricsFromValue(nested.outputs) ||
+        nonEmpty(nested.result)
+      : "")
   );
+}
+
+function titleFrom(data: JsonRecord, fallback: string): string {
+  const task = isRecord(data.data) ? data.data : data;
+  const output = task.outputs ?? task.output ?? task.result ?? data.outputs ?? data.output ?? data.result;
+  if (isRecord(output)) {
+    const titled = nonEmpty(output.title);
+    if (titled) return titled;
+  }
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (!isRecord(item)) continue;
+      const titled = nonEmpty(item.title);
+      if (titled) return titled;
+    }
+  }
+  return nonEmpty(task.title) || fallback;
+}
+
+function taskIdFrom(data: JsonRecord): string {
+  const task = isRecord(data.data) ? data.data : data;
+  const id = nonEmpty(task.id) || nonEmpty(data.id);
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return "";
+  return id;
+}
+
+const LYRIC_POLL_INTERVAL_MS = 2000;
+const LYRIC_POLL_ATTEMPTS = 25;
+const TERMINAL_PREDICTION_STATUSES = new Set(["failed", "cancelled", "timeout", "deleted"]);
+
+function resultUrlFrom(data: JsonRecord, predictionId: string): string {
+  const task = isRecord(data.data) ? data.data : data;
+  const urls = isRecord(task.urls) ? task.urls : undefined;
+  const listed = nonEmpty(urls?.get);
+  if (listed.startsWith("https://")) return listed;
+  return `https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(predictionId)}/result`;
+}
+
+function parseOutputPayload(rawOutputs: unknown): unknown {
+  let outputPayload: unknown = Array.isArray(rawOutputs) ? rawOutputs[0] : rawOutputs;
+  if (typeof outputPayload === "string") {
+    const trimmed = outputPayload.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        outputPayload = JSON.parse(trimmed) as unknown;
+      } catch {
+        return outputPayload;
+      }
+    }
+  }
+  return outputPayload;
+}
+
+function lyricsFromPayload(payload: unknown): string {
+  if (typeof payload === "string") return payload.trim();
+  if (Array.isArray(payload)) return lyricsFromPayload(payload[0]);
+  if (!isRecord(payload)) return "";
+  return nonEmpty(payload.lyrics) || nonEmpty(payload.text) || nonEmpty(payload.content);
+}
+
+function titleFromPayload(payload: unknown, fallback: string): string {
+  if (isRecord(payload)) return nonEmpty(payload.title) || fallback;
+  if (Array.isArray(payload)) return titleFromPayload(payload[0], fallback);
+  return fallback;
+}
+
+async function pollPredictionResult(resultUrl: string, apiKey: string): Promise<unknown> {
+  for (let attempt = 0; attempt < LYRIC_POLL_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, LYRIC_POLL_INTERVAL_MS));
+    const res = await fetch(resultUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) continue;
+    const raw = await res.text();
+    let body: JsonRecord = {};
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) continue;
+      body = parsed;
+    } catch {
+      continue;
+    }
+    const task = isRecord(body.data) ? body.data : body;
+    const status = nonEmpty(task.status).toLowerCase();
+    if (status === "completed") return task.outputs;
+    if (TERMINAL_PREDICTION_STATUSES.has(status)) {
+      throw new Error(nonEmpty(task.error) || `Prediction ended with status: ${status}`);
+    }
+  }
+  throw new Error("WaveSpeed prediction timed out after 50 seconds.");
 }
 
 /**
@@ -139,18 +254,32 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: upstreamError(data, rawText) }, { status: res.status });
     }
 
-    const result = lyricsFrom(data);
-    if (!result) {
-      const snippet = rawText.length > 400 ? `${rawText.slice(0, 400)}…` : rawText;
+    let result = lyricsFrom(data);
+    let finalTitle = titleFrom(data, title.trim() || "Untitled Track");
+    const submittedId = taskIdFrom(data);
+    if (!result && !submittedId) {
+      console.error("[WaveSpeed Submit Error]:", JSON.stringify(data, null, 2));
       return Response.json(
-        { error: `WaveSpeed Mureka returned no lyrics. ${snippet}` },
-        { status: 502 },
+        { error: upstreamError(data, rawText) || "Failed to submit prediction." },
+        { status: 500 },
       );
     }
+    if (!result && submittedId) {
+      const rawOutputs = await pollPredictionResult(resultUrlFrom(data, submittedId), apiKey);
+      const outputPayload = parseOutputPayload(rawOutputs);
+      result = lyricsFromPayload(outputPayload);
+      finalTitle = titleFromPayload(outputPayload, title.trim() || "Untitled Track");
+    }
 
-    return Response.json({ success: true, lyrics: result, result });
+    if (!result) {
+      console.error("[WaveSpeed Raw Response]:", JSON.stringify(data, null, 2));
+      return Response.json({ error: "WaveSpeed completed but returned empty lyrics." }, { status: 500 });
+    }
+
+    return Response.json({ success: true, title: finalTitle, lyrics: result, result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Request failed";
-    return Response.json({ error: message }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Internal server error";
+    console.error("[WaveSpeed Route Handler Error]:", err);
+    return Response.json({ error: message || "Internal server error" }, { status: 500 });
   }
 }

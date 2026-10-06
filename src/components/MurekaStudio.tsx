@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { MurekaStudioForm, type GeneratePayload } from "@/components/studio/MurekaStudioForm";
 import { supabase } from "@/integrations/supabase/client";
+import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const handleDownload = async (url: string, filename: string) => {
   try {
@@ -58,12 +59,27 @@ export default function MurekaStudio() {
           ...(userId ? { userId } : {}),
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.wavUrl) {
+      const data = (await res.json()) as {
+        success?: boolean;
+        status?: string;
+        taskId?: string;
+        wavUrl?: string;
+        mp3Url?: string | null;
+        error?: string;
+      };
+      let wavUrl = typeof data.wavUrl === "string" ? data.wavUrl : "";
+      let mp3Url = typeof data.mp3Url === "string" ? data.mp3Url : "";
+      if (res.ok && data.success && data.status === "pending" && data.taskId) {
+        setStatusText("Rendering master...");
+        const ready = await waitForVaultedTrack(data.taskId);
+        wavUrl = ready.wavUrl;
+        mp3Url = ready.mp3Url;
+      }
+      if (!res.ok || !wavUrl) {
         throw new Error(data.error || "Generation failed upstream");
       }
-      setWavUrl(data.wavUrl);
-      setMp3Url(data.mp3Url ?? null);
+      setWavUrl(wavUrl);
+      setMp3Url(mp3Url || null);
       setStatusText("Master complete");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Request failed";

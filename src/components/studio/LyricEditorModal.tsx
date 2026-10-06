@@ -7,6 +7,7 @@ interface LyricEditorModalProps {
   currentPrompt: string;
   initialLyrics: string;
   onApplyLyrics: (lyrics: string) => void;
+  onTitleChange?: (title: string) => void;
 }
 
 const toolButtonStyle: CSSProperties = {
@@ -27,6 +28,7 @@ export default function LyricEditorModal({
   currentPrompt,
   initialLyrics,
   onApplyLyrics,
+  onTitleChange,
 }: LyricEditorModalProps) {
   const [draftLyrics, setDraftLyrics] = useState(initialLyrics);
   const [topic, setTopic] = useState("");
@@ -87,18 +89,34 @@ export default function LyricEditorModal({
           title: currentTitle.trim() || "Untitled Track",
         }),
       });
-      const data = (await res.json()) as { lyrics?: string; result?: string; error?: string };
+      const rawText = await res.text();
+      let data: { lyrics?: string; result?: string; title?: string; error?: string; message?: string } = {};
+      try {
+        const parsed: unknown = JSON.parse(rawText);
+        if (parsed && typeof parsed === "object") {
+          data = parsed as { lyrics?: string; result?: string; title?: string; error?: string; message?: string };
+        }
+      } catch {
+        throw new Error(`Server returned non-JSON (${res.status}): ${rawText.slice(0, 120)}`);
+      }
       if (!res.ok) {
-        setStatusMessage(data.error || "Could not generate lyrics.");
+        setStatusMessage(data.error || data.message || `Request failed with status ${res.status}`);
         return;
       }
       const generated = data.lyrics || data.result || "";
       if (generated) {
         setDraftLyrics(generated);
+      }
+      if (data.title?.trim()) {
+        onTitleChange?.(data.title.trim());
+      }
+      if (generated) {
         setTopic("");
       }
-    } catch {
-      setStatusMessage("Network connection error.");
+    } catch (err: unknown) {
+      console.error("[Lyric Generation Failure]:", err);
+      const message = err instanceof Error ? err.message : "";
+      setStatusMessage(message || "Network connection error.");
     } finally {
       setIsGeneratingLyrics(false);
     }
