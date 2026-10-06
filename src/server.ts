@@ -176,6 +176,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/user/balance") {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "GET, HEAD" },
+          });
+        }
+        const { GET } = await import("./app/api/user/balance/route");
+        return GET(request);
+      }
+
       if (pathname === "/api/ai/optimize-prompt") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {

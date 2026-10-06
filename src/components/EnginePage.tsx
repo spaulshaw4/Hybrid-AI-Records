@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
 
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
+import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import LyricEditorModal from "@/components/studio/LyricEditorModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -211,7 +212,10 @@ export function EnginePage() {
   const [hasProLicense, setHasProLicense] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
-  const [tokenBalance] = useState(1);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
@@ -228,6 +232,65 @@ export function EnginePage() {
   useEffect(() => {
     setPromptRecords(readPromptRecords());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setAuthUserId(data.session?.user?.id ?? null);
+        setAuthReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthUserId(null);
+        setAuthReady(true);
+      });
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserId(session?.user?.id ?? null);
+      setAuthReady(true);
+    });
+    return () => {
+      cancelled = true;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  const syncTokenBalance = useCallback(async () => {
+    if (!authReady) return;
+    if (!authUserId) {
+      setTokenBalance(null);
+      setIsLoadingBalance(false);
+      return;
+    }
+    setIsLoadingBalance(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      const res = await fetch(`/api/user/balance?userId=${encodeURIComponent(authUserId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = (await res.json().catch(() => ({}))) as { balance?: unknown };
+      if (res.ok && typeof body.balance === "number") {
+        setTokenBalance(body.balance);
+      }
+    } catch (err) {
+      console.error("Failed to sync token ledger:", err);
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  }, [authReady, authUserId]);
+
+  useEffect(() => {
+    void syncTokenBalance();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") !== "success") return;
+    const timer = window.setTimeout(() => {
+      void syncTokenBalance();
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [syncTokenBalance]);
 
   useLayoutEffect(() => {
     const page = pageRef.current;
@@ -474,9 +537,12 @@ export function EnginePage() {
             </button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span
+            <div
               style={{
-                background: "rgba(225, 29, 72, 0.12)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                backgroundColor: "rgba(225, 29, 72, 0.12)",
                 border: "1px solid rgba(225, 29, 72, 0.45)",
                 borderRadius: 20,
                 padding: "4px 12px",
@@ -486,9 +552,13 @@ export function EnginePage() {
                 whiteSpace: "nowrap",
               }}
             >
-              <span style={{ fontWeight: 900 }}>Ⓗ</span>{" "}
-              {tokenBalance === 1 ? `${tokenBalance} Hybrid Token` : `${tokenBalance} Hybrid Tokens`}
-            </span>
+              <span style={{ fontSize: 13, fontWeight: 900 }}>Ⓗ</span>
+              <span>
+                {isLoadingBalance
+                  ? "Syncing..."
+                  : `${tokenBalance ?? 0} Hybrid Token${tokenBalance === 1 ? "" : "s"}`}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setIsBuyTokensOpen(true)}

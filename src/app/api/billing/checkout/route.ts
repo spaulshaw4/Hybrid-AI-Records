@@ -20,31 +20,43 @@ function resolveTier(raw: unknown): TokenTier {
   return "single";
 }
 
+const SIGN_IN_REQUIRED =
+  "Please sign in to your Hybrid AI Records account before purchasing tokens so they can be credited to your vault.";
+
+function isUnauthorized(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = (err as { name?: string }).name;
+  const status = (err as { status?: number }).status;
+  const message = err instanceof Error ? err.message : "";
+  return name === "UnauthorizedSessionError" || status === 401 || message === "Unauthorized session";
+}
+
 /**
- * Prefer the verified studio session (Bearer or auth cookie).
- * A body userId is only used when the request is unsigned, matching the
- * `{ tier, userId }` contract. An invalid bearer fails the checkout instead
- * of opening a guest session the webhook cannot credit.
+ * Checkout metadata must be the verified studio user. A body userId is ignored.
+ * Signed-out requests are rejected so a payment cannot be stored as guest_user.
  */
-async function checkoutUserId(req: Request, bodyUserId: string): Promise<string> {
-  const trimmed = bodyUserId.trim();
-  const hasBearer = (req.headers.get("authorization") ?? "").startsWith("Bearer ");
+async function checkoutUserId(req: Request): Promise<string | Response> {
   try {
     const session = await resolveStudioSession(req);
     const verified = session.userId.trim();
-    if (verified) return verified;
+    if (!verified || verified === "guest_user") {
+      return Response.json({ error: SIGN_IN_REQUIRED }, { status: 401 });
+    }
+    return verified;
   } catch (err) {
-    if (hasBearer) throw err;
+    if (isUnauthorized(err)) {
+      return Response.json({ error: SIGN_IN_REQUIRED }, { status: 401 });
+    }
+    throw err;
   }
-  return trimmed || "guest_user";
 }
 
 export async function POST(req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { tier?: unknown; userId?: unknown };
     const pack = TOKEN_PACKS[resolveTier(body.tier)];
-    const requestedUserId = typeof body.userId === "string" ? body.userId : "";
-    const userId = await checkoutUserId(req, requestedUserId);
+    const userId = await checkoutUserId(req);
+    if (userId instanceof Response) return userId;
 
     const secretKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
     if (!secretKey) {

@@ -12,6 +12,7 @@ import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SettingsMenu } from "@/components/SettingsMenu";
+import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
 import {
   SITE_NAV,
@@ -41,6 +42,7 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
       <LanguageSwitcher menuAlign="end" />
       <CurrencySwitcher variant="pill" />
       <SettingsMenu />
+      <UserAuthButton />
     </div>
   );
 }

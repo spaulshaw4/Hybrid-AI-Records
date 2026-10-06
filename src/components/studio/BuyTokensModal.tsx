@@ -51,28 +51,40 @@ export default function BuyTokensModal({ isOpen, onClose }: BuyTokensModalProps)
   const busy = loadingTier !== null;
 
   const handleCheckout = async (tier: TokenTier) => {
+    let userId = "";
+    let accessToken = "";
+    try {
+      const { data } = await supabase.auth.getSession();
+      userId = data.session?.user?.id ?? "";
+      accessToken = data.session?.access_token ?? "";
+    } catch {
+      userId = "";
+    }
+    if (!userId || userId === "guest_user") {
+      window.location.href = "/auth?next=/engine";
+      return;
+    }
+
     setLoadingTier(tier);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      try {
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (token) headers.Authorization = `Bearer ${token}`;
-      } catch {
-        // Signed-out or a missing client still opens Checkout as guest_user.
-      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      };
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers,
-        body: JSON.stringify({ tier }),
+        body: JSON.stringify({ tier, userId }),
       });
       const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!res.ok || !data.url) {
-        throw new Error(data.error || "Failed to create checkout session");
+      if (data.url) {
+        window.location.href = data.url;
+        return;
       }
-      window.location.href = data.url;
-    } catch (err: unknown) {
-      alert(err instanceof Error && err.message ? err.message : "Network error");
+      alert(data.error || "Unable to start checkout session.");
+      setLoadingTier(null);
+    } catch {
+      alert("Network error connecting to billing service.");
       setLoadingTier(null);
     }
   };

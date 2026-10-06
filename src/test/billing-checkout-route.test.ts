@@ -51,7 +51,7 @@ describe("POST /api/billing/checkout", () => {
 
   function ready() {
     process.env.STRIPE_SECRET_KEY = "sk_test_checkout_route";
-    resolveStudioSessionMock.mockRejectedValue(new Error("Unauthorized session"));
+    resolveStudioSessionMock.mockResolvedValue({ userId: LEDGER_USER });
     createMock.mockResolvedValue({ url: "https://checkout.stripe.com/c/pay/cs_test_route" });
   }
 
@@ -95,7 +95,7 @@ describe("POST /api/billing/checkout", () => {
         },
       },
     });
-    expect(epParams.metadata).toEqual({ tokens: "5", userId: "guest_user" });
+    expect(epParams.metadata).toEqual({ tokens: "5", userId: LEDGER_USER });
     expect(epParams.success_url).toBe(
       "http://localhost:5173/engine?payment=success&session_id={CHECKOUT_SESSION_ID}",
     );
@@ -122,6 +122,21 @@ describe("POST /api/billing/checkout", () => {
       ["sk_test_checkout_route", { apiVersion: "2026-03-25.dahlia" }],
       ["sk_test_checkout_route", { apiVersion: "2026-03-25.dahlia" }],
     ]);
+  });
+
+  it("refuses a signed-out checkout and does not open a Stripe session", async () => {
+    ready();
+    resolveStudioSessionMock.mockRejectedValue(new Error("Unauthorized session"));
+
+    const res = await POST(checkoutRequest({ tier: "single", userId: LEDGER_USER }));
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Please sign in to your Hybrid AI Records account before purchasing tokens so they can be credited to your vault.",
+    });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ctorArgs).toEqual([]);
   });
 
   it("uses a verified session user id and ignores a mismatched body userId", async () => {
