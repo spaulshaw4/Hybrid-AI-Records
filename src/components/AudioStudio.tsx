@@ -63,7 +63,7 @@ import {
   lyricLanguageInstruction,
   type LyricLanguage,
 } from "@/lib/lyric-languages";
-import { isCreateResponseError, sessionFromCreateResponse } from "@/lib/create-session-id";
+import { isCreateResponseError } from "@/lib/create-session-id";
 import { explainEngineFailure } from "@/lib/engine-failure";
 import {
   LYRICS_MAX_CHARS,
@@ -531,6 +531,8 @@ type Result = {
   style: string;
   vocalProfile: string;
   audioUrl: string;
+  wavUrl?: string | null;
+  mp3Url?: string | null;
   vocalUrl?: string | null;
   instrumentalUrl?: string | null;
   /** Raw Gate 1 engine audio, before stems and mastering. */
@@ -1532,6 +1534,7 @@ export function AudioStudio() {
     isDevAuthBypass() ? DEV_TEST_TOKEN_BALANCE : null,
   );
   const [signedIn, setSignedIn] = useState(isDevAuthBypass());
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
 
   // Playwright iOS smoke: open Token Store without a live auth session.
@@ -2189,6 +2192,7 @@ export function AudioStudio() {
 
     void supabase.auth.getSession().then(({ data }) => {
       setSignedIn(Boolean(data.session));
+      setSessionUserId(data.session?.user?.id ?? null);
       if (data.session) {
         void refreshBalance();
         claimLocalVault();
@@ -2196,6 +2200,7 @@ export function AudioStudio() {
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setSignedIn(Boolean(session));
+      setSessionUserId(session?.user?.id ?? null);
       if (session) {
         void refreshBalance();
         claimLocalVault();
@@ -2677,23 +2682,11 @@ export function AudioStudio() {
       const visibleStyle = selectedStyles.join(", ");
       const styleBox = stylePrompt.trim();
       const genre = visibleStyle || styleBox;
-      const subGenre = selectedStyles.slice(1).join(", ");
-      const vocalGender = resolvedVocalGender();
-      const vocalStyle = vocalPresets
-        .filter((preset) => !GENDER_PRESETS.includes(preset as (typeof GENDER_PRESETS)[number]))
-        .filter(Boolean)
-        .join(", ");
-      const vocalProfile = usesDefaultAiVocal(withVocals, vocalSource)
-        ? vocalPresets.filter(Boolean).join(", ")
-        : "";
-      const mood = vocalPrompt.trim();
       const arrangedLyrics = withVocals
         ? arrangeLyricsForDuration(formatLyricBlocks(lyrics), targetDuration)
         : "";
       // Empty style-prompt box: the visible style is the prompt and the style field.
       const styleTags = styleBox || visibleStyle;
-
-      // The recorded take stays in voiceSampleRef. Generate sends it as vocal_file.
 
       // Linear handoff: lyrics → Sonic prompt; Style Prompt textarea → tags.
       beginPipelineStep("lyrics", { lyrics: arrangedLyrics || "(instrumental)" });
@@ -2739,92 +2732,47 @@ export function AudioStudio() {
         gateMask?: number;
         landing?: { pipelineState?: number };
         tokenSettled?: boolean;
+        wavUrl?: string;
+        mp3Url?: string | null;
       };
       try {
-        // One multipart create. Do not set Content-Type; the browser adds the boundary.
+        // WaveSpeed song render via POST /api/generate. JSON only.
         const runStream = async () => {
-          const durationSeconds = Math.round(clampDurationPreset(targetDuration));
-          const bpmValue = Number.isFinite(bpm) && bpm > 0 ? String(clampBpm(bpm)) : "86";
-          const takeSource = voiceSampleRef.current ?? voiceSample;
-          const hasVocal = !!takeSource && takeSource.size > 0;
-          const form = new FormData();
-          const userPrompt = (styleBox || visibleStyle).trim();
-          form.append("prompt", userPrompt.slice(0, 5000));
-          if (visibleStyle || styleBox) form.append("style", visibleStyle || styleBox);
-          const typedLyrics = lyrics.trim();
-          if (typedLyrics.length > LYRICS_MAX_CHARS) {
-            throw new Error(LYRICS_TOO_LONG_MESSAGE);
-          }
-          if (typedLyrics) form.append("lyrics", typedLyrics);
-          form.append("duration", String(durationSeconds));
-          form.append("length", String(durationSeconds));
-          form.append("tempo", bpmValue);
-          form.append("bpm", bpmValue);
-          form.append("weirdness", String(clampWeirdness(weirdness)));
-          form.append("audio_influence", String(clampInfluence(audioInfluence)));
-          form.append("style_influence", String(clampStyleInfluence(styleInfluence)));
-          form.append("vocal_present", hasVocal ? "true" : "false");
-          if (mood) form.append("mood", mood);
-          if (genre) form.append("genre", genre);
-          if (trackTitle) form.append("title", trackTitle);
-          if (hasVocal && takeSource) {
-            const vocalType = takeSource.type || "audio/wav";
-            const dna = new File([takeSource], "vocal_dna.wav", { type: vocalType });
-            const take = new File([takeSource], "ref_vocal.wav", { type: vocalType });
-            form.append("vocal_dna_file", dna, "vocal_dna.wav");
-            form.append("vocal_file", take, "ref_vocal.wav");
-          }
-          const created = await fetch("/api/tracks/create", {
+          const lyricsText = lyrics;
+          const response = await fetch("/api/generate", {
             method: "POST",
-            body: form,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trackTitle,
+              prompt: stylePrompt,
+              lyrics: lyricsText,
+              gender: "male",
+              isInstrumental: false,
+              ...(sessionUserId ? { userId: sessionUserId } : {}),
+            }),
             signal: abort.signal,
           });
-          const data = await created.json().catch(() => ({}));
-          const sessionId = sessionFromCreateResponse(created, data);
-          stageTaskId = sessionId;
-          stageStartedAt = Date.now();
-          savePendingJob({
-            taskId: sessionId,
-            runId,
-            vaultId: audioVaultId ?? vaultId,
-            title: trackTitle,
-            styleLine,
-            vocalProfile: activeVocalProfile(),
-            startedAt: stageStartedAt,
-          });
-          const deadline = Date.now() + 8 * 60_000;
-          while (Date.now() < deadline) {
-            if (abort.signal.aborted || cancelRef.current) throw new Error(CANCELLED_MESSAGE);
-            await new Promise((resolve) => window.setTimeout(resolve, 3000));
-            const statusRes = await fetch(`/api/tracks/${encodeURIComponent(sessionId)}/status`, {
-              signal: abort.signal,
-            });
-            const job = (await statusRes.json().catch(() => ({}))) as {
-              status?: string;
-              error?: string;
-              master_url?: string;
-              audio_filename?: string;
-              step?: string;
-              note?: string;
-            };
-            const stepLabel = (job.step || job.note || "").trim();
-            if (stepLabel && job.status !== "completed" && job.status !== "failed") {
-              setStatusText(whiteLabelEngineText(stepLabel));
-            }
-            if (job.status === "failed") {
-              throw new Error(formatValidationError(job.error, "Generation failed."));
-            }
-            if (job.status === "completed") {
-              const audioUrl = job.master_url || (job.audio_filename ? `/api/stream/${job.audio_filename}` : "");
-              if (!audioUrl) throw new Error("Generation finished without a master.");
-              return {
-                taskId: sessionId,
-                tracks: [{ audioUrl, title: trackTitle }],
-                tokenSettled: false,
-              };
-            }
+          const data = (await response.json().catch(() => ({}))) as {
+            success?: boolean;
+            wavUrl?: string;
+            mp3Url?: string | null;
+            error?: string;
+          };
+          const wavUrl = typeof data.wavUrl === "string" ? data.wavUrl.trim() : "";
+          const mp3Url = typeof data.mp3Url === "string" ? data.mp3Url.trim() : "";
+          if (!response.ok || !wavUrl) {
+            const failure = new Error(
+              typeof data.error === "string" && data.error.trim() ? data.error : "Generation failed.",
+            );
+            failure.name = "CreateResponseError";
+            throw failure;
           }
-          throw new Error("Generation timed out after 6 minutes — no completed track in Vault.");
+          return {
+            tracks: [{ audioUrl: wavUrl, title: trackTitle }],
+            wavUrl,
+            mp3Url: mp3Url || null,
+            tokenSettled: false,
+          };
         };
 
         try {
@@ -3110,11 +3058,14 @@ export function AudioStudio() {
         }
       }
 
+      const playWav = started.wavUrl || audioUrl;
       const finished: Result = {
         title,
         style: styleLine,
         vocalProfile: activeVocalProfile(),
-        audioUrl,
+        audioUrl: playWav,
+        wavUrl: started.wavUrl || playWav,
+        mp3Url: started.mp3Url ?? null,
         vocalUrl: stems?.vocalUrl,
         instrumentalUrl: stems?.instrumentalUrl,
         rawAudioUrl: stems?.rawAudioUrl,
@@ -3135,7 +3086,7 @@ export function AudioStudio() {
       });
       setResult(finished);
       setPlaybackKind("mastered");
-      setPlaybackSrc(audioUrl);
+      setPlaybackSrc(playWav);
       if (started.taskId) {
         void cacheStudioStemBlobs(started.taskId, {
           raw: audioUrl,
@@ -5203,14 +5154,48 @@ export function AudioStudio() {
             </div>
 
             <WaveformPlayer
-              key={playbackSrc ?? result.audioUrl}
-              src={playbackSrc ?? result.audioUrl}
+              key={result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl}
+              src={result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl}
               title={result.title}
               sessionId={result.taskId}
               onUrlRepaired={applyRepairedUrl}
               onRegenerate={() => void handleGenerate()}
               regenerating={busy && !result}
             />
+
+            {(result.wavUrl || result.mp3Url) ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Broadcast Quality Master (Dual Delivery)</p>
+                <div className="grid grid-cols-2 gap-[10px]">
+                  {result.wavUrl ? (
+                    <a
+                      href={result.wavUrl}
+                      download={`${result.title || "master"}.wav`}
+                      className={cn(
+                        buttonVariants({ size: "sm" }),
+                        "inline-flex items-center justify-center gap-2 bg-zinc-950 text-white hover:bg-zinc-800",
+                      )}
+                    >
+                      <Download className="size-3.5" aria-hidden />
+                      Download WAV
+                    </a>
+                  ) : null}
+                  {result.mp3Url ? (
+                    <a
+                      href={result.mp3Url}
+                      download={`${result.title || "master"}.mp3`}
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "inline-flex items-center justify-center gap-2 bg-white text-zinc-900",
+                      )}
+                    >
+                      <Download className="size-3.5" aria-hidden />
+                      Download MP3
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             {masterWavUrl(result.taskId || result.audioUrl) || result.audioUrl ? (
               <div className="flex flex-wrap gap-2">

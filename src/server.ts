@@ -132,6 +132,28 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/stripe/webhook") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/stripe/webhook/route");
+        return POST(request);
+      }
+
+      if (pathname === "/api/voice-enrollment/checkout") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/voice-enrollment/checkout/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/ai/optimize-prompt") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {

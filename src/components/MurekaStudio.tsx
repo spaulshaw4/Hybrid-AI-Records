@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+
 export default function MurekaStudio() {
   const [isInstrumental, setIsInstrumental] = useState(false);
   const [title, setTitle] = useState("Heavy Sky Arrival");
   const [gender, setGender] = useState<"male" | "female">("male");
+  const [vocalId, setVocalId] = useState("");
   const [bpm, setBpm] = useState(74);
   const [stylePrompt, setStylePrompt] = useState(
     "Heavy southern rock, driving rhythm, raw gritty male vocal, wide stereo guitars, live kit"
@@ -46,7 +49,8 @@ We don't break and we don't back down
 [Fade Out]`);
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
-  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
+  const [wavUrl, setWavUrl] = useState<string | null>(null);
+  const [mp3Url, setMp3Url] = useState<string | null>(null);
   // Structural tag inserter matching Mureka's lyric assistant
   const insertTag = (tag: string) => {
     setLyrics((prev) => `${prev}\n\n${tag}\n`);
@@ -57,25 +61,37 @@ We don't break and we don't back down
   async function handleCreate() {
     setLoading(true);
     setStatusText("Submitting to MusiCoT engine...");
-    setMasterAudioUrl(null);
+    setWavUrl(null);
+    setMp3Url(null);
     try {
-      const fullPrompt = `${stylePrompt}, ${bpm} BPM`;
+      const lyricsText = isInstrumental ? "" : lyrics;
+      const trimmedVocalId = vocalId.trim();
+      let userId: string | null = null;
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        userId = auth.user?.id ?? null;
+      } catch {
+        userId = null;
+      }
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
-          prompt: fullPrompt,
-          lyrics: isInstrumental ? "" : lyrics,
+          prompt: stylePrompt,
+          lyrics: lyricsText,
           gender,
+          vocalId: trimmedVocalId,
           isInstrumental,
+          ...(userId ? { userId } : {}),
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data.audioUrl) {
+      if (!res.ok || !data.wavUrl) {
         throw new Error(data.error || "Generation failed upstream");
       }
-      setMasterAudioUrl(data.audioUrl);
+      setWavUrl(data.wavUrl);
+      setMp3Url(data.mp3Url);
       setStatusText("Master complete");
     } catch (err: any) {
       alert(err.message || "Request failed");
@@ -234,6 +250,18 @@ We don't break and we don't back down
               />
             </div>
           </div>
+          {!isInstrumental && (
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Artist Voice ID (Optional)</label>
+              <input
+                type="text"
+                placeholder="Leave blank for default, or paste existing Vocal ID"
+                value={vocalId}
+                onChange={(e) => setVocalId(e.target.value)}
+                style={{ width: "100%", padding: "8px 12px", marginTop: 6, borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
+              />
+            </div>
+          )}
           {/* Primary Render Action */}
           <button
             onClick={handleCreate}
@@ -263,35 +291,30 @@ We don't break and we don't back down
               <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 8 }}>MusiCoT arrangement and stereo mastering in progress.</p>
             </div>
           )}
-          {!loading && !masterAudioUrl && (
+          {!loading && !wavUrl && (
             <div style={{ textAlign: "center", padding: "40px 0", color: "#9ca3af", fontSize: 13 }}>
               Ready to compose. Click Generate to trigger your first master.
             </div>
           )}
-          {masterAudioUrl && (
+          {wavUrl && (
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{title || "Untitled Master"}</div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 16 }}>Broadcast Master (WAV • 48 kHz • Stereo)</div>
-              <audio controls src={masterAudioUrl} style={{ width: "100%", marginBottom: 16 }} />
-              <a
-                href={masterAudioUrl}
-                target="_blank"
-                download={`${title || "master"}.wav`}
-                style={{
-                  display: "block",
-                  textAlign: "center",
-                  padding: "10px 0",
-                  background: "#ffffff",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  color: "#111827",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  textDecoration: "none",
-                }}
-              >
-                Download Master WAV
-              </a>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 4 }}>
+                {title || "Untitled Master"}
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 16 }}>
+                Permanent Audio Vault (Dual Delivery)
+              </div>
+              <audio controls src={mp3Url || wavUrl} style={{ width: "100%", marginBottom: 16 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+                <a href={wavUrl} target="_blank" download={`${title || "master"}.wav`} style={{ display: "block", textAlign: "center", padding: "10px 0", background: "#111827", color: "#ffffff", borderRadius: 6, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+                  Download WAV
+                </a>
+                {mp3Url && (
+                  <a href={mp3Url} target="_blank" download={`${title || "master"}.mp3`} style={{ display: "block", textAlign: "center", padding: "10px 0", background: "#ffffff", border: "1px solid #d1d5db", color: "#111827", borderRadius: 6, fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+                    Download MP3
+                  </a>
+                )}
+              </div>
             </div>
           )}
         </div>
