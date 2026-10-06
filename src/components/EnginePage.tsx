@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
 import LyricEditorModal from "@/components/studio/LyricEditorModal";
@@ -8,6 +8,8 @@ import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
+const ENGINE_CANVAS =
+  "#070508 radial-gradient(circle at 50% 0%, rgba(225, 29, 72, 0.12) 0%, #0d0910 40%, #070508 100%)";
 const FALLBACK_PROMPT = "Heavy dynamic acoustic rock with raspy vocals";
 const VAULT_EMPTY = "No ready masters yet. Create a track and it will show up here.";
 
@@ -209,17 +211,50 @@ export function EnginePage() {
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
+  const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isEnhanceMenuOpen, setIsEnhanceMenuOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const enhanceMenuRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
   const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
   const [vaultTracks, setVaultTracks] = useState<VaultTrack[]>([]);
 
   useEffect(() => {
     setPromptRecords(readPromptRecords());
+  }, []);
+
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    const locale = document.querySelector("[data-site-nav='desktop-locale']");
+    if (!page || !(locale instanceof HTMLElement)) return;
+    const previous = {
+      position: locale.style.position,
+      zIndex: locale.style.zIndex,
+      background: locale.style.background,
+    };
+    const apply = () => {
+      const desktop = window.matchMedia("(min-width: 1024px)").matches;
+      const height = desktop ? locale.getBoundingClientRect().height : 0;
+      page.style.marginTop = height > 0 ? `-${height}px` : "";
+      page.style.paddingTop = height > 0 ? `${24 + height}px` : "24px";
+      locale.style.position = height > 0 ? "relative" : previous.position;
+      locale.style.zIndex = height > 0 ? "2" : previous.zIndex;
+      locale.style.background = height > 0 ? "transparent" : previous.background;
+    };
+    apply();
+    const media = window.matchMedia("(min-width: 1024px)");
+    media.addEventListener("change", apply);
+    return () => {
+      media.removeEventListener("change", apply);
+      page.style.marginTop = "";
+      page.style.paddingTop = "";
+      locale.style.position = previous.position;
+      locale.style.zIndex = previous.zIndex;
+      locale.style.background = previous.background;
+    };
   }, []);
 
   useEffect(() => {
@@ -404,16 +439,15 @@ export function EnginePage() {
 
   return (
     <main
+      ref={pageRef}
       style={{
         minHeight: "100vh",
         color: "#f8fafc",
         colorScheme: "dark",
         position: "relative",
         zIndex: 1,
-        backgroundColor: "#1a0610",
-        backgroundImage:
-          "radial-gradient(ellipse 85% 70% at 0% 0%, rgba(168, 85, 247, 0.78) 0%, rgba(88, 28, 135, 0.42) 34%, transparent 68%), radial-gradient(ellipse 80% 65% at 100% 8%, rgba(225, 29, 72, 0.82) 0%, rgba(136, 19, 55, 0.48) 38%, transparent 70%), radial-gradient(ellipse 70% 50% at 48% 100%, rgba(157, 23, 77, 0.55) 0%, transparent 62%), linear-gradient(165deg, #3b0764 0%, #4c0519 42%, #140810 100%)",
-        padding: "28px 16px 48px",
+        background: ENGINE_CANVAS,
+        padding: "24px 16px 120px",
       }}
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -423,6 +457,7 @@ export function EnginePage() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 16,
+            background: "transparent",
             borderBottom: "1px solid rgba(244, 114, 182, 0.35)",
             paddingBottom: 10,
             marginBottom: 18,
@@ -438,28 +473,27 @@ export function EnginePage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span
-              aria-label="1 Token"
               style={{
-                backgroundColor: "rgba(190, 18, 60, 0.22)",
-                border: "1px solid #e11d48",
+                background: "rgba(225, 29, 72, 0.12)",
+                border: "1px solid rgba(225, 29, 72, 0.45)",
                 borderRadius: 20,
-                color: "#fecdd3",
+                padding: "4px 12px",
                 fontSize: 12,
                 fontWeight: 700,
-                padding: "4px 10px",
+                color: "#fda4af",
                 whiteSpace: "nowrap",
               }}
             >
-              1 Token
+              <span style={{ fontWeight: 900 }}>Ⓗ</span> 1 Hybrid Token
             </span>
             <button
               type="button"
               style={{
-                backgroundColor: "transparent",
+                background: "transparent",
                 border: "none",
-                color: "#fda4af",
+                color: "#f43f5e",
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: 600,
                 textDecoration: "underline",
                 cursor: "pointer",
                 padding: 0,
@@ -853,24 +887,111 @@ export function EnginePage() {
         />
 
         {openModal === "reference" ? (
-          <DarkModal label="Reference" onClose={() => setOpenModal(null)}>
-            <p style={{ margin: 0, fontSize: 13, color: "#e9d5ff" }}>
-              Add a reference recording. Nothing is uploaded until you choose to send it.
-            </p>
-            <input
-              type="file"
-              accept="audio/*"
-              aria-label="Reference audio file"
+          <div
+            role="presentation"
+            onClick={() => setOpenModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100,
+              background: "rgba(0,0,0,0.8)",
+              backdropFilter: "blur(6px)",
+              WebkitBackdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Reference"
+              onClick={(event) => event.stopPropagation()}
               style={{
+                width: "100%",
+                maxWidth: 440,
+                background: "#141018",
                 color: "#f8fafc",
-                colorScheme: "dark",
-                backgroundColor: "#150913",
-                border: "1px solid #4c1d3a",
-                borderRadius: 8,
-                padding: 8,
+                border: "1px solid rgba(225, 29, 72, 0.4)",
+                borderRadius: 12,
+                padding: 22,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
               }}
-            />
-          </DarkModal>
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Reference</h2>
+                <button
+                  type="button"
+                  onClick={() => setOpenModal(null)}
+                  aria-label="Close reference"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#f8fafc",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: 0,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 }}>
+                Add a reference recording. Nothing is uploaded until you choose to send it.
+              </p>
+              <input
+                id="ref-audio-upload"
+                type="file"
+                accept="audio/*"
+                onChange={(event) => {
+                  const name = event.target.files?.[0]?.name;
+                  if (name) setReferenceFileName(name);
+                }}
+                style={{ display: "none" }}
+              />
+              <label
+                htmlFor="ref-audio-upload"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  border: "1px dashed rgba(225, 29, 72, 0.5)",
+                  background: "rgba(255,255,255,0.02)",
+                  borderRadius: 8,
+                  padding: "24px 16px",
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+              >
+                <span aria-hidden="true">🎧</span>
+                <span>{referenceFileName ? `Selected: ${referenceFileName}` : "Click here to add a reference"}</span>
+                <span style={{ color: "#64748b", fontSize: 11 }}>Supports MP3, WAV, FLAC, M4A</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                style={{
+                  width: "100%",
+                  background: "linear-gradient(90deg, #e11d48, #be123c)",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 0",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
         ) : null}
 
         {openModal === "remix" ? (
