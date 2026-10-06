@@ -25,6 +25,7 @@ import { TokenStore } from "@/components/TokenStore";
 import { QuickVocalRecorder } from "@/components/QuickVocalRecorder";
 import { AudioVault } from "@/components/AudioVault";
 import { fetchLocalReleaseSessionIds, rememberWorkerSession } from "@/lib/vault-catalog";
+import { replaceBareConflictingPrompt } from "@/lib/mureka-format";
 
 import { supabase } from "@/integrations/supabase/client";
 import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
@@ -950,9 +951,9 @@ function WaveformPlayer({
   const [activeSrc, setActiveSrc] = useState(src);
   // Never hand the <audio> element a source the browser cannot stream.
   const validSrc = useMemo(() => isPlayableAudioSource(activeSrc), [activeSrc]);
-  // Same-origin proxy first (always CORS/hotlink safe), direct URL as fallback.
+  // Direct file first so duration can load; same-origin proxy is the fallback.
   const sources = useMemo(
-    () => (validSrc ? [proxiedAudioUrl(activeSrc), activeSrc] : []),
+    () => (validSrc ? [activeSrc, proxiedAudioUrl(activeSrc)] : []),
     [activeSrc, validSrc],
   );
   const [sourceIndex, setSourceIndex] = useState(0);
@@ -982,18 +983,28 @@ function WaveformPlayer({
 
   const progress = duration > 0 ? current / duration : 0;
 
+  const elementSrc = sources[sourceIndex] || src;
+
   useEffect(() => {
     wantPlayRef.current = false;
     repairedRef.current = null;
     setActiveSrc(src);
     setSourceIndex(0);
+    setCurrent(0);
+    setDuration(0);
     setLoadError(null);
     setErrorCause(null);
     setErrorStatus(null);
     setExpired(false);
     setAutoplayBlocked(false);
-
   }, [src]);
+
+  useEffect(() => {
+    if (audioRef.current && src) {
+      audioRef.current.src = elementSrc || src;
+      audioRef.current.load();
+    }
+  }, [src, elementSrc]);
 
   useEffect(() => {
     return () => {
@@ -1153,7 +1164,7 @@ function WaveformPlayer({
     <div className="space-y-3">
       <audio
         ref={audioRef}
-        {...(sources[sourceIndex] ? { src: sources[sourceIndex] } : {})}
+        src={elementSrc || undefined}
         preload="metadata"
         playsInline
 
@@ -1165,15 +1176,6 @@ function WaveformPlayer({
             void diagnose();
             return prev;
           });
-          try {
-            const audio = audioRef.current;
-            if (audio && sourceIndex >= sources.length - 1) {
-              audio.removeAttribute("src");
-              audio.load();
-            }
-          } catch {
-            /* WebKit teardown must never freeze the thread */
-          }
         }}
 
         onCanPlay={() => {
@@ -1576,6 +1578,10 @@ export function AudioStudio() {
   const [playbackKind, setPlaybackKind] = useState<StemKind>("mastered");
   const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [vaultMonitor, setVaultMonitor] = useState<{ url: string; title: string } | null>(null);
+  useEffect(() => {
+    setVaultMonitor(null);
+  }, [result?.mp3Url, result?.wavUrl, result?.audioUrl]);
   const [conductorSession, setConductorSession] = useState<string | null>(null);
   useEffect(() => {
     void fetchLocalReleaseSessionIds().then((ids) => {
@@ -2738,18 +2744,34 @@ export function AudioStudio() {
       try {
         // WaveSpeed song render via POST /api/generate. JSON only.
         const runStream = async () => {
-          const lyricsText = lyrics;
+          const instrumental = !withVocals;
+          const lyricsText = instrumental ? "" : lyrics;
+          const trimmedVocalId = voiceId.trim();
+          const resolvedGender = resolvedVocalGender();
+          const vocalGender =
+            resolvedGender === "f" || resolvedGender === "Female" ? "female" : "male";
           const response = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: trackTitle,
-              prompt: stylePrompt,
-              lyrics: lyricsText,
-              gender: "male",
-              isInstrumental: false,
-              ...(sessionUserId ? { userId: sessionUserId } : {}),
-            }),
+            body: JSON.stringify(
+              instrumental
+                ? {
+                    title: trackTitle,
+                    prompt: replaceBareConflictingPrompt(stylePrompt),
+                    lyrics: lyricsText,
+                    isInstrumental: true,
+                    ...(sessionUserId ? { userId: sessionUserId } : {}),
+                  }
+                : {
+                    title: trackTitle,
+                    prompt: replaceBareConflictingPrompt(stylePrompt),
+                    lyrics: lyricsText,
+                    gender: vocalGender,
+                    isInstrumental: false,
+                    ...(trimmedVocalId ? { vocalId: trimmedVocalId } : {}),
+                    ...(sessionUserId ? { userId: sessionUserId } : {}),
+                  },
+            ),
             signal: abort.signal,
           });
           const data = (await response.json().catch(() => ({}))) as {
@@ -3761,6 +3783,23 @@ export function AudioStudio() {
   }
 
   const showAiVocalStyling = usesDefaultAiVocal(withVocals, vocalSource);
+
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      window.open(url, "_blank");
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -5154,10 +5193,10 @@ export function AudioStudio() {
             </div>
 
             <WaveformPlayer
-              key={result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl}
-              src={result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl}
-              title={result.title}
-              sessionId={result.taskId}
+              key={vaultMonitor?.url || result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl}
+              src={vaultMonitor?.url || result.mp3Url || result.wavUrl || playbackSrc || result.audioUrl || ""}
+              title={vaultMonitor?.title || result.title}
+              sessionId={vaultMonitor ? null : result.taskId}
               onUrlRepaired={applyRepairedUrl}
               onRegenerate={() => void handleGenerate()}
               regenerating={busy && !result}
@@ -5166,32 +5205,52 @@ export function AudioStudio() {
             {(result.wavUrl || result.mp3Url) ? (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">Broadcast Quality Master (Dual Delivery)</p>
-                <div className="grid grid-cols-2 gap-[10px]">
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
                   {result.wavUrl ? (
-                    <a
-                      href={result.wavUrl}
-                      download={`${result.title || "master"}.wav`}
-                      className={cn(
-                        buttonVariants({ size: "sm" }),
-                        "inline-flex items-center justify-center gap-2 bg-zinc-950 text-white hover:bg-zinc-800",
-                      )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = result.wavUrl;
+                        if (!url) return;
+                        void handleDownload(url, `${result.title || "master"}.wav`);
+                      }}
+                      style={{
+                        padding: "10px 0",
+                        background: "#0f172a",
+                        border: "1px solid #334155",
+                        color: "#f8fafc",
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        width: "100%",
+                      }}
                     >
-                      <Download className="size-3.5" aria-hidden />
-                      Download WAV
-                    </a>
+                      ↓ Download WAV
+                    </button>
                   ) : null}
                   {result.mp3Url ? (
-                    <a
-                      href={result.mp3Url}
-                      download={`${result.title || "master"}.mp3`}
-                      className={cn(
-                        buttonVariants({ variant: "outline", size: "sm" }),
-                        "inline-flex items-center justify-center gap-2 bg-white text-zinc-900",
-                      )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = result.mp3Url;
+                        if (!url) return;
+                        void handleDownload(url, `${result.title || "master"}.mp3`);
+                      }}
+                      style={{
+                        padding: "10px 0",
+                        background: "#1e293b",
+                        border: "1px solid #475569",
+                        color: "#f8fafc",
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        width: "100%",
+                      }}
                     >
-                      <Download className="size-3.5" aria-hidden />
-                      Download MP3
-                    </a>
+                      ↓ Download MP3
+                    </button>
                   ) : null}
                 </div>
               </div>
@@ -5239,10 +5298,23 @@ export function AudioStudio() {
         </Card>
       ) : null}
 
+      {!result && vaultMonitor ? (
+        <Card className="border border-white/[0.08] bg-zinc-900/40 text-zinc-100">
+          <CardContent className="p-6">
+            <WaveformPlayer
+              key={vaultMonitor.url}
+              src={vaultMonitor.url}
+              title={vaultMonitor.title}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
       <AudioVault
         signedIn={signedIn}
         refreshKey={vaultTick}
         onDownload={(url, name) => downloadFinishedMaster(url, name)}
+        onPlayInMonitor={(track) => setVaultMonitor(track)}
       />
 
       {/* Top-up modal — opens whenever the balance can't cover a generation. */}

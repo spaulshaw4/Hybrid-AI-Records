@@ -1,6 +1,10 @@
 import { createRequire } from "node:module";
 import { createClient } from "@supabase/supabase-js";
-import { formatMurekaLyrics, formatMurekaPrompt } from "@/lib/mureka-format";
+import {
+  formatMurekaLyrics,
+  formatMurekaPrompt,
+  replaceBareConflictingPrompt,
+} from "@/lib/mureka-format";
 // @ts-ignore lamejs has no published @types/lamejs package
 import lamejs from "lamejs";
 
@@ -35,6 +39,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** WaveSpeed accepts only lowercase "male" or "female". "Male (m)" is ignored. */
+export function normalizeVocalGender(gender: unknown): "male" | "female" {
+  const text = typeof gender === "string" ? gender.trim().toLowerCase() : "";
+  if (text.startsWith("female")) return "female";
+  if (text.startsWith("male")) return "male";
+  return "male";
+}
+
 type GenerateBody = {
   title?: unknown;
   prompt?: unknown;
@@ -42,6 +54,7 @@ type GenerateBody = {
   gender?: unknown;
   isInstrumental?: unknown;
   vocalId?: unknown;
+  referenceId?: unknown;
   userId?: unknown;
 };
 
@@ -110,9 +123,12 @@ export async function POST(req: Request): Promise<Response> {
       gender,
       isInstrumental: rawInstrumental,
       vocalId,
+      referenceId: rawReferenceId,
       userId: rawUserId,
     } = (await req.json()) as GenerateBody;
-    const prompt = formatMurekaPrompt(typeof rawPrompt === "string" ? rawPrompt : "");
+    const prompt = replaceBareConflictingPrompt(
+      formatMurekaPrompt(typeof rawPrompt === "string" ? rawPrompt : ""),
+    );
     const lyrics = formatMurekaLyrics(typeof rawLyrics === "string" ? rawLyrics : "");
     const isInstrumental = rawInstrumental === true;
     const title =
@@ -126,18 +142,24 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const endpoint = isInstrumental ? GENERATE_BGM_URL : GENERATE_SONG_URL;
-    const resolvedGender = (typeof gender === "string" ? gender.trim() : "") || "male";
-    const payload = isInstrumental
-      ? {
-          prompt,
-          output_format: "wav" as const,
-        }
-      : {
-          prompt,
-          lyrics,
-          gender: resolvedGender,
-          output_format: "wav" as const,
-        };
+    const referenceId = typeof rawReferenceId === "string" ? rawReferenceId.trim() : "";
+    const payload: {
+      prompt: string;
+      output_format: "wav";
+      reference_id?: string;
+      lyrics?: string;
+      gender?: string;
+      vocal_id?: string;
+    } = {
+      prompt,
+      output_format: "wav",
+    };
+    if (referenceId) payload.reference_id = referenceId;
+    if (!isInstrumental) {
+      payload.lyrics = lyrics;
+      if (vocalUsed) payload.vocal_id = vocalUsed;
+      else payload.gender = normalizeVocalGender(gender);
+    }
 
     const submitRes = await fetch(endpoint, {
       method: "POST",

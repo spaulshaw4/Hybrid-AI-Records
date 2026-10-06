@@ -64,3 +64,16 @@ export function formatMurekaPrompt(prompt: string, bpm?: number): string {
   }
   return formatted.replace(/\b(\d+(?:\.\d+)?)\s*bpm\b/gi, "$1 BPM");
 }
+
+/** Replaces only the bare "Acoustic, Heavy Rock" pair (optional BPM suffix). */
+const BARE_ACOUSTIC_HEAVY_ROCK =
+  /^Acoustic,\s*Heavy Rock(?:\s*,?\s*\d+(?:\.\d+)?\s*BPM)?$/;
+
+export const POST_GRUNGE_ACOUSTIC_ROCK_PROMPT =
+  "90s post-grunge acoustic rock, aggressive hard strumming acoustic guitar, distorted driving bass, punchy heavy rock drum kit, raspy gritty male rock vocals, raw dynamic chorus";
+
+export function replaceBareConflictingPrompt(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (BARE_ACOUSTIC_HEAVY_ROCK.test(trimmed)) return POST_GRUNGE_ACOUSTIC_ROCK_PROMPT;
+  return prompt;
+}

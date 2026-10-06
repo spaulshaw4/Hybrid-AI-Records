@@ -1,9 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
-import { AudioStudio } from "@/components/AudioStudio";
+import { EnginePage as EngineStudio } from "@/components/EnginePage";
 import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
-import { DEV_TEST_TOKEN_BALANCE, DEV_TEST_USER, isDevAuthBypass } from "@/lib/dev-auth";
 import { LABEL_ID, SITE_URL, buildPageJsonLd } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 
@@ -75,33 +73,13 @@ export const Route = createFileRoute("/engine")({
     ],
 
   }),
-  component: EnginePage,
+  component: EngineRoutePage,
 });
 
-function EnginePage() {
+function EngineRoutePage() {
   return (
-    <main
-      id="engine-workspace"
-      className="relative z-40 bg-transparent py-3 text-white"
-    >
-      <div className="mx-auto mb-3 w-full max-w-7xl px-4 sm:px-6">
-        <h1 className="sr-only">Create Your Track</h1>
-        <PortalBreadcrumb
-          trail={[{ label: "Create Your Track" }]}
-        />
-        {isDevAuthBypass() ? (
-          <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 font-mono text-xs text-amber-200">
-            Dev test mode — signed in as {DEV_TEST_USER.email} · {DEV_TEST_TOKEN_BALANCE}{" "}
-            Hybrid Tokens. Login is skipped on this route.
-          </p>
-        ) : null}
-      </div>
-
-      <section className="w-full px-4 sm:px-6">
-        <StudioErrorBoundary region="engine">
-          <AudioStudio />
-        </StudioErrorBoundary>
-      </section>
-    </main>
+    <StudioErrorBoundary region="engine">
+      <EngineStudio />
+    </StudioErrorBoundary>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Download, Loader2, Pause, Play, Trash2 } from "lucide-react";
+import { Download, Loader2, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,13 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { VaultMasterDock } from "@/components/VaultMasterDock";
 import { supabase } from "@/integrations/supabase/client";
 import { masterWavFromUrl } from "@/lib/audio-mixdown";
-import {
-  playCatalogTrack,
-  useCatalogPlayback,
-} from "@/lib/catalog-player";
 import { profileNameFromAuthUser } from "@/lib/ensure-user-profile";
 import { listUserVaultTracks, type UserVaultRow } from "@/lib/user-vault.functions";
 import {
@@ -63,6 +58,8 @@ type Props = {
   refreshKey?: number;
   signedIn: boolean;
   onDownload: (url: string, title: string) => void;
+  /** Sends the row into the studio monitor already on this page. */
+  onPlayInMonitor?: (track: { url: string; title: string }) => void;
 };
 
 function relativeStamp(iso: string): string {
@@ -127,27 +124,13 @@ function upsertProcessing(previous: UserVaultRow[], incoming: UserVaultRow): Use
   return [incoming, ...withoutTemps];
 }
 
-function toPlayable(row: UserVaultRow, src: string, artist: string) {
-  return {
-    id: row.id,
-    title: row.title,
-    artist,
-    src,
-    audio_url: src,
-    album: row.albumName,
-    genre: row.style,
-  };
-}
-
-export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
+export function AudioVault({ refreshKey = 0, signedIn, onDownload, onPlayInMonitor }: Props) {
   const loadVault = useServerFn(listUserVaultTracks);
   const [rows, setRows] = useState<UserVaultRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [wavBusy, setWavBusy] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
-  const playback = useCatalogPlayback();
-  const playFallbackRef = useRef<(() => void) | null>(null);
 
   const refresh = useCallback(async () => {
     if (!signedIn) {
@@ -363,33 +346,11 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
     });
   }, [defaultOpenAlbums]);
 
-  function artistFor(row: UserVaultRow): string {
-    return displayVaultArtistName(row.artistName, { signedIn, profileName });
-  }
-
   function playRow(row: UserVaultRow) {
     const urls = vaultMasterUrls(row);
-    if (!isPlayableVaultAudioUrl(urls.streamUrl)) return;
-    const el = document.getElementById("hybrid-catalog-audio");
-    if (el instanceof HTMLAudioElement && playFallbackRef.current) {
-      el.removeEventListener("error", playFallbackRef.current);
-      playFallbackRef.current = null;
-    }
-    // Attach before play. catalog-player releases the element on error, so a
-    // listener registered after play() resolves never sees the failure.
-    if (
-      el instanceof HTMLAudioElement &&
-      urls.fallbackUrl &&
-      urls.fallbackUrl !== urls.streamUrl
-    ) {
-      const retry = () => {
-        playFallbackRef.current = null;
-        void playCatalogTrack(toPlayable(row, urls.fallbackUrl, artistFor(row)), "vault");
-      };
-      playFallbackRef.current = retry;
-      el.addEventListener("error", retry, { once: true });
-    }
-    void playCatalogTrack(toPlayable(row, urls.streamUrl, artistFor(row)), "vault");
+    const url = urls.streamUrl || urls.wavUrl;
+    if (!isPlayableVaultAudioUrl(url)) return;
+    onPlayInMonitor?.({ url, title: row.title });
   }
 
   function downloadMasterMp3(row: UserVaultRow) {
@@ -555,10 +516,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                 );
                                 const urls = vaultMasterUrls(row);
                                 const mp3Url = vaultMp3DownloadUrl(urls);
-                                const ready = isPlayableVaultAudioUrl(urls.streamUrl);
-                                const active =
-                                  playback.owner === "vault" && playback.currentTrack?.id === row.id;
-                                const playing = active && playback.playing;
+                                const ready = isPlayableVaultAudioUrl(urls.streamUrl || urls.wavUrl);
                                 return (
                                   <TableRow
                                     key={row.id}
@@ -610,16 +568,10 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
                                               variant="ghost"
                                               className="size-8"
                                               disabled={!ready}
-                                              aria-label={
-                                                playing ? `Pause ${row.title}` : `Play ${row.title}`
-                                              }
+                                              aria-label={`Play ${row.title}`}
                                               onClick={() => playRow(row)}
                                             >
-                                              {playing ? (
-                                                <Pause className="size-3.5" aria-hidden />
-                                              ) : (
-                                                <Play className="size-3.5" aria-hidden />
-                                              )}
+                                              <Play className="size-3.5" aria-hidden />
                                             </Button>
                                             <Button
                                               type="button"
@@ -684,7 +636,6 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload }: Props) {
           </div>
         )}
       </div>
-      <VaultMasterDock />
     </div>
   );
 }

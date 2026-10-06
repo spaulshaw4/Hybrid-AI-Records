@@ -314,10 +314,10 @@ describe("POST /api/generate", () => {
     expect(voicedBody).toEqual({
       prompt: "Acoustic, heavy rock",
       lyrics: "[Verse]\nline\n[inst-short]",
-      gender: "female",
+      vocal_id: "artist-voice-9",
       output_format: "wav",
     });
-    expect(voicedBody).not.toHaveProperty("vocal_id");
+    expect(voicedBody).not.toHaveProperty("gender");
     expect(voicedBody).not.toHaveProperty("title");
     expect(voicedBody).not.toHaveProperty("userId");
     expect(voicedBody).not.toHaveProperty("reference_id");
@@ -363,5 +363,121 @@ describe("POST /api/generate", () => {
     expect(bgmBody).not.toHaveProperty("gender");
     expect(bgmBody).not.toHaveProperty("vocal_id");
     expect(bgmBody).not.toHaveProperty("reference_id");
+  });
+
+  it("adds reference_id only when referenceId is a non-empty string", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const vocal = await POST(generateRequest({ gender: "male", referenceId: "  ref-swamp  " }));
+    expect(vocal.status).toBe(500);
+    const vocalBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(vocalBody).toEqual({
+      prompt: "Acoustic, heavy rock",
+      lyrics: "[Verse]\nline\n[inst-short]",
+      gender: "male",
+      output_format: "wav",
+      reference_id: "ref-swamp",
+    });
+    expect(vocalBody).not.toHaveProperty("vocal_id");
+
+    fetchMock.mockClear();
+    const withVoice = await POST(
+      generateRequest({
+        gender: "female",
+        vocalId: "  artist-voice-9  ",
+        referenceId: "ref-voice",
+      }),
+    );
+    expect(withVoice.status).toBe(500);
+    const voicedBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(voicedBody).toEqual({
+      prompt: "Acoustic, heavy rock",
+      lyrics: "[Verse]\nline\n[inst-short]",
+      vocal_id: "artist-voice-9",
+      output_format: "wav",
+      reference_id: "ref-voice",
+    });
+    expect(voicedBody).not.toHaveProperty("gender");
+
+    fetchMock.mockClear();
+    const instrumental = await POST(
+      generateRequest({
+        isInstrumental: true,
+        referenceId: "ref-bgm",
+        gender: "female",
+        vocalId: "artist-voice-9",
+        lyrics: "[Chorus]",
+        prompt: "Heavy southern rock, 74 BPM",
+      }),
+    );
+    expect(instrumental.status).toBe(500);
+    const bgmBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(bgmBody).toEqual({
+      prompt: "Heavy southern rock, 74 BPM",
+      output_format: "wav",
+      reference_id: "ref-bgm",
+    });
+    expect(bgmBody).not.toHaveProperty("lyrics");
+    expect(bgmBody).not.toHaveProperty("gender");
+    expect(bgmBody).not.toHaveProperty("vocal_id");
+
+    fetchMock.mockClear();
+    const blank = await POST(generateRequest({ gender: "male", referenceId: "   " }));
+    expect(blank.status).toBe(500);
+    const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(blankBody).not.toHaveProperty("reference_id");
+    expect(blankBody.gender).toBe("male");
+  });
+
+  it("sends Male (m) as male and forwards the prompt unchanged", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+    const prompt = "soft female ballad, close piano, sung verse";
+
+    const res = await POST(
+      generateRequest({
+        gender: "Male (m)",
+        prompt,
+        lyrics: "The room stays quiet",
+        title: "Soft Ballad",
+        isInstrumental: false,
+      }),
+    );
+
+    expect(res.status).toBe(500);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body.gender).toBe("male");
+    expect(body.prompt).toBe(prompt);
+    expect(body.prompt).not.toContain("gentle plucks");
+    expect(body.prompt).not.toContain("Upright Bass");
+    expect(body.prompt).not.toContain("warm resonance");
+    expect(body.prompt).not.toContain("Stripped-down");
+    expect(body).not.toHaveProperty("weirdness");
+    expect(body).not.toHaveProperty("styleInfluence");
+    expect(body).not.toHaveProperty("audioInfluence");
+    expect(body).toEqual({
+      prompt,
+      lyrics: "The room stays quiet",
+      gender: "male",
+      output_format: "wav",
+    });
   });
 });

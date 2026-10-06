@@ -132,6 +132,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/reference") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/reference/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/stripe/webhook") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {
