@@ -1,24 +1,26 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
-import { ReferenceModal } from "@/components/studio/ReferenceModal";
+import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
+import LyricEditorModal from "@/components/studio/LyricEditorModal";
+import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
+import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 
-const SAVED_PROMPTS_KEY = "hybrid_saved_prompts";
-const FALLBACK_PROMPT = "Dynamic studio arrangement with balanced rhythm and master polish";
-const VAULT_SUBTITLE = "Permanent dual delivery. Ready WAV and MP3 masters stay in this list.";
+const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
+const FALLBACK_PROMPT = "Heavy dynamic acoustic rock with raspy vocals";
 const VAULT_EMPTY = "No ready masters yet. Create a track and it will show up here.";
 
-type AiAction = "enhance_style" | "optimize_lyrics" | "generate_lyrics";
-type VaultStatus = "Ready" | "Failed";
+type StudioModal = "reference" | "remix" | null;
 
-interface VaultRow {
+interface VaultTrack {
   id: string;
   title: string;
-  prompt: string;
-  status: VaultStatus;
-  wavUrl: string;
-  mp3Url: string;
+  genre: string;
+  duration: string;
+  status: string;
+  wav_url: string;
+  mp3_url: string;
 }
 
 const cardStyle: CSSProperties = {
@@ -32,74 +34,155 @@ const pillStyle: CSSProperties = {
   backgroundColor: "#121826",
   border: "1px solid #1e293b",
   borderRadius: 8,
-  padding: "10px 0",
+  padding: "10px 8px",
   color: "#cbd5e1",
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
 };
 
+const fieldStyle: CSSProperties = {
+  width: "100%",
+  backgroundColor: "transparent",
+  border: "none",
+  color: "#f8fafc",
+  outline: "none",
+  resize: "none",
+  fontSize: 14,
+  lineHeight: 1.5,
+};
+
 function modeTabStyle(active: boolean): CSSProperties {
   return {
     backgroundColor: "transparent",
     border: "none",
-    color: active ? "#06b6d4" : "#94a3b8",
+    color: active ? "#f9a8d4" : "#e9d5ff",
     fontWeight: 700,
     fontSize: 15,
-    borderBottom: active ? "2px solid #06b6d4" : "2px solid transparent",
+    borderBottom: active ? "2px solid #e11d48" : "2px solid transparent",
     paddingBottom: 6,
     cursor: "pointer",
   };
 }
 
-function textButtonStyle(disabled: boolean): CSSProperties {
-  return {
-    backgroundColor: "transparent",
-    border: "none",
-    color: disabled ? "#475569" : "#94a3b8",
-    cursor: disabled ? "not-allowed" : "pointer",
-    padding: 0,
-    fontSize: 12,
-    fontWeight: 600,
-  };
-}
-
-function readSavedPrompts(): string[] {
+function readPromptRecords(): SavedPromptItem[] {
   try {
-    const raw = localStorage.getItem(SAVED_PROMPTS_KEY);
+    const raw = localStorage.getItem(PROMPT_RECORDS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    return parsed.filter((item): item is SavedPromptItem => {
+      if (!item || typeof item !== "object") return false;
+      const row = item as Partial<SavedPromptItem>;
+      return (
+        typeof row.id === "string" &&
+        typeof row.title === "string" &&
+        typeof row.prompt === "string" &&
+        typeof row.timestamp === "number" &&
+        typeof row.isBookmarked === "boolean"
+      );
+    });
   } catch {
     return [];
   }
 }
 
-function vaultStatus(value: unknown): VaultStatus {
-  return value === "Failed" ? "Failed" : "Ready";
-}
-
-function rowsFromVaultPayload(data: unknown): VaultRow[] {
-  const list = Array.isArray(data)
-    ? data
-    : data && typeof data === "object" && Array.isArray((data as { tracks?: unknown }).tracks)
+function tracksFromPayload(data: unknown): VaultTrack[] {
+  const list =
+    data && typeof data === "object" && Array.isArray((data as { tracks?: unknown }).tracks)
       ? (data as { tracks: unknown[] }).tracks
       : [];
   return list.flatMap((item, index) => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
+    const id =
+      typeof row.id === "string" && row.id
+        ? row.id
+        : typeof row.task_id === "string" && row.task_id
+          ? row.task_id
+          : `vault-${index}`;
     const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Untitled Master";
+    const genre =
+      typeof row.genre === "string" ? row.genre : String(typeof row.prompt === "string" ? row.prompt : "").slice(0, 24);
     return [
       {
-        id: typeof row.id === "string" && row.id ? row.id : `vault-${index}`,
+        id,
         title,
-        prompt: typeof row.prompt === "string" ? row.prompt : "",
-        status: vaultStatus(row.status),
-        wavUrl: typeof row.wavUrl === "string" ? row.wavUrl : typeof row.wav_url === "string" ? row.wav_url : "",
-        mp3Url: typeof row.mp3Url === "string" ? row.mp3Url : typeof row.mp3_url === "string" ? row.mp3_url : "",
+        genre,
+        duration: typeof row.duration === "string" && row.duration ? row.duration : "210s",
+        status: typeof row.status === "string" && row.status ? row.status : "Ready",
+        wav_url: typeof row.wav_url === "string" ? row.wav_url : "",
+        mp3_url: typeof row.mp3_url === "string" ? row.mp3_url : "",
       },
     ];
   });
+}
+
+function DarkModal({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 80,
+        background: "rgba(8, 2, 6, 0.78)",
+        backgroundColor: "rgba(8, 2, 6, 0.78)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(440px, 100%)",
+          background: "#150913",
+          backgroundColor: "#150913",
+          color: "#f8fafc",
+          colorScheme: "dark",
+          border: "1px solid #6b2144",
+          borderRadius: 12,
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          boxShadow: "0 24px 48px rgba(0, 0, 0, 0.45)",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>{label}</h2>
+        {children}
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            backgroundColor: "#3b1024",
+            color: "#f8fafc",
+            border: "1px solid #9f1239",
+            borderRadius: 8,
+            padding: "10px 0",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function EnginePage() {
@@ -110,20 +193,33 @@ export function EnginePage() {
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
   const [gender, setGender] = useState<"male" | "female">("male");
+  const [userCharacters] = useState<VocalCharacter[]>([
+    {
+      id: "char-stephen-oct5",
+      name: "My Voice - October 5",
+      timbreTag: "Powerful",
+      isPublished: true,
+      vocalId: "vocal_stephen_oct5_master",
+    },
+  ]);
+  const [selectedCharacter, setSelectedCharacter] = useState<VocalCharacter | null>(null);
+  const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [hasProLicense, setHasProLicense] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isReferenceOpen, setIsReferenceOpen] = useState(false);
+  const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
+  const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isEnhanceMenuOpen, setIsEnhanceMenuOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [savedPrompts, setSavedPrompts] = useState<string[]>([]);
-  const [vaultRows, setVaultRows] = useState<VaultRow[]>([]);
-  const [hideFailed, setHideFailed] = useState(true);
-  const [nowPlayingUrl, setNowPlayingUrl] = useState<string | null>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  const rowAudio = useRef<Record<string, HTMLAudioElement | null>>({});
+  const enhanceMenuRef = useRef<HTMLDivElement>(null);
+  const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
+  const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
+  const [vaultTracks, setVaultTracks] = useState<VaultTrack[]>([]);
 
   useEffect(() => {
-    setSavedPrompts(readSavedPrompts());
+    setPromptRecords(readPromptRecords());
   }, []);
 
   useEffect(() => {
@@ -134,10 +230,9 @@ export function EnginePage() {
         if (!res.ok) return;
         const data: unknown = await res.json();
         if (cancelled) return;
-        const rows = rowsFromVaultPayload(data);
-        setVaultRows((current) => (current.length > 0 ? current : rows));
+        setVaultTracks(tracksFromPayload(data));
       } catch {
-        // No list endpoint — local rows after Create are enough.
+        // Vault stays on the empty copy when the list cannot be loaded.
       }
     }
     void fetchVault();
@@ -146,43 +241,40 @@ export function EnginePage() {
     };
   }, []);
 
-  const triggerDownload = async (fileUrl: string, fileName: string) => {
-    try {
-      const response = await fetch(fileUrl);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(fileUrl, "_blank");
-    }
-  };
+  useEffect(() => {
+    if (!isEnhanceMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!enhanceMenuRef.current?.contains(event.target as Node)) {
+        setIsEnhanceMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsEnhanceMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isEnhanceMenuOpen]);
 
-  const handleAiAction = async (action: AiAction) => {
+  const handleEnhanceSelection = async (type: "enhance_match_vibe" | "enhance_surprise_me") => {
     if (isAiLoading) return;
-    if (action === "optimize_lyrics" && !lyrics.trim()) return;
-    if (action === "enhance_style" && !prompt.trim()) return;
-    const text = action === "optimize_lyrics" ? lyrics : prompt;
+    setIsEnhanceMenuOpen(false);
     setIsAiLoading(true);
     setErrorMessage(null);
     try {
       const res = await fetch("/api/ai/coproducer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, text, title, genre }),
+        body: JSON.stringify({ action: type, text: prompt.trim(), title }),
       });
       const data = (await res.json()) as { success?: boolean; result?: string; error?: string };
       if (!res.ok || !data.success) {
         throw new Error(data.error || "AI request failed");
       }
-      const result = (data.result ?? "").trim();
-      if (action === "enhance_style") setPrompt(result.slice(0, 1000));
-      else setLyrics(result);
+      setPrompt(data.result ?? "");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "AI request failed");
@@ -199,45 +291,52 @@ export function EnginePage() {
     setActiveTab("custom");
   };
 
-  const savePrompt = () => {
-    const next = prompt.trim();
-    if (!next) return;
-    const updated = [next, ...savedPrompts.filter((item) => item !== next)];
-    setSavedPrompts(updated);
-    localStorage.setItem(SAVED_PROMPTS_KEY, JSON.stringify(updated));
+  const saveRecords = (updated: SavedPromptItem[]) => {
+    setPromptRecords(updated);
+    localStorage.setItem(PROMPT_RECORDS_KEY, JSON.stringify(updated));
   };
 
-  const loadSavedPrompt = () => {
-    if (savedPrompts.length === 0) return;
-    setPrompt(savedPrompts[0] ?? "");
-  };
-
-  const toggleRowAudio = (row: VaultRow) => {
-    const src = row.mp3Url || row.wavUrl;
-    const node = rowAudio.current[row.id];
-    if (!src || !node) return;
-    if (playingId === row.id && !node.paused) {
-      node.pause();
-      setPlayingId(null);
+  const handleManualBookmark = () => {
+    const nextPrompt = prompt.trim();
+    if (!nextPrompt) return;
+    const existing = promptRecords.find((item) => item.prompt === nextPrompt);
+    if (existing) {
+      saveRecords(
+        promptRecords.map((item) =>
+          item.id === existing.id ? { ...item, isBookmarked: !item.isBookmarked } : item,
+        ),
+      );
       return;
     }
-    for (const [id, audio] of Object.entries(rowAudio.current)) {
-      if (id !== row.id) audio?.pause();
-    }
-    void node.play();
-    setPlayingId(row.id);
+    const entry: SavedPromptItem = {
+      id: Date.now().toString(),
+      title: title.trim() || "Untitled",
+      prompt: nextPrompt,
+      timestamp: Date.now(),
+      isBookmarked: true,
+    };
+    saveRecords([entry, ...promptRecords]);
+  };
+
+  const handleToggleBookmark = (id: string) => {
+    saveRecords(
+      promptRecords.map((item) => (item.id === id ? { ...item, isBookmarked: !item.isBookmarked } : item)),
+    );
   };
 
   const handleGenerate = async (event: FormEvent) => {
     event.preventDefault();
     if (isGenerating) return;
-    const lyricPayload = isInstrumental ? "" : lyrics.trim();
-    if (!prompt.trim() && !lyricPayload) {
-      setErrorMessage("Add a style prompt or lyrics before creating.");
-      return;
-    }
-    const sentPrompt = prompt.trim() || FALLBACK_PROMPT;
-    const sentTitle = title.trim() || "Untitled Master";
+    const effectivePrompt = prompt.trim() || FALLBACK_PROMPT;
+    const effectiveTitle = title.trim() || "Untitled Master";
+    const historyEntry: SavedPromptItem = {
+      id: Date.now().toString(),
+      title: effectiveTitle,
+      prompt: effectivePrompt,
+      timestamp: Date.now(),
+      isBookmarked: false,
+    };
+    saveRecords([historyEntry, ...promptRecords.filter((item) => item.prompt !== effectivePrompt)]);
     setIsGenerating(true);
     setErrorMessage(null);
     try {
@@ -245,11 +344,12 @@ export function EnginePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: sentTitle,
-          prompt: sentPrompt,
-          lyrics: lyricPayload,
+          title: effectiveTitle,
+          prompt: effectivePrompt,
+          lyrics: isInstrumental ? "" : lyrics,
           gender,
           isInstrumental,
+          vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
         }),
       });
       const data = (await res.json()) as {
@@ -261,18 +361,29 @@ export function EnginePage() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Generation rejected by upstream engine");
       }
-      const wavUrl = data.wavUrl ?? "";
-      const mp3Url = data.mp3Url ?? "";
-      const row: VaultRow = {
+      const created: VaultTrack = {
         id: `local-${Date.now()}`,
-        title: sentTitle,
-        prompt: sentPrompt,
+        title: effectiveTitle,
+        genre: effectivePrompt.slice(0, 24),
+        duration: "210s",
         status: "Ready",
-        wavUrl,
-        mp3Url,
+        wav_url: data.wavUrl ?? "",
+        mp3_url: data.mp3Url ?? "",
       };
-      setVaultRows((current) => [row, ...current]);
-      setNowPlayingUrl(mp3Url || wavUrl || null);
+      setVaultTracks((current) => [created, ...current]);
+      try {
+        const vaultRes = await fetch("/api/vault");
+        if (vaultRes.ok) {
+          const vaultData: unknown = await vaultRes.json();
+          const fetched = tracksFromPayload(vaultData);
+          setVaultTracks((current) => {
+            if (fetched.length === 0) return current;
+            return fetched;
+          });
+        }
+      } catch {
+        // Keep the row just created when the vault list cannot refresh.
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "An unexpected error occurred during synthesis.");
@@ -281,19 +392,28 @@ export function EnginePage() {
     }
   };
 
-  const visibleRows = hideFailed ? vaultRows.filter((row) => row.status === "Ready") : vaultRows;
-  const optimizeDisabled = isAiLoading || !lyrics.trim();
-  const generateDisabled = isAiLoading;
-  const enhanceDisabled = isAiLoading || !prompt.trim();
+  const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
+  const vocalButtonStyle: CSSProperties = selectedCharacter
+    ? {
+        ...pillStyle,
+        backgroundColor: "rgba(6,182,212,0.15)",
+        border: "1px solid #06b6d4",
+        color: "#06b6d4",
+      }
+    : pillStyle;
 
   return (
     <main
       style={{
         minHeight: "100vh",
-        backgroundColor: "#0b0f19",
         color: "#f8fafc",
         colorScheme: "dark",
-        padding: "28px 16px 120px",
+        position: "relative",
+        zIndex: 1,
+        backgroundColor: "#1a0610",
+        backgroundImage:
+          "radial-gradient(ellipse 85% 70% at 0% 0%, rgba(168, 85, 247, 0.78) 0%, rgba(88, 28, 135, 0.42) 34%, transparent 68%), radial-gradient(ellipse 80% 65% at 100% 8%, rgba(225, 29, 72, 0.82) 0%, rgba(136, 19, 55, 0.48) 38%, transparent 70%), radial-gradient(ellipse 70% 50% at 48% 100%, rgba(157, 23, 77, 0.55) 0%, transparent 62%), linear-gradient(165deg, #3b0764 0%, #4c0519 42%, #140810 100%)",
+        padding: "28px 16px 48px",
       }}
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -303,7 +423,7 @@ export function EnginePage() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 16,
-            borderBottom: "1px solid #1e293b",
+            borderBottom: "1px solid rgba(244, 114, 182, 0.35)",
             paddingBottom: 10,
             marginBottom: 18,
           }}
@@ -318,26 +438,26 @@ export function EnginePage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span
-              aria-label="1 Tokens"
+              aria-label="1 Token"
               style={{
-                backgroundColor: "rgba(239, 68, 68, 0.15)",
-                border: "1px solid #ef4444",
+                backgroundColor: "rgba(190, 18, 60, 0.22)",
+                border: "1px solid #e11d48",
                 borderRadius: 20,
-                color: "#f87171",
+                color: "#fecdd3",
                 fontSize: 12,
                 fontWeight: 700,
                 padding: "4px 10px",
                 whiteSpace: "nowrap",
               }}
             >
-              1 Tokens
+              1 Token
             </span>
             <button
               type="button"
               style={{
                 backgroundColor: "transparent",
                 border: "none",
-                color: "#f87171",
+                color: "#fda4af",
                 fontSize: 12,
                 fontWeight: 700,
                 textDecoration: "underline",
@@ -351,14 +471,14 @@ export function EnginePage() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <button type="button" onClick={() => setIsReferenceOpen(true)} style={pillStyle}>
+          <button type="button" onClick={() => setOpenModal("reference")} style={pillStyle}>
             + Reference
           </button>
-          <button type="button" style={pillStyle}>
+          <button type="button" onClick={() => setOpenModal("remix")} style={pillStyle}>
             + Remix
           </button>
-          <button type="button" style={pillStyle}>
-            + Vocal 🔒
+          <button type="button" onClick={() => setIsCharacterModalOpen(true)} style={vocalButtonStyle}>
+            {vocalLabel}
           </button>
         </div>
 
@@ -392,9 +512,9 @@ export function EnginePage() {
                   onClick={() => handleApplyTemplate(tmpl)}
                   style={{
                     marginTop: "auto",
-                    backgroundColor: "#0284c7",
+                    backgroundColor: "#9f1239",
                     color: "#ffffff",
-                    border: "1px solid #1e293b",
+                    border: "1px solid #4c0519",
                     borderRadius: 8,
                     padding: "8px 0",
                     fontSize: 12,
@@ -418,7 +538,7 @@ export function EnginePage() {
                     type="checkbox"
                     checked={isInstrumental}
                     onChange={(event) => setIsInstrumental(event.target.checked)}
-                    style={{ accentColor: "#0284c7", width: 16, height: 16, cursor: "pointer" }}
+                    style={{ accentColor: "#e11d48", width: 16, height: 16, cursor: "pointer" }}
                   />
                 </label>
               </div>
@@ -430,23 +550,22 @@ export function EnginePage() {
                     onChange={(event) => setLyrics(event.target.value)}
                     placeholder="Enter lyrics..."
                     rows={5}
-                    style={{
-                      width: "100%",
-                      backgroundColor: "transparent",
-                      border: "none",
-                      color: "#f8fafc",
-                      outline: "none",
-                      resize: "none",
-                      fontSize: 14,
-                      lineHeight: 1.5,
-                    }}
+                    style={fieldStyle}
                   />
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
                     <div style={{ display: "flex", gap: 14 }}>
-                      <button type="button" disabled={optimizeDisabled} onClick={() => void handleAiAction("optimize_lyrics")} style={textButtonStyle(optimizeDisabled)}>
+                      <button
+                        type="button"
+                        onClick={() => setIsLyricModalOpen(true)}
+                        style={{ background: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                      >
                         ✨ Optimize
                       </button>
-                      <button type="button" disabled={generateDisabled} onClick={() => void handleAiAction("generate_lyrics")} style={textButtonStyle(generateDisabled)}>
+                      <button
+                        type="button"
+                        onClick={() => setIsLyricModalOpen(true)}
+                        style={{ background: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                      >
                         📋 Generate Lyrics
                       </button>
                     </div>
@@ -469,9 +588,10 @@ export function EnginePage() {
                 <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
-                    onClick={savePrompt}
-                    aria-label="Bookmark prompt"
-                    style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
+                    onClick={handleManualBookmark}
+                    title="Bookmark this prompt"
+                    aria-label="Bookmark this prompt"
+                    style={{ backgroundColor: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", fontSize: 14 }}
                   >
                     🔖
                   </button>
@@ -492,31 +612,127 @@ export function EnginePage() {
                 placeholder="Enter style, mood, instrument, etc. to control the generated music"
                 maxLength={1000}
                 rows={4}
-                style={{
-                  width: "100%",
-                  backgroundColor: "transparent",
-                  border: "none",
-                  color: "#f8fafc",
-                  outline: "none",
-                  resize: "none",
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                }}
+                style={fieldStyle}
               />
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10, fontSize: 12, color: "#64748b" }}>
                 <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                  <button type="button" disabled={enhanceDisabled} onClick={() => void handleAiAction("enhance_style")} style={textButtonStyle(enhanceDisabled)}>
-                    ✨ Enhance
-                  </button>
+                  <div ref={enhanceMenuRef} style={{ position: "relative" }}>
+                    <button
+                      type="button"
+                      disabled={isAiLoading}
+                      aria-expanded={isEnhanceMenuOpen}
+                      aria-haspopup="menu"
+                      onClick={() => setIsEnhanceMenuOpen((open) => !open)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#f43f5e",
+                        cursor: isAiLoading ? "not-allowed" : "pointer",
+                        padding: 0,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {isAiLoading ? "🪄 Writing..." : "🪄 Enhance"}
+                    </button>
+                    {isEnhanceMenuOpen ? (
+                      <div
+                        role="menu"
+                        aria-label="Enhance style"
+                        style={{
+                          position: "absolute",
+                          bottom: "calc(100% + 8px)",
+                          left: 0,
+                          background: "#16131c",
+                          backgroundColor: "#16131c",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: 10,
+                          width: 230,
+                          zIndex: 40,
+                          overflow: "hidden",
+                          boxShadow: "0 12px 28px rgba(0, 0, 0, 0.45)",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void handleEnhanceSelection("enhance_match_vibe")}
+                          onMouseEnter={(event) => {
+                            event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.backgroundColor = "transparent";
+                          }}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            gap: 2,
+                            width: "100%",
+                            textAlign: "left",
+                            background: "transparent",
+                            backgroundColor: "transparent",
+                            border: "none",
+                            color: "#f8fafc",
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>🪄 Match my vibe</span>
+                          <span style={{ fontSize: 11, color: "#a1a1aa" }}>Polish and expand your style</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void handleEnhanceSelection("enhance_surprise_me")}
+                          onMouseEnter={(event) => {
+                            event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.backgroundColor = "transparent";
+                          }}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            gap: 2,
+                            width: "100%",
+                            textAlign: "left",
+                            background: "transparent",
+                            backgroundColor: "transparent",
+                            border: "none",
+                            color: "#f8fafc",
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>✨ Surprise me</span>
+                          <span style={{ fontSize: 11, color: "#a1a1aa" }}>Try a fresh, unexpected twist</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setIsTemplatesOpen(true)}
-                    style={{ backgroundColor: "transparent", border: "none", color: "#38bdf8", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
+                    style={{ backgroundColor: "transparent", border: "none", color: "#f9a8d4", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
                   >
                     📋 Templates
                   </button>
-                  <button type="button" onClick={loadSavedPrompt} style={textButtonStyle(savedPrompts.length === 0)}>
-                    🔖 Saved ({savedPrompts.length})
+                  <button
+                    type="button"
+                    onClick={() => setIsMyPromptsOpen(true)}
+                    style={{
+                      backgroundColor: "transparent",
+                      border: "none",
+                      color: "#f43f5e",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: 12,
+                    }}
+                  >
+                    🔖 My prompts
                   </button>
                 </div>
                 <span>{prompt.length}/1000</span>
@@ -533,7 +749,7 @@ export function EnginePage() {
                     onClick={() => setGender("female")}
                     style={{
                       padding: "5px 18px",
-                      backgroundColor: gender === "female" ? "#0284c7" : "transparent",
+                      backgroundColor: gender === "female" ? "#9f1239" : "transparent",
                       color: gender === "female" ? "#ffffff" : "#94a3b8",
                       border: "none",
                       borderRadius: 4,
@@ -550,7 +766,7 @@ export function EnginePage() {
                     onClick={() => setGender("male")}
                     style={{
                       padding: "5px 18px",
-                      backgroundColor: gender === "male" ? "#0284c7" : "transparent",
+                      backgroundColor: gender === "male" ? "#9f1239" : "transparent",
                       color: gender === "male" ? "#ffffff" : "#94a3b8",
                       border: "none",
                       borderRadius: 4,
@@ -583,8 +799,8 @@ export function EnginePage() {
               disabled={isGenerating}
               style={{
                 padding: "14px 0",
-                background: isGenerating ? "#1e293b" : "linear-gradient(90deg, #0284c7 0%, #06b6d4 100%)",
-                backgroundColor: isGenerating ? "#1e293b" : "#0284c7",
+                background: isGenerating ? "#1e293b" : "linear-gradient(90deg, #9f1239 0%, #7e22ce 100%)",
+                backgroundColor: isGenerating ? "#1e293b" : "#9f1239",
                 color: "#ffffff",
                 border: "none",
                 borderRadius: 8,
@@ -598,109 +814,113 @@ export function EnginePage() {
           </form>
         )}
 
-        {nowPlayingUrl ? (
-          <section style={{ ...cardStyle, marginTop: 24 }} aria-label="Now Playing Master Audio">
-            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>Now Playing Master Audio</h3>
-            <audio controls autoPlay src={nowPlayingUrl} style={{ width: "100%" }} />
-          </section>
-        ) : null}
-
         <section style={{ ...cardStyle, marginTop: 24 }} aria-label="Your Audio Vault">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Audio Vault</h3>
-              <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>{VAULT_SUBTITLE}</p>
-            </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#94a3b8", cursor: "pointer", whiteSpace: "nowrap" }}>
-              <input
-                type="checkbox"
-                checked={hideFailed}
-                onChange={(event) => setHideFailed(event.target.checked)}
-                style={{ accentColor: "#0284c7" }}
-              />
-              Hide failed
-            </label>
-          </div>
-          {visibleRows.length === 0 ? (
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Audio Vault</h3>
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>
+            Permanent dual delivery. Ready WAV and MP3 masters stay in this list.
+          </p>
+          {vaultTracks.length === 0 ? (
             <p style={{ margin: "12px 0 0", fontSize: 13, color: "#94a3b8" }}>{VAULT_EMPTY}</p>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 13 }}>
-              <thead>
-                <tr style={{ color: "#94a3b8", textAlign: "left" }}>
-                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>Title</th>
-                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>Status</th>
-                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>Play</th>
-                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>Download</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => {
-                  const src = row.mp3Url || row.wavUrl;
-                  return (
-                    <tr key={row.id} style={{ borderTop: "1px solid #1e293b" }}>
-                      <td style={{ padding: "10px 6px" }}>{row.title}</td>
-                      <td style={{ padding: "10px 6px", color: row.status === "Ready" ? "#86efac" : "#fca5a5" }}>{row.status}</td>
-                      <td style={{ padding: "10px 6px" }}>
-                        <button
-                          type="button"
-                          disabled={!src}
-                          onClick={() => toggleRowAudio(row)}
-                          style={{
-                            backgroundColor: "#1e293b",
-                            color: "#f8fafc",
-                            border: "1px solid #1e293b",
-                            borderRadius: 6,
-                            padding: "6px 10px",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: src ? "pointer" : "not-allowed",
-                          }}
-                        >
-                          {playingId === row.id ? "Pause" : "Play"}
-                        </button>
-                        {src ? (
-                          <audio
-                            ref={(node) => {
-                              rowAudio.current[row.id] = node;
-                            }}
-                            src={src}
-                            preload="none"
-                            onEnded={() => setPlayingId((current) => (current === row.id ? null : current))}
-                          />
-                        ) : null}
-                      </td>
-                      <td style={{ padding: "10px 6px" }}>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          {row.mp3Url ? (
-                            <button
-                              type="button"
-                              onClick={() => void triggerDownload(row.mp3Url, `${row.title}.mp3`)}
-                              style={{ backgroundColor: "#1e293b", color: "#f8fafc", border: "1px solid #475569", borderRadius: 6, padding: "6px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                            >
-                              MP3
-                            </button>
-                          ) : null}
-                          {row.wavUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => void triggerDownload(row.wavUrl, `${row.title}.wav`)}
-                              style={{ backgroundColor: "#1e293b", color: "#f8fafc", border: "1px solid #475569", borderRadius: 6, padding: "6px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                            >
-                              WAV
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <ul style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+              {vaultTracks.map((track) => {
+                const src = track.mp3_url || track.wav_url;
+                return (
+                  <li key={track.id} style={{ borderTop: "1px solid #1e293b", paddingTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                      <strong style={{ fontSize: 14 }}>{track.title}</strong>
+                      <span style={{ fontSize: 12, color: "#86efac" }}>{track.status}</span>
+                    </div>
+                    <p style={{ margin: "4px 0 8px", fontSize: 12, color: "#94a3b8" }}>
+                      {track.genre || "Untitled style"} · {track.duration}
+                    </p>
+                    {src ? <audio controls preload="none" src={src} style={{ width: "100%" }} /> : null}
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </section>
 
         <TemplatesModal isOpen={isTemplatesOpen} onClose={() => setIsTemplatesOpen(false)} onSelectTemplate={handleApplyTemplate} />
-        <ReferenceModal isOpen={isReferenceOpen} onClose={() => setIsReferenceOpen(false)} onReferenceSelected={() => undefined} />
+        <LyricEditorModal
+          isOpen={isLyricModalOpen}
+          onClose={() => setIsLyricModalOpen(false)}
+          currentTitle={title}
+          currentPrompt={prompt}
+          initialLyrics={lyrics}
+          onApplyLyrics={(newLyrics) => setLyrics(newLyrics)}
+        />
+
+        {openModal === "reference" ? (
+          <DarkModal label="Reference" onClose={() => setOpenModal(null)}>
+            <p style={{ margin: 0, fontSize: 13, color: "#e9d5ff" }}>
+              Add a reference recording. Nothing is uploaded until you choose to send it.
+            </p>
+            <input
+              type="file"
+              accept="audio/*"
+              aria-label="Reference audio file"
+              style={{
+                color: "#f8fafc",
+                colorScheme: "dark",
+                backgroundColor: "#150913",
+                border: "1px solid #4c1d3a",
+                borderRadius: 8,
+                padding: 8,
+              }}
+            />
+          </DarkModal>
+        ) : null}
+
+        {openModal === "remix" ? (
+          <DarkModal label="Remix" onClose={() => setOpenModal(null)}>
+            <p style={{ margin: 0, fontSize: 13, color: "#e9d5ff" }}>
+              Describe how the new master should move. The original stays in the vault.
+            </p>
+            <textarea
+              aria-label="Remix direction"
+              rows={4}
+              placeholder="Harder drums, keep the vocal, half-time chorus"
+              style={{
+                ...fieldStyle,
+                backgroundColor: "#1c0c14",
+                border: "1px solid #4c1d3a",
+                borderRadius: 8,
+                padding: 8,
+              }}
+            />
+          </DarkModal>
+        ) : null}
+
+        <MyPromptsModal
+          isOpen={isMyPromptsOpen}
+          onClose={() => setIsMyPromptsOpen(false)}
+          items={promptRecords}
+          onSelectPrompt={(loadedPrompt) => setPrompt(loadedPrompt)}
+          onToggleBookmark={handleToggleBookmark}
+        />
+        <CharacterModal
+          isOpen={isCharacterModalOpen}
+          onClose={() => setIsCharacterModalOpen(false)}
+          characters={userCharacters}
+          selectedCharacterId={selectedCharacter?.id || null}
+          onSelectCharacter={(char) => setSelectedCharacter(char)}
+          onOpenUpgradeModal={() => {
+            setIsCharacterModalOpen(false);
+            setIsUpgradeModalOpen(true);
+          }}
+          hasProLicense={hasProLicense}
+        />
+        <VocalUpgradeModal
+          isOpen={isUpgradeModalOpen}
+          onClose={() => setIsUpgradeModalOpen(false)}
+          onCompleteCheckout={() => {
+            setHasProLicense(true);
+            setIsUpgradeModalOpen(false);
+            setIsCharacterModalOpen(true);
+          }}
+        />
       </div>
     </main>
   );

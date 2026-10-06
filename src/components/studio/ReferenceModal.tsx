@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
 
 type ReferenceSelection = { id: string; name: string };
 
@@ -7,6 +7,17 @@ type Props = {
   onClose: () => void;
   onReferenceSelected: (reference: ReferenceSelection) => void;
 };
+
+const panelButton = (selected = false): CSSProperties => ({
+  backgroundColor: selected ? "#0284c7" : "#121826",
+  color: selected ? "#ffffff" : "#e2e8f0",
+  border: "1px solid #1e293b",
+  borderRadius: 8,
+  padding: "8px 12px",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+});
 
 export function ReferenceModal({ isOpen, onClose, onReferenceSelected }: Props) {
   const [tab, setTab] = useState<"upload" | "library">("upload");
@@ -47,6 +58,7 @@ export function ReferenceModal({ isOpen, onClose, onReferenceSelected }: Props) 
         inset: 0,
         zIndex: 80,
         background: "rgba(15, 23, 42, 0.55)",
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
@@ -59,7 +71,11 @@ export function ReferenceModal({ isOpen, onClose, onReferenceSelected }: Props) 
         onClick={(event) => event.stopPropagation()}
         style={{
           width: "min(480px, 100%)",
-          background: "#ffffff",
+          background: "#121826",
+          backgroundColor: "#121826",
+          color: "#f8fafc",
+          colorScheme: "dark",
+          border: "1px solid #1e293b",
           borderRadius: 12,
           padding: 16,
           display: "flex",
@@ -69,15 +85,27 @@ export function ReferenceModal({ isOpen, onClose, onReferenceSelected }: Props) 
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <strong>Reference audio</strong>
-          <button type="button" onClick={onClose} aria-label="Close reference">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close reference"
+            style={{
+              background: "transparent",
+              backgroundColor: "transparent",
+              color: "#94a3b8",
+              border: "none",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
             ✕
           </button>
         </div>
         <div style={{ display: "flex", gap: 8 }} role="tablist" aria-label="Reference source">
-          <button type="button" role="tab" aria-selected={tab === "upload"} onClick={() => setTab("upload")}>
+          <button type="button" role="tab" aria-selected={tab === "upload"} onClick={() => setTab("upload")} style={panelButton(tab === "upload")}>
             Upload audio
           </button>
-          <button type="button" role="tab" aria-selected={tab === "library"} onClick={() => setTab("library")}>
+          <button type="button" role="tab" aria-selected={tab === "library"} onClick={() => setTab("library")} style={panelButton(tab === "library")}>
             Library
           </button>
         </div>
@@ -88,14 +116,29 @@ export function ReferenceModal({ isOpen, onClose, onReferenceSelected }: Props) 
               type="file"
               accept="audio/*"
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              style={{
+                backgroundColor: "#0b0f19",
+                color: "#e2e8f0",
+                border: "1px solid #1e293b",
+                borderRadius: 8,
+                padding: 8,
+              }}
             />
-            <button type="submit" disabled={!file || isUploading}>
+            <button
+              type="submit"
+              disabled={!file || isUploading}
+              style={{
+                ...panelButton(false),
+                cursor: !file || isUploading ? "not-allowed" : "pointer",
+                opacity: !file || isUploading ? 0.6 : 1,
+              }}
+            >
               {isUploading ? "Uploading..." : "Upload"}
             </button>
-            {error ? <p style={{ margin: 0, color: "#b91c1c" }}>{error}</p> : null}
+            {error ? <p style={{ margin: 0, color: "#f87171" }}>{error}</p> : null}
           </form>
         ) : (
-          <p style={{ margin: 0, color: "#64748b" }}>No saved references yet.</p>
+          <p style={{ margin: 0, color: "#94a3b8" }}>No saved references yet.</p>
         )}
       </div>
     </div>

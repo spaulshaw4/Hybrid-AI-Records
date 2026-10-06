@@ -187,6 +187,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/vault") {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "GET, HEAD" },
+          });
+        }
+        const { GET } = await import("./app/api/vault/route");
+        return GET();
+      }
+
       const trackStatus = pathname.match(/^\/api\/tracks\/([^/]+)\/status$/);
       if (trackStatus && (request.method === "GET" || request.method === "HEAD")) {
         const { trackStatusResponse } = await import("./lib/track-create.server");
