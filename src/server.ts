@@ -176,6 +176,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/ai/coproducer") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/ai/coproducer/route");
+        return POST(request);
+      }
+
       const trackStatus = pathname.match(/^\/api\/tracks\/([^/]+)\/status$/);
       if (trackStatus && (request.method === "GET" || request.method === "HEAD")) {
         const { trackStatusResponse } = await import("./lib/track-create.server");
