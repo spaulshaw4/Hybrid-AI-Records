@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { constructEventMock, events, profileWrites, fetchMock } = vi.hoisted(() => ({
+const { constructEventMock, events, profileWrites, fetchMock, creditCalls, creditGate } = vi.hoisted(() => ({
   constructEventMock: vi.fn(),
   events: new Set<string>(),
   profileWrites: [] as Array<Record<string, unknown>>,
   fetchMock: vi.fn(),
+  creditCalls: [] as Array<Record<string, unknown>>,
+  creditGate: { fail: false },
 }));
 
 vi.mock("stripe", () => {
@@ -52,6 +54,19 @@ vi.mock("@supabase/supabase-js", () => ({
         insert: async () => ({ error: { message: `unexpected table ${table}` } }),
       };
     },
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      if (fn !== "credit_token_purchase") {
+        return { data: null, error: { message: `unexpected rpc ${fn}` } };
+      }
+      creditCalls.push(args);
+      if (creditGate.fail) {
+        return { data: null, error: { message: "db down" } };
+      }
+      return {
+        data: [{ credited: args._tokens, balance: args._tokens, already_credited: false }],
+        error: null,
+      };
+    },
   }),
 }));
 
@@ -67,14 +82,17 @@ function webhookRequest(body = "{}"): Request {
   });
 }
 
+const LEDGER_USER = "11111111-1111-4111-8111-111111111111";
+
 function completedEvent(
   metadata: Record<string, string> | null,
   id = "evt_voice_1",
+  extra: Record<string, unknown> = {},
 ) {
   return {
     id,
     type: "checkout.session.completed",
-    data: { object: { id: "cs_test_voice", metadata } },
+    data: { object: { id: "cs_test_voice", metadata, ...extra } },
   };
 }
 
@@ -85,6 +103,8 @@ describe("POST /api/stripe/webhook", () => {
     constructEventMock.mockReset();
     events.clear();
     profileWrites.length = 0;
+    creditCalls.length = 0;
+    creditGate.fail = false;
     fetchMock.mockReset();
     vi.unstubAllGlobals();
     if (originalFlag === undefined) delete process.env.ENABLE_WAVESPEED_ENROLLMENT;
@@ -206,5 +226,110 @@ describe("POST /api/stripe/webhook", () => {
     expect(profileWrites).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(events.size).toBe(0);
+    expect(creditCalls).toEqual([]);
+  });
+
+  it("credits a token pack once and does not enroll a voice", async () => {
+    readyEnv();
+    constructEventMock.mockReturnValue(
+      completedEvent({ tokens: "5", userId: LEDGER_USER }, "evt_tokens_1", {
+        id: "cs_tokens_1",
+        amount_total: 1000,
+        currency: "usd",
+      }),
+    );
+
+    const first = await POST(webhookRequest());
+    const second = await POST(webhookRequest());
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(first.json()).resolves.toEqual({ received: true });
+    await expect(second.json()).resolves.toEqual({ received: true });
+    expect(creditCalls).toEqual([
+      {
+        _user_id: LEDGER_USER,
+        _session_id: "cs_tokens_1",
+        _price_id: "billing_ep",
+        _tokens: 5,
+        _amount_total: 1000,
+        _currency: "usd",
+      },
+    ]);
+    expect(profileWrites).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(events.has("evt_tokens_1")).toBe(true);
+  });
+
+  it("does not claim a token event when the ledger write fails, so a retry can credit", async () => {
+    readyEnv();
+    creditGate.fail = true;
+    constructEventMock.mockReturnValue(
+      completedEvent({ tokens: "1", userId: LEDGER_USER }, "evt_tokens_retry", {
+        id: "cs_tokens_retry",
+      }),
+    );
+
+    const first = await POST(webhookRequest());
+    expect(first.status).toBe(500);
+    expect(events.has("evt_tokens_retry")).toBe(false);
+
+    creditGate.fail = false;
+    const second = await POST(webhookRequest());
+    expect(second.status).toBe(200);
+    expect(creditCalls).toHaveLength(2);
+    expect(events.has("evt_tokens_retry")).toBe(true);
+    expect(profileWrites).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("acks a guest token checkout without writing a balance", async () => {
+    readyEnv();
+    constructEventMock.mockReturnValue(
+      completedEvent({ tokens: "12", userId: "guest_user" }, "evt_tokens_guest"),
+    );
+
+    const res = await POST(webhookRequest());
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true });
+    expect(creditCalls).toEqual([]);
+    expect(profileWrites).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not credit an unpaid token checkout", async () => {
+    readyEnv();
+    constructEventMock.mockReturnValue(
+      completedEvent({ tokens: "1", userId: LEDGER_USER }, "evt_tokens_unpaid", {
+        payment_status: "unpaid",
+      }),
+    );
+
+    const res = await POST(webhookRequest());
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true });
+    expect(creditCalls).toEqual([]);
+    expect(events.size).toBe(0);
+  });
+
+  it("keeps voice enrollment when a session also carries a sample URL", async () => {
+    readyEnv();
+    constructEventMock.mockReturnValue(
+      completedEvent({
+        tokens: "5",
+        userId: "user-1",
+        sampleAudioUrl: "https://project.supabase.co/storage/v1/object/public/voice-samples/user-1/take.wav",
+      }),
+    );
+
+    const res = await POST(webhookRequest());
+
+    expect(res.status).toBe(200);
+    expect(profileWrites).toHaveLength(1);
+    expect(profileWrites[0]).toMatchObject({ user_id: "user-1", is_voice_enrolled: true });
+    expect(creditCalls).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
