@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { isMp3FrameOrId3, wavToMp3 } from "@/lib/audio/wavToMp3";
+import { refundGenerationToken } from "@/lib/generation-tokens.server";
 import {
   formatMurekaLyrics,
   formatMurekaPrompt,
   replaceBareConflictingPrompt,
 } from "@/lib/mureka-format";
+import { resolveStudioSession, UnauthorizedSessionError } from "@/lib/studio-request-auth.server";
 import {
   beginDelivery,
   completeTrackJob,
@@ -72,6 +75,8 @@ type GenerateBody = {
 const EMPTY_GENERATION_ERROR = "Generation blocked: No style or lyrics received by backend.";
 const LYRICS_REQUIRED_ERROR = "Generation blocked: Lyrics are required.";
 const QUEUE_FAILED_ERROR = "Failed to queue the master.";
+const INSUFFICIENT_TOKENS_ERROR = "Insufficient hybrid tokens";
+const TOKEN_DEDUCTION_ERROR = "Failed to process token deduction";
 const PROMPT_MAX_CHARS = 1024;
 const LYRICS_MAX_CHARS = 5000;
 
@@ -575,6 +580,82 @@ export async function watchTrack(taskId: string): Promise<void> {
 
 const watching = new Set<string>();
 
+type TokenDebit =
+  | { ok: true; spendKey: string }
+  | { ok: false; status: 402 | 500; error: string };
+
+function isUnauthorized(err: unknown): boolean {
+  if (err instanceof UnauthorizedSessionError) return true;
+  if (!err || typeof err !== "object") return false;
+  const name = (err as { name?: string }).name;
+  const status = (err as { status?: number }).status;
+  const message = err instanceof Error ? err.message : "";
+  return name === "UnauthorizedSessionError" || status === 401 || message === "Unauthorized session";
+}
+
+function hasBearer(req: Request): boolean {
+  const header = req.headers.get("authorization");
+  if (!header?.startsWith("Bearer ")) return false;
+  return header.slice("Bearer ".length).trim().length > 0;
+}
+
+/**
+ * Reads token_balances.balance, then burns 1 via spend_hybrid_tokens.
+ * That RPC updates the row only while balance >= 1, so two submits cannot spend the same token.
+ */
+async function debitOneHybridToken(userId: string): Promise<TokenDebit> {
+  try {
+    const supabase = vaultClient();
+    const { data, error } = await supabase
+      .from("token_balances")
+      .select("balance")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const balance = typeof data?.balance === "number" ? data.balance : null;
+    if (error || balance === null || balance < 1) {
+      return { ok: false, status: 402, error: INSUFFICIENT_TOKENS_ERROR };
+    }
+
+    const spendKey = `gen:${randomUUID()}`;
+    const { data: rpcData, error: rpcError } = await supabase.rpc("spend_hybrid_tokens", {
+      _user_id: userId,
+      _amount: 1,
+      _note: "Studio master generation",
+      _idempotency_key: spendKey,
+    });
+    if (rpcError) {
+      console.error("[generate] token deduction failed", rpcError.message);
+      return { ok: false, status: 500, error: TOKEN_DEDUCTION_ERROR };
+    }
+    const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as { ok?: boolean } | null;
+    if (!row || row.ok !== true) {
+      return { ok: false, status: 402, error: INSUFFICIENT_TOKENS_ERROR };
+    }
+    return { ok: true, spendKey };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "error";
+    console.error("[generate] token deduction failed", message);
+    return { ok: false, status: 500, error: TOKEN_DEDUCTION_ERROR };
+  }
+}
+
+async function refundChargedToken(userId: string, spendKey: string): Promise<void> {
+  try {
+    const refund = await refundGenerationToken({
+      userId,
+      amount: 1,
+      spendIdempotencyKey: spendKey,
+      note: "Refund for failed generation",
+    });
+    if (!refund.ok) {
+      console.error("[generate] token refund failed");
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "error";
+    console.error("[generate] token refund failed", message);
+  }
+}
+
 function startTrackWatch(taskId: string): void {
   // VITEST=true skips the automatic watch. Tests call watchTrack or settle explicitly.
   // setTimeout detaches the poll from the POST so a browser refresh cannot abort the vault.
@@ -587,6 +668,27 @@ function startTrackWatch(taskId: string): void {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  if (!hasBearer(req)) {
+    return Response.json({ error: "Unauthorized session" }, { status: 401 });
+  }
+
+  let userId = "";
+  try {
+    const session = await resolveStudioSession(req);
+    userId = session.userId.trim();
+  } catch (err: unknown) {
+    if (isUnauthorized(err)) {
+      return Response.json({ error: "Unauthorized session" }, { status: 401 });
+    }
+    const message = err instanceof Error ? err.message : "";
+    console.error("[generate] session failed", message || "error");
+    return Response.json({ error: "Unauthorized session" }, { status: 401 });
+  }
+  if (!userId || userId === "guest_user") {
+    return Response.json({ error: "Unauthorized session" }, { status: 401 });
+  }
+
+  let chargedKey: string | null = null;
   try {
     const body = (await req.json()) as GenerateBody;
     logGenerationBody(body);
@@ -594,7 +696,6 @@ export async function POST(req: Request): Promise<Response> {
       gender,
       isInstrumental: rawInstrumental,
       vocalId,
-      userId: rawUserId,
     } = body;
     const style = replaceBareConflictingPrompt(
       formatMurekaPrompt(firstAlias(body.prompt, body.stylePrompt, body.style)),
@@ -606,7 +707,6 @@ export async function POST(req: Request): Promise<Response> {
     ).trim();
     const isInstrumental = rawInstrumental === true;
     const title = resolvedTitle(body.title);
-    const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     const vocalUsed = vocalId && String(vocalId).trim() !== "" ? String(vocalId).trim() : "";
     const vocalGender = normalizeVocalGender(gender);
     if (!isInstrumental && !rawLyrics) {
@@ -629,6 +729,12 @@ export async function POST(req: Request): Promise<Response> {
       console.error("[generate] missing API key");
       return Response.json({ error: "Missing API key" }, { status: 500 });
     }
+
+    const debit = await debitOneHybridToken(userId);
+    if (!debit.ok) {
+      return Response.json({ error: debit.error }, { status: debit.status });
+    }
+    chargedKey = debit.spendKey;
 
     const endpoint = isInstrumental ? GENERATE_BGM_URL : GENERATE_SONG_URL;
     // duration, seed, webhook, vocal_id, and reference_id stay off this body.
@@ -672,11 +778,18 @@ export async function POST(req: Request): Promise<Response> {
     const taskId = typeof queued?.id === "string" ? queued.id.trim() : "";
     if (!taskId) {
       console.error("[generate] queue response had no id", JSON.stringify(submitData));
+      const key = chargedKey;
+      chargedKey = null;
+      if (key) await refundChargedToken(userId, key);
       return Response.json({ error: QUEUE_FAILED_ERROR }, { status: 502 });
     }
     if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
+      const key = chargedKey;
+      chargedKey = null;
+      if (key) await refundChargedToken(userId, key);
       throw new Error("Task submission rejected by upstream");
     }
+    chargedKey = null;
     console.log(`[generate] WaveSpeed accepted task ${taskId}`);
     rememberTrackJob({
       taskId,
@@ -697,6 +810,11 @@ export async function POST(req: Request): Promise<Response> {
       requestId: taskId,
     });
   } catch (err: unknown) {
+    if (chargedKey) {
+      const key = chargedKey;
+      chargedKey = null;
+      await refundChargedToken(userId, key);
+    }
     const message = err instanceof Error ? err.message : "";
     console.error("[generate] submit failed", message || "error");
     return Response.json(

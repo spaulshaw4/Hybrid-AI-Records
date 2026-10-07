@@ -1,9 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadMock, insertMock, fromMock } = vi.hoisted(() => ({
+const {
+  uploadMock,
+  insertMock,
+  fromMock,
+  resolveStudioSessionMock,
+  balanceMaybeSingleMock,
+  spendRpcMock,
+  refundGenerationTokenMock,
+} = vi.hoisted(() => ({
   uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
   insertMock: vi.fn(async () => ({ error: null })),
   fromMock: vi.fn(),
+  resolveStudioSessionMock: vi.fn(),
+  balanceMaybeSingleMock: vi.fn(),
+  spendRpcMock: vi.fn(),
+  refundGenerationTokenMock: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -11,13 +23,40 @@ vi.mock("@supabase/supabase-js", () => ({
     storage: { from: () => ({ upload: uploadMock }) },
     from: (table: string) => {
       fromMock(table);
+      if (table === "token_balances") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => balanceMaybeSingleMock(),
+            }),
+          }),
+        };
+      }
       return { insert: insertMock };
     },
+    rpc: (fn: string, args: unknown) => spendRpcMock(fn, args),
   }),
 }));
 
+vi.mock("@/lib/studio-request-auth.server", () => ({
+  resolveStudioSession: (...args: unknown[]) => resolveStudioSessionMock(...args),
+  UnauthorizedSessionError: class UnauthorizedSessionError extends Error {
+    status = 401;
+    constructor(message = "Unauthorized session") {
+      super(message);
+      this.name = "UnauthorizedSessionError";
+    }
+  },
+}));
+
+vi.mock("@/lib/generation-tokens.server", () => ({
+  refundGenerationToken: (...args: unknown[]) => refundGenerationTokenMock(...args),
+}));
+
 import { maxDuration, POST, settleTrackFromWaveSpeed, watchTrack } from "@/app/api/generate/route";
-import { readTrackJob, resetTrackJobs } from "@/lib/wavespeed-track-jobs.server";
+import { readTrackJob, rememberTrackJob, resetTrackJobs } from "@/lib/wavespeed-track-jobs.server";
+
+const SESSION_USER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 const SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
@@ -49,10 +88,12 @@ function expectLockedPayload(body: Record<string, unknown>, expected: Record<str
   expect(body.prompt).not.toBe("");
 }
 
-function generateRequest(extra: Record<string, unknown> = {}): Request {
+function generateRequest(extra: Record<string, unknown> = {}, authorization = "Bearer a.b.c"): Request {
+  const headers = new Headers({ "content-type": "application/json" });
+  if (authorization) headers.set("authorization", authorization);
   return new Request("http://localhost/api/generate", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({
       prompt: "Acoustic,  heavy rock",
       lyrics: "[Verse]\nline\n[inst]",
@@ -66,6 +107,18 @@ describe("POST /api/generate", () => {
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
+    balanceMaybeSingleMock.mockResolvedValue({ data: { balance: 4 }, error: null });
+    spendRpcMock.mockResolvedValue({
+      data: [{ ok: true, balance: 3, already_applied: false, reason: null }],
+      error: null,
+    });
+    refundGenerationTokenMock.mockResolvedValue({ ok: true, balance: 4, alreadyApplied: false });
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -73,6 +126,10 @@ describe("POST /api/generate", () => {
     uploadMock.mockClear();
     insertMock.mockClear();
     fromMock.mockClear();
+    resolveStudioSessionMock.mockReset();
+    balanceMaybeSingleMock.mockReset();
+    spendRpcMock.mockReset();
+    refundGenerationTokenMock.mockReset();
     resetTrackJobs();
     if (originalKey === undefined) delete process.env.WAVESPEED_API_KEY;
     else process.env.WAVESPEED_API_KEY = originalKey;
@@ -97,6 +154,8 @@ describe("POST /api/generate", () => {
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "Missing API key" });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(balanceMaybeSingleMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
   });
 
   it("returns 502 when the queue response has no task id", async () => {
@@ -108,6 +167,10 @@ describe("POST /api/generate", () => {
 
     expect(res.status).toBe(502);
     await expect(res.json()).resolves.toEqual({ error: "Failed to queue the master." });
+    expect(refundGenerationTokenMock).toHaveBeenCalledTimes(1);
+    expect(refundGenerationTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION_USER, amount: 1 }),
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SONG_URL);
@@ -149,7 +212,7 @@ describe("POST /api/generate", () => {
     expect(readTrackJob("task-9")).toMatchObject({
       status: "processing",
       title: "Heavy Sky",
-      userId: "user-1",
+      userId: SESSION_USER,
     });
     expect(uploadMock).not.toHaveBeenCalled();
   });
@@ -231,6 +294,9 @@ describe("POST /api/generate", () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "socket hang up" });
+    expect(refundGenerationTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION_USER, amount: 1 }),
+    );
   });
 
   it("sends lyrics, wav output, and prompt or gender only when set", async () => {
@@ -530,6 +596,8 @@ describe("POST /api/generate", () => {
     expect(instrumental.status).toBe(400);
     await expect(instrumental.json()).resolves.toEqual(blocked);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(balanceMaybeSingleMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.some((call) => String((call as [string, RequestInit?])[0]).includes("/v1/mureka"))).toBe(false);
   });
 
@@ -541,7 +609,7 @@ describe("POST /api/generate", () => {
     const aliased = await POST(
       new Request("http://localhost/api/generate", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer a.b.c" },
         body: JSON.stringify({
           stylePrompt: "Close piano, 80 BPM",
           lyricsText: "[Chorus]\nhey",
@@ -571,7 +639,7 @@ describe("POST /api/generate", () => {
     const lyricsOnly = await POST(
       new Request("http://localhost/api/generate", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer a.b.c" },
         body: JSON.stringify({ lyrics: "[Verse]\nstorm", gender: "male" }),
       }),
     );
@@ -594,7 +662,7 @@ describe("POST /api/generate", () => {
     const fromText = await POST(
       new Request("http://localhost/api/generate", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer a.b.c" },
         body: JSON.stringify({ text: "[Bridge]\nfrom text", gender: "female" }),
       }),
     );
@@ -622,6 +690,7 @@ describe("POST /api/generate", () => {
       error: "Generation blocked: Lyrics are required.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
 
     const kept = await POST(generateRequest({ duration: 240, seed: 7, title: "Neon rain" }));
     expect(kept.status).toBe(502);
@@ -733,10 +802,10 @@ describe("POST /api/generate", () => {
     );
 
     const accepted = await POST(
-      generateRequest({ title: "Glass Harbor", userId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }),
+      generateRequest({ title: "Glass Harbor", userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }),
     );
     expect(accepted.status).toBe(200);
-    expect(readTrackJob(taskId)?.userId).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    expect(readTrackJob(taskId)?.userId).toBe(SESSION_USER);
 
     await settleTrackFromWaveSpeed(taskId);
 
@@ -746,7 +815,7 @@ describe("POST /api/generate", () => {
     expect(insertMock).toHaveBeenCalledTimes(1);
     const row = insertMock.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(row).toEqual({
-      user_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      user_id: SESSION_USER,
       title: "Glass Harbor",
       prompt: expect.any(String),
       lyrics: expect.any(String),
@@ -794,8 +863,16 @@ describe("POST /api/generate", () => {
       }),
     );
 
-    const accepted = await POST(generateRequest({ title: "No Owner" }));
-    expect(accepted.status).toBe(200);
+    rememberTrackJob({
+      taskId,
+      title: "No Owner",
+      prompt: "Acoustic, heavy rock",
+      lyrics: "[Verse]\nline",
+      vocalId: null,
+      userId: "",
+      status: "processing",
+      delivering: false,
+    });
     expect(readTrackJob(taskId)?.userId).toBe("");
 
     await settleTrackFromWaveSpeed(taskId);
@@ -822,7 +899,7 @@ describe("POST /api/generate", () => {
     const instrumental = await POST(
       new Request("http://localhost/api/generate", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer a.b.c" },
         body: JSON.stringify({
           isInstrumental: true,
           prompt: "Heavy southern rock, 74 BPM",
@@ -840,5 +917,182 @@ describe("POST /api/generate", () => {
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
     });
+    expect(spendRpcMock).toHaveBeenCalledWith(
+      "spend_hybrid_tokens",
+      expect.objectContaining({ _user_id: SESSION_USER, _amount: 1 }),
+    );
+  });
+
+  it("returns 402 when the balance is 0 or the balance row is missing and does not call upstream", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "should-not-run" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    balanceMaybeSingleMock.mockResolvedValue({ data: { balance: 0 }, error: null });
+    const empty = await POST(generateRequest({ userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }));
+    expect(empty.status).toBe(402);
+    await expect(empty.json()).resolves.toEqual({ error: "Insufficient hybrid tokens" });
+
+    balanceMaybeSingleMock.mockResolvedValue({ data: null, error: null });
+    const missing = await POST(generateRequest());
+    expect(missing.status).toBe(402);
+    await expect(missing.json()).resolves.toEqual({ error: "Insufficient hybrid tokens" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
+    expect(JSON.stringify({ error: "Insufficient hybrid tokens" })).not.toMatch(/wavespeed/i);
+  });
+
+  it("returns 402 when the conditional debit matches no row", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    balanceMaybeSingleMock.mockResolvedValue({ data: { balance: 1 }, error: null });
+    spendRpcMock.mockResolvedValue({
+      data: [{ ok: false, balance: 0, already_applied: false, reason: "insufficient" }],
+      error: null,
+    });
+
+    const res = await POST(generateRequest());
+
+    expect(res.status).toBe(402);
+    await expect(res.json()).resolves.toEqual({ error: "Insufficient hybrid tokens" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refundGenerationTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when the token deduction write fails and does not dispatch", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    spendRpcMock.mockResolvedValue({ data: null, error: { message: "ledger write failed" } });
+
+    const res = await POST(generateRequest());
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: "Failed to process token deduction" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refundGenerationTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("debits 1 hybrid token for the session user and still sends the locked vocal payload", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const order: string[] = [];
+    balanceMaybeSingleMock.mockImplementation(async () => {
+      order.push("read");
+      return { data: { balance: 1 }, error: null };
+    });
+    spendRpcMock.mockImplementation(async (fn: string, args: { _user_id?: string; _amount?: number }) => {
+      order.push("debit");
+      expect(fn).toBe("spend_hybrid_tokens");
+      expect(args._user_id).toBe(SESSION_USER);
+      expect(args._amount).toBe(1);
+      return { data: [{ ok: true, balance: 0, already_applied: false }], error: null };
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      order.push(String(url));
+      return jsonResponse({ data: { id: "task-paid" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await POST(
+      generateRequest({
+        title: "Heavy Sky",
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        duration: 240,
+        seed: 7,
+        gender: "male",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ taskId: "task-paid" });
+    expect(order[0]).toBe("read");
+    expect(order[1]).toBe("debit");
+    expect(order[2]).toBe(SONG_URL);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expectLockedPayload(body, {
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
+      lyrics: "[Verse]\nline\n[inst-short]",
+      title: "Heavy Sky",
+      output_format: "wav",
+    });
+    expect(body.lyrics_type).toBe("custom");
+    expect(body).not.toHaveProperty("duration");
+    expect(body).not.toHaveProperty("seed");
+    expect(body).not.toHaveProperty("webhook");
+    expect(readTrackJob("task-paid")?.userId).toBe(SESSION_USER);
+    expect(refundGenerationTokenMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refunds 1 token when the submit throws after the debit and still returns the queue error", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map((part) => String(part)).join(" "));
+    });
+    refundGenerationTokenMock.mockRejectedValue(new Error("refund ledger down"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("upstream queue exploded");
+      }),
+    );
+
+    const res = await POST(generateRequest({ isInstrumental: true, prompt: "Heavy southern rock, 74 BPM" }));
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: "upstream queue exploded" });
+    expect(JSON.stringify({ error: "upstream queue exploded" })).not.toMatch(/wavespeed/i);
+    expect(spendRpcMock).toHaveBeenCalledWith(
+      "spend_hybrid_tokens",
+      expect.objectContaining({ _user_id: SESSION_USER, _amount: 1 }),
+    );
+    expect(refundGenerationTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: SESSION_USER,
+        amount: 1,
+        note: "Refund for failed generation",
+        spendIdempotencyKey: expect.stringMatching(/^gen:/),
+      }),
+    );
+    expect(errors.some((line) => line.includes("[generate] token refund failed"))).toBe(true);
+  });
+
+  it("returns 400 for empty lyrics and does not debit", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await POST(generateRequest({ lyrics: "   ", lyricsText: "", text: "", prompt: "piano" }));
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "Generation blocked: Lyrics are required." });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(balanceMaybeSingleMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
+    expect(refundGenerationTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 without a session and does not debit", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const missing = await POST(generateRequest({}, ""));
+    expect(missing.status).toBe(401);
+    await expect(missing.json()).resolves.toEqual({ error: "Unauthorized session" });
+
+    resolveStudioSessionMock.mockRejectedValue(
+      Object.assign(new Error("Unauthorized session"), { name: "UnauthorizedSessionError", status: 401 }),
+    );
+    const rejected = await POST(generateRequest());
+    expect(rejected.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(spendRpcMock).not.toHaveBeenCalled();
   });
 });
