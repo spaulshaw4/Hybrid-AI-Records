@@ -9,6 +9,7 @@ import TemplatesModal from "@/components/studio/TemplatesModal";
 import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { AudioVaultList } from "@/components/studio/AudioVaultList";
 import { DurationSlider } from "@/components/studio/DurationSlider";
+import { VocalStudioTab } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
@@ -172,7 +173,7 @@ function DarkModal({
 }
 
 export function EnginePage() {
-  const [activeTab, setActiveTab] = useState<"custom" | "easy">("easy");
+  const [activeTab, setActiveTab] = useState<"custom" | "easy" | "vocals">("easy");
   const [isInstrumental, setIsInstrumental] = useState(false);
   const [lyrics, setLyrics] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -463,9 +464,11 @@ export function EnginePage() {
     console.log("READY TO DISPATCH:", { title, prompt: styleValue, lyrics: lyricValue, duration });
     console.log("=== SENDING TO BACKEND ===", { prompt: styleValue, lyrics: lyricValue, duration, title: songTitle });
     let ownerId = authUserId?.trim() ?? "";
+    let accessToken = "";
     try {
       const { data } = await supabase.auth.getSession();
       const liveId = data.session?.user?.id?.trim() ?? "";
+      accessToken = data.session?.access_token?.trim() ?? "";
       if (liveId) ownerId = liveId;
     } catch {
       /* keep the id already held in state */
@@ -474,7 +477,10 @@ export function EnginePage() {
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify({
           prompt: styleValue,
           stylePrompt: styleValue,
@@ -593,12 +599,15 @@ export function EnginePage() {
             marginBottom: 18,
           }}
         >
-          <div style={{ display: "flex", gap: 24 }} role="tablist" aria-label="Studio mode">
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }} role="tablist" aria-label="Studio mode">
             <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} style={modeTabStyle(activeTab === "easy")}>
               Easy
             </button>
             <button type="button" role="tab" aria-selected={activeTab === "custom"} onClick={() => setActiveTab("custom")} style={modeTabStyle(activeTab === "custom")}>
               Custom
+            </button>
+            <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
+              Vocals & Toplines
             </button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -672,7 +681,9 @@ export function EnginePage() {
           </div>
         ) : null}
 
-        {activeTab === "easy" ? (
+        {activeTab === "vocals" ? (
+          <VocalStudioTab />
+        ) : activeTab === "easy" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <h2
