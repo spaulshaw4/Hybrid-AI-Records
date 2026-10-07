@@ -10,6 +10,7 @@ const PRODUCTION_ORIGIN = "https://hybrid-ai-records.com";
 const INSUFFICIENT_TOKENS_ERROR = "Insufficient hybrid tokens";
 const TOKEN_DEDUCTION_ERROR = "Failed to process token deduction";
 const LYRICS_REQUIRED_ERROR = "Lyrics are required.";
+const REFERENCE_ERROR = "Invalid vocal reference.";
 const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 type TokenDebit =
@@ -49,6 +50,63 @@ function isLocalHost(hostname: string): boolean {
     host === "0.0.0.0" ||
     host === "[::1]"
   );
+}
+
+function bareHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+}
+
+function audioVaultHost(): string {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim() || "";
+  if (!raw) return "";
+  try {
+    return bareHost(new URL(raw).hostname);
+  } catch {
+    return "";
+  }
+}
+
+/** Link-local, loopback, and localhost hosts are never forwarded. */
+function isBlockedReferenceHost(hostname: string): boolean {
+  const host = bareHost(hostname);
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "127.0.0.1" || host === "0.0.0.0" || host === "::1") return true;
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const parts = ipv4.slice(1).map((part) => Number(part));
+    if (parts.some((part) => !Number.isInteger(part) || part > 255)) return true;
+    if (parts[0] === 127 || parts[0] === 0) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+  }
+
+  const v6 = host.split("%")[0] ?? host;
+  if (v6 === "::1" || /^fe[89ab]/i.test(v6)) return true;
+  return false;
+}
+
+/**
+ * Forwards an https audio-vault URL. Empty values are omitted.
+ * http and link-local values are rejected and never fetched.
+ * When the project host is unknown, any other https URL may be forwarded.
+ */
+function gateReference(raw: string): { url: string } | null {
+  if (!raw) return { url: "" };
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || isBlockedReferenceHost(parsed.hostname)) {
+    return null;
+  }
+  const vaultHost = audioVaultHost();
+  if (!vaultHost) return { url: raw };
+  if (bareHost(parsed.hostname) !== vaultHost) return { url: "" };
+  if (!parsed.pathname.includes("/audio-vault/")) return { url: "" };
+  return { url: raw };
 }
 
 /** Production callback. A localhost app URL must never be sent upstream. */
@@ -165,6 +223,10 @@ export async function POST(req: Request): Promise<Response> {
   const vocalGender = readString(record.vocalGender);
   const styleTags = readString(record.styleTags);
   const tags = [vocalGender, styleTags].filter(Boolean).join(", ");
+  const reference = gateReference(readString(record.vocalAudioUrl) || readString(record.referenceUrl));
+  if (!reference) {
+    return Response.json({ error: REFERENCE_ERROR }, { status: 400 });
+  }
 
   const debit = await debitOneHybridToken(userId);
   if (!debit.ok) {
@@ -192,6 +254,7 @@ export async function POST(req: Request): Promise<Response> {
         tags,
         prompt: lyrics,
         webhook_url: vocalWebhookUrl(),
+        ...(reference.url ? { reference_audio_url: reference.url } : {}),
       }),
     });
   } catch {

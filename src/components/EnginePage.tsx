@@ -603,11 +603,11 @@ export function EnginePage() {
             <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} style={modeTabStyle(activeTab === "easy")}>
               Easy
             </button>
-            <button type="button" role="tab" aria-selected={activeTab === "custom"} onClick={() => setActiveTab("custom")} style={modeTabStyle(activeTab === "custom")}>
-              Custom
+            <button type="button" role="tab" value="custom" aria-selected={activeTab === "custom"} onClick={() => setActiveTab("custom")} style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}>
+              Without Vocals
             </button>
             <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
-              Vocals & Toplines
+              With Vocals
             </button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

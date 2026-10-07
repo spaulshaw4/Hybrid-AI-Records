@@ -180,6 +180,109 @@ describe("POST /api/vocals/generate", () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
+  it("forwards an audio-vault https vocalAudioUrl and does not fetch it", async () => {
+    const reference = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocal-references/${SESSION_USER}/take.wav`;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-vocal-ref" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({
+        title: "Night Drive",
+        lyrics: "[Chorus]\nwe go",
+        vocalGender: "Female Vocal",
+        styleTags: "close vocal, dry",
+        vocalAudioUrl: reference,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(CREATE_URL);
+    expect(url).not.toBe(reference);
+    expect(JSON.parse(String(init.body))).toEqual({
+      custom_mode: true,
+      mv: "sonic-v4-5",
+      title: "Night Drive",
+      tags: "Female Vocal, close vocal, dry",
+      prompt: "[Chorus]\nwe go",
+      webhook_url: WEBHOOK,
+      reference_audio_url: reference,
+    });
+  });
+
+  it("forwards referenceUrl when vocalAudioUrl is empty", async () => {
+    const reference = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocal-references/${SESSION_USER}/take.mp3`;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-vocal-alias" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({
+        lyrics: "[Verse]\nline",
+        vocalAudioUrl: "   ",
+        referenceUrl: reference,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).reference_audio_url).toBe(reference);
+  });
+
+  it("returns 400 for http and link-local references before debit and does not fetch them", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("must not fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const vocalAudioUrl of [
+      "http://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/take.wav",
+      "https://169.254.169.254/latest/meta-data",
+      "https://169.254.1.1/latest",
+      "http://127.0.0.1/vocal.wav",
+    ]) {
+      fetchMock.mockClear();
+      spendRpcMock.mockClear();
+      balanceMaybeSingleMock.mockClear();
+      const res = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline", vocalAudioUrl }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({ error: "Invalid vocal reference." });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(spendRpcMock).not.toHaveBeenCalled();
+      expect(balanceMaybeSingleMock).not.toHaveBeenCalled();
+      expect(refundGenerationTokenMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("omits a foreign https reference from the upstream body", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-vocal-omit" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({
+        lyrics: "[Verse]\nline",
+        vocalAudioUrl: "https://cdn.example/vocal.wav",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(CREATE_URL);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("reference_audio_url");
+    expect(body.prompt).toBe("[Verse]\nline");
+  });
+
   it("returns 402 when the conditional debit changes 0 rows and does not call upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
