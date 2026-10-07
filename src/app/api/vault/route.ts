@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { storageObjectFromUrl } from "@/lib/audio-vault";
+import { resolveStudioSession, UnauthorizedSessionError } from "@/lib/studio-request-auth.server";
 
 type VaultRow = {
   id?: string | null;
@@ -25,26 +26,45 @@ function vaultClient(): SupabaseClient | null {
  * Newest 20 rows from vaulted_tracks. Client is created here so importing
  * this module does not throw when Supabase env is missing.
  */
-export async function GET(): Promise<Response> {
+export async function GET(req?: Request): Promise<Response> {
   try {
-    return await readVault();
+    return await readVault(req);
   } catch (err) {
+    if (isUnauthorized(err)) {
+      return Response.json({ error: "Unauthorized session" }, { status: 401 });
+    }
     const message = err instanceof Error ? err.message : "Supabase query failed";
     return Response.json({ error: message }, { status: 500 });
   }
 }
 
-async function readVault(): Promise<Response> {
+function isUnauthorized(err: unknown): boolean {
+  if (err instanceof UnauthorizedSessionError) return true;
+  if (!err || typeof err !== "object") return false;
+  const name = (err as { name?: string }).name;
+  const status = (err as { status?: number }).status;
+  return name === "UnauthorizedSessionError" || status === 401;
+}
+
+/** Bearer session, when the list sends one. Empty when the caller is signed out. */
+async function sessionUserId(req?: Request): Promise<string> {
+  const header = req?.headers.get("authorization") ?? "";
+  if (!header.startsWith("Bearer ") || !header.slice("Bearer ".length).trim()) return "";
+  const session = await resolveStudioSession(req as Request);
+  return session.userId.trim();
+}
+
+async function readVault(req?: Request): Promise<Response> {
   const supabase = vaultClient();
   if (!supabase) {
     return Response.json({ error: "Supabase is not configured" }, { status: 500 });
   }
 
-  const { data, error } = await supabase
-    .from("vaulted_tracks")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const userId = await sessionUserId(req);
+  // Service-role read, limited to the session user when a bearer token is present.
+  let query = supabase.from("vaulted_tracks").select("*");
+  if (userId) query = query.eq("user_id", userId);
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });

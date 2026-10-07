@@ -34,18 +34,26 @@ function jsonResult(body: unknown, status = 200) {
 
 function mockSignedInVault(rows: Array<Record<string, unknown>>) {
   const tables: string[] = [];
-  getSession.mockResolvedValue({ data: { session: { user: { id: "user-1" } } } });
+  const filters: Array<[string, string]> = [];
+  getSession.mockResolvedValue({
+    data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+  });
   from.mockImplementation((table: string) => {
     tables.push(table);
     return {
       select: () => ({
-        order: () => ({
-          limit: () => Promise.resolve({ data: rows, error: null }),
-        }),
+        eq: (column: string, value: string) => {
+          filters.push([column, value]);
+          return {
+            order: () => ({
+              limit: () => Promise.resolve({ data: rows, error: null }),
+            }),
+          };
+        },
       }),
     };
   });
-  return tables;
+  return { tables, filters };
 }
 
 describe("AudioVaultList", () => {
@@ -78,7 +86,7 @@ describe("AudioVaultList", () => {
   });
 
   it("renders a row title from vaulted_tracks", async () => {
-    const tables = mockSignedInVault([
+    const { tables, filters } = mockSignedInVault([
       {
         id: "vault-42",
         title: "Glass Harbor",
@@ -92,6 +100,7 @@ describe("AudioVaultList", () => {
 
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
     expect(tables).toEqual(["vaulted_tracks"]);
+    expect(filters).toEqual([["user_id", "user-1"]]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -145,5 +154,30 @@ describe("AudioVaultList", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByText("Glass Harbor")).toBeInTheDocument();
+  });
+
+  it("loads the service-role catalog when the signed-in query is empty", async () => {
+    mockSignedInVault([]);
+    fetchMock.mockResolvedValue(
+      jsonResult({
+        tracks: [
+          {
+            id: "vault-9",
+            title: "Like the wind",
+            genre: "open air",
+            wav_url: "https://cdn.example/a.wav",
+            mp3_url: "https://cdn.example/a.mp3",
+          },
+        ],
+      }),
+    );
+
+    render(<AudioVaultList revision={5} />);
+
+    expect(await screen.findByText("Like the wind")).toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/vault", {
+      headers: { Authorization: "Bearer session-token" },
+    });
   });
 });

@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, uploadMock, insertMock, limitMock, resolveStudioSessionMock } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
-  uploadMock: vi.fn(async () => ({ data: { path: "masters/task" }, error: null })),
-  insertMock: vi.fn(async () => ({ error: null })),
-  limitMock: vi.fn(async () => ({ data: [], error: null })),
-  resolveStudioSessionMock: vi.fn(),
-}));
+const { createClientMock, uploadMock, insertMock, limitMock, resolveStudioSessionMock, fromMock } = vi.hoisted(
+  () => ({
+    createClientMock: vi.fn(),
+    uploadMock: vi.fn(async () => ({ data: { path: "masters/task" }, error: null })),
+    insertMock: vi.fn(async () => ({ error: null })),
+    limitMock: vi.fn(async () => ({ data: [], error: null })),
+    resolveStudioSessionMock: vi.fn(),
+    fromMock: vi.fn(),
+  }),
+);
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...args: unknown[]) => createClientMock(...args),
@@ -78,16 +81,19 @@ describe("POST /api/vault/sync-task", () => {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-test";
     createClientMock.mockImplementation(() => ({
       storage: { from: () => ({ upload: uploadMock }) },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
+      from: (table: string) => {
+        fromMock(table);
+        return {
+          select: () => ({
             eq: () => ({
-              limit: () => limitMock(),
+              eq: () => ({
+                limit: () => limitMock(),
+              }),
             }),
           }),
-        }),
-        insert: (row: { wav_url?: string; mp3_url?: string }) => insertMock(row),
-      }),
+          insert: (row: { wav_url?: string; mp3_url?: string }) => insertMock(row),
+        };
+      },
     }));
     limitMock.mockImplementation(async () => ({ data: stored.map((row) => ({ ...row })), error: null }));
     insertMock.mockImplementation(async (row: { wav_url?: string; mp3_url?: string }) => {
@@ -103,6 +109,7 @@ describe("POST /api/vault/sync-task", () => {
     uploadMock.mockClear();
     insertMock.mockReset();
     limitMock.mockReset();
+    fromMock.mockReset();
     resolveStudioSessionMock.mockReset();
     if (originalKey === undefined) delete process.env.WAVESPEED_API_KEY;
     else process.env.WAVESPEED_API_KEY = originalKey;
@@ -205,6 +212,8 @@ describe("POST /api/vault/sync-task", () => {
     expect(mp3Bytes[0]).toBe(0xff);
     expect(mp3Bytes[1]! & 0xe0).toBe(0xe0);
 
+    expect(fromMock).toHaveBeenCalledWith("vaulted_tracks");
+    expect(fromMock.mock.calls.every((call) => call[0] === "vaulted_tracks")).toBe(true);
     expect(insertMock).toHaveBeenCalledTimes(1);
     expect(insertMock).toHaveBeenCalledWith({
       user_id: SESSION_USER,

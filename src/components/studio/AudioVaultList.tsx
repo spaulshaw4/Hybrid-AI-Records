@@ -26,14 +26,20 @@ type Props = {
   pending?: VaultPendingRow[];
 };
 
+type VaultPage = PromiseLike<{
+  data: Array<Record<string, unknown>> | null;
+  error: { message: string } | null;
+}>;
+
+type VaultOrdered = {
+  order: (column: string, options: { ascending: boolean }) => {
+    limit: (count: number) => VaultPage;
+  };
+};
+
 type VaultQuery = {
-  select: (columns: string) => {
-    order: (column: string, options: { ascending: boolean }) => {
-      limit: (count: number) => PromiseLike<{
-        data: Array<Record<string, unknown>> | null;
-        error: { message: string } | null;
-      }>;
-    };
+  select: (columns: string) => VaultOrdered & {
+    eq: (column: string, value: string) => VaultOrdered;
   };
 };
 
@@ -97,18 +103,23 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
       setError(null);
       try {
         const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData.session?.user) {
+        const sessionUser = sessionData.session?.user;
+        const accessToken = sessionData.session?.access_token?.trim() ?? "";
+        if (sessionUser?.id) {
           const query = await (supabase as unknown as { from: (table: string) => VaultQuery })
             .from("vaulted_tracks")
             .select("id, title, prompt, wav_url, mp3_url, created_at, user_id")
+            .eq("user_id", sessionUser.id)
             .order("created_at", { ascending: false })
             .limit(20);
-          if (!query.error && Array.isArray(query.data)) {
+          if (!query.error && Array.isArray(query.data) && query.data.length > 0) {
             if (!cancelled) setRows(query.data.map(cardFromRow).filter((row): row is VaultCard => row !== null));
             return;
           }
         }
-        const response = await fetch("/api/vault");
+        const response = accessToken
+          ? await fetch("/api/vault", { headers: { Authorization: `Bearer ${accessToken}` } })
+          : await fetch("/api/vault");
         if (!response.ok) throw new Error("Could not load the vault.");
         const payload: unknown = await response.json();
         const tracks =

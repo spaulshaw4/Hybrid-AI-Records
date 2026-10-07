@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { uploadMock, insertMock } = vi.hoisted(() => ({
+const { uploadMock, insertMock, fromMock } = vi.hoisted(() => ({
   uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
   insertMock: vi.fn(async () => ({ error: null })),
+  fromMock: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({
     storage: { from: () => ({ upload: uploadMock }) },
-    from: () => ({ insert: insertMock }),
+    from: (table: string) => {
+      fromMock(table);
+      return { insert: insertMock };
+    },
   }),
 }));
 
@@ -59,15 +63,23 @@ function generateRequest(extra: Record<string, unknown> = {}): Request {
 
 describe("POST /api/generate", () => {
   const originalKey = process.env.WAVESPEED_API_KEY;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     uploadMock.mockClear();
     insertMock.mockClear();
+    fromMock.mockClear();
     resetTrackJobs();
     if (originalKey === undefined) delete process.env.WAVESPEED_API_KEY;
     else process.env.WAVESPEED_API_KEY = originalKey;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalService === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalService;
   });
 
   it("exports a 360 second max duration and does not require the key at import", () => {
@@ -671,6 +683,132 @@ describe("POST /api/generate", () => {
     expect(queued.status).toBe(200);
     await expect(settleTrackFromWaveSpeed("task-empty")).rejects.toThrow(/no audio URL found/);
     expect(readTrackJob("task-empty")?.status).toBe("processing");
+  });
+
+  function silentWav(): Buffer {
+    const channels = 1;
+    const sampleRate = 44100;
+    const frames = 1152;
+    const dataLen = frames * channels * 2;
+    const buffer = Buffer.alloc(44 + dataLen);
+    buffer.write("RIFF", 0);
+    buffer.writeUInt32LE(36 + dataLen, 4);
+    buffer.write("WAVE", 8);
+    buffer.write("fmt ", 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(channels, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * channels * 2, 28);
+    buffer.writeUInt16LE(channels * 2, 32);
+    buffer.writeUInt16LE(16, 34);
+    buffer.write("data", 36);
+    buffer.writeUInt32LE(dataLen, 40);
+    return buffer;
+  }
+
+  it("commits a vaulted_tracks row when the completed job has a userId", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map((part) => String(part)).join(" "));
+    });
+    const wav = silentWav();
+    const audio = "https://cdn.example/vaulted.wav";
+    const taskId = "task-vault-user";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === SONG_URL) return jsonResponse({ data: { id: taskId } });
+        if (url === audio) {
+          const copy = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer;
+          return new Response(copy, { status: 200 });
+        }
+        return jsonResponse({
+          data: { status: "completed", outputs: [audio] },
+        });
+      }),
+    );
+
+    const accepted = await POST(
+      generateRequest({ title: "Glass Harbor", userId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" }),
+    );
+    expect(accepted.status).toBe(200);
+    expect(readTrackJob(taskId)?.userId).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+
+    await settleTrackFromWaveSpeed(taskId);
+
+    const wavUrl = `https://project.supabase.co/storage/v1/object/public/audio-vault/masters/${taskId}.wav`;
+    const mp3Url = `https://project.supabase.co/storage/v1/object/public/audio-vault/masters/${taskId}.mp3`;
+    expect(fromMock).toHaveBeenCalledWith("vaulted_tracks");
+    expect(insertMock).toHaveBeenCalledTimes(1);
+    const row = insertMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(row).toEqual({
+      user_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      title: "Glass Harbor",
+      prompt: expect.any(String),
+      lyrics: expect.any(String),
+      vocal_id_used: null,
+      wav_url: wavUrl,
+      mp3_url: mp3Url,
+      task_id: taskId,
+    });
+    expect(row).not.toHaveProperty("status");
+    expect(row).not.toHaveProperty("master_url");
+    expect(row).not.toHaveProperty("audio_url");
+    expect(logs.some((line) => line === `[vault] DB row committed for task ${taskId}`)).toBe(true);
+    const committedAt = logs.findIndex((line) => line.includes("[vault] DB row committed for task"));
+    const storedAt = logs.findIndex((line) => line.includes(`[vault] stored ${taskId}`));
+    expect(storedAt).toBeGreaterThan(committedAt);
+    expect(readTrackJob(taskId)).toMatchObject({ status: "completed", wavUrl, mp3Url });
+  });
+
+  it("does not commit a vault row or log success when userId is empty", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    const logs: string[] = [];
+    const errors: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map((part) => String(part)).join(" "));
+    });
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map((part) => String(part)).join(" "));
+    });
+    const wav = silentWav();
+    const audio = "https://cdn.example/orphan.wav";
+    const taskId = "task-vault-empty";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === SONG_URL) return jsonResponse({ data: { id: taskId } });
+        if (url === audio) {
+          const copy = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer;
+          return new Response(copy, { status: 200 });
+        }
+        return jsonResponse({
+          data: { status: "completed", outputs: [audio] },
+        });
+      }),
+    );
+
+    const accepted = await POST(generateRequest({ title: "No Owner" }));
+    expect(accepted.status).toBe(200);
+    expect(readTrackJob(taskId)?.userId).toBe("");
+
+    await settleTrackFromWaveSpeed(taskId);
+
+    expect(uploadMock).toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(logs.some((line) => line.includes("[vault] DB row committed for task"))).toBe(false);
+    expect(logs.some((line) => line.includes("[vault] stored"))).toBe(false);
+    expect(errors.some((line) => line.includes("DB row skipped because userId was empty"))).toBe(true);
+    expect(readTrackJob(taskId)?.status).toBe("failed");
+    expect(readTrackJob(taskId)?.error).toMatch(/userId was empty/);
+    expect(readTrackJob(taskId)?.wavUrl).toBeUndefined();
+    expect(readTrackJob(taskId)?.mp3Url).toBeUndefined();
   });
 
   it("routes instrumental masters to generate-bgm without lyrics or title", async () => {

@@ -250,7 +250,7 @@ export default {
           });
         }
         const { GET } = await import("./app/api/vault/route");
-        return GET();
+        return GET(request);
       }
 
       const trackStatus = pathname.match(/^\/api\/tracks\/([^/]+)\/status$/);

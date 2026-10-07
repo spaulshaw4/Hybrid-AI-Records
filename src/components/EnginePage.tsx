@@ -462,6 +462,15 @@ export function EnginePage() {
     setErrorMessage(null);
     console.log("READY TO DISPATCH:", { title, prompt: styleValue, lyrics: lyricValue, duration });
     console.log("=== SENDING TO BACKEND ===", { prompt: styleValue, lyrics: lyricValue, duration, title: songTitle });
+    let ownerId = authUserId?.trim() ?? "";
+    try {
+      const { data } = await supabase.auth.getSession();
+      const liveId = data.session?.user?.id?.trim() ?? "";
+      if (liveId) ownerId = liveId;
+    } catch {
+      /* keep the id already held in state */
+    }
+    if (ownerId && ownerId !== authUserId) setAuthUserId(ownerId);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -476,7 +485,7 @@ export function EnginePage() {
           gender,
           isInstrumental,
           vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
-          ...(authUserId ? { userId: authUserId } : {}),
+          ...(ownerId ? { userId: ownerId } : {}),
         }),
       });
       const data = (await res.json()) as {

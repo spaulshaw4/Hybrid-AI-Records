@@ -1,16 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, fromMock, selectMock, orderMock, limitMock } = vi.hoisted(() => {
+const { createClientMock, fromMock, selectMock, orderMock, limitMock, eqMock, resolveStudioSessionMock } = vi.hoisted(() => {
   const limitMock = vi.fn();
   const orderMock = vi.fn(() => ({ limit: limitMock }));
-  const selectMock = vi.fn(() => ({ order: orderMock }));
+  const eqMock = vi.fn(() => ({ order: orderMock }));
+  const selectMock = vi.fn(() => ({ order: orderMock, eq: eqMock }));
   const fromMock = vi.fn(() => ({ select: selectMock }));
   const createClientMock = vi.fn((..._args: unknown[]) => ({ from: fromMock }));
-  return { createClientMock, fromMock, selectMock, orderMock, limitMock };
+  const resolveStudioSessionMock = vi.fn();
+  return { createClientMock, fromMock, selectMock, orderMock, limitMock, eqMock, resolveStudioSessionMock };
 });
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...args: unknown[]) => createClientMock(...args),
+}));
+
+vi.mock("@/lib/studio-request-auth.server", () => ({
+  resolveStudioSession: (...args: unknown[]) => resolveStudioSessionMock(...args),
+  UnauthorizedSessionError: class UnauthorizedSessionError extends Error {
+    status = 401;
+    constructor(message = "Unauthorized session") {
+      super(message);
+      this.name = "UnauthorizedSessionError";
+    }
+  },
 }));
 
 import { GET } from "@/app/api/vault/route";
@@ -37,8 +50,11 @@ describe("GET /api/vault", () => {
     orderMock.mockClear();
     limitMock.mockReset();
     orderMock.mockImplementation(() => ({ limit: limitMock }));
-    selectMock.mockImplementation(() => ({ order: orderMock }));
+    eqMock.mockImplementation(() => ({ order: orderMock }));
+    selectMock.mockImplementation(() => ({ order: orderMock, eq: eqMock }));
     fromMock.mockImplementation(() => ({ select: selectMock }));
+    eqMock.mockClear();
+    resolveStudioSessionMock.mockReset();
   });
 
   it("imports and returns 500 without calling Supabase when neither key is set", async () => {
@@ -135,5 +151,37 @@ describe("GET /api/vault", () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "permission denied" });
+  });
+
+  it("scopes a bearer session to that user_id", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    resolveStudioSessionMock.mockResolvedValue({ userId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" });
+    limitMock.mockResolvedValue({
+      data: [
+        {
+          id: "row-1",
+          title: "Like the wind",
+          prompt: "open air",
+          wav_url: "https://cdn.example/a.wav",
+          mp3_url: "https://cdn.example/a.mp3",
+        },
+      ],
+      error: null,
+    });
+
+    const res = await GET(
+      new Request("http://localhost/api/vault", {
+        headers: { authorization: "Bearer a.b.c" },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test");
+    expect(eqMock).toHaveBeenCalledWith("user_id", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    expect(fromMock).toHaveBeenCalledWith("vaulted_tracks");
+    await expect(res.json()).resolves.toMatchObject({
+      tracks: [expect.objectContaining({ id: "row-1", title: "Like the wind" })],
+    });
   });
 });

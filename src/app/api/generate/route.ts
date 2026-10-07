@@ -335,26 +335,53 @@ export async function fetchWaveSpeedPrediction(taskId: string): Promise<unknown>
   );
 }
 
+async function commitVaultedTrack(input: {
+  userId: string;
+  title: string;
+  prompt: string | null;
+  lyrics: string | null;
+  vocalId: string | null;
+  wavUrl: string;
+  mp3Url: string;
+  taskId: string;
+}): Promise<void> {
+  // vaulted_tracks.wav_url and mp3_url are NOT NULL. There is no status, master_url, or audio_url column.
+  // A processing placeholder would fail, so the only insert is this one, after the master is stored.
+  const userId = input.userId.trim();
+  if (!userId) {
+    console.error("[vault] DB row skipped because userId was empty", input.taskId);
+    throw new Error("Vault DB row skipped because userId was empty");
+  }
+  const supabase = vaultClient();
+  const { error: insertError } = await supabase.from("vaulted_tracks").insert({
+    user_id: userId,
+    title: input.title,
+    prompt: input.prompt,
+    lyrics: input.lyrics,
+    vocal_id_used: input.vocalId,
+    wav_url: input.wavUrl,
+    mp3_url: input.mp3Url,
+    task_id: input.taskId,
+  });
+  if (insertError) throw new Error(insertError.message);
+  console.log("[vault] DB row committed for task", input.taskId);
+}
+
 async function insertVaultRow(
   job: TrackJob,
   wavUrl: string,
   mp3Url: string,
 ): Promise<void> {
-  // vaulted_tracks.wav_url and mp3_url are NOT NULL. There is no status or style_prompt column.
-  // A processing placeholder would fail, so the only insert is this one, after the master is stored.
-  if (!job.userId) return;
-  const supabase = vaultClient();
-  const { error: insertError } = await supabase.from("vaulted_tracks").insert({
-    user_id: job.userId,
+  await commitVaultedTrack({
+    userId: job.userId,
     title: job.title,
     prompt: job.prompt,
     lyrics: job.lyrics,
-    vocal_id_used: job.vocalId,
-    wav_url: wavUrl,
-    mp3_url: mp3Url,
-    task_id: job.taskId,
+    vocalId: job.vocalId,
+    wavUrl,
+    mp3Url,
+    taskId: job.taskId,
   });
-  if (insertError) throw new Error(insertError.message);
 }
 
 async function uploadMasterFiles(
@@ -451,18 +478,16 @@ export async function storeVaultedMaster(input: {
   outputUrl: string;
 }): Promise<{ wavUrl: string; mp3Url: string }> {
   const urls = await uploadMasterFiles(input.taskId, input.outputUrl);
-  const supabase = vaultClient();
-  const { error: insertError } = await supabase.from("vaulted_tracks").insert({
-    user_id: input.userId,
+  await commitVaultedTrack({
+    userId: input.userId,
     title: input.title,
     prompt: input.prompt,
     lyrics: input.lyrics,
-    vocal_id_used: null,
-    wav_url: urls.wavUrl,
-    mp3_url: urls.mp3Url,
-    task_id: input.taskId,
+    vocalId: null,
+    wavUrl: urls.wavUrl,
+    mp3Url: urls.mp3Url,
+    taskId: input.taskId,
   });
-  if (insertError) throw new Error(insertError.message);
   return urls;
 }
 
@@ -515,8 +540,11 @@ export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
     console.log(`[vault] stored ${taskId}`);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
-    console.error(`[vault] upload failed ${taskId}`, message || "error");
-    failTrackJob(taskId, message || "Generation failed upstream");
+    const skipped = /userId was empty/i.test(message);
+    if (!skipped) {
+      console.error(`[vault] upload failed ${taskId}`, message || "error");
+    }
+    failTrackJob(taskId, skipped ? message : message || "Generation failed upstream");
   }
 }
 

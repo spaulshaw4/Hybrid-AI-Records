@@ -2751,6 +2751,15 @@ export function AudioStudio() {
           const resolvedGender = resolvedVocalGender();
           const vocalGender =
             resolvedGender === "f" || resolvedGender === "Female" ? "female" : "male";
+          let ownerId = sessionUserId?.trim() ?? "";
+          try {
+            const { data: auth } = await supabase.auth.getSession();
+            const liveId = auth.session?.user?.id?.trim() ?? "";
+            if (liveId) ownerId = liveId;
+          } catch {
+            /* keep the id already held in state */
+          }
+          if (ownerId && ownerId !== sessionUserId) setSessionUserId(ownerId);
           const response = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2761,7 +2770,7 @@ export function AudioStudio() {
                     prompt: replaceBareConflictingPrompt(stylePrompt),
                     lyrics: lyricsText,
                     isInstrumental: true,
-                    ...(sessionUserId ? { userId: sessionUserId } : {}),
+                    ...(ownerId ? { userId: ownerId } : {}),
                   }
                 : {
                     title: trackTitle,
@@ -2770,7 +2779,7 @@ export function AudioStudio() {
                     gender: vocalGender,
                     isInstrumental: false,
                     ...(trimmedVocalId ? { vocalId: trimmedVocalId } : {}),
-                    ...(sessionUserId ? { userId: sessionUserId } : {}),
+                    ...(ownerId ? { userId: ownerId } : {}),
                   },
             ),
             signal: abort.signal,
