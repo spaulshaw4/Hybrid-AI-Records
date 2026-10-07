@@ -146,24 +146,6 @@ export async function readActuatorHealth(): Promise<ActuatorHealth> {
     };
     const evaluation = ActuatorMonitor.evaluateHealth(metrics);
 
-    // Operational trigger: CRITICAL → auto MAINTENANCE via Activator Switch.
-    let safeguard: { tripped: boolean; actionTaken?: string } | undefined;
-    try {
-      const { PipelineTriggerOrchestrator } = await import(
-        "@/lib/PipelineTriggerOrchestrator"
-      );
-      const result = await PipelineTriggerOrchestrator.evaluateAndTriggerSafeguards(metrics);
-      safeguard = {
-        tripped: result.tripped,
-        ...(result.tripped ? { actionTaken: result.actionTaken } : {}),
-      };
-    } catch (err) {
-      console.warn(
-        "[actuator] safeguard evaluation failed",
-        err instanceof Error ? err.message : err,
-      );
-    }
-
     const health: ActuatorHealth = {
       status: evaluation.status === "CRITICAL" ? "DEGRADED" : "HEALTHY",
       actuator: "ONLINE",
@@ -176,11 +158,6 @@ export async function readActuatorHealth(): Promise<ActuatorHealth> {
         stuckThresholdMs: ACTUATOR_STUCK_JOB_MS,
         timestamp: new Date().toISOString(),
       },
-      ...(safeguard?.tripped
-        ? {
-            error: `Circuit breaker tripped: ${safeguard.actionTaken ?? "MAINTENANCE_ENGAGED"}`,
-          }
-        : {}),
     };
 
     PipelineInformant.emit({
@@ -192,8 +169,8 @@ export async function readActuatorHealth(): Promise<ActuatorHealth> {
         evaluationStatus: evaluation.status,
         recommendedAction: evaluation.recommendedAction,
         workerEnabled: worker.enabled,
-        safeguardTripped: Boolean(safeguard?.tripped),
-        safeguardAction: safeguard?.actionTaken ?? null,
+        safeguardTripped: false,
+        safeguardAction: null,
       },
     });
 

@@ -86,16 +86,20 @@ describe("PipelineTriggerOrchestrator", () => {
     expect(source).toContain("generation_queue");
   });
 
-  it("is wired into actuator health + worker tick", () => {
-    const actuator = readFileSync(
-      join(process.cwd(), "src/lib/pipeline-actuator.server.ts"),
-      "utf8",
-    );
+  it("does not run actuator trips from the generation queue poller", () => {
     const worker = readFileSync(
       join(process.cwd(), "src/lib/generation-queue-worker.server.ts"),
       "utf8",
     );
-    expect(actuator).toContain("PipelineTriggerOrchestrator.evaluateAndTriggerSafeguards");
-    expect(worker).toContain("PipelineTriggerOrchestrator.evaluateAndTriggerSafeguards");
+    const automation = readFileSync(
+      join(process.cwd(), "src/lib/PipelineAutomationEngine.ts"),
+      "utf8",
+    );
+    expect(worker).not.toContain("PipelineTriggerOrchestrator");
+    expect(worker).not.toContain("readActuatorHealth");
+    expect(worker).not.toContain("system_config");
+    expect(automation).not.toContain("ADMIN_ACTUATOR_SECRET is unset");
+    expect(automation).not.toContain("system_config");
+    expect(automation).not.toContain('updated_by: "pipeline-automation-engine"');
   });
 });
