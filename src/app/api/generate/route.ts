@@ -231,7 +231,8 @@ function audioUrl(value: unknown): string {
   if (typeof value === "string") {
     const text = value.trim();
     if (text.startsWith("https://")) {
-      if (/\/predictions\/[^/]+\/result\/?$/.test(text)) return "";
+      const bare = text.split(/[?#]/)[0] ?? text;
+      if (/\/predictions\/[^/]+\/result\/?$/.test(bare)) return "";
       return text;
     }
     if (text.startsWith("{") || text.startsWith("[")) {
@@ -262,15 +263,76 @@ function audioUrl(value: unknown): string {
 function readResultOutput(body: unknown): string {
   const record = isRecord(body) ? body : null;
   const nested = record && isRecord(record.data) ? record.data : null;
-  const layers = [record, nested];
+  const layers = [nested, record];
   for (const layer of layers) {
     if (!layer) continue;
-    for (const candidate of [layer.output, layer.outputs, layer.result, layer.audio_url, layer.url]) {
+    for (const candidate of [layer.outputs, layer.output, layer.result, layer.audio_url, layer.url]) {
       const found = audioUrl(candidate);
       if (found) return found;
     }
   }
   return "";
+}
+
+function stringField(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text || null;
+}
+
+/** Title, prompt, and lyrics from a prediction body. Title falls back to "Untitled". */
+export function waveSpeedResultMeta(body: unknown): {
+  title: string;
+  prompt: string | null;
+  lyrics: string | null;
+} {
+  const record = isRecord(body) ? body : null;
+  const data = record && isRecord(record.data) ? record.data : null;
+  const sources = [
+    data,
+    data && isRecord(data.input) ? data.input : null,
+    data && isRecord(data.output) ? data.output : null,
+    record,
+    record && isRecord(record.input) ? record.input : null,
+    record && isRecord(record.output) ? record.output : null,
+  ];
+  let title = "";
+  let prompt: string | null = null;
+  let lyrics: string | null = null;
+  for (const source of sources) {
+    if (!source) continue;
+    if (!title) title = stringField(source.title) ?? "";
+    if (!prompt) prompt = stringField(source.prompt);
+    if (!lyrics) lyrics = stringField(source.lyrics);
+  }
+  return { title: title || "Untitled", prompt, lyrics };
+}
+
+export function waveSpeedResultStatus(body: unknown): string {
+  return readResultStatus(body);
+}
+
+export function waveSpeedAudioUrl(body: unknown): string {
+  return readResultOutput(body);
+}
+
+export function isTerminalWaveSpeedStatus(status: string): boolean {
+  return TERMINAL_FAIL.has(status);
+}
+
+/** GET the v3 prediction result. The caller-supplied body is not a source for this URL. */
+export async function fetchWaveSpeedPrediction(taskId: string): Promise<unknown> {
+  const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
+  if (!apiKey) throw new Error("Missing API key");
+  return fetchJson(
+    resultUrl(taskId),
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    },
+    RESULT_RETRIES,
+    false,
+  );
 }
 
 async function insertVaultRow(
@@ -295,10 +357,17 @@ async function insertVaultRow(
   if (insertError) throw new Error(insertError.message);
 }
 
-async function vaultCompletedWav(
-  job: TrackJob,
+async function uploadMasterFiles(
+  taskId: string,
   outputUrl: string,
 ): Promise<{ wavUrl: string; mp3Url: string }> {
+  if (!outputUrl.startsWith("https://")) {
+    throw new Error("Generation failed upstream");
+  }
+  const bare = outputUrl.split(/[?#]/)[0] ?? outputUrl;
+  if (/\/predictions\/[^/]+\/result\/?$/.test(bare)) {
+    throw new Error("Generation failed upstream");
+  }
   const wavRes = await fetch(outputUrl);
   if (!wavRes.ok) {
     throw new Error("Generation failed upstream");
@@ -308,7 +377,7 @@ async function vaultCompletedWav(
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
   const supabase = vaultClient();
-  const wavPath = `masters/${job.taskId}.wav`;
+  const wavPath = `masters/${taskId}.wav`;
   const cdnBase = `${supabaseUrl}/storage/v1/object/public/${VAULT_BUCKET}`;
   const wavUrl = `${cdnBase}/${wavPath}`;
 
@@ -320,11 +389,10 @@ async function vaultCompletedWav(
     if (wavUpload.error) {
       throw new Error(wavUpload.error.message || "Vault upload failed");
     }
-    await insertVaultRow(job, wavUrl, wavUrl);
     return { wavUrl, mp3Url: wavUrl };
   }
 
-  const mp3Path = `masters/${job.taskId}.mp3`;
+  const mp3Path = `masters/${taskId}.mp3`;
   const [wavUpload, mp3Upload] = await Promise.all([
     supabase.storage.from(VAULT_BUCKET).upload(wavPath, wavBuffer, {
       contentType: "audio/wav",
@@ -339,9 +407,63 @@ async function vaultCompletedWav(
     throw new Error(wavUpload.error?.message || mp3Upload.error?.message || "Vault upload failed");
   }
 
-  const mp3Url = `${cdnBase}/${mp3Path}`;
-  await insertVaultRow(job, wavUrl, mp3Url);
+  return { wavUrl, mp3Url: `${cdnBase}/${mp3Path}` };
+}
+
+async function vaultCompletedWav(
+  job: TrackJob,
+  outputUrl: string,
+): Promise<{ wavUrl: string; mp3Url: string }> {
+  const urls = await uploadMasterFiles(job.taskId, outputUrl);
+  await insertVaultRow(job, urls.wavUrl, urls.mp3Url);
+  return urls;
+}
+
+type VaultUrlRow = { wav_url?: string | null; mp3_url?: string | null };
+
+/** Existing masters for this user and task. A second sync must not insert again. */
+export async function findVaultedTrack(
+  userId: string,
+  taskId: string,
+): Promise<{ wavUrl: string; mp3Url: string } | null> {
+  const supabase = vaultClient();
+  const { data, error } = await supabase
+    .from("vaulted_tracks")
+    .select("wav_url, mp3_url")
+    .eq("user_id", userId)
+    .eq("task_id", taskId)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : null) as VaultUrlRow | null;
+  const wavUrl = typeof row?.wav_url === "string" ? row.wav_url : "";
+  const mp3Url = typeof row?.mp3_url === "string" ? row.mp3_url : "";
+  if (!wavUrl || !mp3Url) return null;
   return { wavUrl, mp3Url };
+}
+
+/** Download one https master and insert a single vaulted_tracks row. */
+export async function storeVaultedMaster(input: {
+  taskId: string;
+  userId: string;
+  title: string;
+  prompt: string | null;
+  lyrics: string | null;
+  outputUrl: string;
+}): Promise<{ wavUrl: string; mp3Url: string }> {
+  const urls = await uploadMasterFiles(input.taskId, input.outputUrl);
+  const supabase = vaultClient();
+  const { error: insertError } = await supabase.from("vaulted_tracks").insert({
+    user_id: input.userId,
+    title: input.title,
+    prompt: input.prompt,
+    lyrics: input.lyrics,
+    vocal_id_used: null,
+    wav_url: urls.wavUrl,
+    mp3_url: urls.mp3Url,
+    task_id: input.taskId,
+  });
+  if (insertError) throw new Error(insertError.message);
+  return urls;
 }
 
 /**

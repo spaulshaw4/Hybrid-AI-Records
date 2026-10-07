@@ -224,6 +224,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/vault/sync-task") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/vault/sync-task/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) {
         if (request.method === "DELETE") {
           const { DELETE } = await import("./app/api/vault/route");
