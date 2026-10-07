@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SyncBadge, syncTooltipText, type ResolveState } from "@/components/radio/SyncBadge";
 
 /**
@@ -166,5 +167,50 @@ describe("SyncBadge tooltip — error phase", () => {
     fireEvent.focus(retry);
     await openBubbles();
     expect(document.activeElement).toBe(retry);
+  });
+
+  it("Escape from Retry dismisses the tooltip and leaves focus on Retry", async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    render(<SyncBadge {...base} resolveState={errored} onRetry={onRetry} />);
+    const retry = screen.getByTestId("radio-sync-retry");
+
+    retry.focus();
+    fireEvent.focus(retry);
+    await openBubbles();
+
+    await user.keyboard("{Escape}");
+    await closedBubbles();
+    expect(document.activeElement).toBe(retry);
+    expect(document.activeElement).not.toBe(document.body);
+
+    await user.keyboard("{Enter}");
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("Shift+Tab from Retry focuses the failed chip before the tooltip closes", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button">Before</button>
+        <SyncBadge {...base} resolveState={errored} />
+        <button type="button">After</button>
+      </>,
+    );
+    const retry = screen.getByTestId("radio-sync-retry");
+    const chip = screen.getByTestId("radio-sync-status");
+
+    retry.focus();
+    fireEvent.focus(retry);
+    await openBubbles();
+
+    await user.tab({ shift: true });
+
+    expect(document.activeElement).toBe(chip);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(chip.closest("[data-testid='radio-sync-error-cluster']")).toBeTruthy();
+    await closedBubbles();
+    expect(document.activeElement).toBe(chip);
+    expect(screen.getByTestId("radio-sync-error-cluster")).toHaveAttribute("data-state", "closed");
   });
 });

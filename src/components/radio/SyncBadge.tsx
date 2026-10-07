@@ -6,7 +6,7 @@
  * `aria-expanded`, and the `aria-disabled`-not-`disabled` Retry button are all
  * load-bearing and test-enforced. Read the contract before changing them.
  */
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, CloudCheck, Loader2, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DeviceWin } from "@/lib/radio-positions";
@@ -106,6 +106,12 @@ export function syncTooltipText({
     .join(" — ");
 }
 
+/** Programmatic focus from a key handler still paints `:focus-visible`. */
+function focusWithVisibleRing(el: HTMLElement | null | undefined) {
+  if (!el?.isConnected) return;
+  el.focus({ focusVisible: true } as FocusOptions);
+}
+
 /** Screen-reader sentence — the visible chips are shorthand. */
 export function syncAnnouncement({
   syncState,
@@ -149,6 +155,13 @@ export function SyncBadge({
   const busy = resolveState?.phase === "resolving" || syncState === "loading";
   const retryRef = useRef<HTMLButtonElement | null>(null);
   const clusterRef = useRef<HTMLSpanElement | null>(null);
+  /** The focusable status chip — the badge trigger keyboard users return to. */
+  const badgeRef = useRef<HTMLSpanElement | null>(null);
+  // Shift+Tab from Retry focuses the chip before the popper unmounts. While
+  // this is set, chip focus must not reopen the tooltip.
+  const suppressOpenRef = useRef(false);
+  const shiftTabToChipRef = useRef(false);
+  const restoreFocusTo = useRef<HTMLElement | null>(null);
   // Both branches are controlled so close can be debounced. Retry sits beside
   // the chip inside the error trigger, so Radix would close on chip → Retry
   // without the focus guard below. Keys remount the Tooltip on phase flip.
@@ -170,7 +183,7 @@ export function SyncBadge({
   const setTooltipOpen = (next: boolean, immediate = false) => {
     if (pinned) return;
     if (next) {
-      if (holdClosedRef.current) return;
+      if (holdClosedRef.current || suppressOpenRef.current) return;
       clearCloseTimer();
       setOpen(true);
       return;
@@ -204,6 +217,14 @@ export function SyncBadge({
     setTooltipOpen(false, true);
   };
   useEffect(() => () => clearCloseTimer(), []);
+  // Close commits before this runs. If unmounting the popper dumped focus on
+  // <body>, put it back on the chip or Retry before paint.
+  useLayoutEffect(() => {
+    const el = restoreFocusTo.current;
+    if (!el) return;
+    restoreFocusTo.current = null;
+    if (document.activeElement !== el) focusWithVisibleRing(el);
+  });
   // A failed retry unmounts and remounts this subtree, which would drop keyboard
   // focus to <body>. Remember the intent and restore it when Retry comes back.
   const wantsRetryFocus = useRef(false);
@@ -225,6 +246,48 @@ export function SyncBadge({
     if (active && active !== document.body) return;
     retryRef.current?.focus();
   }, [errored, retrying]);
+
+  const releaseShiftTabSuppress = () => {
+    queueMicrotask(() => {
+      const chip = badgeRef.current;
+      if (shiftTabToChipRef.current && chip && document.activeElement !== chip) {
+        focusWithVisibleRing(chip);
+      }
+      queueMicrotask(() => {
+        suppressOpenRef.current = false;
+        shiftTabToChipRef.current = false;
+      });
+    });
+  };
+
+  const onRetryKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (pinned) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setTooltipOpen(false, true);
+      // Tooltip only. A following Enter must still activate Retry, so focus
+      // stays on this button rather than moving to the chip or <body>.
+      const keep = retryRef.current;
+      restoreFocusTo.current = keep;
+      focusWithVisibleRing(keep);
+      queueMicrotask(() => {
+        if (keep && document.activeElement === document.body) focusWithVisibleRing(keep);
+      });
+      return;
+    }
+    if (event.key !== "Tab" || !event.shiftKey) return;
+    event.preventDefault();
+    const chip = badgeRef.current;
+    // Chip first, while the popper is still mounted. Closing first lets the
+    // browser park focus on document.body.
+    shiftTabToChipRef.current = true;
+    suppressOpenRef.current = true;
+    leftRetryRef.current = true;
+    focusWithVisibleRing(chip);
+    restoreFocusTo.current = chip;
+    setTooltipOpen(false, true);
+    releaseShiftTabSuppress();
+  };
 
 
 
@@ -261,11 +324,12 @@ export function SyncBadge({
                 if (pinned) return;
                 const next = event.relatedTarget;
                 if (next instanceof Node && event.currentTarget.contains(next)) {
-                  // Shift+Tab Retry → chip: dismiss (same as Radix leaving a
-                  // nested button). Chip → Retry stays open via onFocusCapture.
+                  // Shift+Tab Retry → chip is closed from the key handler after
+                  // the chip has focus. Closing inside this blur unmounts the
+                  // popper mid-move and drops focus on <body>.
                   if (event.target === retryRef.current) {
                     leftRetryRef.current = true;
-                    setTooltipOpen(false, true);
+                    if (!shiftTabToChipRef.current) setTooltipOpen(false, true);
                   }
                   return;
                 }
@@ -273,11 +337,18 @@ export function SyncBadge({
               }}
               onKeyDown={(event) => {
                 if (pinned || event.key !== "Escape") return;
+                // Retry handles its own Escape so focus stays on the button.
+                if (event.target === retryRef.current) return;
+                event.preventDefault();
                 setTooltipOpen(false, true);
+                const chip = badgeRef.current;
+                restoreFocusTo.current = chip;
+                if (document.activeElement === document.body) focusWithVisibleRing(chip);
               }}
               className="flex h-8 items-center gap-1.5 rounded-full border border-status-outline bg-destructive/10 px-3 text-status-accent outline-none has-[[data-testid=radio-sync-status]:focus-visible]:ring-2 has-[[data-testid=radio-sync-status]:focus-visible]:ring-status-outline has-[[data-testid=radio-sync-status]:focus-visible]:ring-offset-2 has-[[data-testid=radio-sync-status]:focus-visible]:ring-offset-background"
             >
               <span
+                ref={badgeRef}
                 role="alert"
                 aria-live="assertive"
                 aria-atomic="true"
@@ -323,6 +394,7 @@ export function SyncBadge({
                   dismissSticky();
                   onRetry();
                 }}
+                onKeyDown={onRetryKeyDown}
                 onFocus={() => {
                   wantsRetryFocus.current = true;
                 }}
@@ -403,11 +475,15 @@ export function SyncBadge({
             aria-describedby={tooltipTextId}
             tabIndex={0}
             data-testid="radio-sync-status"
+            ref={badgeRef}
             onPointerLeave={releasePointerHold}
             onFocus={() => setTooltipOpen(true)}
             onKeyDown={(event) => {
               if (pinned || event.key !== "Escape") return;
+              event.preventDefault();
               setTooltipOpen(false, true);
+              restoreFocusTo.current = badgeRef.current;
+              if (document.activeElement === document.body) focusWithVisibleRing(badgeRef.current);
             }}
 
             className={`flex h-8 items-center gap-1.5 rounded-full border px-3 outline-none transition focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
