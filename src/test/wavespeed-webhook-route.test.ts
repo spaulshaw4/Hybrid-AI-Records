@@ -90,6 +90,7 @@ describe("POST /api/ai/wavespeed-webhook", () => {
   const originalKey = process.env.WAVESPEED_API_KEY;
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     uploadMock.mockClear();
     insertMock.mockClear();
@@ -155,6 +156,7 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    vi.useFakeTimers();
     const wav = silentWav();
     const cloudfront = "https://cdn.example/master.wav";
     let polls = 0;
@@ -171,7 +173,8 @@ describe("POST /api/ai/wavespeed-webhook", () => {
         return new Response(copy, { status: 200 });
       }
       polls += 1;
-      if (polls === 1) return new Response("unavailable", { status: 502 });
+      // Result polls retry 5 times (6 attempts) before the watcher gives up on this read.
+      if (polls <= 6) return new Response("unavailable", { status: 502 });
       return jsonResponse({
         data: { status: "completed", outputs: [cloudfront] },
       });
@@ -181,11 +184,13 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     const accepted = await generatePost(generateRequest({ title: "Heavy Sky", userId: "user-1" }));
     expect(accepted.status).toBe(200);
 
-    const first = await webhookPost(
+    const firstPromise = webhookPost(
       webhookRequest({
         data: { id: "task-3", status: "completed", outputs: ["https://evil.example/not-this.wav"] },
       }),
     );
+    await vi.runAllTimersAsync();
+    const first = await firstPromise;
     expect(first.status).toBe(200);
     expect(readTrackJob("task-3")?.status).toBe("processing");
     expect(uploadMock).not.toHaveBeenCalled();
@@ -218,6 +223,12 @@ describe("POST /api/ai/wavespeed-webhook", () => {
         task_id: "task-3",
       }),
     );
+
+    const resultUrl = "https://api.wavespeed.ai/api/v3/predictions/task-3/result";
+    const resultCalls = fetchMock.mock.calls.filter((call) => call[0] === resultUrl);
+    expect(resultCalls.length).toBeGreaterThanOrEqual(7);
+    expect(resultCalls.every((call) => (call[1] as RequestInit | undefined)?.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/v1/mureka"))).toBe(false);
 
     const status = await GET(new Request("http://localhost/api/ai/wavespeed-webhook?taskId=task-3"));
     const statusBody = (await status.json()) as Record<string, unknown>;

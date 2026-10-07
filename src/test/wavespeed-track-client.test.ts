@@ -33,8 +33,8 @@ describe("waitForVaultedTrack", () => {
     );
 
     const pending = waitForVaultedTrack("task-9");
-    await vi.advanceTimersByTimeAsync(3000);
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
     await expect(pending).resolves.toEqual({
       wavUrl: "https://project.supabase.co/masters/task-9.wav",
       mp3Url: "https://project.supabase.co/masters/task-9.mp3",
@@ -50,11 +50,11 @@ describe("waitForVaultedTrack", () => {
 
     const pending = waitForVaultedTrack("task-1");
     const expectation = expect(pending).rejects.toThrow("Generation failed upstream");
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(5000);
     await expectation;
   });
 
-  it("throws the engine ceiling after 120 status polls", async () => {
+  it("throws the engine ceiling at the 60 minute deadline", async () => {
     vi.useFakeTimers();
     let calls = 0;
     vi.stubGlobal(
@@ -66,11 +66,9 @@ describe("waitForVaultedTrack", () => {
     );
 
     const pending = waitForVaultedTrack("task-4");
-    const expectation = expect(pending).rejects.toThrow("Task hit the 6-minute engine ceiling");
-    for (let attempt = 0; attempt < 120; attempt++) {
-      await vi.advanceTimersByTimeAsync(3000);
-    }
+    const expectation = expect(pending).rejects.toThrow("Task hit the 60-minute engine ceiling");
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
     await expectation;
-    expect(calls).toBe(120);
+    expect(calls).toBe(720);
   });
 });

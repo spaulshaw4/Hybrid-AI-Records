@@ -13,8 +13,9 @@ function taskIdFrom(body: unknown): string {
 }
 
 /**
- * WaveSpeed calls this when a full track finishes.
- * The body is only a wake-up: the output URL is read from our own result poll.
+ * Browser status poll for a full track.
+ * WaveSpeed does not POST here. The background watcher reads the prediction result.
+ * POST remains so a known task can still be settled from that same result poll.
  */
 export async function POST(req: Request): Promise<Response> {
   let body: unknown = {};

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { POST } from "@/app/api/ai/coproducer/route";
+import { POST, parseLyricsIntoSections } from "@/app/api/ai/coproducer/route";
 
 const CHAT_URL = "https://api.wavespeed.ai/v1/chat/completions";
 const EXTEND_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/extend-lyrics";
@@ -686,5 +686,46 @@ describe("POST /api/ai/coproducer", () => {
     expect(body.lyrics).toBeUndefined();
     expect(body.style).toBeUndefined();
     expect(String((fetchMock.mock.calls[0] as unknown as [string])[0])).not.toContain("wavespeed");
+  });
+
+  it("returns plain format_lyrics stanzas without calling WaveSpeed", async () => {
+    useStyleToken();
+    const plain = ["Rain on the window", "I stay up too late", "", "Hold the light", "Don't let it fade"].join("\n");
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "lyric_pred", status: "succeeded", output: plain }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await POST(
+      aiRequest({
+        action: "format_lyrics",
+        lyrics: "rain on the window\n\nhold the light",
+        genre: "soul",
+      }),
+    );
+    const body = (await res.json()) as { success?: boolean; lyrics?: string; result?: string; error?: string };
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.error).toBeUndefined();
+    expect(body.lyrics).toBe(plain);
+    expect(body.result).toBe(plain);
+    expect(body.lyrics).toContain("Rain on the window");
+    expect(body.lyrics).toContain("Don't let it fade");
+    expect(body.lyrics).not.toMatch(/\[(verse|chorus|bridge|intro|outro)/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(String(url)).toContain(`/models/${STYLE_MODEL}/predictions`);
+    expect(String(url)).not.toContain("wavespeed");
+  });
+});
+
+describe("parseLyricsIntoSections", () => {
+  it("returns no sections for empty text and names blank-line stanzas", () => {
+    expect(parseLyricsIntoSections("")).toEqual([]);
+    expect(parseLyricsIntoSections("  \n")).toEqual([]);
+    expect(parseLyricsIntoSections("first stanza\nstill first\n\nsecond stanza\n\nthird stanza")).toEqual([
+      { name: "Verse 1", text: "first stanza\nstill first" },
+      { name: "Chorus", text: "second stanza" },
+      { name: "Verse 2", text: "third stanza" },
+    ]);
   });
 });

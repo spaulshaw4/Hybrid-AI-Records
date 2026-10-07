@@ -1,7 +1,7 @@
-/** Poll our webhook status route until a full track is vaulted. */
+/** Poll our status route until a full track is vaulted. The server watcher uses the same 60-minute deadline. */
 
-export const TRACK_POLL_INTERVAL_MS = 3000;
-export const TRACK_POLL_ATTEMPTS = 120;
+export const TRACK_POLL_INTERVAL_MS = 5000;
+export const TRACK_POLL_DEADLINE_MS = 60 * 60 * 1000;
 
 export type VaultedTrackUrls = {
   wavUrl: string;
@@ -35,11 +35,12 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export async function waitForVaultedTrack(
   taskId: string,
-  options?: { signal?: AbortSignal; intervalMs?: number; attempts?: number },
+  options?: { signal?: AbortSignal; intervalMs?: number; deadlineMs?: number },
 ): Promise<VaultedTrackUrls> {
   const intervalMs = options?.intervalMs ?? TRACK_POLL_INTERVAL_MS;
-  const attempts = options?.attempts ?? TRACK_POLL_ATTEMPTS;
-  for (let attempt = 0; attempt < attempts; attempt++) {
+  const deadlineMs = options?.deadlineMs ?? TRACK_POLL_DEADLINE_MS;
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
     await sleep(intervalMs, options?.signal);
     const res = await fetch(`/api/ai/wavespeed-webhook?taskId=${encodeURIComponent(taskId)}`, {
       signal: options?.signal,
@@ -52,5 +53,5 @@ export async function waitForVaultedTrack(
       throw new Error(data.error || "Generation failed upstream");
     }
   }
-  throw new Error("Task hit the 6-minute engine ceiling");
+  throw new Error("Task hit the 60-minute engine ceiling");
 }

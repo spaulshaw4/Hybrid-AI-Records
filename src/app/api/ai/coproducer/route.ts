@@ -258,6 +258,42 @@ function isCommentaryLine(line: string): boolean {
   return text.length > 120;
 }
 
+const LYRIC_BRACKET = /\[(verse|chorus|bridge|intro|outro).*?\]/i;
+
+export function parseLyricsIntoSections(rawLyrics: string): { name: string; text: string }[] {
+  const normalized = rawLyrics.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  if (!LYRIC_BRACKET.test(normalized)) {
+    const stanzas = normalized
+      .split(/\n\s*\n/)
+      .map((stanza) => stanza.trim())
+      .filter((stanza) => stanza.length > 0);
+    return stanzas.map((text, index) => ({
+      name: index === 0 ? "Verse 1" : index === 1 ? "Chorus" : `Verse ${index}`,
+      text,
+    }));
+  }
+
+  const finder = /\[(verse|chorus|bridge|intro|outro).*?\]/gi;
+  const matches = [...normalized.matchAll(finder)];
+  const sections: { name: string; text: string }[] = [];
+  const firstAt = matches[0]?.index ?? 0;
+  if (firstAt > 0) {
+    const lead = normalized.slice(0, firstAt).trim();
+    if (lead) sections.push({ name: "Verse 1", text: lead });
+  }
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    if (!match || match.index === undefined) continue;
+    const start = match.index + match[0].length;
+    const end = matches[index + 1]?.index ?? normalized.length;
+    const text = normalized.slice(start, end).trim();
+    const name = match[0].replace(/^\[|\]$/g, "").trim() || "Verse";
+    sections.push({ name, text });
+  }
+  return sections;
+}
+
 /** Keep lyric lines inside [Outro] and drop a trailing commentary block with no section header. */
 function trimLyricsAtOutro(raw: string): string {
   const normalized = raw.replace(/\r\n/g, "\n").trim();
@@ -475,11 +511,15 @@ async function formatClaudeLyrics(body: JsonRecord): Promise<Response> {
     },
     "Lyric generation",
   );
-  const lyrics = trimLyricsAtOutro(generated);
-  if (!lyrics || !LYRIC_SECTION.test(lyrics) || !/\[Outro\]/i.test(lyrics)) {
-    return Response.json({ error: "Lyric generation returned no sectioned lyrics." }, { status: 500 });
+  const normalized = generated.replace(/\r\n/g, "\n").trim();
+  const sectioned = trimLyricsAtOutro(normalized);
+  if (sectioned && LYRIC_SECTION.test(sectioned) && /\[Outro\]/i.test(sectioned)) {
+    return Response.json({ success: true, lyrics: sectioned, result: sectioned });
   }
-  return Response.json({ success: true, lyrics, result: lyrics });
+  if (!LYRIC_BRACKET.test(normalized) && parseLyricsIntoSections(normalized).length > 0) {
+    return Response.json({ success: true, lyrics: normalized, result: normalized });
+  }
+  return Response.json({ error: "Lyric generation returned no sectioned lyrics." }, { status: 500 });
 }
 
 async function pollPredictionResult(resultUrl: string, apiKey: string): Promise<unknown> {

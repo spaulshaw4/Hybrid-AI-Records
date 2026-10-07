@@ -1,4 +1,12 @@
-const TRACK_LENGTH_PRESETS = [30, 60, 120, 180, 240, 300, 360] as const;
+export function formatTrackTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const remainingSecs = seconds % 60;
+  if (mins === 0) return `${remainingSecs} sec`;
+  if (remainingSecs === 0) return `${mins} min`;
+  return `${mins} min ${remainingSecs} sec`;
+}
+
+const quickPresets = [30, 60, 90, 120, 150, 180, 210, 240, 300, 360];
 
 function clampTrackLength(value: number): number {
   return Math.min(360, Math.max(30, Number(value) || 30));
@@ -13,9 +21,13 @@ export function DurationSlider({
 }) {
   return (
     <div className="flex w-full flex-col gap-3">
-      <label htmlFor="track-length-seconds" className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-        Track Length (Seconds)
-      </label>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor="track-length-seconds" className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          Track Length
+        </label>
+        <span className="text-xs font-semibold tabular-nums text-zinc-200">{formatTrackTime(value)}</span>
+      </div>
+      <p className="text-xs text-zinc-500">Length follows the lyric arrangement.</p>
       <div className="flex items-center gap-3">
         <input
           id="track-length-seconds"
@@ -36,11 +48,11 @@ export function DurationSlider({
           step={15}
           value={value}
           onChange={(event) => onChange(clampTrackLength(Number(event.target.value)))}
-          className="w-full accent-amber-500"
+          className="w-full accent-red-600"
         />
       </div>
       <div className="flex flex-wrap gap-2" role="group" aria-label="Track length">
-        {TRACK_LENGTH_PRESETS.map((sec) => (
+        {quickPresets.map((sec) => (
           <button
             key={sec}
             type="button"
@@ -48,11 +60,11 @@ export function DurationSlider({
             onClick={() => onChange(sec)}
             className={
               value === sec
-                ? "rounded-md border border-amber-500/40 bg-amber-500/20 px-2 py-1 text-xs font-semibold text-amber-300"
+                ? "rounded-md border border-red-500/40 bg-red-500/20 px-2 py-1 text-xs font-semibold text-red-400"
                 : "rounded-md border border-zinc-700 bg-transparent px-2 py-1 text-xs font-semibold text-zinc-400"
             }
           >
-            {sec}s
+            {formatTrackTime(sec)}
           </button>
         ))}
       </div>

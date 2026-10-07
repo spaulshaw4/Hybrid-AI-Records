@@ -100,7 +100,7 @@ export function TrackActionsMenu({ trackId, title, mp3Url, wavUrl, onDelete }: T
         style={{
           background: "transparent",
           border: "1px solid #3f3f46",
-          color: "#fbbf24",
+          color: "#f4f4f5",
           borderRadius: 8,
           width: 32,
           height: 32,
@@ -135,7 +135,7 @@ export function TrackActionsMenu({ trackId, title, mp3Url, wavUrl, onDelete }: T
             onClick={() => download(mp3Url, "mp3")}
             style={{ ...itemStyle, opacity: mp3Url ? 1 : 0.4, cursor: mp3Url ? "pointer" : "not-allowed" }}
           >
-            <Music size={14} color="#fbbf24" />
+            <Music size={14} color="#f87171" />
             Download MP3 (320 kbps)
           </button>
           <button
@@ -145,7 +145,7 @@ export function TrackActionsMenu({ trackId, title, mp3Url, wavUrl, onDelete }: T
             onClick={() => download(wavUrl, "wav")}
             style={{ ...itemStyle, opacity: wavUrl ? 1 : 0.4, cursor: wavUrl ? "pointer" : "not-allowed" }}
           >
-            <FileAudio size={14} color="#fbbf24" />
+            <FileAudio size={14} color="#f87171" />
             Download Master WAV
           </button>
           <button

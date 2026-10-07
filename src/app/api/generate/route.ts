@@ -11,7 +11,6 @@ import {
   failTrackJob,
   readTrackJob,
   rememberTrackJob,
-  WAVESPEED_TRACK_WEBHOOK_URL,
   type TrackJob,
 } from "@/lib/wavespeed-track-jobs.server";
 
@@ -21,20 +20,21 @@ const GENERATE_BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/
 /** Harmless on Bun. Next.js route segment config when this file is used as a route. */
 export const maxDuration = 360;
 
-const POLL_INTERVAL_MS = 3000;
-const maxAttempts = 120;
+const SUBMIT_RETRIES = 3;
+const RESULT_RETRIES = 5;
+const POLL_DEADLINE_MS = 60 * 60 * 1000;
 const VAULT_BUCKET = "audio-vault";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** WaveSpeed accepts only lowercase "male" or "female". "Male (m)" is ignored. */
-export function normalizeVocalGender(gender: unknown): "male" | "female" {
+/** Lowercase "male" or "female". "Male (m)" counts as male. Anything else is omitted. */
+export function normalizeVocalGender(gender: unknown): "male" | "female" | null {
   const text = typeof gender === "string" ? gender.trim().toLowerCase() : "";
   if (text.startsWith("female")) return "female";
   if (text.startsWith("male")) return "male";
-  return "male";
+  return null;
 }
 
 const MALE_VOCAL_LEAD = "Deep soulful male vocal, baritone delivery, ";
@@ -69,8 +69,15 @@ type GenerateBody = {
   duration?: unknown;
 };
 
-const LYRICS_ONLY_STYLE = "Deep soulful acoustic groove, 75 BPM";
 const EMPTY_GENERATION_ERROR = "Generation blocked: No style or lyrics received by backend.";
+const LYRICS_REQUIRED_ERROR = "Generation blocked: Lyrics are required.";
+const QUEUE_FAILED_ERROR = "Failed to queue the master.";
+const PROMPT_MAX_CHARS = 1024;
+const LYRICS_MAX_CHARS = 5000;
+
+function clipText(value: string, max: number): string {
+  return value.length <= max ? value : value.slice(0, max);
+}
 
 function firstAlias(...values: unknown[]): string {
   for (const value of values) {
@@ -94,13 +101,102 @@ function logGenerationBody(body: GenerateBody): void {
   console.log("=== INCOMING GENERATION PAYLOAD ===", safe);
 }
 
-function trackDuration(value: unknown): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 30 || value > 360) return 180;
-  return value;
+type JsonRecord = Record<string, unknown>;
+
+class UpstreamHttpError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UpstreamHttpError";
+  }
 }
 
-function generationSeed(): number {
-  return Math.floor(Math.random() * 2147483647);
+function isRecord(value: unknown): value is JsonRecord {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function withJitter(ms: number): number {
+  return ms + Math.random() * 250;
+}
+
+function networkDelay(attempt: number): number {
+  return withJitter(Math.max(2000, 500 * 2 ** attempt));
+}
+
+function retryAfterDelay(response: Response, attempt: number): number {
+  const header = response.headers.get("retry-after");
+  let delay = 500 * 2 ** attempt;
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds)) {
+      delay = seconds * 1000;
+    } else {
+      const when = Date.parse(header);
+      if (Number.isFinite(when)) delay = Math.max(0, when - Date.now());
+    }
+  }
+  return withJitter(Math.max(2000, Math.min(10000, delay)));
+}
+
+function upstreamMessage(body: JsonRecord, status: number): string {
+  const data = isRecord(body.data) ? body.data : null;
+  const message = typeof body.message === "string" ? body.message : "";
+  const dataError = data && typeof data.error === "string" ? data.error : "";
+  return message || dataError || `HTTP ${status}`;
+}
+
+function isNetworkError(err: unknown): boolean {
+  if (err instanceof UpstreamHttpError) return false;
+  if (!(err instanceof Error)) return false;
+  if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+  return err instanceof TypeError;
+}
+
+function hasIdOrStatus(body: JsonRecord): boolean {
+  return body.id !== undefined || body.status !== undefined;
+}
+
+function customerMessage(message: string, fallback: string): string {
+  const text = message.trim();
+  if (!text || /wavespeed/i.test(text)) return fallback;
+  return text;
+}
+
+/** One attempt uses a 30s timeout. Network and 429/5xx responses retry; other HTTP errors do not. */
+async function fetchJson(url: string, init: RequestInit, retries: number): Promise<unknown> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await response.text();
+      let body: JsonRecord;
+      try {
+        const parsed: unknown = JSON.parse(text);
+        body = isRecord(parsed) ? parsed : { message: text };
+      } catch {
+        body = { message: text };
+      }
+      const code = body.code;
+      const codeOk = code === 200 || code === undefined;
+      if (response.ok && codeOk) {
+        if (body.data !== undefined && body.data !== null) return body.data;
+        if (hasIdOrStatus(body)) return body;
+        if (code === 200) return body;
+        throw new UpstreamHttpError(upstreamMessage(body, response.status));
+      }
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt >= retries) throw new UpstreamHttpError(upstreamMessage(body, response.status));
+        await sleep(retryAfterDelay(response, attempt));
+        continue;
+      }
+      throw new UpstreamHttpError(upstreamMessage(body, response.status));
+    } catch (err) {
+      if (!isNetworkError(err) || attempt >= retries) throw err;
+      await sleep(networkDelay(attempt));
+    }
+  }
+  throw new UpstreamHttpError("HTTP 0");
 }
 
 function vaultClient() {
@@ -118,19 +214,17 @@ function resultUrl(taskId: string): string {
   return `https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(taskId)}/result`;
 }
 
-function readResultStatus(body: {
-  data?: { status?: string };
-  status?: string;
-}): string {
-  const status = body.data?.status ?? body.status;
+function readResultStatus(body: unknown): string {
+  const record = isRecord(body) ? body : null;
+  const nested = record && isRecord(record.data) ? record.data : null;
+  const status = nested?.status ?? record?.status;
   return typeof status === "string" ? status.trim().toLowerCase() : "";
 }
 
-function readResultOutput(body: {
-  data?: { outputs?: unknown[] };
-  outputs?: unknown[];
-}): string {
-  const outputs = body.data?.outputs ?? body.outputs;
+function readResultOutput(body: unknown): string {
+  const record = isRecord(body) ? body : null;
+  const nested = record && isRecord(record.data) ? record.data : null;
+  const outputs = nested?.outputs ?? record?.outputs;
   const first = Array.isArray(outputs) ? outputs[0] : undefined;
   return typeof first === "string" ? first.trim() : "";
 }
@@ -140,6 +234,8 @@ async function insertVaultRow(
   wavUrl: string,
   mp3Url: string,
 ): Promise<void> {
+  // vaulted_tracks.wav_url and mp3_url are NOT NULL. There is no status or style_prompt column.
+  // A processing placeholder would fail, so the only insert is this one, after the master is stored.
   if (!job.userId) return;
   const supabase = vaultClient();
   const { error: insertError } = await supabase.from("vaulted_tracks").insert({
@@ -214,28 +310,19 @@ export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
 
   const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
   if (!apiKey) {
-    failTrackJob(taskId, "Missing WaveSpeed API key");
+    console.error("[generate] missing API key");
+    failTrackJob(taskId, "Missing API key");
     return;
   }
 
-  const pollRes = await fetch(resultUrl(taskId), {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!pollRes.ok) {
-    console.log(`[generate] task ${taskId} result http ${pollRes.status}`);
-    return;
-  }
-
-  let pollData: {
-    data?: { status?: string; outputs?: unknown[] };
-    status?: string;
-    outputs?: unknown[];
-  };
-  try {
-    pollData = (await pollRes.json()) as typeof pollData;
-  } catch {
-    return;
-  }
+  const pollData = await fetchJson(
+    resultUrl(taskId),
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    },
+    RESULT_RETRIES,
+  );
 
   const status = readResultStatus(pollData);
   console.log(`[generate] task ${taskId} status ${status || "pending"}`);
@@ -263,10 +350,11 @@ export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
   }
 }
 
-/** Keep checking after the HTTP response has already returned. */
+/** Keep checking after the HTTP response has already returned. Backs off from 2s toward 10s until 60 minutes. */
 export async function watchTrack(taskId: string): Promise<void> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await sleep(POLL_INTERVAL_MS);
+  const deadline = Date.now() + POLL_DEADLINE_MS;
+  let pollDelay = 2000;
+  while (Date.now() < deadline) {
     const current = readTrackJob(taskId);
     if (!current || current.status !== "processing") return;
     try {
@@ -277,12 +365,18 @@ export async function watchTrack(taskId: string): Promise<void> {
     }
     const after = readTrackJob(taskId);
     if (!after || after.status !== "processing") return;
+    if (Date.now() >= deadline) break;
+    await sleep(pollDelay);
+    pollDelay = Math.min(10000, pollDelay + 1000);
   }
-  failTrackJob(taskId, "Task hit the 6-minute engine ceiling");
+  const still = readTrackJob(taskId);
+  if (still?.status === "processing") {
+    failTrackJob(taskId, "Task hit the 60-minute engine ceiling");
+  }
 }
 
 function startTrackWatch(taskId: string): void {
-  // Unit tests drive delivery through the webhook. The live server watches in the background.
+  // VITEST=true skips the automatic watch. Tests call watchTrack or settle explicitly.
   if (process.env.VITEST === "true") return;
   void watchTrack(taskId);
 }
@@ -295,88 +389,81 @@ export async function POST(req: Request): Promise<Response> {
       gender,
       isInstrumental: rawInstrumental,
       vocalId,
-      referenceId: rawReferenceId,
       userId: rawUserId,
-      duration: rawDuration,
     } = body;
-    const aliasedStyle = replaceBareConflictingPrompt(
+    const style = replaceBareConflictingPrompt(
       formatMurekaPrompt(firstAlias(body.prompt, body.stylePrompt, body.style)),
     );
-    const lyrics = formatMurekaLyrics(firstAlias(body.lyrics, body.lyricsText, body.text));
+    const rawLyrics = (
+      (typeof body.lyrics === "string" ? body.lyrics : "") ||
+      (typeof body.lyricsText === "string" ? body.lyricsText : "") ||
+      (typeof body.text === "string" ? body.text : "")
+    ).trim();
     const isInstrumental = rawInstrumental === true;
     const title = resolvedTitle(body.title);
     const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     const vocalUsed = vocalId && String(vocalId).trim() !== "" ? String(vocalId).trim() : "";
     const vocalGender = normalizeVocalGender(gender);
-    let style = aliasedStyle;
-    if (!isInstrumental && !style && lyrics) style = LYRICS_ONLY_STYLE;
-    if ((isInstrumental && !style) || (!isInstrumental && !style && !lyrics)) {
+    if (!isInstrumental && !rawLyrics) {
+      console.error("ABORTED: Vocal lyrics are empty.");
+      return Response.json({ error: LYRICS_REQUIRED_ERROR }, { status: 400 });
+    }
+    const lyrics = formatMurekaLyrics(rawLyrics);
+    const lyricText = clipText(lyrics.trim(), LYRICS_MAX_CHARS);
+    if (!isInstrumental && !lyricText) {
+      console.error("ABORTED: Vocal lyrics are empty.");
+      return Response.json({ error: LYRICS_REQUIRED_ERROR }, { status: 400 });
+    }
+    if (isInstrumental && !style) {
       console.error("ABORTED: Style and lyrics are both empty or undefined!");
       return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
     }
-    const prompt = !isInstrumental && !vocalUsed ? promptWithVocalGender(style, vocalGender) : style;
-    if (!prompt.trim()) {
-      console.error("ABORTED: Style and lyrics are both empty or undefined!");
-      return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
-    }
-    const duration = trackDuration(rawDuration);
-    const seed = generationSeed();
 
     const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
     if (!apiKey) {
-      return Response.json({ error: "Missing WaveSpeed API key" }, { status: 500 });
+      console.error("[generate] missing API key");
+      return Response.json({ error: "Missing API key" }, { status: 500 });
     }
 
     const endpoint = isInstrumental ? GENERATE_BGM_URL : GENERATE_SONG_URL;
-    const referenceId = typeof rawReferenceId === "string" ? rawReferenceId.trim() : "";
+    // generate-song rejects unknown keys. vocal_id, reference_id, webhook, duration, seed, and title stay off this body.
     const payload: {
-      prompt: string;
       output_format: "wav";
-      webhook: string;
-      seed: number;
-      duration: number;
-      reference_id?: string;
+      prompt?: string;
       lyrics?: string;
-      gender?: string;
-      vocal_id?: string;
+      gender?: "male" | "female";
     } = {
-      prompt,
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
-      seed,
-      duration,
     };
-    if (referenceId) payload.reference_id = referenceId;
-    if (!isInstrumental) {
-      const lyricText = lyrics.trim();
-      if (lyricText) payload.lyrics = lyricText;
-      if (vocalUsed) payload.vocal_id = vocalUsed;
-      else payload.gender = vocalGender;
+    if (style) {
+      const styled = isInstrumental ? style : promptWithVocalGender(style, vocalGender ?? "male");
+      const clipped = clipText(styled.trim(), PROMPT_MAX_CHARS);
+      if (clipped) payload.prompt = clipped;
     }
+    if (!isInstrumental) {
+      payload.lyrics = lyricText;
+      if (vocalGender) payload.gender = vocalGender;
+    }
+    const prompt = payload.prompt ?? "";
 
     console.log("=== DISPATCHING TO WAVESPEED ===", payload);
-    const submitRes = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    const submitData = (await submitRes.json()) as {
-      data?: { id?: string };
-      message?: string;
-      error?: string;
-    };
-    const taskId = submitData.data?.id;
-    if (!taskId) {
-      console.error("WaveSpeed Raw Rejection:", JSON.stringify(submitData, null, 2));
-      return Response.json(
-        {
-          error: `WaveSpeed rejected: ${submitData.message || submitData.error || JSON.stringify(submitData)}`,
+    const submitData = await fetchJson(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
-        { status: 500 },
-      );
+        body: JSON.stringify(payload),
+      },
+      SUBMIT_RETRIES,
+    );
+    const queued = isRecord(submitData) ? submitData : null;
+    const taskId = typeof queued?.id === "string" ? queued.id.trim() : "";
+    if (!taskId) {
+      console.error("[generate] queue response had no id", JSON.stringify(submitData));
+      return Response.json({ error: QUEUE_FAILED_ERROR }, { status: 502 });
     }
     if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
       throw new Error("Task submission rejected by upstream");
@@ -386,7 +473,7 @@ export async function POST(req: Request): Promise<Response> {
       taskId,
       title,
       prompt,
-      lyrics: isInstrumental ? null : lyrics,
+      lyrics: isInstrumental ? null : lyricText,
       vocalId: vocalUsed || null,
       userId,
       status: "processing",
@@ -398,9 +485,14 @@ export async function POST(req: Request): Promise<Response> {
       success: true,
       status: "pending",
       taskId,
+      requestId: taskId,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
-    return Response.json({ error: message || "Internal server error" }, { status: 500 });
+    console.error("[generate] submit failed", message || "error");
+    return Response.json(
+      { error: customerMessage(message, QUEUE_FAILED_ERROR) },
+      { status: 500 },
+    );
   }
 }

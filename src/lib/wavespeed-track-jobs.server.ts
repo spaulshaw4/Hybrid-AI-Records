@@ -1,7 +1,7 @@
 /**
  * In-process record of full-track renders submitted to WaveSpeed.
- * The webhook and the background watcher both finish the same task id,
- * so delivery is claimed once.
+ * The background watcher polls until the task finishes. Delivery is claimed once.
+ * generate-song rejects a webhook field, so this URL is not submitted.
  */
 
 export const WAVESPEED_TRACK_WEBHOOK_URL =

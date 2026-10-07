@@ -2823,7 +2823,7 @@ export function AudioStudio() {
           ])) as typeof started;
         } catch (streamErr) {
           // Mobile Safari often drops SSE mid-render — never paint an error card;
-          // short-poll Vault silently until the 6-minute ceiling.
+          // short-poll Vault silently until the 60-minute ceiling.
           if (
             isGenerationAborted(streamErr) ||
             abort.signal.aborted ||

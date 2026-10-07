@@ -13,7 +13,7 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 import { maxDuration, POST, watchTrack } from "@/app/api/generate/route";
-import { readTrackJob, resetTrackJobs, WAVESPEED_TRACK_WEBHOOK_URL } from "@/lib/wavespeed-track-jobs.server";
+import { readTrackJob, resetTrackJobs } from "@/lib/wavespeed-track-jobs.server";
 
 const SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
@@ -28,17 +28,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const FORBIDDEN_UPSTREAM_KEYS = ["webhook", "duration", "seed", "title", "vocal_id", "reference_id"] as const;
+
 function expectLockedPayload(body: Record<string, unknown>, expected: Record<string, unknown>) {
-  expect(Number.isInteger(body.seed)).toBe(true);
-  expect(body.seed as number).toBeGreaterThanOrEqual(0);
-  expect(body.seed as number).toBeLessThanOrEqual(2147483647);
-  expect(body.duration).toBe(typeof expected.duration === "number" ? expected.duration : 180);
-  const rest = { ...body };
-  delete rest.seed;
-  delete rest.duration;
-  const expectedRest = { ...expected };
-  delete expectedRest.duration;
-  expect(rest).toEqual(expectedRest);
+  expect(body).toEqual(expected);
+  for (const key of FORBIDDEN_UPSTREAM_KEYS) {
+    expect(body).not.toHaveProperty(key);
+  }
+  const serialized = JSON.stringify(body);
+  expect(serialized).not.toMatch(/\/v1\/mureka/);
+  expect(serialized).not.toMatch(/Neon rain falls softly tonight|dreamy synth-pop|warm female vocal|cinematic chorus/i);
+  expect(body.prompt).not.toBe("");
 }
 
 function generateRequest(extra: Record<string, unknown> = {}): Request {
@@ -79,21 +79,19 @@ describe("POST /api/generate", () => {
     const res = await POST(generateRequest());
 
     expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({ error: "Missing WaveSpeed API key" });
+    await expect(res.json()).resolves.toEqual({ error: "Missing API key" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns 500 when the queue response has no task id", async () => {
+  it("returns 502 when the queue response has no task id", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await POST(generateRequest());
 
-    expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({
-      error: `WaveSpeed rejected: ${JSON.stringify({ data: {} })}`,
-    });
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toEqual({ error: "Failed to queue the master." });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(SONG_URL);
@@ -103,8 +101,6 @@ describe("POST /api/generate", () => {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       output_format: "wav",
-      gender: "male",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
   });
 
@@ -120,13 +116,19 @@ describe("POST /api/generate", () => {
       success: true,
       status: "pending",
       taskId: "task-9",
+      requestId: "task-9",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
-    expect(body.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
+    expectLockedPayload(body, {
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
+      lyrics: "[Verse]\nline\n[inst-short]",
+      output_format: "wav",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("/v1/mureka");
     expect(readTrackJob("task-9")).toMatchObject({
       status: "processing",
       title: "Heavy Sky",
@@ -135,14 +137,52 @@ describe("POST /api/generate", () => {
     expect(uploadMock).not.toHaveBeenCalled();
   });
 
-  it("marks the job failed after 120 background result polls", async () => {
+  it("accepts a code 200 envelope and a body that already has an id", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ code: 200, data: { id: "task-code" } }))
+      .mockResolvedValueOnce(jsonResponse({ id: "task-bare", status: "created" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const coded = await POST(generateRequest({ gender: "male" }));
+    expect(coded.status).toBe(200);
+    await expect(coded.json()).resolves.toEqual({
+      success: true,
+      status: "pending",
+      taskId: "task-code",
+      requestId: "task-code",
+    });
+
+    const bare = await POST(generateRequest({ gender: "female" }));
+    expect(bare.status).toBe(200);
+    await expect(bare.json()).resolves.toEqual({
+      success: true,
+      status: "pending",
+      taskId: "task-bare",
+      requestId: "task-bare",
+    });
+    const bareBody = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(bareBody.gender).toBe("female");
+    expect(bareBody).not.toHaveProperty("webhook");
+  });
+
+  it("marks the job failed when the backoff poll reaches 60 minutes", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => new AbortController().signal);
+    vi.spyOn(console, "log").mockImplementation(() => {});
     let polls = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string) => {
-        if (url === SONG_URL) return jsonResponse({ data: { id: "task-4" } });
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === SONG_URL) return jsonResponse({ code: 200, data: { id: "task-4" } });
+        expect(url).toBe("https://api.wavespeed.ai/api/v3/predictions/task-4/result");
+        expect(url).not.toContain("/v1/mureka");
+        expect(init?.method).toBe("GET");
         polls += 1;
         return jsonResponse({ data: { status: "processing" } });
       }),
@@ -151,17 +191,15 @@ describe("POST /api/generate", () => {
     const accepted = await POST(generateRequest());
     expect(accepted.status).toBe(200);
     const pending = watchTrack("task-4");
-    for (let attempt = 0; attempt < 120; attempt++) {
-      await vi.advanceTimersByTimeAsync(3000);
-    }
+    await vi.advanceTimersByTimeAsync(61 * 60 * 1000);
     await pending;
 
-    expect(polls).toBe(120);
+    expect(polls).toBeGreaterThan(1);
     expect(readTrackJob("task-4")).toMatchObject({
       status: "failed",
-      error: "Task hit the 6-minute engine ceiling",
+      error: "Task hit the 60-minute engine ceiling",
     });
-  });
+  }, 20_000);
 
   it("returns 500 with the thrown message", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
@@ -178,7 +216,7 @@ describe("POST /api/generate", () => {
     await expect(res.json()).resolves.toEqual({ error: "socket hang up" });
   });
 
-  it("sends the vocal song fields plus the production webhook", async () => {
+  it("sends lyrics, wav output, and prompt or gender only when set", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
@@ -191,7 +229,7 @@ describe("POST /api/generate", () => {
         isInstrumental: false,
       }),
     );
-    expect(vocal.status).toBe(500);
+    expect(vocal.status).toBe(502);
     const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(songUrl).toBe(SONG_URL);
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
@@ -200,17 +238,8 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "female",
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
-    expect(Object.keys(songBody).sort()).toEqual([
-      "duration",
-      "gender",
-      "lyrics",
-      "output_format",
-      "prompt",
-      "seed",
-      "webhook",
-    ]);
+    expect(Object.keys(songBody).sort()).toEqual(["gender", "lyrics", "output_format", "prompt"]);
     expect(songBody).not.toHaveProperty("title");
     expect(songBody).not.toHaveProperty("userId");
     expect(songBody).not.toHaveProperty("reference_id");
@@ -226,18 +255,17 @@ describe("POST /api/generate", () => {
         isInstrumental: false,
       }),
     );
-    expect(withVoice.status).toBe(500);
+    expect(withVoice.status).toBe(502);
     const [voicedUrl, voicedInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(voicedUrl).toBe(SONG_URL);
     const voicedBody = JSON.parse(String(voicedInit.body)) as Record<string, unknown>;
     expectLockedPayload(voicedBody, {
-      prompt: "Acoustic, heavy rock",
+      prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
-      vocal_id: "artist-voice-9",
+      gender: "female",
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
-    expect(voicedBody).not.toHaveProperty("gender");
+    expect(voicedBody).not.toHaveProperty("vocal_id");
     expect(voicedBody).not.toHaveProperty("title");
     expect(voicedBody).not.toHaveProperty("userId");
     expect(voicedBody).not.toHaveProperty("reference_id");
@@ -246,7 +274,7 @@ describe("POST /api/generate", () => {
     const blankVoice = await POST(
       generateRequest({ gender: "   ", vocalId: "   ", title: "Heavy Sky Arrival", userId: "user-1" }),
     );
-    expect(blankVoice.status).toBe(500);
+    expect(blankVoice.status).toBe(502);
     const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
@@ -254,10 +282,9 @@ describe("POST /api/generate", () => {
     expectLockedPayload(blankBody, {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
-      gender: "male",
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
+    expect(blankBody).not.toHaveProperty("gender");
     expect(blankBody).not.toHaveProperty("vocal_id");
 
     fetchMock.mockClear();
@@ -270,14 +297,13 @@ describe("POST /api/generate", () => {
         prompt: "Heavy southern rock, 74 BPM",
       }),
     );
-    expect(instrumental.status).toBe(500);
+    expect(instrumental.status).toBe(502);
     const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(bgmUrl).toBe(BGM_URL);
     const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
     expectLockedPayload(bgmBody, {
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(bgmBody.prompt).toBe("Heavy southern rock, 74 BPM");
     expect(String(bgmBody.prompt).match(/74 BPM/g)).toEqual(["74 BPM"]);
@@ -288,13 +314,13 @@ describe("POST /api/generate", () => {
     expect(bgmBody).not.toHaveProperty("reference_id");
   });
 
-  it("adds reference_id only when referenceId is a non-empty string", async () => {
+  it("never sends reference_id or vocal_id on generate-song or generate-bgm", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
     const vocal = await POST(generateRequest({ gender: "male", referenceId: "  ref-swamp  " }));
-    expect(vocal.status).toBe(500);
+    expect(vocal.status).toBe(502);
     const vocalBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
@@ -304,8 +330,6 @@ describe("POST /api/generate", () => {
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "male",
       output_format: "wav",
-      reference_id: "ref-swamp",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(vocalBody).not.toHaveProperty("vocal_id");
 
@@ -317,20 +341,18 @@ describe("POST /api/generate", () => {
         referenceId: "ref-voice",
       }),
     );
-    expect(withVoice.status).toBe(500);
+    expect(withVoice.status).toBe(502);
     const voicedBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
     expectLockedPayload(voicedBody, {
-      prompt: "Acoustic, heavy rock",
+      prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
-      vocal_id: "artist-voice-9",
+      gender: "female",
       output_format: "wav",
-      reference_id: "ref-voice",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
-    expect(voicedBody).not.toHaveProperty("gender");
+    expect(voicedBody).not.toHaveProperty("vocal_id");
 
     fetchMock.mockClear();
     const instrumental = await POST(
@@ -343,7 +365,7 @@ describe("POST /api/generate", () => {
         prompt: "Heavy southern rock, 74 BPM",
       }),
     );
-    expect(instrumental.status).toBe(500);
+    expect(instrumental.status).toBe(502);
     const bgmBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
@@ -351,8 +373,6 @@ describe("POST /api/generate", () => {
     expectLockedPayload(bgmBody, {
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
-      reference_id: "ref-bgm",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
     expect(bgmBody).not.toHaveProperty("lyrics");
     expect(bgmBody).not.toHaveProperty("gender");
@@ -360,7 +380,7 @@ describe("POST /api/generate", () => {
 
     fetchMock.mockClear();
     const blank = await POST(generateRequest({ gender: "male", referenceId: "   " }));
-    expect(blank.status).toBe(500);
+    expect(blank.status).toBe(502);
     const blankBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
@@ -386,7 +406,7 @@ describe("POST /api/generate", () => {
       }),
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(502);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
@@ -406,13 +426,12 @@ describe("POST /api/generate", () => {
       lyrics: "The room stays quiet",
       gender: "male",
       output_format: "wav",
-      webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
 
     async function submittedPrompt(extra: Record<string, unknown>): Promise<Record<string, unknown>> {
       fetchMock.mockClear();
       const next = await POST(generateRequest(extra));
-      expect(next.status).toBe(500);
+      expect(next.status).toBe(502);
       return JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
         string,
         unknown
@@ -467,11 +486,19 @@ describe("POST /api/generate", () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const lyricsRequired = { error: "Generation blocked: Lyrics are required." };
     const blocked = { error: "Generation blocked: No style or lyrics received by backend." };
 
-    const vocal = await POST(generateRequest({ prompt: "   ", lyrics: "  " }));
+    const vocal = await POST(generateRequest({ prompt: "   ", lyrics: "  ", lyricsText: "", text: "" }));
     expect(vocal.status).toBe(400);
-    await expect(vocal.json()).resolves.toEqual(blocked);
+    await expect(vocal.json()).resolves.toEqual(lyricsRequired);
+    expect(JSON.stringify(lyricsRequired)).not.toMatch(/wavespeed/i);
+
+    const styleOnly = await POST(
+      generateRequest({ prompt: "piano, 90 BPM", lyrics: "   ", duration: 240, seed: 1, title: "Neon rain" }),
+    );
+    expect(styleOnly.status).toBe(400);
+    await expect(styleOnly.json()).resolves.toEqual(lyricsRequired);
 
     const instrumental = await POST(generateRequest({ isInstrumental: true, prompt: " ", lyrics: "still here" }));
     expect(instrumental.status).toBe(400);
@@ -505,8 +532,14 @@ describe("POST /api/generate", () => {
     expect(aliasBody.prompt).not.toBe("");
     expect(aliasBody.lyrics).toContain("[Chorus]");
     expect(aliasBody.lyrics).toContain("hey");
-    expect(aliasBody.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
-    expect(String(aliasBody.webhook)).not.toMatch(/localhost|127\.0\.0\.1/);
+    expect(aliasBody).not.toHaveProperty("webhook");
+    expect(aliasUrl).not.toMatch(/localhost|127\.0\.0\.1/);
+    expectLockedPayload(aliasBody, {
+      prompt: `${FEMALE_VOCAL_LEAD}Close piano, 80 BPM`,
+      lyrics: "[Chorus]\nhey",
+      gender: "female",
+      output_format: "wav",
+    });
 
     fetchMock.mockClear();
     const lyricsOnly = await POST(
@@ -521,55 +554,83 @@ describe("POST /api/generate", () => {
     expect(songUrl).toBe("https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song");
     expect(songUrl).not.toContain("/v1/mureka");
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
-    expect(songBody.prompt).toBe(`${MALE_VOCAL_LEAD}Deep soulful acoustic groove, 75 BPM`);
-    expect(songBody.prompt).not.toBe("");
+    expect(songBody).not.toHaveProperty("prompt");
     expect(songBody.lyrics).toContain("[Verse]");
-    expect(songBody.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
-    expect(String(songBody.webhook)).not.toMatch(/localhost|127\.0\.0\.1/);
+    expect(songBody.lyrics).toContain("storm");
+    expect(songBody.gender).toBe("male");
+    expectLockedPayload(songBody, {
+      lyrics: "[Verse]\nstorm",
+      gender: "male",
+      output_format: "wav",
+    });
+
+    fetchMock.mockClear();
+    const fromText = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "[Bridge]\nfrom text", gender: "female" }),
+      }),
+    );
+    expect(fromText.status).toBe(200);
+    const textBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
+      string,
+      unknown
+    >;
+    expect(textBody).not.toHaveProperty("prompt");
+    expect(textBody.lyrics).toContain("from text");
+    expect(textBody.gender).toBe("female");
   });
 
-  it("omits empty lyrics and sends the requested duration", async () => {
+  it("does not call generate-song without lyrics and ignores duration, seed, and title", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
-    const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === BGM_URL) return jsonResponse({ data: { id: "task-bgm" } });
+      return jsonResponse({ data: {} });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    const omitted = await POST(generateRequest({ lyrics: "   ", duration: 240 }));
-    expect(omitted.status).toBe(500);
+    const omitted = await POST(generateRequest({ lyrics: "   ", duration: 240, seed: 7, title: "Neon rain" }));
+    expect(omitted.status).toBe(400);
+    await expect(omitted.json()).resolves.toEqual({
+      error: "Generation blocked: Lyrics are required.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const kept = await POST(generateRequest({ duration: 240, seed: 7, title: "Neon rain" }));
+    expect(kept.status).toBe(502);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
       string,
       unknown
     >;
-    expect(body.duration).toBe(240);
-    expect(body).not.toHaveProperty("lyrics");
-    expect(body.webhook).toBe(WAVESPEED_TRACK_WEBHOOK_URL);
-    expect(body.output_format).toBe("wav");
-    expect(Number.isInteger(body.seed)).toBe(true);
+    expectLockedPayload(body, {
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
+      lyrics: "[Verse]\nline\n[inst-short]",
+      output_format: "wav",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(SONG_URL);
 
     fetchMock.mockClear();
-    const fallback = await POST(generateRequest({ duration: 15 }));
-    const fallbackBody = JSON.parse(
-      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
-    ) as Record<string, unknown>;
-    expect(fallbackBody.duration).toBe(180);
-
-    for (const seconds of [30, 35, 45, 360]) {
-      fetchMock.mockClear();
-      await POST(generateRequest({ duration: seconds, seed: 7 }));
-      const passed = JSON.parse(
-        String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
-      ) as Record<string, unknown>;
-      expect(passed.duration).toBe(seconds);
-      expect(passed.seed).not.toBe(7);
-      expect(Number.isInteger(passed.seed)).toBe(true);
-    }
-
-    for (const rejected of [29, 361, 45.5, "45"]) {
-      fetchMock.mockClear();
-      await POST(generateRequest({ duration: rejected }));
-      const forced = JSON.parse(
-        String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
-      ) as Record<string, unknown>;
-      expect(forced.duration).toBe(180);
-    }
+    const instrumental = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          isInstrumental: true,
+          prompt: "Heavy southern rock, 74 BPM",
+          duration: 180,
+          seed: 4,
+          title: "Beat only",
+        }),
+      }),
+    );
+    expect(instrumental.status).toBe(200);
+    const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(bgmUrl).toBe(BGM_URL);
+    expect(bgmUrl).not.toContain("/v1/mureka");
+    expectLockedPayload(JSON.parse(String(bgmInit.body)) as Record<string, unknown>, {
+      prompt: "Heavy southern rock, 74 BPM",
+      output_format: "wav",
+    });
   });
 });

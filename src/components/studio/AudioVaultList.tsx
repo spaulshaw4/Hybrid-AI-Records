@@ -168,7 +168,7 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
         {visiblePending.map((row) => (
           <li key={row.id} style={{ borderTop: "1px solid #1e293b", paddingTop: 12 }}>
             <strong style={{ fontSize: 14 }}>{row.title}</strong>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: row.status === "Failed" ? "#f87171" : "#fbbf24" }}>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: row.status === "Failed" ? "#f87171" : "#dc2626" }}>
               {row.genre || "Untitled style"} · {row.status}
             </p>
           </li>
@@ -195,7 +195,7 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
               {barsFor(row.id).map((height, index) => (
                 <span
                   key={`${row.id}-${index}`}
-                  style={{ width: 3, height, borderRadius: 2, background: "#d97706", opacity: 0.85 }}
+                  style={{ width: 3, height, borderRadius: 2, background: "#dc2626", opacity: 0.85 }}
                 />
               ))}
             </div>

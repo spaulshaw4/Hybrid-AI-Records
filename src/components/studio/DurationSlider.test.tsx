@@ -2,9 +2,20 @@ import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { DurationSlider } from "./DurationSlider";
+import { DurationSlider, formatTrackTime } from "./DurationSlider";
 
-const PRESETS = [30, 60, 120, 180, 240, 300, 360] as const;
+const PRESETS = [
+  [30, "30 sec"],
+  [60, "1 min"],
+  [90, "1 min 30 sec"],
+  [120, "2 min"],
+  [150, "2 min 30 sec"],
+  [180, "3 min"],
+  [210, "3 min 30 sec"],
+  [240, "4 min"],
+  [300, "5 min"],
+  [360, "6 min"],
+] as const;
 
 function renderSlider(initial = 180) {
   const setDuration = vi.fn();
@@ -29,23 +40,36 @@ function renderSlider(initial = 180) {
   };
 }
 
+describe("formatTrackTime", () => {
+  it("labels whole minutes and leftover seconds", () => {
+    expect(formatTrackTime(30)).toBe("30 sec");
+    expect(formatTrackTime(60)).toBe("1 min");
+    expect(formatTrackTime(90)).toBe("1 min 30 sec");
+    expect(formatTrackTime(240)).toBe("4 min");
+    expect(formatTrackTime(360)).toBe("6 min");
+  });
+});
+
 describe("DurationSlider", () => {
   it("renders Track Length and displays the duration", () => {
     const { input } = renderSlider(180);
 
     expect(screen.getByText(/track length/i)).toBeInTheDocument();
+    expect(screen.getByText("Length follows the lyric arrangement.")).toBeInTheDocument();
+    expect(screen.getByText("3 min", { selector: "span" })).toBeInTheDocument();
     expect(input()).toHaveValue(180);
     expect(screen.getByRole("slider", { name: "Track length slider" })).toHaveValue("180");
   });
 
-  it("calls setDuration from the 30, 60, 120, 180, 240, 300, and 360 pills", async () => {
+  it("calls setDuration from the human-labeled preset pills", async () => {
     const user = userEvent.setup();
     const { setDuration, input } = renderSlider(45);
 
-    for (const seconds of PRESETS) {
-      await user.click(screen.getByRole("button", { name: `${seconds}s` }));
+    for (const [seconds, label] of PRESETS) {
+      await user.click(screen.getByRole("button", { name: label }));
       expect(setDuration).toHaveBeenLastCalledWith(seconds);
       expect(input()).toHaveValue(seconds);
+      expect(screen.getByText(label, { selector: "span" })).toBeInTheDocument();
     }
   });
 

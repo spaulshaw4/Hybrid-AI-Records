@@ -23,7 +23,7 @@ const EASY_INSTRUMENTAL_BEATS = [
 
 const compactActionClass =
   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
-const primaryActionClass = `${compactActionClass} bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-amber-500/30`;
+const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
 const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
 
 type StudioModal = "reference" | "remix" | null;
@@ -377,6 +377,7 @@ export function EnginePage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "AI request failed");
+      if (draft.trim()) setLyrics(draft);
     } finally {
       setIsLyricsLoading(false);
     }
@@ -425,14 +426,27 @@ export function EnginePage() {
   const handleGenerate = async (event: FormEvent | MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (isGenerating) return;
-    const style = prompt.trim();
-    const lyricText = lyrics.trim();
+    const styleValue = (prompt ?? "").trim();
+    const lyricValue = (lyrics ?? "").trim();
     const duration = trackLength || 180;
     const songTitle = title.trim() || "Feel It in the Rain";
-    if (activeTab === "easy" && !style) return;
-    if (isInstrumental && !style) return;
-    if (!style && !lyricText) return;
-    const effectivePrompt = style;
+    if (!isInstrumental && !styleValue && !lyricValue) {
+      console.error("HALT: Attempted to submit with empty prompt and lyrics.");
+      alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
+      return;
+    }
+    if (!isInstrumental && !lyricValue) {
+      console.error("HALT: Attempted to render a vocal master without lyrics.");
+      alert("Generation halted: add lyrics before rendering a vocal master.");
+      return;
+    }
+    if (isInstrumental && !styleValue) {
+      console.error("HALT: Attempted to submit an instrumental with an empty style prompt.");
+      alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
+      return;
+    }
+    if (activeTab === "easy" && !styleValue) return;
+    const effectivePrompt = styleValue;
     const effectiveTitle = songTitle;
     if (effectivePrompt) {
       const historyEntry: SavedPromptItem = {
@@ -446,16 +460,17 @@ export function EnginePage() {
     }
     setIsGenerating(true);
     setErrorMessage(null);
-    console.log("=== SENDING TO BACKEND ===", { prompt: style, lyrics: lyricText, duration, title: songTitle });
+    console.log("READY TO DISPATCH:", { title, prompt: styleValue, lyrics: lyricValue, duration });
+    console.log("=== SENDING TO BACKEND ===", { prompt: styleValue, lyrics: lyricValue, duration, title: songTitle });
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: style,
-          stylePrompt: style,
-          lyrics: lyricText,
-          lyricsText: lyricText,
+          prompt: styleValue,
+          stylePrompt: styleValue,
+          lyrics: lyricValue,
+          lyricsText: lyricValue,
           duration,
           title: songTitle,
           gender,
@@ -513,7 +528,8 @@ export function EnginePage() {
     }
   };
 
-  const customCreateDisabled = isGenerating || (!prompt.trim() && !lyrics.trim());
+  const customCreateDisabled =
+    isGenerating || (!prompt.trim() && !lyrics.trim()) || (isInstrumental && !prompt.trim());
   const styleAssistLabel = prompt.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
   const lyricsAssistLabel = isLyricsLoading
     ? lyrics.trim()
@@ -818,7 +834,7 @@ export function EnginePage() {
                       type="button"
                       disabled={isLyricsLoading}
                       onClick={() => void handleLyricsAssist()}
-                      className={primaryActionClass}
+                      className={badgeActionClass}
                     >
                       <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                       {lyricsAssistLabel}
@@ -867,7 +883,7 @@ export function EnginePage() {
                     type="button"
                     disabled={isAiLoading}
                     onClick={() => void handleEnhanceStyle()}
-                    className={primaryActionClass}
+                    className={badgeActionClass}
                   >
                     {isAiLoading ? "Designing..." : styleAssistLabel}
                   </button>
@@ -975,19 +991,9 @@ export function EnginePage() {
             <button
               type="submit"
               disabled={customCreateDisabled}
-              style={{
-                padding: "14px 0",
-                background: customCreateDisabled ? "#1e293b" : "linear-gradient(90deg, #9f1239 0%, #7e22ce 100%)",
-                backgroundColor: customCreateDisabled ? "#1e293b" : "#9f1239",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: customCreateDisabled ? "not-allowed" : "pointer",
-              }}
+              className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
             >
-              {isGenerating ? "Synthesizing & Vaulting..." : "🎵 Create"}
+              {isGenerating ? "Synthesizing & Vaulting..." : "Render Master Record"}
             </button>
           </form>
         )}
