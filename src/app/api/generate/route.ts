@@ -90,7 +90,7 @@ function firstAlias(...values: unknown[]): string {
 
 function resolvedTitle(value: unknown): string {
   if (typeof value === "string" && value.trim()) return value.trim();
-  return "Feel It in the Rain";
+  return "Untitled";
 }
 
 function logGenerationBody(body: GenerateBody): void {
@@ -162,7 +162,12 @@ function customerMessage(message: string, fallback: string): string {
 }
 
 /** One attempt uses a 30s timeout. Network and 429/5xx responses retry; other HTTP errors do not. */
-async function fetchJson(url: string, init: RequestInit, retries: number): Promise<unknown> {
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  retries: number,
+  unwrap = true,
+): Promise<unknown> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, {
@@ -180,6 +185,7 @@ async function fetchJson(url: string, init: RequestInit, retries: number): Promi
       const code = body.code;
       const codeOk = code === 200 || code === undefined;
       if (response.ok && codeOk) {
+        if (!unwrap) return body;
         if (body.data !== undefined && body.data !== null) return body.data;
         if (hasIdOrStatus(body)) return body;
         if (code === 200) return body;
@@ -221,12 +227,50 @@ function readResultStatus(body: unknown): string {
   return typeof status === "string" ? status.trim().toLowerCase() : "";
 }
 
+function audioUrl(value: unknown): string {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.startsWith("https://")) {
+      if (/\/predictions\/[^/]+\/result\/?$/.test(text)) return "";
+      return text;
+    }
+    if (text.startsWith("{") || text.startsWith("[")) {
+      try {
+        return audioUrl(JSON.parse(text) as unknown);
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = audioUrl(item);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (isRecord(value)) {
+    for (const key of ["url", "audio", "audio_url", "wav_url", "wav"]) {
+      const found = audioUrl(value[key]);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
 function readResultOutput(body: unknown): string {
   const record = isRecord(body) ? body : null;
   const nested = record && isRecord(record.data) ? record.data : null;
-  const outputs = nested?.outputs ?? record?.outputs;
-  const first = Array.isArray(outputs) ? outputs[0] : undefined;
-  return typeof first === "string" ? first.trim() : "";
+  const layers = [record, nested];
+  for (const layer of layers) {
+    if (!layer) continue;
+    for (const candidate of [layer.output, layer.outputs, layer.result, layer.audio_url, layer.url]) {
+      const found = audioUrl(candidate);
+      if (found) return found;
+    }
+  }
+  return "";
 }
 
 async function insertVaultRow(
@@ -322,6 +366,7 @@ export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
       headers: { Authorization: `Bearer ${apiKey}` },
     },
     RESULT_RETRIES,
+    false,
   );
 
   const status = readResultStatus(pollData);
@@ -333,19 +378,22 @@ export async function settleTrackFromWaveSpeed(taskId: string): Promise<void> {
   }
   if (status !== "completed") return;
 
+  console.log("[generate] completed task full payload:", JSON.stringify(pollData));
   const outputUrl = readResultOutput(pollData);
   if (!outputUrl.startsWith("https://")) {
-    failTrackJob(taskId, "Generation failed upstream");
-    return;
+    throw new Error(`Task marked completed but no audio URL found in: ${JSON.stringify(pollData)}`);
   }
 
   const job = beginDelivery(taskId);
   if (!job) return;
+  console.log(`[vault] uploading ${outputUrl}`);
   try {
     const urls = await vaultCompletedWav(job, outputUrl);
     completeTrackJob(taskId, urls);
+    console.log(`[vault] stored ${taskId}`);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
+    console.error(`[vault] upload failed ${taskId}`, message || "error");
     failTrackJob(taskId, message || "Generation failed upstream");
   }
 }
@@ -375,10 +423,17 @@ export async function watchTrack(taskId: string): Promise<void> {
   }
 }
 
+const watching = new Set<string>();
+
 function startTrackWatch(taskId: string): void {
   // VITEST=true skips the automatic watch. Tests call watchTrack or settle explicitly.
+  // setTimeout detaches the poll from the POST so a browser refresh cannot abort the vault.
   if (process.env.VITEST === "true") return;
-  void watchTrack(taskId);
+  if (watching.has(taskId)) return;
+  watching.add(taskId);
+  setTimeout(() => {
+    void watchTrack(taskId).finally(() => watching.delete(taskId));
+  }, 0);
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -426,11 +481,13 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const endpoint = isInstrumental ? GENERATE_BGM_URL : GENERATE_SONG_URL;
-    // generate-song rejects unknown keys. vocal_id, reference_id, webhook, duration, seed, and title stay off this body.
+    // duration, seed, webhook, vocal_id, and reference_id stay off this body.
     const payload: {
       output_format: "wav";
       prompt?: string;
       lyrics?: string;
+      lyrics_type?: "custom";
+      title?: string;
       gender?: "male" | "female";
     } = {
       output_format: "wav",
@@ -441,8 +498,10 @@ export async function POST(req: Request): Promise<Response> {
       if (clipped) payload.prompt = clipped;
     }
     if (!isInstrumental) {
+      payload.title = title || "Untitled";
+      payload.lyrics_type = "custom";
       payload.lyrics = lyricText;
-      if (vocalGender) payload.gender = vocalGender;
+      payload.gender = vocalGender ?? "male";
     }
     const prompt = payload.prompt ?? "";
 

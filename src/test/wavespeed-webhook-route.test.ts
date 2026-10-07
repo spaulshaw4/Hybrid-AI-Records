@@ -160,7 +160,7 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     const wav = silentWav();
     const cloudfront = "https://cdn.example/master.wav";
     let polls = 0;
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (String(url).includes("vocal-clone")) {
         throw new Error("vocal-clone must not run on generate");
       }
@@ -227,7 +227,7 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     const resultUrl = "https://api.wavespeed.ai/api/v3/predictions/task-3/result";
     const resultCalls = fetchMock.mock.calls.filter((call) => call[0] === resultUrl);
     expect(resultCalls.length).toBeGreaterThanOrEqual(7);
-    expect(resultCalls.every((call) => (call[1] as RequestInit | undefined)?.method === "GET")).toBe(true);
+    expect(resultCalls.every((call) => ((call as [string, RequestInit?])[1])?.method === "GET")).toBe(true);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/v1/mureka"))).toBe(false);
 
     const status = await GET(new Request("http://localhost/api/ai/wavespeed-webhook?taskId=task-3"));
