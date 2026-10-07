@@ -1,5 +1,10 @@
-import { readTrackJob } from "@/lib/wavespeed-track-jobs.server";
+import { failTrackJob, readTrackJob } from "@/lib/wavespeed-track-jobs.server";
 import { settleTrackFromWaveSpeed } from "@/app/api/generate/route";
+
+/** settle throws this when a completed task has no usable https audio URL. */
+function completedWithoutHttpsAudio(message: string): boolean {
+  return /no audio URL found/i.test(message);
+}
 
 function taskIdFrom(body: unknown): string {
   if (!body || typeof body !== "object") return "";
@@ -33,6 +38,12 @@ export async function POST(req: Request): Promise<Response> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
     console.error("[wavespeed-webhook]", message || "error");
+    // Missing, invalid, or non-https output is a finished bad result. Fail the
+    // in-memory job here so it does not stay processing. settle itself still
+    // throws for a missing URL so the background watcher can retry.
+    if (completedWithoutHttpsAudio(message)) {
+      failTrackJob(taskId, "Generation failed upstream");
+    }
   }
   return Response.json({ received: true });
 }
