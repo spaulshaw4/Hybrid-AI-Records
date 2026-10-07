@@ -6,6 +6,22 @@ function completedWithoutHttpsAudio(message: string): boolean {
   return /no audio URL found/i.test(message);
 }
 
+function thrownMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    const message = (err as { message: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return typeof err === "string" ? err : "";
+}
+
+/** Non-https URL embedded in settle's error, or "(missing)" when none was returned. */
+function invalidAudioUrl(message: string): string {
+  const match = message.match(/https?:\/\/[^\s"'<>\\]+/i);
+  if (match && !match[0].toLowerCase().startsWith("https://")) return match[0];
+  return "(missing)";
+}
+
 function taskIdFrom(body: unknown): string {
   if (!body || typeof body !== "object") return "";
   const record = body as Record<string, unknown>;
@@ -36,13 +52,18 @@ export async function POST(req: Request): Promise<Response> {
   try {
     await settleTrackFromWaveSpeed(taskId);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "";
+    const message = thrownMessage(err);
     console.error("[wavespeed-webhook]", message || "error");
-    // Missing, invalid, or non-https output is a finished bad result. Fail the
-    // in-memory job here so it does not stay processing. settle itself still
-    // throws for a missing URL so the background watcher can retry.
+    // Missing or non-https output is a finished bad result. Fail the in-memory
+    // job before returning. settle still throws for an empty URL so a direct
+    // watcher call can leave the job processing and poll again.
     if (completedWithoutHttpsAudio(message)) {
+      console.warn("[wavespeed-webhook] invalid audio URL:", invalidAudioUrl(message));
       failTrackJob(taskId, "Generation failed upstream");
+      return Response.json(
+        { error: "Generation failed upstream: non-https or invalid audio URL" },
+        { status: 400 },
+      );
     }
   }
   return Response.json({ received: true });
