@@ -467,19 +467,65 @@ describe("POST /api/generate", () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const blocked = { error: "Generation blocked: No style or lyrics received by backend." };
 
     const vocal = await POST(generateRequest({ prompt: "   ", lyrics: "  " }));
     expect(vocal.status).toBe(400);
-    await expect(vocal.json()).resolves.toEqual({
-      error: "Generation aborted: Style prompt or lyrics required.",
-    });
+    await expect(vocal.json()).resolves.toEqual(blocked);
 
     const instrumental = await POST(generateRequest({ isInstrumental: true, prompt: " ", lyrics: "still here" }));
     expect(instrumental.status).toBe(400);
-    await expect(instrumental.json()).resolves.toEqual({
-      error: "Generation aborted: Style prompt or lyrics required.",
-    });
+    await expect(instrumental.json()).resolves.toEqual(blocked);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/v1/mureka"))).toBe(false);
+  });
+
+  it("accepts stylePrompt and lyricsText aliases and never sends an empty prompt", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "task-alias" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const aliased = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          stylePrompt: "Close piano, 80 BPM",
+          lyricsText: "[Chorus]\nhey",
+          gender: "female",
+        }),
+      }),
+    );
+    expect(aliased.status).toBe(200);
+    const [aliasUrl, aliasInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(aliasUrl).toBe(SONG_URL);
+    expect(aliasUrl).not.toContain("/v1/mureka");
+    const aliasBody = JSON.parse(String(aliasInit.body)) as Record<string, unknown>;
+    expect(aliasBody.prompt).toContain("Close piano, 80 BPM");
+    expect(aliasBody.prompt).not.toBe("");
+    expect(aliasBody.lyrics).toContain("[Chorus]");
+    expect(aliasBody.lyrics).toContain("hey");
+    expect(aliasBody.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
+    expect(String(aliasBody.webhook)).not.toMatch(/localhost|127\.0\.0\.1/);
+
+    fetchMock.mockClear();
+    const lyricsOnly = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lyrics: "[Verse]\nstorm", gender: "male" }),
+      }),
+    );
+    expect(lyricsOnly.status).toBe(200);
+    const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(songUrl).toBe("https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song");
+    expect(songUrl).not.toContain("/v1/mureka");
+    const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
+    expect(songBody.prompt).toBe(`${MALE_VOCAL_LEAD}Deep soulful acoustic groove, 75 BPM`);
+    expect(songBody.prompt).not.toBe("");
+    expect(songBody.lyrics).toContain("[Verse]");
+    expect(songBody.webhook).toBe("https://hybrid-ai-records.com/api/ai/wavespeed-webhook");
+    expect(String(songBody.webhook)).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
   it("omits empty lyrics and sends the requested duration", async () => {
@@ -505,5 +551,25 @@ describe("POST /api/generate", () => {
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     ) as Record<string, unknown>;
     expect(fallbackBody.duration).toBe(180);
+
+    for (const seconds of [30, 35, 45, 360]) {
+      fetchMock.mockClear();
+      await POST(generateRequest({ duration: seconds, seed: 7 }));
+      const passed = JSON.parse(
+        String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+      ) as Record<string, unknown>;
+      expect(passed.duration).toBe(seconds);
+      expect(passed.seed).not.toBe(7);
+      expect(Number.isInteger(passed.seed)).toBe(true);
+    }
+
+    for (const rejected of [29, 361, 45.5, "45"]) {
+      fetchMock.mockClear();
+      await POST(generateRequest({ duration: rejected }));
+      const forced = JSON.parse(
+        String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+      ) as Record<string, unknown>;
+      expect(forced.duration).toBe(180);
+    }
   });
 });

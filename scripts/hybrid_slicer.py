@@ -122,6 +122,9 @@ class HybridEngineSlicer:
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher()
     slicer = HybridEngineSlicer()
     slicer.process_all(
         input_dir=r"D:\MusicDatasets\curated_vault\TEST_FOLDER",

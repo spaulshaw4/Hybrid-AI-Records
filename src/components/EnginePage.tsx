@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
+import { Sparkles } from "lucide-react";
 
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,12 +8,23 @@ import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyProm
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { AudioVaultList } from "@/components/studio/AudioVaultList";
+import { DurationSlider } from "@/components/studio/DurationSlider";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
-const TRACK_LENGTHS = [60, 120, 180, 240] as const;
-type TrackLength = (typeof TRACK_LENGTHS)[number];
+const EASY_INSTRUMENTAL_BEATS = [
+  "Heavy 808 trap beat, rolling hi-hats, dark minor synth pads, 140 BPM",
+  "Boom bap hip hop groove, vinyl crackle, soulful vocal chop, punchy kick, 90 BPM",
+  "Amapiano club rhythm, deep log drum bassline, airy shaker loops, 113 BPM",
+  "Modern melodic drill groove, sliding sub bass, atmospheric strings, 142 BPM",
+  "Lo-fi chill instrumental beat, warm Rhodes piano, dusty vinyl snare, 84 BPM",
+] as const;
+
+const compactActionClass =
+  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
+const primaryActionClass = `${compactActionClass} bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-amber-500/30`;
+const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
 
 type StudioModal = "reference" | "remix" | null;
 
@@ -191,7 +203,7 @@ export function EnginePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
-  const [trackLength, setTrackLength] = useState<TrackLength>(180);
+  const [trackLength, setTrackLength] = useState(180);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const pageRef = useRef<HTMLElement>(null);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
@@ -413,9 +425,15 @@ export function EnginePage() {
   const handleGenerate = async (event: FormEvent | MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (isGenerating) return;
-    if (activeTab === "custom" && !prompt.trim() && !lyrics.trim()) return;
-    const effectivePrompt = prompt.trim();
-    const effectiveTitle = title.trim() || "Untitled Master";
+    const style = prompt.trim();
+    const lyricText = lyrics.trim();
+    const duration = trackLength || 180;
+    const songTitle = title.trim() || "Feel It in the Rain";
+    if (activeTab === "easy" && !style) return;
+    if (isInstrumental && !style) return;
+    if (!style && !lyricText) return;
+    const effectivePrompt = style;
+    const effectiveTitle = songTitle;
     if (effectivePrompt) {
       const historyEntry: SavedPromptItem = {
         id: Date.now().toString(),
@@ -428,17 +446,20 @@ export function EnginePage() {
     }
     setIsGenerating(true);
     setErrorMessage(null);
+    console.log("=== SENDING TO BACKEND ===", { prompt: style, lyrics: lyricText, duration, title: songTitle });
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: effectiveTitle,
-          prompt: effectivePrompt,
-          lyrics: isInstrumental ? "" : lyrics,
+          prompt: style,
+          stylePrompt: style,
+          lyrics: lyricText,
+          lyricsText: lyricText,
+          duration,
+          title: songTitle,
           gender,
           isInstrumental,
-          duration: activeTab === "custom" ? trackLength : 180,
           vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
           ...(authUserId ? { userId: authUserId } : {}),
         }),
@@ -494,7 +515,23 @@ export function EnginePage() {
 
   const customCreateDisabled = isGenerating || (!prompt.trim() && !lyrics.trim());
   const styleAssistLabel = prompt.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
-  const lyricsAssistLabel = lyrics.trim() ? "✨ Format & Polish" : "✨ Write with Claude";
+  const lyricsAssistLabel = isLyricsLoading
+    ? lyrics.trim()
+      ? "Polishing..."
+      : "Drafting..."
+    : lyrics.trim()
+      ? "Format & Polish"
+      : "Studio Ghostwriter";
+
+  const handleMakeABeat = () => {
+    setIsInstrumental(true);
+    setPrompt((current) => {
+      const typed = current.trim();
+      if (typed) return typed;
+      const index = Math.floor(Math.random() * EASY_INSTRUMENTAL_BEATS.length);
+      return EASY_INSTRUMENTAL_BEATS[index] ?? EASY_INSTRUMENTAL_BEATS[0];
+    });
+  };
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
     ? {
@@ -733,12 +770,7 @@ export function EnginePage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsInstrumental(true);
-                    setPrompt((prev) =>
-                      prev ? `${prev}, punchy instrumental beat` : "Heavy 808 acoustic hybrid beat, hard drums",
-                    );
-                  }}
+                  onClick={handleMakeABeat}
                   style={{
                     backgroundColor: isInstrumental ? "rgba(225, 29, 72, 0.2)" : "rgba(255,255,255,0.05)",
                     border: isInstrumental ? "1px solid #e11d48" : "1px solid rgba(255,255,255,0.1)",
@@ -786,16 +818,9 @@ export function EnginePage() {
                       type="button"
                       disabled={isLyricsLoading}
                       onClick={() => void handleLyricsAssist()}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#f43f5e",
-                        cursor: isLyricsLoading ? "not-allowed" : "pointer",
-                        padding: 0,
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
+                      className={primaryActionClass}
                     >
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                       {lyricsAssistLabel}
                     </button>
                   )}
@@ -836,45 +861,21 @@ export function EnginePage() {
 
             <div style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Style & Sonic Descriptor</span>
-                <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Musical Style</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     disabled={isAiLoading}
                     onClick={() => void handleEnhanceStyle()}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "#f43f5e",
-                      cursor: isAiLoading ? "not-allowed" : "pointer",
-                      padding: 0,
-                      fontSize: 12,
-                      fontWeight: 700,
-                    }}
+                    className={primaryActionClass}
                   >
                     {isAiLoading ? "Designing..." : styleAssistLabel}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsTemplatesOpen(true)}
-                    style={{ backgroundColor: "transparent", border: "none", color: "#f9a8d4", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
-                  >
-                    📋 Templates
+                  <button type="button" onClick={() => setIsTemplatesOpen(true)} className={secondaryActionClass}>
+                    Templates
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsMyPromptsOpen(true)}
-                    style={{
-                      backgroundColor: "transparent",
-                      border: "none",
-                      color: "#f43f5e",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      padding: 0,
-                      fontSize: 12,
-                    }}
-                  >
-                    🔖 My Prompts
+                  <button type="button" onClick={() => setIsMyPromptsOpen(true)} className={secondaryActionClass}>
+                    Saved
                   </button>
                 </div>
               </div>
@@ -953,31 +954,8 @@ export function EnginePage() {
                 </div>
               </div>
             )}
-              <div style={{ ...cardStyle, flex: "1 1 280px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 16px" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Length</span>
-                <div role="group" aria-label="Track length" style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
-                  {TRACK_LENGTHS.map((seconds) => (
-                    <button
-                      key={seconds}
-                      type="button"
-                      aria-pressed={trackLength === seconds}
-                      aria-label={`${seconds} seconds`}
-                      onClick={() => setTrackLength(seconds)}
-                      style={{
-                        padding: "5px 12px",
-                        backgroundColor: trackLength === seconds ? "#9f1239" : "transparent",
-                        color: trackLength === seconds ? "#ffffff" : "#94a3b8",
-                        border: "none",
-                        borderRadius: 4,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {seconds}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ ...cardStyle, flex: "1 1 280px" }}>
+                <DurationSlider value={trackLength} onChange={setTrackLength} />
               </div>
             </div>
 

@@ -350,6 +350,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher()
     args = build_parser().parse_args()
     RAW_INPUT = args.raw
     CORPUS_OUTPUT = args.corpus

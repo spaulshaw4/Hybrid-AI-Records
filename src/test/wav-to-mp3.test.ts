@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { isMp3FrameOrId3, wavToMp3 } from "@/lib/audio/wavToMp3";
 
-function pcm16Wav(channels: number, junkBeforeData: boolean): Buffer {
+function pcm16Wav(channels: number, factBeforeData: boolean): Buffer {
   const sampleRate = 44100;
   const frames = 1152;
   const dataLen = frames * channels * 2;
-  const junkLen = junkBeforeData ? 8 : 0;
-  const dataHeaderAt = 36 + junkLen;
+  // A real fact chunk (8-byte header + 4-byte sample-count payload) sits between
+  // fmt and data, so the data id starts at offset 48 rather than 44.
+  const factPayloadLen = 4;
+  const factChunkLen = factBeforeData ? 8 + factPayloadLen : 0;
+  const dataHeaderAt = 36 + factChunkLen;
   const pcmAt = dataHeaderAt + 8;
   const buffer = Buffer.alloc(pcmAt + dataLen);
   buffer.write("RIFF", 0);
@@ -20,9 +23,10 @@ function pcm16Wav(channels: number, junkBeforeData: boolean): Buffer {
   buffer.writeUInt32LE(sampleRate * channels * 2, 28);
   buffer.writeUInt16LE(channels * 2, 32);
   buffer.writeUInt16LE(16, 34);
-  if (junkLen > 0) {
-    buffer.write("JUNK", 36);
-    buffer.writeUInt32LE(junkLen, 40);
+  if (factBeforeData) {
+    buffer.write("fact", 36);
+    buffer.writeUInt32LE(factPayloadLen, 40);
+    buffer.writeUInt32LE(frames, 44);
   }
   buffer.write("data", dataHeaderAt);
   buffer.writeUInt32LE(dataLen, dataHeaderAt + 4);
@@ -30,6 +34,42 @@ function pcm16Wav(channels: number, junkBeforeData: boolean): Buffer {
     buffer.writeInt16LE((i % 50) - 25, pcmAt + i * 2);
   }
   return buffer;
+}
+
+function createShiftedWavBuffer(sampleCount = 1152): Buffer {
+  const numChannels = 2;
+  const sampleRate = 44100;
+  const bitsPerSample = 16;
+  const dataSize = sampleCount * numChannels * (bitsPerSample / 8);
+  const junkChunkId = "JUNK";
+  const junkChunkData = Buffer.alloc(12, 0);
+  const junkChunkSize = junkChunkData.length;
+  const riffSize = 4 + 24 + (8 + junkChunkSize) + (8 + dataSize);
+  const header = Buffer.alloc(12);
+  header.write("RIFF", 0);
+  header.writeInt32LE(riffSize, 4);
+  header.write("WAVE", 8);
+  const fmtChunk = Buffer.alloc(24);
+  fmtChunk.write("fmt ", 0);
+  fmtChunk.writeInt32LE(16, 4);
+  fmtChunk.writeInt16LE(1, 8);
+  fmtChunk.writeInt16LE(numChannels, 10);
+  fmtChunk.writeInt32LE(sampleRate, 12);
+  fmtChunk.writeInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 16);
+  fmtChunk.writeInt16LE(numChannels * (bitsPerSample / 8), 20);
+  fmtChunk.writeInt16LE(bitsPerSample, 22);
+  const junkChunk = Buffer.alloc(8 + junkChunkSize);
+  junkChunk.write(junkChunkId, 0);
+  junkChunk.writeInt32LE(junkChunkSize, 4);
+  junkChunkData.copy(junkChunk, 8);
+  const dataChunkHeader = Buffer.alloc(8);
+  dataChunkHeader.write("data", 0);
+  dataChunkHeader.writeInt32LE(dataSize, 4);
+  const samples = Buffer.alloc(dataSize);
+  for (let i = 0; i < samples.length; i += 2) {
+    samples.writeInt16LE(1000, i);
+  }
+  return Buffer.concat([header, fmtChunk, junkChunk, dataChunkHeader, samples]);
 }
 
 function expectMp3(bytes: Buffer): void {
@@ -60,9 +100,13 @@ describe("wavToMp3", () => {
   });
 
   it("encodes 16-bit stereo PCM when the data chunk is not at offset 44", () => {
-    const shifted = pcm16Wav(2, true);
+    const shifted = createShiftedWavBuffer();
     expect(shifted.toString("ascii", 44, 48)).not.toBe("data");
+    expect(shifted.toString("ascii", 56, 60)).toBe("data");
     const plain = pcm16Wav(2, false);
+    for (let i = 44; i < plain.length; i += 2) {
+      plain.writeInt16LE(1000, i);
+    }
     const mp3 = wavToMp3(shifted);
     expectMp3(mp3);
     expect(Buffer.compare(mp3, wavToMp3(plain))).toBe(0);

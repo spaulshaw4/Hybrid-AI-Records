@@ -24,6 +24,7 @@ export const SITEMAP_ENTRIES: SitemapEntry[] = [
   { path: "/portal", changefreq: "weekly", priority: "0.9" },
   { path: "/engine", changefreq: "weekly", priority: "0.9" },
   { path: "/studio", changefreq: "weekly", priority: "0.8" },
+  { path: "/simple-studio", changefreq: "weekly", priority: "0.8" },
   { path: "/cinematic-studio", changefreq: "weekly", priority: "0.8" },
   { path: "/artists", changefreq: "weekly", priority: "0.8" },
   { path: "/tokens", changefreq: "weekly", priority: "0.8" },

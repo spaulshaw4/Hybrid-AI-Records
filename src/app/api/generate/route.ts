@@ -56,7 +56,11 @@ export function promptWithVocalGender(prompt: string, gender: "male" | "female")
 type GenerateBody = {
   title?: unknown;
   prompt?: unknown;
+  stylePrompt?: unknown;
+  style?: unknown;
   lyrics?: unknown;
+  lyricsText?: unknown;
+  text?: unknown;
   gender?: unknown;
   isInstrumental?: unknown;
   vocalId?: unknown;
@@ -65,12 +69,34 @@ type GenerateBody = {
   duration?: unknown;
 };
 
-const TRACK_DURATIONS = new Set([60, 120, 180, 240]);
 const LYRICS_ONLY_STYLE = "Deep soulful acoustic groove, 75 BPM";
-const EMPTY_GENERATION_ERROR = "Generation aborted: Style prompt or lyrics required.";
+const EMPTY_GENERATION_ERROR = "Generation blocked: No style or lyrics received by backend.";
+
+function firstAlias(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const text = value.trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function resolvedTitle(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return "Feel It in the Rain";
+}
+
+function logGenerationBody(body: GenerateBody): void {
+  const safe: Record<string, unknown> = { ...body };
+  for (const key of Object.keys(safe)) {
+    if (/authorization|token|api[_-]?key|secret|password/i.test(key)) delete safe[key];
+  }
+  console.log("=== INCOMING GENERATION PAYLOAD ===", safe);
+}
 
 function trackDuration(value: unknown): number {
-  return typeof value === "number" && TRACK_DURATIONS.has(value) ? value : 180;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 30 || value > 360) return 180;
+  return value;
 }
 
 function generationSeed(): number {
@@ -263,35 +289,36 @@ function startTrackWatch(taskId: string): void {
 
 export async function POST(req: Request): Promise<Response> {
   try {
+    const body = (await req.json()) as GenerateBody;
+    logGenerationBody(body);
     const {
-      title: rawTitle,
-      prompt: rawPrompt,
-      lyrics: rawLyrics,
       gender,
       isInstrumental: rawInstrumental,
       vocalId,
       referenceId: rawReferenceId,
       userId: rawUserId,
       duration: rawDuration,
-    } = (await req.json()) as GenerateBody;
-    const formattedPrompt = replaceBareConflictingPrompt(
-      formatMurekaPrompt(typeof rawPrompt === "string" ? rawPrompt : ""),
+    } = body;
+    const aliasedStyle = replaceBareConflictingPrompt(
+      formatMurekaPrompt(firstAlias(body.prompt, body.stylePrompt, body.style)),
     );
-    const lyrics = formatMurekaLyrics(typeof rawLyrics === "string" ? rawLyrics : "");
+    const lyrics = formatMurekaLyrics(firstAlias(body.lyrics, body.lyricsText, body.text));
     const isInstrumental = rawInstrumental === true;
-    if ((isInstrumental && !formattedPrompt) || (!isInstrumental && !formattedPrompt && !lyrics)) {
-      return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
-    }
-    const stylePrompt = !isInstrumental && !formattedPrompt ? LYRICS_ONLY_STYLE : formattedPrompt;
-    const title =
-      typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : "Untitled Master";
+    const title = resolvedTitle(body.title);
     const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     const vocalUsed = vocalId && String(vocalId).trim() !== "" ? String(vocalId).trim() : "";
     const vocalGender = normalizeVocalGender(gender);
-    const prompt =
-      !isInstrumental && !vocalUsed
-        ? promptWithVocalGender(stylePrompt, vocalGender)
-        : stylePrompt;
+    let style = aliasedStyle;
+    if (!isInstrumental && !style && lyrics) style = LYRICS_ONLY_STYLE;
+    if ((isInstrumental && !style) || (!isInstrumental && !style && !lyrics)) {
+      console.error("ABORTED: Style and lyrics are both empty or undefined!");
+      return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
+    }
+    const prompt = !isInstrumental && !vocalUsed ? promptWithVocalGender(style, vocalGender) : style;
+    if (!prompt.trim()) {
+      console.error("ABORTED: Style and lyrics are both empty or undefined!");
+      return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
+    }
     const duration = trackDuration(rawDuration);
     const seed = generationSeed();
 
@@ -327,6 +354,7 @@ export async function POST(req: Request): Promise<Response> {
       else payload.gender = vocalGender;
     }
 
+    console.log("=== DISPATCHING TO WAVESPEED ===", payload);
     const submitRes = await fetch(endpoint, {
       method: "POST",
       headers: {

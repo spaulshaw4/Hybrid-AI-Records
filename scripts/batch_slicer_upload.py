@@ -237,6 +237,9 @@ def phase_3_cleanup(dry_run=True):
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher()
     for dir_path in [SPLICED_STAGING_DIR, ARCHIVE_RAW_DIR, ARCHIVE_SLICES_DIR]:
         os.makedirs(dir_path, exist_ok=True)
 

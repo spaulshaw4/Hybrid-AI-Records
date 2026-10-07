@@ -537,4 +537,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher()
     sys.exit(main())

@@ -101,4 +101,7 @@ def start_watchdog():
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher(idle=True)
     start_watchdog()

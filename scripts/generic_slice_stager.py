@@ -112,6 +112,9 @@ def stage_session(session_id: str, output_dir: str, slice_duration: float, genre
 
 
 if __name__ == "__main__":
+    from slicer_launch_guard import refuse_unattended_launcher
+
+    refuse_unattended_launcher()
     parser = argparse.ArgumentParser()
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--slice-duration", type=float, default=4.0)
