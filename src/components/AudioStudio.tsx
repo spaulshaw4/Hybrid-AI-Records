@@ -2752,9 +2752,11 @@ export function AudioStudio() {
           const vocalGender =
             resolvedGender === "f" || resolvedGender === "Female" ? "female" : "male";
           let ownerId = sessionUserId?.trim() ?? "";
+          let accessToken = "";
           try {
             const { data: auth } = await supabase.auth.getSession();
             const liveId = auth.session?.user?.id?.trim() ?? "";
+            accessToken = auth.session?.access_token?.trim() ?? "";
             if (liveId) ownerId = liveId;
           } catch {
             /* keep the id already held in state */
@@ -2762,7 +2764,10 @@ export function AudioStudio() {
           if (ownerId && ownerId !== sessionUserId) setSessionUserId(ownerId);
           const response = await fetch("/api/generate", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            },
             body: JSON.stringify(
               instrumental
                 ? {

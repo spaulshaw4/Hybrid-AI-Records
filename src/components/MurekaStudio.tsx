@@ -45,15 +45,20 @@ export default function MurekaStudio() {
     setTitle(payload.title);
     try {
       let userId: string | null = null;
+      let accessToken = "";
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        userId = auth.user?.id ?? null;
+        const { data: auth } = await supabase.auth.getSession();
+        userId = auth.session?.user?.id ?? null;
+        accessToken = auth.session?.access_token?.trim() ?? "";
       } catch {
         userId = null;
       }
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify({
           ...payload,
           ...(userId ? { userId } : {}),

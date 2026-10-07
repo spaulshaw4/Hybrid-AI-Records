@@ -1,15 +1,35 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadMock, insertMock } = vi.hoisted(() => ({
+const { uploadMock, insertMock, resolveStudioSessionMock } = vi.hoisted(() => ({
   uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
   insertMock: vi.fn(async () => ({ error: null })),
+  resolveStudioSessionMock: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({
     storage: { from: () => ({ upload: uploadMock }) },
-    from: () => ({ insert: insertMock }),
+    from: (table: string) => {
+      if (table === "token_balances") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { balance: 3 }, error: null }),
+            }),
+          }),
+        };
+      }
+      return { insert: insertMock };
+    },
+    rpc: async () => ({
+      data: [{ ok: true, balance: 2, already_applied: false }],
+      error: null,
+    }),
   }),
+}));
+
+vi.mock("@/lib/studio-request-auth.server", () => ({
+  resolveStudioSession: (...args: unknown[]) => resolveStudioSessionMock(...args),
 }));
 
 import { POST as generatePost } from "@/app/api/generate/route";
@@ -69,7 +89,7 @@ function wav24(): Buffer {
 function generateRequest(extra: Record<string, unknown> = {}): Request {
   return new Request("http://localhost/api/generate", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: "Bearer a.b.c" },
     body: JSON.stringify({
       prompt: "Acoustic,  heavy rock",
       lyrics: "[Verse]\nline\n[inst]",
@@ -88,15 +108,30 @@ function webhookRequest(body: unknown): Request {
 
 describe("POST /api/ai/wavespeed-webhook", () => {
   const originalKey = process.env.WAVESPEED_API_KEY;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let sessionUserId = "user-1";
+
+  beforeEach(() => {
+    sessionUserId = "user-1";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    resolveStudioSessionMock.mockImplementation(async () => ({ userId: sessionUserId }));
+  });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     uploadMock.mockClear();
     insertMock.mockClear();
+    resolveStudioSessionMock.mockReset();
     resetTrackJobs();
     if (originalKey === undefined) delete process.env.WAVESPEED_API_KEY;
     else process.env.WAVESPEED_API_KEY = originalKey;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalService === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalService;
   });
 
   it("ignores an unknown task and does not fetch its output URL", async () => {
@@ -293,6 +328,7 @@ describe("POST /api/ai/wavespeed-webhook", () => {
       }),
     );
 
+    sessionUserId = "user-24";
     await generatePost(generateRequest({ title: "Wide Take", userId: "user-24" }));
     const res = await webhookPost(webhookRequest({ id: "task-24" }));
     expect(res.status).toBe(200);
