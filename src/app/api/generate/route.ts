@@ -56,6 +56,22 @@ export function normalizeVocalGender(gender: unknown): "male" | "female" {
   return "male";
 }
 
+const MALE_VOCAL_LEAD = "Deep soulful male vocal, baritone delivery, ";
+const FEMALE_VOCAL_LEAD = "Female vocal, ";
+
+/**
+ * Mureka defaults to female pop when the prompt never names the singer.
+ * The gender field alone does not lock it; the prompt text has to.
+ */
+export function promptWithVocalGender(prompt: string, gender: "male" | "female"): string {
+  if (gender === "female") {
+    if (/\bfemale vocal\b/i.test(prompt)) return prompt;
+    return `${FEMALE_VOCAL_LEAD}${prompt}`;
+  }
+  if (/\bmale vocal\b|\bbaritone\b/i.test(prompt)) return prompt;
+  return `${MALE_VOCAL_LEAD}${prompt}`;
+}
+
 type GenerateBody = {
   title?: unknown;
   prompt?: unknown;
@@ -120,7 +136,14 @@ export function transcodeWavToMp3(wavBuffer: Buffer): Buffer {
 
   const flushed = encoder.flush();
   if (flushed.length > 0) mp3Data.push(flushed);
-  return Buffer.concat(mp3Data.map((chunk) => Buffer.from(chunk)));
+  // Each chunk is an Int8Array view. Copy only its byte range so the frame stays intact.
+  const mp3Buffer = Buffer.concat(
+    mp3Data.map((arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength)),
+  );
+  if (mp3Buffer.length < 2 || mp3Buffer[0] !== 0xff || (mp3Buffer[1] & 0xe0) !== 0xe0) {
+    throw new Error("MP3 encode produced an empty or header-less buffer");
+  }
+  return mp3Buffer;
 }
 
 const TERMINAL_FAIL = new Set(["failed", "cancelled", "timeout", "deleted"]);
@@ -291,7 +314,7 @@ export async function POST(req: Request): Promise<Response> {
       referenceId: rawReferenceId,
       userId: rawUserId,
     } = (await req.json()) as GenerateBody;
-    const prompt = replaceBareConflictingPrompt(
+    const formattedPrompt = replaceBareConflictingPrompt(
       formatMurekaPrompt(typeof rawPrompt === "string" ? rawPrompt : ""),
     );
     const lyrics = formatMurekaLyrics(typeof rawLyrics === "string" ? rawLyrics : "");
@@ -300,6 +323,11 @@ export async function POST(req: Request): Promise<Response> {
       typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : "Untitled Master";
     const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
     const vocalUsed = vocalId && String(vocalId).trim() !== "" ? String(vocalId).trim() : "";
+    const vocalGender = normalizeVocalGender(gender);
+    const prompt =
+      !isInstrumental && !vocalUsed
+        ? promptWithVocalGender(formattedPrompt, vocalGender)
+        : formattedPrompt;
 
     const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
     if (!apiKey) {
@@ -325,7 +353,7 @@ export async function POST(req: Request): Promise<Response> {
     if (!isInstrumental) {
       payload.lyrics = lyrics;
       if (vocalUsed) payload.vocal_id = vocalUsed;
-      else payload.gender = normalizeVocalGender(gender);
+      else payload.gender = vocalGender;
     }
 
     const submitRes = await fetch(endpoint, {

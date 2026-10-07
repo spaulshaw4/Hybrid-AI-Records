@@ -78,14 +78,14 @@ export default function LyricEditorModal({
     setIsGeneratingLyrics(true);
     setStatusMessage(null);
     try {
-      const effectiveTopic = topic.trim() || draftLyrics.trim() || "the moon in my eyes color the night";
+      const styleText = currentPrompt.trim();
       const res = await fetch("/api/ai/coproducer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "generate_lyrics",
-          topic: effectiveTopic,
-          lyrics: draftLyrics,
+          topic: draftLyrics.trim() || styleText || "Overcoming the storm",
+          genre: styleText,
           title: currentTitle.trim() || "Untitled Track",
         }),
       });
@@ -218,6 +218,24 @@ export default function LyricEditorModal({
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{ fontSize: 12, color: "#64748b" }}>{draftLyrics.length}/5000</span>
+              <button
+                type="button"
+                disabled={!draftLyrics}
+                onClick={() => setDraftLyrics("")}
+                style={{
+                  background: "transparent",
+                  backgroundColor: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: 0,
+                  cursor: draftLyrics ? "pointer" : "not-allowed",
+                  opacity: draftLyrics ? 1 : 0.45,
+                }}
+              >
+                Clear Draft
+              </button>
               <button
                 type="button"
                 onClick={() => {

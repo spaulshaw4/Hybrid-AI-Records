@@ -361,8 +361,9 @@ export function EnginePage() {
     };
   }, [isEnhanceMenuOpen]);
 
-  const handleEnhanceSelection = async (type: "enhance_match_vibe" | "enhance_surprise_me") => {
-    if (isAiLoading) return;
+  const handleEnhanceStyle = async () => {
+    const styleText = prompt.trim();
+    if (!styleText || isAiLoading) return;
     setIsEnhanceMenuOpen(false);
     setIsAiLoading(true);
     setErrorMessage(null);
@@ -370,13 +371,25 @@ export function EnginePage() {
       const res = await fetch("/api/ai/coproducer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: type, text: prompt.trim(), title }),
+        body: JSON.stringify({ action: "enhance_style", prompt: styleText }),
       });
-      const data = (await res.json()) as { success?: boolean; result?: string; error?: string };
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "AI request failed");
+      const rawText = await res.text();
+      let data: { success?: boolean; style?: string; prompt?: string; error?: string; message?: string } = {};
+      try {
+        const parsed: unknown = JSON.parse(rawText);
+        if (parsed && typeof parsed === "object") {
+          data = parsed as { success?: boolean; style?: string; prompt?: string; error?: string; message?: string };
+        }
+      } catch {
+        throw new Error(`Server returned non-JSON (${res.status}): ${rawText.slice(0, 120)}`);
       }
-      setPrompt(data.result ?? "");
+      const enhanced = (data.style || data.prompt || "").trim();
+      if (!res.ok || !enhanced) {
+        throw new Error(
+          data.error || data.message || (res.ok ? "Style enhancement returned an empty prompt." : "AI request failed"),
+        );
+      }
+      setPrompt(enhanced);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "AI request failed");
@@ -428,6 +441,7 @@ export function EnginePage() {
   const handleGenerate = async (event: FormEvent | MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (isGenerating) return;
+    if (activeTab === "custom" && !prompt.trim() && !lyrics.trim()) return;
     const effectivePrompt = prompt.trim() || FALLBACK_PROMPT;
     const effectiveTitle = title.trim() || "Untitled Master";
     const historyEntry: SavedPromptItem = {
@@ -526,6 +540,7 @@ export function EnginePage() {
     }
   };
 
+  const customCreateDisabled = isGenerating || (!prompt.trim() && !lyrics.trim());
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
     ? {
@@ -898,21 +913,24 @@ export function EnginePage() {
                   <div ref={enhanceMenuRef} style={{ position: "relative" }}>
                     <button
                       type="button"
-                      disabled={isAiLoading}
+                      disabled={isAiLoading || !prompt.trim()}
                       aria-expanded={isEnhanceMenuOpen}
                       aria-haspopup="menu"
-                      onClick={() => setIsEnhanceMenuOpen((open) => !open)}
+                      onClick={() => {
+                        if (isAiLoading || !prompt.trim()) return;
+                        setIsEnhanceMenuOpen((open) => !open);
+                      }}
                       style={{
                         background: "transparent",
                         border: "none",
                         color: "#f43f5e",
-                        cursor: isAiLoading ? "not-allowed" : "pointer",
+                        cursor: isAiLoading || !prompt.trim() ? "not-allowed" : "pointer",
                         padding: 0,
                         fontSize: 12,
                         fontWeight: 600,
                       }}
                     >
-                      {isAiLoading ? "🪄 Writing..." : "🪄 Enhance"}
+                      {isAiLoading ? "🪄 Designing..." : "🪄 Enhance"}
                     </button>
                     {isEnhanceMenuOpen ? (
                       <div
@@ -935,7 +953,7 @@ export function EnginePage() {
                         <button
                           type="button"
                           role="menuitem"
-                          onClick={() => void handleEnhanceSelection("enhance_match_vibe")}
+                          onClick={() => void handleEnhanceStyle()}
                           onMouseEnter={(event) => {
                             event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
                           }}
@@ -963,7 +981,7 @@ export function EnginePage() {
                         <button
                           type="button"
                           role="menuitem"
-                          onClick={() => void handleEnhanceSelection("enhance_surprise_me")}
+                          onClick={() => void handleEnhanceStyle()}
                           onMouseEnter={(event) => {
                             event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
                           }}
@@ -1075,17 +1093,17 @@ export function EnginePage() {
 
             <button
               type="submit"
-              disabled={isGenerating}
+              disabled={customCreateDisabled}
               style={{
                 padding: "14px 0",
-                background: isGenerating ? "#1e293b" : "linear-gradient(90deg, #9f1239 0%, #7e22ce 100%)",
-                backgroundColor: isGenerating ? "#1e293b" : "#9f1239",
+                background: customCreateDisabled ? "#1e293b" : "linear-gradient(90deg, #9f1239 0%, #7e22ce 100%)",
+                backgroundColor: customCreateDisabled ? "#1e293b" : "#9f1239",
                 color: "#ffffff",
                 border: "none",
                 borderRadius: 8,
                 fontSize: 14,
                 fontWeight: 700,
-                cursor: isGenerating ? "not-allowed" : "pointer",
+                cursor: customCreateDisabled ? "not-allowed" : "pointer",
               }}
             >
               {isGenerating ? "Synthesizing & Vaulting..." : "🎵 Create"}

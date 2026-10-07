@@ -185,7 +185,11 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     expect(wavCall?.[2]).toMatchObject({ contentType: "audio/wav", upsert: true });
     expect(mp3Call?.[2]).toMatchObject({ contentType: "audio/mpeg", upsert: true });
     expect(Buffer.compare(Buffer.from(wavCall?.[1] as Uint8Array), wav)).toBe(0);
-    expect((mp3Call?.[1] as Uint8Array).byteLength).toBeGreaterThan(0);
+    const mp3Bytes = Buffer.from(mp3Call?.[1] as Uint8Array);
+    expect(mp3Bytes.byteLength).toBeGreaterThan(0);
+    expect(mp3Bytes[0]).toBe(0xff);
+    expect(mp3Bytes[1]! & 0xe0).toBe(0xe0);
+    expect(mp3Bytes.toString("utf8")).not.toContain("[object Blob]");
     expect(insertMock).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: "user-1",

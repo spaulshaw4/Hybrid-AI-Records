@@ -17,6 +17,9 @@ import { readTrackJob, resetTrackJobs, WAVESPEED_TRACK_WEBHOOK_URL } from "@/lib
 
 const SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
+const MALE_VOCAL_LEAD = "Deep soulful male vocal, baritone delivery, ";
+const FEMALE_VOCAL_LEAD = "Female vocal, ";
+const DEFAULT_STYLE = "Acoustic, heavy rock";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -84,7 +87,7 @@ describe("POST /api/generate", () => {
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
     expect(JSON.parse(String(init.body))).toEqual({
-      prompt: "Acoustic, heavy rock",
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       output_format: "wav",
       gender: "male",
@@ -180,7 +183,7 @@ describe("POST /api/generate", () => {
     expect(songUrl).toBe(SONG_URL);
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
     expect(songBody).toEqual({
-      prompt: "Acoustic, heavy rock",
+      prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "female",
       output_format: "wav",
@@ -228,7 +231,7 @@ describe("POST /api/generate", () => {
       unknown
     >;
     expect(blankBody).toEqual({
-      prompt: "Acoustic, heavy rock",
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "male",
       output_format: "wav",
@@ -257,6 +260,7 @@ describe("POST /api/generate", () => {
     });
     expect(bgmBody.prompt).toBe("Heavy southern rock, 74 BPM");
     expect(String(bgmBody.prompt).match(/74 BPM/g)).toEqual(["74 BPM"]);
+    expect(String(bgmBody.prompt)).not.toMatch(/\bmale vocal\b|\bbaritone\b|\bfemale vocal\b/i);
     expect(bgmBody).not.toHaveProperty("lyrics");
     expect(bgmBody).not.toHaveProperty("gender");
     expect(bgmBody).not.toHaveProperty("vocal_id");
@@ -275,7 +279,7 @@ describe("POST /api/generate", () => {
       unknown
     >;
     expect(vocalBody).toEqual({
-      prompt: "Acoustic, heavy rock",
+      prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       gender: "male",
       output_format: "wav",
@@ -344,11 +348,12 @@ describe("POST /api/generate", () => {
     expect(blankBody.gender).toBe("male");
   });
 
-  it("sends Male (m) as male and forwards the prompt unchanged", async () => {
+  it("sends Male (m) as male and leads the prompt with baritone delivery", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
-    const prompt = "soft female ballad, close piano, sung verse";
+    const prompt = "Atmospheric downtempo soul, Rhodes piano, 75 BPM";
+    const sentPrompt = `${MALE_VOCAL_LEAD}${prompt}`;
 
     const res = await POST(
       generateRequest({
@@ -366,7 +371,8 @@ describe("POST /api/generate", () => {
       unknown
     >;
     expect(body.gender).toBe("male");
-    expect(body.prompt).toBe(prompt);
+    expect(String(body.prompt).startsWith(MALE_VOCAL_LEAD)).toBe(true);
+    expect(String(body.prompt).endsWith(prompt)).toBe(true);
     expect(body.prompt).not.toContain("gentle plucks");
     expect(body.prompt).not.toContain("Upright Bass");
     expect(body.prompt).not.toContain("warm resonance");
@@ -375,11 +381,64 @@ describe("POST /api/generate", () => {
     expect(body).not.toHaveProperty("styleInfluence");
     expect(body).not.toHaveProperty("audioInfluence");
     expect(body).toEqual({
-      prompt,
+      prompt: sentPrompt,
       lyrics: "The room stays quiet",
       gender: "male",
       output_format: "wav",
       webhook: WAVESPEED_TRACK_WEBHOOK_URL,
     });
+
+    async function submittedPrompt(extra: Record<string, unknown>): Promise<Record<string, unknown>> {
+      fetchMock.mockClear();
+      const next = await POST(generateRequest(extra));
+      expect(next.status).toBe(500);
+      return JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    const alreadyMale = await submittedPrompt({
+      gender: "Male (m)",
+      prompt: "male vocal, close piano, 75 BPM",
+      lyrics: "The room stays quiet",
+    });
+    expect(alreadyMale.gender).toBe("male");
+    expect(alreadyMale.prompt).toBe("male vocal, close piano, 75 BPM");
+
+    const alreadyBaritone = await submittedPrompt({
+      gender: "male",
+      prompt: "dusty baritone, Rhodes piano, 75 BPM",
+      lyrics: "The room stays quiet",
+    });
+    expect(alreadyBaritone.gender).toBe("male");
+    expect(alreadyBaritone.prompt).toBe("dusty baritone, Rhodes piano, 75 BPM");
+
+    const female = await submittedPrompt({
+      gender: "female",
+      prompt,
+      lyrics: "The room stays quiet",
+    });
+    expect(female.gender).toBe("female");
+    expect(female.prompt).toBe(`${FEMALE_VOCAL_LEAD}${prompt}`);
+
+    const alreadyFemale = await submittedPrompt({
+      gender: "female",
+      prompt: "Female vocal, close piano, 75 BPM",
+      lyrics: "The room stays quiet",
+    });
+    expect(alreadyFemale.gender).toBe("female");
+    expect(alreadyFemale.prompt).toBe("Female vocal, close piano, 75 BPM");
+
+    const instrumental = await submittedPrompt({
+      isInstrumental: true,
+      gender: "female",
+      prompt: "Heavy southern rock, 74 BPM",
+      lyrics: "[Chorus]",
+    });
+    expect(instrumental.prompt).toBe("Heavy southern rock, 74 BPM");
+    expect(instrumental).not.toHaveProperty("gender");
+    expect(instrumental).not.toHaveProperty("lyrics");
+    expect(String(instrumental.prompt)).not.toMatch(/\bmale vocal\b|\bbaritone\b|\bfemale vocal\b/i);
   });
 });
