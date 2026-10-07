@@ -166,34 +166,6 @@ async function tick(): Promise<void> {
   }
   const pending = await refreshPendingCount();
 
-  // Periodic safeguard probe (empty-queue ticks) — trips MAINTENANCE on CRITICAL fails.
-  try {
-    const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = tryGetSupabaseAdmin();
-    if (admin) {
-      const [{ count: processing }, { count: failed }] = await Promise.all([
-        admin
-          .from("generation_queue")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "processing"),
-        admin
-          .from("generation_queue")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "failed"),
-      ]);
-      const { PipelineTriggerOrchestrator } = await import(
-        "@/lib/PipelineTriggerOrchestrator"
-      );
-      await PipelineTriggerOrchestrator.evaluateAndTriggerSafeguards({
-        pendingJobs: pending,
-        processingJobs: processing ?? 0,
-        failedJobCount: failed ?? 0,
-      });
-    }
-  } catch {
-    /* never block the poller on safeguard errors */
-  }
-
   const { DynamicLogicEngine } = await import("@/lib/DynamicLogicEngine");
   const pollMs = DynamicLogicEngine.calculateAdaptivePoll(pending, GENERATION_QUEUE_POLL_MS);
   scheduleTick(pollMs);

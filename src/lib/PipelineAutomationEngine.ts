@@ -175,46 +175,16 @@ export class PipelineAutomationEngine {
     recommendedAction?: string;
   }): Promise<boolean> {
     const secret = process.env.ADMIN_ACTUATOR_SECRET?.trim();
+    if (!secret) return false;
 
-    if (secret) {
-      try {
-        await PipelineActivatorSwitch.setSystemState("MAINTENANCE", secret);
-      } catch (err) {
-        console.error(
-          "[AUTOMATION] setSystemState failed",
-          err instanceof Error ? err.message : err,
-        );
-        return false;
-      }
-    } else {
+    try {
+      await PipelineActivatorSwitch.setSystemState("MAINTENANCE", secret);
+    } catch (err) {
       console.error(
-        "[AUTOMATION] CRITICAL breach but ADMIN_ACTUATOR_SECRET is unset — attempting direct system_config upsert.",
+        "[AUTOMATION] setSystemState failed",
+        err instanceof Error ? err.message : err,
       );
-      try {
-        const { tryGetSupabaseAdmin } = await import("@/integrations/supabase/client.server");
-        const admin = tryGetSupabaseAdmin();
-        if (!admin) return false;
-        const { error } = await admin.from("system_config").upsert(
-          {
-            key: "pipeline_master_state",
-            value: "MAINTENANCE",
-            updated_at: new Date().toISOString(),
-            updated_by: "pipeline-automation-engine",
-          },
-          { onConflict: "key" },
-        );
-        if (error) {
-          console.error("[AUTOMATION] emergency upsert failed", error.message);
-          return false;
-        }
-        PipelineActivatorSwitch.bustCache();
-      } catch (err) {
-        console.error(
-          "[AUTOMATION] emergency upsert failed",
-          err instanceof Error ? err.message : err,
-        );
-        return false;
-      }
+      return false;
     }
 
     // Telemetry audit (null user_id — system-level, UUID-safe).
