@@ -6,14 +6,18 @@ const STYLE_MODEL = "anthropic/claude-fable-5";
 // Replicate rejects anthropic/claude-fable-5 unless max_tokens is at least 1024.
 const FABLE_MAX_TOKENS = 1024;
 
-const STYLE_ENHANCE_SYSTEM = `You are an elite music director and prompt designer for Mureka AI audio generation.
-Transform the input into a single comma-separated list of sonic production tags under 40 words.
-Specify: genre, core instruments, BPM, vocal register/gender, and spatial acoustics.
-STRICT TERMINATION RULES:
-- Output everything on ONE single line.
-- Do NOT use line breaks, bullet points, or section headings.
-- Never write lyrics, rhymes, or verse markers.
-- Stop immediately after the final sonic descriptor tag.`;
+const STYLE_ENHANCE_SYSTEM = `You are an executive music producer and prompt designer for Mureka AI audio generation.
+Your job is to output a single-line sonic production descriptor under 40 words.
+Specify: Genre/subgenre, core instrumentation, exact tempo (BPM), vocal gender/timbre (e.g., deep baritone male vocal, warm soulful vocal), and acoustic space.
+CONTEXT RULES:
+1. IF LYRICS ARE PROVIDED: Analyze the theme, rhythm, and emotional weight of the lyrics. Design a sonic style that naturally carries that vocal delivery.
+2. IF A SEED KEYWORD IS PROVIDED (e.g., "rock", "lo-fi", "country"): Expand that seed into a complete, professional studio arrangement.
+3. IF NEITHER ARE PROVIDED: Act as "Surprise Me". Select a distinct, high-impact commercial genre and generate an original production blueprint.
+STRICT TERMINATION:
+- Output EVERYTHING on ONE single line.
+- Do NOT write lyrics, rhymes, or [Verse]/[Chorus] tags.
+- Do NOT include conversational intros or explanations.
+- Stop immediately after the final descriptor tag.`;
 
 const SECTION_TAG = /\[(?:verse|chorus|intro|bridge|outro)\b[^\]]*\]/i;
 const LYRIC_SECTION = /\[(Intro|Verse|Chorus|Bridge|Outro)/;
@@ -179,30 +183,67 @@ function titleFromPayload(payload: unknown, fallback: string): string {
   return fallback;
 }
 
-function firstStyleIdea(body: JsonRecord): string {
-  const prompt = textField(body.prompt).trim();
-  if (prompt) return prompt;
-  const topic = textField(body.topic).trim();
-  if (topic) return topic;
-  return textField(body.text).trim();
+function firstFilled(...values: unknown[]): string {
+  for (const value of values) {
+    const text = textField(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function styleUserInstruction(userStyle: string, userLyrics: string): string {
+  if (userStyle && userLyrics) {
+    return `Expand this style seed "${userStyle}" while matching the mood, meter, and cadence of these lyrics:\n\n${userLyrics}`;
+  }
+  if (userLyrics) {
+    return `Analyze these lyrics and create the ideal sonic style prompt to match their tone and cadence:\n\n${userLyrics}`;
+  }
+  if (userStyle) {
+    return `Expand this style seed into a full production prompt: "${userStyle}"`;
+  }
+  return "Surprise me with a fresh, creative, and commercial music style prompt.";
 }
 
 function lyricTheme(body: JsonRecord): string {
-  const found = [body.topic, body.prompt, body.text, body.lyrics]
-    .map((value) => textField(value).trim())
-    .find((value) => value.length > 0);
-  return found || "A powerful personal story";
+  return firstFilled(body.topic, body.prompt, body.text, body.lyrics) || "A powerful personal story";
 }
 
-function lyricSystemPrompt(genre: unknown): string {
-  const genreText = textField(genre).trim();
-  const musicalContext = genreText ? `Musical Genre: ${genreText}.\n` : "";
+function lyricSystemPrompt(body: JsonRecord): string {
+  const style = firstFilled(body.genre, body.prompt);
+  const musicalContext = style ? `Musical Style Context: ${style}.\n` : "";
   return `You are a master songwriter and lyricist.
 Write complete, compelling song lyrics based on the user's theme.
 ${musicalContext}MUREKA FORMATTING RULES:
-1. Use standard structural markers on their own lines: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
-2. Keep meter and syllable counts consistent across lines for natural vocal cadence.
-3. Terminate immediately after the final line of the [Outro]. Do not include commentary, notes, or outro titles.`;
+1. Use standard structural headers on their own line: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
+2. Keep line syllable counts balanced (7-10 syllables per line) so the singer locks naturally to the pocket.
+3. Use grounded, evocative imagery. Avoid cheap pop clichés.
+4. Output ONLY the bracketed sections and lyrics. Do NOT include titles, commentary, or conversational notes.
+5. Terminate immediately after the last line of [Outro].`;
+}
+
+/** Drop a trailing block after [Outro] when the model leaves a triple newline. */
+function cutLyricsAtTripleNewlineAfterOutro(generatedLyrics: string): string {
+  const outroIndex = generatedLyrics.lastIndexOf("[Outro]");
+  if (outroIndex !== -1) {
+    const afterOutro = generatedLyrics.slice(outroIndex);
+    const doubleNewlineIndex = afterOutro.indexOf("\n\n\n");
+    if (doubleNewlineIndex !== -1) {
+      generatedLyrics = generatedLyrics.slice(0, outroIndex + doubleNewlineIndex).trim();
+    }
+  }
+  return generatedLyrics;
+}
+
+const FORMAT_LYRIC_SYSTEM = `You are a master songwriter and lyric editor.
+Preserve the user's meaning and images.
+Balance each lyric line to about 7-10 syllables.
+Emit only Mureka section headers on their own lines: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
+Terminate immediately after the final line of the [Outro].
+No title. No commentary.`;
+
+function formatLyricUserPrompt(draft: string, genre: string): string {
+  const base = `Format and polish these lyrics for Mureka:\n${draft}`;
+  return genre ? `${base}\nMusical Genre: ${genre}.` : base;
 }
 
 const COMMENTARY_START =
@@ -379,17 +420,14 @@ async function callClaudeFable(input: ClaudeInput, failureLabel: string): Promis
 }
 
 async function enhanceMusicalStyle(body: JsonRecord): Promise<Response> {
-  const rawInput = firstStyleIdea(body);
-  if (!rawInput) {
-    return Response.json({ error: "Provide a mood or genre description to enhance." }, { status: 400 });
-  }
-
+  const userStyle = firstFilled(body.prompt, body.topic, body.text);
+  const userLyrics = textField(body.lyrics).trim();
   const rawStyle = await callClaudeFable(
     {
-      prompt: `Generate an AI music production style prompt for: "${rawInput}"`,
+      prompt: styleUserInstruction(userStyle, userLyrics),
       system_prompt: STYLE_ENHANCE_SYSTEM,
       max_tokens: FABLE_MAX_TOKENS,
-      temperature: 0.5,
+      temperature: 0.7,
     },
     "Style enhancement",
   );
@@ -404,12 +442,36 @@ async function enhanceMusicalStyle(body: JsonRecord): Promise<Response> {
 async function generateClaudeLyrics(body: JsonRecord): Promise<Response> {
   const theme = lyricTheme(body);
   const requestTitle = textField(body.title).trim();
-  const generated = await callClaudeFable(
+  const generated = (await callClaudeFable(
     {
-      system_prompt: lyricSystemPrompt(body.genre),
-      prompt: `Write song lyrics about: "${theme}"`,
+      system_prompt: lyricSystemPrompt(body),
+      prompt: `Write complete song lyrics about: "${theme}"`,
       max_tokens: FABLE_MAX_TOKENS,
       temperature: 0.7,
+    },
+    "Lyric generation",
+  )).replace(/\r\n/g, "\n");
+  const lyrics = cutLyricsAtTripleNewlineAfterOutro(generated);
+  if (!lyrics || lyrics.lastIndexOf("[Outro]") === -1 || !LYRIC_SECTION.test(lyrics)) {
+    return Response.json({ error: "Lyric generation returned no sectioned lyrics." }, { status: 500 });
+  }
+
+  const title = requestTitle || "Untitled Track";
+  return Response.json({ success: true, title, lyrics, result: lyrics });
+}
+
+async function formatClaudeLyrics(body: JsonRecord): Promise<Response> {
+  const draft = textField(body.lyrics).trim();
+  if (!draft) {
+    return Response.json({ error: "Provide lyrics to format." }, { status: 400 });
+  }
+  const genre = textField(body.genre).trim();
+  const generated = await callClaudeFable(
+    {
+      system_prompt: FORMAT_LYRIC_SYSTEM,
+      prompt: formatLyricUserPrompt(draft, genre),
+      max_tokens: FABLE_MAX_TOKENS,
+      temperature: 0.5,
     },
     "Lyric generation",
   );
@@ -417,9 +479,7 @@ async function generateClaudeLyrics(body: JsonRecord): Promise<Response> {
   if (!lyrics || !LYRIC_SECTION.test(lyrics) || !/\[Outro\]/i.test(lyrics)) {
     return Response.json({ error: "Lyric generation returned no sectioned lyrics." }, { status: 500 });
   }
-
-  const title = requestTitle || "Untitled Track";
-  return Response.json({ success: true, title, lyrics, result: lyrics });
+  return Response.json({ success: true, lyrics, result: lyrics });
 }
 
 async function pollPredictionResult(resultUrl: string, apiKey: string): Promise<unknown> {
@@ -450,7 +510,7 @@ async function pollPredictionResult(resultUrl: string, apiKey: string): Promise<
 
 /**
  * POST /api/ai/coproducer
- * enhance_prompt / enhance_style and generate_lyrics use Replicate Claude Fable.
+ * enhance_prompt / enhance_style, generate_lyrics, and format_lyrics use Replicate Claude Fable.
  * next_line and every other lyric action stay on WaveSpeed.
  */
 export async function POST(req: Request): Promise<Response> {
@@ -465,13 +525,20 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const action = textField(body.action);
-    if (action === "enhance_prompt" || action === "enhance_style" || action === "generate_lyrics") {
+    if (
+      action === "enhance_prompt" ||
+      action === "enhance_style" ||
+      action === "generate_style" ||
+      action === "generate_lyrics" ||
+      action === "format_lyrics"
+    ) {
       try {
         if (action === "generate_lyrics") return await generateClaudeLyrics(body);
+        if (action === "format_lyrics") return await formatClaudeLyrics(body);
         return await enhanceMusicalStyle(body);
       } catch (err) {
         const message = err instanceof Error ? err.message : "";
-        console.error("[Coproducer Error]", err);
+        console.error("[Coproducer Route Error]", err);
         return Response.json({ error: message || "Failed to process coproducer request." }, { status: 500 });
       }
     }

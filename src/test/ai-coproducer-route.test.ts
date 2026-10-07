@@ -34,21 +34,27 @@ function assertChatNotCalled(fetchMock: ReturnType<typeof vi.fn>): void {
 }
 
 const STYLE_MODEL = "anthropic/claude-fable-5";
-const STYLE_SYSTEM = `You are an elite music director and prompt designer for Mureka AI audio generation.
-Transform the input into a single comma-separated list of sonic production tags under 40 words.
-Specify: genre, core instruments, BPM, vocal register/gender, and spatial acoustics.
-STRICT TERMINATION RULES:
-- Output everything on ONE single line.
-- Do NOT use line breaks, bullet points, or section headings.
-- Never write lyrics, rhymes, or verse markers.
-- Stop immediately after the final sonic descriptor tag.`;
+const STYLE_SYSTEM = `You are an executive music producer and prompt designer for Mureka AI audio generation.
+Your job is to output a single-line sonic production descriptor under 40 words.
+Specify: Genre/subgenre, core instrumentation, exact tempo (BPM), vocal gender/timbre (e.g., deep baritone male vocal, warm soulful vocal), and acoustic space.
+CONTEXT RULES:
+1. IF LYRICS ARE PROVIDED: Analyze the theme, rhythm, and emotional weight of the lyrics. Design a sonic style that naturally carries that vocal delivery.
+2. IF A SEED KEYWORD IS PROVIDED (e.g., "rock", "lo-fi", "country"): Expand that seed into a complete, professional studio arrangement.
+3. IF NEITHER ARE PROVIDED: Act as "Surprise Me". Select a distinct, high-impact commercial genre and generate an original production blueprint.
+STRICT TERMINATION:
+- Output EVERYTHING on ONE single line.
+- Do NOT write lyrics, rhymes, or [Verse]/[Chorus] tags.
+- Do NOT include conversational intros or explanations.
+- Stop immediately after the final descriptor tag.`;
 const LYRIC_SYSTEM_WITH_GENRE = `You are a master songwriter and lyricist.
 Write complete, compelling song lyrics based on the user's theme.
-Musical Genre: dark country.
+Musical Style Context: dark country.
 MUREKA FORMATTING RULES:
-1. Use standard structural markers on their own lines: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
-2. Keep meter and syllable counts consistent across lines for natural vocal cadence.
-3. Terminate immediately after the final line of the [Outro]. Do not include commentary, notes, or outro titles.`;
+1. Use standard structural headers on their own line: [Intro], [Verse 1], [Chorus], [Verse 2], [Chorus], [Bridge], [Chorus], [Outro].
+2. Keep line syllable counts balanced (7-10 syllables per line) so the singer locks naturally to the pocket.
+3. Use grounded, evocative imagery. Avoid cheap pop clichés.
+4. Output ONLY the bracketed sections and lyrics. Do NOT include titles, commentary, or conversational notes.
+5. Terminate immediately after the last line of [Outro].`;
 const STYLE_TOKEN = "replicate-style-test-token";
 
 function restoreEnv(name: "WAVESPEED_API_KEY" | "LYRIC_ENGINE_API_KEY" | "ENGINE_API_KEY" | "REPLICATE_API_TOKEN" | "REPLICATE_API_KEY", value: string | undefined): void {
@@ -111,6 +117,7 @@ describe("POST /api/ai/coproducer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(EXTEND_URL);
+    expect(url).not.toContain("/v1/");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
@@ -387,19 +394,36 @@ describe("POST /api/ai/coproducer", () => {
       "Warm acoustic country, 96 BPM, acoustic guitar, brushed snare, close baritone, dry intimate mix";
     const cases = [
       {
+        action: "enhance_style",
+        body: { prompt: "", lyrics: "", topic: "", text: "" },
+        instruction: "Surprise me with a fresh, creative, and commercial music style prompt.",
+      },
+      {
+        action: "enhance_style",
+        body: { prompt: "   ", lyrics: "rain on the window", topic: "", text: "" },
+        instruction:
+          "Analyze these lyrics and create the ideal sonic style prompt to match their tone and cadence:\n\nrain on the window",
+      },
+      {
         action: "enhance_prompt",
-        body: { prompt: "lofi rain", topic: "ignored topic", text: "ignored text" },
-        idea: "lofi rain",
+        body: { prompt: "lofi rain", lyrics: "", topic: "ignored topic", text: "ignored text" },
+        instruction: 'Expand this style seed into a full production prompt: "lofi rain"',
+      },
+      {
+        action: "generate_style",
+        body: { prompt: "", topic: "rock", text: "", lyrics: "hold the light" },
+        instruction:
+          'Expand this style seed "rock" while matching the mood, meter, and cadence of these lyrics:\n\nhold the light',
       },
       {
         action: "enhance_style",
         body: { prompt: "  ", topic: "dusty country", text: "ignored text" },
-        idea: "dusty country",
+        instruction: 'Expand this style seed into a full production prompt: "dusty country"',
       },
       {
         action: "enhance_style",
         body: { prompt: "", topic: " ", text: "harbor fog" },
-        idea: "harbor fog",
+        instruction: 'Expand this style seed into a full production prompt: "harbor fog"',
       },
     ];
 
@@ -434,9 +458,8 @@ describe("POST /api/ai/coproducer", () => {
       expect(String(url)).not.toContain("haiku");
       const input = (requestBody(fetchMock.mock.calls[0] as unknown[]).input ?? {}) as Record<string, unknown>;
       expect(input.system_prompt).toBe(STYLE_SYSTEM);
-      expect(input.prompt).toBe(`Generate an AI music production style prompt for: "${spec.idea}"`);
-      expect(String(input.prompt).startsWith("Generate an AI music production style prompt for:")).toBe(true);
-      expect(input.temperature).toBe(0.5);
+      expect(input.prompt).toBe(spec.instruction);
+      expect(input.temperature).toBe(0.7);
       expect(input.max_tokens).toBe(1024);
       expect(input.system_instruction).toBeUndefined();
       expect(input.max_output_tokens).toBeUndefined();
@@ -475,10 +498,13 @@ describe("POST /api/ai/coproducer", () => {
     expect(String((fetchMock.mock.calls[0] as unknown as [string])[0])).not.toContain("wavespeed");
   });
 
-  it("returns 400 for an empty style and does not fetch", async () => {
+  it("calls Claude for Surprise Me when style and lyrics are empty", async () => {
     useStyleToken();
     process.env.WAVESPEED_API_KEY = "test-key";
-    const fetchMock = vi.fn();
+    const enhanced = "Neon synthwave, 118 BPM, analog bass, airy female vocal, wide club room";
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ id: "style_pred", status: "succeeded", output: enhanced }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await POST(
@@ -487,13 +513,22 @@ describe("POST /api/ai/coproducer", () => {
         prompt: "  ",
         topic: "",
         text: "\n",
-        lyrics: "should not become the style",
+        lyrics: "   ",
       }),
     );
+    const body = (await res.json()) as { success?: boolean; style?: string; prompt?: string; lyrics?: string };
 
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toEqual({ error: "Provide a mood or genre description to enhance." });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ success: true, style: enhanced, prompt: enhanced });
+    expect(body.lyrics).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain(`/models/${STYLE_MODEL}/predictions`);
+    expect(String(url)).not.toContain("wavespeed");
+    const input = (requestBody(fetchMock.mock.calls[0] as unknown[]).input ?? {}) as Record<string, unknown>;
+    expect(input.prompt).toBe("Surprise me with a fresh, creative, and commercial music style prompt.");
+    expect(input.temperature).toBe(0.7);
+    expect(input.max_tokens).toBe(1024);
   });
 
   it("returns 500 when the replicate token is missing and does not fetch", async () => {
@@ -592,7 +627,7 @@ describe("POST /api/ai/coproducer", () => {
       jsonResponse({
         id: "lyric_pred",
         status: "succeeded",
-        output: `${kept}\n\nI hope this fits the vocal engine. Let me know if you want another verse.`,
+        output: `${kept}\n\n\nI hope this fits the vocal engine. Let me know if you want another verse.`,
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -631,7 +666,7 @@ describe("POST /api/ai/coproducer", () => {
     expect(String(url)).not.toContain("wavespeed");
     const input = (requestBody(fetchMock.mock.calls[0] as unknown[]).input ?? {}) as Record<string, unknown>;
     expect(input.system_prompt).toBe(LYRIC_SYSTEM_WITH_GENRE);
-    expect(input.prompt).toBe('Write song lyrics about: "rain"');
+    expect(input.prompt).toBe('Write complete song lyrics about: "rain"');
     expect(input.temperature).toBe(0.7);
     expect(input.max_tokens).toBe(1024);
   });

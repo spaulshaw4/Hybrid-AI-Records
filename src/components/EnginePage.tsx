@@ -3,16 +3,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
-import LyricEditorModal from "@/components/studio/LyricEditorModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
+import { AudioVaultList } from "@/components/studio/AudioVaultList";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
-const FALLBACK_PROMPT = "Heavy dynamic acoustic rock with raspy vocals";
-const VAULT_EMPTY = "No ready masters yet. Create a track and it will show up here.";
+const TRACK_LENGTHS = [60, 120, 180, 240] as const;
+type TrackLength = (typeof TRACK_LENGTHS)[number];
 
 type StudioModal = "reference" | "remix" | null;
 
@@ -89,37 +89,6 @@ function readPromptRecords(): SavedPromptItem[] {
   } catch {
     return [];
   }
-}
-
-function tracksFromPayload(data: unknown): VaultTrack[] {
-  const list =
-    data && typeof data === "object" && Array.isArray((data as { tracks?: unknown }).tracks)
-      ? (data as { tracks: unknown[] }).tracks
-      : [];
-  return list.flatMap((item, index) => {
-    if (!item || typeof item !== "object") return [];
-    const row = item as Record<string, unknown>;
-    const id =
-      typeof row.id === "string" && row.id
-        ? row.id
-        : typeof row.task_id === "string" && row.task_id
-          ? row.task_id
-          : `vault-${index}`;
-    const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Untitled Master";
-    const genre =
-      typeof row.genre === "string" ? row.genre : String(typeof row.prompt === "string" ? row.prompt : "").slice(0, 24);
-    return [
-      {
-        id,
-        title,
-        genre,
-        duration: typeof row.duration === "string" && row.duration ? row.duration : "210s",
-        status: typeof row.status === "string" && row.status ? row.status : "Ready",
-        wav_url: typeof row.wav_url === "string" ? row.wav_url : "",
-        mp3_url: typeof row.mp3_url === "string" ? row.mp3_url : "",
-      },
-    ];
-  });
 }
 
 function DarkModal({
@@ -217,18 +186,18 @@ export function EnginePage() {
   const [authReady, setAuthReady] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
-  const [isLyricModalOpen, setIsLyricModalOpen] = useState(false);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isEnhanceMenuOpen, setIsEnhanceMenuOpen] = useState(false);
+  const [isLyricsLoading, setIsLyricsLoading] = useState(false);
+  const [trackLength, setTrackLength] = useState<TrackLength>(180);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const enhanceMenuRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLElement>(null);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
   const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
   const [vaultTracks, setVaultTracks] = useState<VaultTrack[]>([]);
+  const [vaultRevision, setVaultRevision] = useState(0);
 
   useEffect(() => {
     setPromptRecords(readPromptRecords());
@@ -324,54 +293,17 @@ export function EnginePage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchVault() {
-      try {
-        const res = await fetch("/api/vault");
-        if (!res.ok) return;
-        const data: unknown = await res.json();
-        if (cancelled) return;
-        setVaultTracks(tracksFromPayload(data));
-      } catch {
-        // Vault stays on the empty copy when the list cannot be loaded.
-      }
-    }
-    void fetchVault();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isEnhanceMenuOpen) return;
-    const onPointerDown = (event: globalThis.MouseEvent) => {
-      if (!enhanceMenuRef.current?.contains(event.target as Node)) {
-        setIsEnhanceMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setIsEnhanceMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [isEnhanceMenuOpen]);
-
   const handleEnhanceStyle = async () => {
+    if (isAiLoading) return;
     const styleText = prompt.trim();
-    if (!styleText || isAiLoading) return;
-    setIsEnhanceMenuOpen(false);
+    const lyricsText = lyrics.trim();
     setIsAiLoading(true);
     setErrorMessage(null);
     try {
       const res = await fetch("/api/ai/coproducer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "enhance_style", prompt: styleText }),
+        body: JSON.stringify({ action: "enhance_style", prompt: styleText, lyrics: lyricsText }),
       });
       const rawText = await res.text();
       let data: { success?: boolean; style?: string; prompt?: string; error?: string; message?: string } = {};
@@ -395,6 +327,46 @@ export function EnginePage() {
       setErrorMessage(message || "AI request failed");
     } finally {
       setIsAiLoading(false);
+    }
+  };
+
+  const handleLyricsAssist = async () => {
+    if (isLyricsLoading) return;
+    const styleText = prompt;
+    const draft = lyrics;
+    const hasDraft = draft.trim().length > 0;
+    setIsLyricsLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch("/api/ai/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          hasDraft
+            ? { action: "format_lyrics", lyrics: draft, genre: styleText }
+            : { action: "generate_lyrics", topic: styleText.trim() || "Overcoming the storm", genre: styleText },
+        ),
+      });
+      const rawText = await res.text();
+      let data: { lyrics?: string; result?: string; error?: string; message?: string } = {};
+      try {
+        const parsed: unknown = JSON.parse(rawText);
+        if (parsed && typeof parsed === "object") {
+          data = parsed as { lyrics?: string; result?: string; error?: string; message?: string };
+        }
+      } catch {
+        throw new Error(`Server returned non-JSON (${res.status}): ${rawText.slice(0, 120)}`);
+      }
+      const nextLyrics = data.lyrics || data.result || "";
+      if (!res.ok || !nextLyrics.trim()) {
+        throw new Error(data.error || data.message || "AI request failed");
+      }
+      setLyrics(nextLyrics);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      setErrorMessage(message || "AI request failed");
+    } finally {
+      setIsLyricsLoading(false);
     }
   };
 
@@ -442,16 +414,18 @@ export function EnginePage() {
     event.preventDefault();
     if (isGenerating) return;
     if (activeTab === "custom" && !prompt.trim() && !lyrics.trim()) return;
-    const effectivePrompt = prompt.trim() || FALLBACK_PROMPT;
+    const effectivePrompt = prompt.trim();
     const effectiveTitle = title.trim() || "Untitled Master";
-    const historyEntry: SavedPromptItem = {
-      id: Date.now().toString(),
-      title: effectiveTitle,
-      prompt: effectivePrompt,
-      timestamp: Date.now(),
-      isBookmarked: false,
-    };
-    saveRecords([historyEntry, ...promptRecords.filter((item) => item.prompt !== effectivePrompt)]);
+    if (effectivePrompt) {
+      const historyEntry: SavedPromptItem = {
+        id: Date.now().toString(),
+        title: effectiveTitle,
+        prompt: effectivePrompt,
+        timestamp: Date.now(),
+        isBookmarked: false,
+      };
+      saveRecords([historyEntry, ...promptRecords.filter((item) => item.prompt !== effectivePrompt)]);
+    }
     setIsGenerating(true);
     setErrorMessage(null);
     try {
@@ -464,6 +438,7 @@ export function EnginePage() {
           lyrics: isInstrumental ? "" : lyrics,
           gender,
           isInstrumental,
+          duration: activeTab === "custom" ? trackLength : 180,
           vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
           ...(authUserId ? { userId: authUserId } : {}),
         }),
@@ -480,7 +455,6 @@ export function EnginePage() {
         throw new Error(data.error || "Generation rejected by upstream engine");
       }
       let wavUrl = data.wavUrl ?? "";
-      let mp3Url = data.mp3Url ?? "";
       const localId = data.taskId ? `local-${data.taskId}` : `local-${Date.now()}`;
       if (data.status === "pending" && data.taskId) {
         setVaultTracks((current) => [
@@ -498,7 +472,6 @@ export function EnginePage() {
         try {
           const ready = await waitForVaultedTrack(data.taskId);
           wavUrl = ready.wavUrl;
-          mp3Url = ready.mp3Url;
         } catch (waitErr: unknown) {
           setVaultTracks((current) =>
             current.map((row) => (row.id === localId ? { ...row, status: "Failed" } : row)),
@@ -509,29 +482,8 @@ export function EnginePage() {
       if (!wavUrl) {
         throw new Error(data.error || "Generation rejected by upstream engine");
       }
-      const created: VaultTrack = {
-        id: localId,
-        title: effectiveTitle,
-        genre: effectivePrompt.slice(0, 24),
-        duration: "210s",
-        status: "Ready",
-        wav_url: wavUrl,
-        mp3_url: mp3Url,
-      };
-      setVaultTracks((current) => [created, ...current.filter((row) => row.id !== localId)]);
-      try {
-        const vaultRes = await fetch("/api/vault");
-        if (vaultRes.ok) {
-          const vaultData: unknown = await vaultRes.json();
-          const fetched = tracksFromPayload(vaultData);
-          setVaultTracks((current) => {
-            if (fetched.length === 0) return current;
-            return fetched;
-          });
-        }
-      } catch {
-        // Keep the row just created when the vault list cannot refresh.
-      }
+      setVaultTracks((current) => current.filter((row) => row.id !== localId));
+      setVaultRevision((value) => value + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "An unexpected error occurred during synthesis.");
@@ -541,6 +493,8 @@ export function EnginePage() {
   };
 
   const customCreateDisabled = isGenerating || (!prompt.trim() && !lyrics.trim());
+  const styleAssistLabel = prompt.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
+  const lyricsAssistLabel = lyrics.trim() ? "✨ Format & Polish" : "✨ Write with Claude";
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
     ? {
@@ -824,17 +778,37 @@ export function EnginePage() {
         ) : (
           <form onSubmit={(event) => void handleGenerate(event)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={cardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{isInstrumental ? "Lyrics disabled" : "Lyrics"}</span>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#94a3b8", cursor: "pointer" }}>
-                  Instrumental
-                  <input
-                    type="checkbox"
-                    checked={isInstrumental}
-                    onChange={(event) => setIsInstrumental(event.target.checked)}
-                    style={{ accentColor: "#e11d48", width: 16, height: 16, cursor: "pointer" }}
-                  />
-                </label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{isInstrumental ? "Lyrics disabled" : "Lyrics & Structure"}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  {isInstrumental ? null : (
+                    <button
+                      type="button"
+                      disabled={isLyricsLoading}
+                      onClick={() => void handleLyricsAssist()}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#f43f5e",
+                        cursor: isLyricsLoading ? "not-allowed" : "pointer",
+                        padding: 0,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {lyricsAssistLabel}
+                    </button>
+                  )}
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#94a3b8", cursor: "pointer" }}>
+                    Instrumental
+                    <input
+                      type="checkbox"
+                      checked={isInstrumental}
+                      onChange={(event) => setIsInstrumental(event.target.checked)}
+                      style={{ accentColor: "#e11d48", width: 16, height: 16, cursor: "pointer" }}
+                    />
+                  </label>
+                </div>
               </div>
               {isInstrumental ? null : (
                 <>
@@ -846,23 +820,7 @@ export function EnginePage() {
                     rows={5}
                     style={fieldStyle}
                   />
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
-                    <div style={{ display: "flex", gap: 14 }}>
-                      <button
-                        type="button"
-                        onClick={() => setIsLyricModalOpen(true)}
-                        style={{ background: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
-                      >
-                        ✨ Optimize
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsLyricModalOpen(true)}
-                        style={{ background: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600 }}
-                      >
-                        📋 Generate Lyrics
-                      </button>
-                    </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
                     <button
                       type="button"
                       onClick={() => setLyrics("")}
@@ -877,138 +835,25 @@ export function EnginePage() {
             </div>
 
             <div style={cardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Style</span>
-                <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Style & Sonic Descriptor</span>
+                <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
                   <button
                     type="button"
-                    onClick={handleManualBookmark}
-                    title="Bookmark this prompt"
-                    aria-label="Bookmark this prompt"
-                    style={{ backgroundColor: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", fontSize: 14 }}
+                    disabled={isAiLoading}
+                    onClick={() => void handleEnhanceStyle()}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#f43f5e",
+                      cursor: isAiLoading ? "not-allowed" : "pointer",
+                      padding: 0,
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
                   >
-                    🔖
+                    {isAiLoading ? "Designing..." : styleAssistLabel}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPrompt("")}
-                    aria-label="Clear style"
-                    style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </div>
-              <textarea
-                aria-label="Style"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Enter style, mood, instrument, etc. to control the generated music"
-                maxLength={1000}
-                rows={4}
-                style={fieldStyle}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10, fontSize: 12, color: "#64748b" }}>
-                <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                  <div ref={enhanceMenuRef} style={{ position: "relative" }}>
-                    <button
-                      type="button"
-                      disabled={isAiLoading || !prompt.trim()}
-                      aria-expanded={isEnhanceMenuOpen}
-                      aria-haspopup="menu"
-                      onClick={() => {
-                        if (isAiLoading || !prompt.trim()) return;
-                        setIsEnhanceMenuOpen((open) => !open);
-                      }}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#f43f5e",
-                        cursor: isAiLoading || !prompt.trim() ? "not-allowed" : "pointer",
-                        padding: 0,
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {isAiLoading ? "🪄 Designing..." : "🪄 Enhance"}
-                    </button>
-                    {isEnhanceMenuOpen ? (
-                      <div
-                        role="menu"
-                        aria-label="Enhance style"
-                        style={{
-                          position: "absolute",
-                          bottom: "calc(100% + 8px)",
-                          left: 0,
-                          background: "#16131c",
-                          backgroundColor: "#16131c",
-                          border: "1px solid rgba(255,255,255,0.12)",
-                          borderRadius: 10,
-                          width: 230,
-                          zIndex: 40,
-                          overflow: "hidden",
-                          boxShadow: "0 12px 28px rgba(0, 0, 0, 0.45)",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => void handleEnhanceStyle()}
-                          onMouseEnter={(event) => {
-                            event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
-                          }}
-                          onMouseLeave={(event) => {
-                            event.currentTarget.style.backgroundColor = "transparent";
-                          }}
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-start",
-                            gap: 2,
-                            width: "100%",
-                            textAlign: "left",
-                            background: "transparent",
-                            backgroundColor: "transparent",
-                            border: "none",
-                            color: "#f8fafc",
-                            padding: "10px 12px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <span style={{ fontSize: 13, fontWeight: 700 }}>🪄 Match my vibe</span>
-                          <span style={{ fontSize: 11, color: "#a1a1aa" }}>Polish and expand your style</span>
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => void handleEnhanceStyle()}
-                          onMouseEnter={(event) => {
-                            event.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)";
-                          }}
-                          onMouseLeave={(event) => {
-                            event.currentTarget.style.backgroundColor = "transparent";
-                          }}
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-start",
-                            gap: 2,
-                            width: "100%",
-                            textAlign: "left",
-                            background: "transparent",
-                            backgroundColor: "transparent",
-                            border: "none",
-                            color: "#f8fafc",
-                            padding: "10px 12px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <span style={{ fontSize: 13, fontWeight: 700 }}>✨ Surprise me</span>
-                          <span style={{ fontSize: 11, color: "#a1a1aa" }}>Try a fresh, unexpected twist</span>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
                   <button
                     type="button"
                     onClick={() => setIsTemplatesOpen(true)}
@@ -1029,15 +874,46 @@ export function EnginePage() {
                       fontSize: 12,
                     }}
                   >
-                    🔖 My prompts
+                    🔖 My Prompts
+                  </button>
+                </div>
+              </div>
+              <textarea
+                aria-label="Style"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Genre, mood, or instruments — or try Match Lyrics or Surprise Me"
+                maxLength={1000}
+                rows={4}
+                style={fieldStyle}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10, fontSize: 12, color: "#64748b" }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={handleManualBookmark}
+                    title="Bookmark this prompt"
+                    aria-label="Bookmark this prompt"
+                    style={{ backgroundColor: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", fontSize: 14 }}
+                  >
+                    🔖
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrompt("")}
+                    aria-label="Clear style"
+                    style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
+                  >
+                    🗑️
                   </button>
                 </div>
                 <span>{prompt.length}/1000</span>
               </div>
             </div>
 
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             {isInstrumental ? null : (
-              <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
+              <div style={{ ...cardStyle, flex: "1 1 240px", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Vocal Gender</span>
                 <div style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
                   <button
@@ -1077,6 +953,33 @@ export function EnginePage() {
                 </div>
               </div>
             )}
+              <div style={{ ...cardStyle, flex: "1 1 280px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 16px" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Length</span>
+                <div role="group" aria-label="Track length" style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
+                  {TRACK_LENGTHS.map((seconds) => (
+                    <button
+                      key={seconds}
+                      type="button"
+                      aria-pressed={trackLength === seconds}
+                      aria-label={`${seconds} seconds`}
+                      onClick={() => setTrackLength(seconds)}
+                      style={{
+                        padding: "5px 12px",
+                        backgroundColor: trackLength === seconds ? "#9f1239" : "transparent",
+                        color: trackLength === seconds ? "#ffffff" : "#94a3b8",
+                        border: "none",
+                        borderRadius: 4,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {seconds}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
             <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
               <input
@@ -1116,52 +1019,16 @@ export function EnginePage() {
           <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>
             Permanent dual delivery. Ready WAV and MP3 masters stay in this list.
           </p>
-          {vaultTracks.length === 0 ? (
-            <p style={{ margin: "12px 0 0", fontSize: 13, color: "#94a3b8" }}>{VAULT_EMPTY}</p>
-          ) : (
-            <ul style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-              {vaultTracks.map((track) => {
-                const src = track.mp3_url || track.wav_url;
-                return (
-                  <li key={track.id} style={{ borderTop: "1px solid #1e293b", paddingTop: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-                      <strong style={{ fontSize: 14 }}>{track.title}</strong>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color:
-                            track.status === "Failed"
-                              ? "#f87171"
-                              : track.status === "Ready"
-                                ? "#86efac"
-                                : "#fbbf24",
-                        }}
-                      >
-                        {track.status}
-                      </span>
-                    </div>
-                    <p style={{ margin: "4px 0 8px", fontSize: 12, color: "#94a3b8" }}>
-                      {track.genre || "Untitled style"} · {track.duration}
-                    </p>
-                    {src ? <audio controls preload="none" src={src} style={{ width: "100%" }} /> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <AudioVaultList
+            revision={vaultRevision}
+            pending={vaultTracks
+              .filter((row) => row.status === "Rendering" || row.status === "Failed")
+              .map((row) => ({ id: row.id, title: row.title, status: row.status, genre: row.genre }))}
+          />
         </section>
 
         <TemplatesModal isOpen={isTemplatesOpen} onClose={() => setIsTemplatesOpen(false)} onSelectTemplate={handleApplyTemplate} />
         <BuyTokensModal isOpen={isBuyTokensOpen} onClose={() => setIsBuyTokensOpen(false)} />
-        <LyricEditorModal
-          isOpen={isLyricModalOpen}
-          onClose={() => setIsLyricModalOpen(false)}
-          currentTitle={title}
-          currentPrompt={prompt}
-          initialLyrics={lyrics}
-          onApplyLyrics={(newLyrics) => setLyrics(newLyrics)}
-          onTitleChange={setTitle}
-        />
 
         {openModal === "reference" ? (
           <div

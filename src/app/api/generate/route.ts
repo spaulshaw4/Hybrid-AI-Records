@@ -1,5 +1,5 @@
-import { createRequire } from "node:module";
 import { createClient } from "@supabase/supabase-js";
+import { isMp3FrameOrId3, wavToMp3 } from "@/lib/audio/wavToMp3";
 import {
   formatMurekaLyrics,
   formatMurekaPrompt,
@@ -14,25 +14,6 @@ import {
   WAVESPEED_TRACK_WEBHOOK_URL,
   type TrackJob,
 } from "@/lib/wavespeed-track-jobs.server";
-// @ts-ignore lamejs has no published @types/lamejs package
-import lamejs from "lamejs";
-
-const require = createRequire(import.meta.url);
-
-/**
- * lamejs looks up MPEGMode, Lame, and BitStream as free variables (browser bundle globals).
- * Node's module build does not attach them, so the encoder throws unless they are installed first.
- */
-function ensureLamejsRuntime(): void {
-  const runtime = globalThis as typeof globalThis & {
-    MPEGMode?: unknown;
-    Lame?: unknown;
-    BitStream?: unknown;
-  };
-  if (!runtime.MPEGMode) runtime.MPEGMode = require("lamejs/src/js/MPEGMode.js");
-  if (!runtime.Lame) runtime.Lame = require("lamejs/src/js/Lame.js");
-  if (!runtime.BitStream) runtime.BitStream = require("lamejs/src/js/BitStream.js");
-}
 
 const GENERATE_SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const GENERATE_BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
@@ -81,7 +62,20 @@ type GenerateBody = {
   vocalId?: unknown;
   referenceId?: unknown;
   userId?: unknown;
+  duration?: unknown;
 };
+
+const TRACK_DURATIONS = new Set([60, 120, 180, 240]);
+const LYRICS_ONLY_STYLE = "Deep soulful acoustic groove, 75 BPM";
+const EMPTY_GENERATION_ERROR = "Generation aborted: Style prompt or lyrics required.";
+
+function trackDuration(value: unknown): number {
+  return typeof value === "number" && TRACK_DURATIONS.has(value) ? value : 180;
+}
+
+function generationSeed(): number {
+  return Math.floor(Math.random() * 2147483647);
+}
 
 function vaultClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
@@ -90,60 +84,6 @@ function vaultClient() {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
   return createClient(supabaseUrl, serviceKey);
-}
-
-/**
- * 320 kbps MP3 from the WAV bytes just downloaded. A throw is a failed generate.
- */
-export function transcodeWavToMp3(wavBuffer: Buffer): Buffer {
-  ensureLamejsRuntime();
-  const arrayBuffer = wavBuffer.buffer.slice(
-    wavBuffer.byteOffset,
-    wavBuffer.byteOffset + wavBuffer.byteLength,
-  ) as ArrayBuffer;
-  const wav = lamejs.WavHeader.readHeader(new DataView(arrayBuffer));
-  if (!wav?.dataLen || !wav.channels || !wav.sampleRate) {
-    throw new Error("Invalid WAV header");
-  }
-  const samples = new Int16Array(arrayBuffer, wav.dataOffset, wav.dataLen / 2);
-  const channels = wav.channels;
-  const sampleRate = wav.sampleRate;
-  const encoder = new lamejs.Mp3Encoder(channels, sampleRate, 320);
-  const blockSize = 1152;
-  const mp3Data: Int8Array[] = [];
-
-  if (channels === 1) {
-    for (let i = 0; i < samples.length; i += blockSize) {
-      const chunk = samples.subarray(i, i + blockSize);
-      const mp3buf = encoder.encodeBuffer(chunk);
-      if (mp3buf.length > 0) mp3Data.push(mp3buf);
-    }
-  } else {
-    const left = new Int16Array(samples.length / 2);
-    const right = new Int16Array(samples.length / 2);
-    for (let i = 0; i < samples.length; i += 2) {
-      left[i / 2] = samples[i] ?? 0;
-      right[i / 2] = samples[i + 1] ?? 0;
-    }
-    for (let i = 0; i < left.length; i += blockSize) {
-      const mp3buf = encoder.encodeBuffer(
-        left.subarray(i, i + blockSize),
-        right.subarray(i, i + blockSize),
-      );
-      if (mp3buf.length > 0) mp3Data.push(mp3buf);
-    }
-  }
-
-  const flushed = encoder.flush();
-  if (flushed.length > 0) mp3Data.push(flushed);
-  // Each chunk is an Int8Array view. Copy only its byte range so the frame stays intact.
-  const mp3Buffer = Buffer.concat(
-    mp3Data.map((arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength)),
-  );
-  if (mp3Buffer.length < 2 || mp3Buffer[0] !== 0xff || (mp3Buffer[1] & 0xe0) !== 0xe0) {
-    throw new Error("MP3 encode produced an empty or header-less buffer");
-  }
-  return mp3Buffer;
 }
 
 const TERMINAL_FAIL = new Set(["failed", "cancelled", "timeout", "deleted"]);
@@ -169,6 +109,26 @@ function readResultOutput(body: {
   return typeof first === "string" ? first.trim() : "";
 }
 
+async function insertVaultRow(
+  job: TrackJob,
+  wavUrl: string,
+  mp3Url: string,
+): Promise<void> {
+  if (!job.userId) return;
+  const supabase = vaultClient();
+  const { error: insertError } = await supabase.from("vaulted_tracks").insert({
+    user_id: job.userId,
+    title: job.title,
+    prompt: job.prompt,
+    lyrics: job.lyrics,
+    vocal_id_used: job.vocalId,
+    wav_url: wavUrl,
+    mp3_url: mp3Url,
+    task_id: job.taskId,
+  });
+  if (insertError) throw new Error(insertError.message);
+}
+
 async function vaultCompletedWav(
   job: TrackJob,
   outputUrl: string,
@@ -178,18 +138,33 @@ async function vaultCompletedWav(
     throw new Error("Generation failed upstream");
   }
   const wavBuffer = Buffer.from(await wavRes.arrayBuffer());
-  const mp3Buffer = transcodeWavToMp3(wavBuffer);
+  const encoded = wavToMp3(wavBuffer);
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
   const supabase = vaultClient();
   const wavPath = `masters/${job.taskId}.wav`;
+  const cdnBase = `${supabaseUrl}/storage/v1/object/public/${VAULT_BUCKET}`;
+  const wavUrl = `${cdnBase}/${wavPath}`;
+
+  if (!isMp3FrameOrId3(encoded)) {
+    const wavUpload = await supabase.storage.from(VAULT_BUCKET).upload(wavPath, wavBuffer, {
+      contentType: "audio/wav",
+      upsert: true,
+    });
+    if (wavUpload.error) {
+      throw new Error(wavUpload.error.message || "Vault upload failed");
+    }
+    await insertVaultRow(job, wavUrl, wavUrl);
+    return { wavUrl, mp3Url: wavUrl };
+  }
+
   const mp3Path = `masters/${job.taskId}.mp3`;
   const [wavUpload, mp3Upload] = await Promise.all([
     supabase.storage.from(VAULT_BUCKET).upload(wavPath, wavBuffer, {
       contentType: "audio/wav",
       upsert: true,
     }),
-    supabase.storage.from(VAULT_BUCKET).upload(mp3Path, mp3Buffer, {
+    supabase.storage.from(VAULT_BUCKET).upload(mp3Path, encoded, {
       contentType: "audio/mpeg",
       upsert: true,
     }),
@@ -198,24 +173,8 @@ async function vaultCompletedWav(
     throw new Error(wavUpload.error?.message || mp3Upload.error?.message || "Vault upload failed");
   }
 
-  const cdnBase = `${supabaseUrl}/storage/v1/object/public/${VAULT_BUCKET}`;
-  const wavUrl = `${cdnBase}/${wavPath}`;
   const mp3Url = `${cdnBase}/${mp3Path}`;
-
-  if (job.userId) {
-    const { error: insertError } = await supabase.from("vaulted_tracks").insert({
-      user_id: job.userId,
-      title: job.title,
-      prompt: job.prompt,
-      lyrics: job.lyrics,
-      vocal_id_used: job.vocalId,
-      wav_url: wavUrl,
-      mp3_url: mp3Url,
-      task_id: job.taskId,
-    });
-    if (insertError) throw new Error(insertError.message);
-  }
-
+  await insertVaultRow(job, wavUrl, mp3Url);
   return { wavUrl, mp3Url };
 }
 
@@ -313,12 +272,17 @@ export async function POST(req: Request): Promise<Response> {
       vocalId,
       referenceId: rawReferenceId,
       userId: rawUserId,
+      duration: rawDuration,
     } = (await req.json()) as GenerateBody;
     const formattedPrompt = replaceBareConflictingPrompt(
       formatMurekaPrompt(typeof rawPrompt === "string" ? rawPrompt : ""),
     );
     const lyrics = formatMurekaLyrics(typeof rawLyrics === "string" ? rawLyrics : "");
     const isInstrumental = rawInstrumental === true;
+    if ((isInstrumental && !formattedPrompt) || (!isInstrumental && !formattedPrompt && !lyrics)) {
+      return Response.json({ error: EMPTY_GENERATION_ERROR }, { status: 400 });
+    }
+    const stylePrompt = !isInstrumental && !formattedPrompt ? LYRICS_ONLY_STYLE : formattedPrompt;
     const title =
       typeof rawTitle === "string" && rawTitle.trim() ? rawTitle.trim() : "Untitled Master";
     const userId = typeof rawUserId === "string" ? rawUserId.trim() : "";
@@ -326,8 +290,10 @@ export async function POST(req: Request): Promise<Response> {
     const vocalGender = normalizeVocalGender(gender);
     const prompt =
       !isInstrumental && !vocalUsed
-        ? promptWithVocalGender(formattedPrompt, vocalGender)
-        : formattedPrompt;
+        ? promptWithVocalGender(stylePrompt, vocalGender)
+        : stylePrompt;
+    const duration = trackDuration(rawDuration);
+    const seed = generationSeed();
 
     const apiKey = process.env.WAVESPEED_API_KEY?.trim() ?? "";
     if (!apiKey) {
@@ -340,6 +306,8 @@ export async function POST(req: Request): Promise<Response> {
       prompt: string;
       output_format: "wav";
       webhook: string;
+      seed: number;
+      duration: number;
       reference_id?: string;
       lyrics?: string;
       gender?: string;
@@ -348,10 +316,13 @@ export async function POST(req: Request): Promise<Response> {
       prompt,
       output_format: "wav",
       webhook: WAVESPEED_TRACK_WEBHOOK_URL,
+      seed,
+      duration,
     };
     if (referenceId) payload.reference_id = referenceId;
     if (!isInstrumental) {
-      payload.lyrics = lyrics;
+      const lyricText = lyrics.trim();
+      if (lyricText) payload.lyrics = lyricText;
       if (vocalUsed) payload.vocal_id = vocalUsed;
       else payload.gender = vocalGender;
     }

@@ -47,6 +47,25 @@ function silentWav(): Buffer {
   return buffer;
 }
 
+function wav24(): Buffer {
+  const dataLen = 6;
+  const buffer = Buffer.alloc(44 + dataLen);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataLen, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(44100, 24);
+  buffer.writeUInt32LE(44100 * 3, 28);
+  buffer.writeUInt16LE(3, 32);
+  buffer.writeUInt16LE(24, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataLen, 40);
+  return buffer;
+}
+
 function generateRequest(extra: Record<string, unknown> = {}): Request {
   return new Request("http://localhost/api/generate", {
     method: "POST",
@@ -239,9 +258,57 @@ describe("POST /api/ai/wavespeed-webhook", () => {
     expect(res.status).toBe(200);
     const job = readTrackJob("task-bad");
     expect(job?.status).toBe("failed");
-    expect(job?.error).toBeTruthy();
+    expect(job?.error).toBe("Invalid WAV: Buffer smaller than 44 bytes.");
     expect(job?.wavUrl).toBeUndefined();
     expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("stores a non-16-bit WAV as audio/wav and points mp3Url at that file", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    const wav = wav24();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === SONG_URL) return jsonResponse({ data: { id: "task-24" } });
+        if (url === "https://cdn.example/wide.wav") {
+          const copy = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer;
+          return new Response(copy, { status: 200 });
+        }
+        return jsonResponse({
+          data: { status: "completed", outputs: ["https://cdn.example/wide.wav"] },
+        });
+      }),
+    );
+
+    await generatePost(generateRequest({ title: "Wide Take", userId: "user-24" }));
+    const res = await webhookPost(webhookRequest({ id: "task-24" }));
+    expect(res.status).toBe(200);
+
+    const wavUrl =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/task-24.wav";
+    expect(readTrackJob("task-24")).toMatchObject({
+      status: "completed",
+      wavUrl,
+      mp3Url: wavUrl,
+    });
+    expect(uploadMock).toHaveBeenCalledTimes(1);
+    const wavCall = uploadMock.mock.calls[0];
+    expect(wavCall?.[0]).toBe("masters/task-24.wav");
+    expect(wavCall?.[2]).toMatchObject({ contentType: "audio/wav", upsert: true });
+    expect(Buffer.compare(Buffer.from(wavCall?.[1] as Uint8Array), wav)).toBe(0);
+    expect(uploadMock.mock.calls.some((call) => call[2] && (call[2] as { contentType?: string }).contentType === "audio/mpeg")).toBe(
+      false,
+    );
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: "user-24",
+        wav_url: wavUrl,
+        mp3_url: wavUrl,
+        task_id: "task-24",
+      }),
+    );
   });
 
   it("rejects a non-https result URL", async () => {

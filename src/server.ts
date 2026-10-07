@@ -224,11 +224,18 @@ export default {
         return POST(request);
       }
 
-      if (pathname === "/api/vault") {
+      if (pathname === "/api/vault" || pathname.startsWith("/api/vault/")) {
+        if (request.method === "DELETE") {
+          const { DELETE } = await import("./app/api/vault/route");
+          return DELETE(request);
+        }
+        if (pathname !== "/api/vault") {
+          return new Response("Not found", { status: 404 });
+        }
         if (request.method !== "GET" && request.method !== "HEAD") {
           return new Response("Method not allowed", {
             status: 405,
-            headers: { allow: "GET, HEAD" },
+            headers: { allow: "GET, HEAD, DELETE" },
           });
         }
         const { GET } = await import("./app/api/vault/route");
