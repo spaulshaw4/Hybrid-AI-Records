@@ -10,8 +10,14 @@ const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 type VocalAudio = { contentType: "audio/wav" | "audio/mpeg"; extension: "wav" | "mp3" };
 
-/** RIFF/WAVE, or MPEG (frame sync 0xFFEx / 0xFFFx, or an ID3 header). */
+/** Matroska/WebM starts with the EBML magic. Storage and Sonic both reject it. */
+function isWebmEbml(buffer: Buffer): boolean {
+  return buffer.length >= 4 && buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
+}
+
+/** RIFF/WAVE, or MPEG (frame sync 0xFFEx / 0xFFFx, or an ID3 header). WebM is never a match. */
 function sniffVocalAudio(buffer: Buffer): VocalAudio | null {
+  if (isWebmEbml(buffer)) return null;
   if (
     buffer.length >= 12 &&
     buffer.toString("ascii", 0, 4) === "RIFF" &&
@@ -148,16 +154,21 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: "File empty or exceeds 15MB limit" }, { status: 400 });
     }
 
+    if (isWebmEbml(buffer)) {
+      return Response.json({ error: UNSUPPORTED_AUDIO }, { status: 400 });
+    }
     const sniffed = sniffVocalAudio(buffer);
     if (!sniffed) {
       return Response.json({ error: UNSUPPORTED_AUDIO }, { status: 400 });
     }
+    const contentType = sniffed.extension === "wav" ? "audio/wav" : "audio/mpeg";
     const fileName = `voice-take-${Date.now()}.${sniffed.extension}`;
     const storagePath = `vocal-references/${user.id}/${fileName}`;
+    const uploadBytes = Buffer.from(buffer);
 
     const admin = vaultAdminClient();
-    const { error: uploadError } = await admin.storage.from("audio-vault").upload(storagePath, buffer, {
-      contentType: sniffed.contentType,
+    const { error: uploadError } = await admin.storage.from("audio-vault").upload(storagePath, uploadBytes, {
+      contentType,
       upsert: true,
     });
     if (uploadError) {

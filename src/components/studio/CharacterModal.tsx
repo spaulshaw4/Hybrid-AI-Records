@@ -480,8 +480,17 @@ export default function CharacterModal({
         setRecordError("Sign in to upload a vocal.");
         return;
       }
+      const wavBytes = new Uint8Array(await take.blob.arrayBuffer());
+      if (serial !== uploadSerialRef.current) return;
+      const riff = String.fromCharCode(wavBytes[0] ?? 0, wavBytes[1] ?? 0, wavBytes[2] ?? 0, wavBytes[3] ?? 0);
+      const wave = String.fromCharCode(wavBytes[8] ?? 0, wavBytes[9] ?? 0, wavBytes[10] ?? 0, wavBytes[11] ?? 0);
+      if (take.blob.type !== "audio/wav" || riff !== "RIFF" || wave !== "WAVE") {
+        setRecordError("Could not read this vocal take.");
+        return;
+      }
+      const wavBlob = new Blob([wavBytes], { type: "audio/wav" });
       const form = new FormData();
-      form.append("audio", take.blob, "vocal-take.wav");
+      form.append("audio", wavBlob, "vocal-take.wav");
       const response = await fetch("/api/vocals/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
