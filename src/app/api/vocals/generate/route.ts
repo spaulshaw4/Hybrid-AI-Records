@@ -135,6 +135,11 @@ function vocalWebhookUrl(): string {
   }
 }
 
+/** AIMUSIC_API_KEY, or AIMUSICAPI_KEY when the primary name is unset. */
+function aimusicApiKey(): string {
+  return process.env.AIMUSIC_API_KEY?.trim() || process.env.AIMUSICAPI_KEY?.trim() || "";
+}
+
 function taskIdFromUpstream(body: unknown): string {
   if (!isRecord(body)) return "";
   const direct = readString(body.task_id);
@@ -247,7 +252,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: debit.error }, { status: debit.status });
   }
 
-  const apiKey = process.env.AIMUSIC_API_KEY?.trim() ?? "";
+  const apiKey = aimusicApiKey();
   if (!apiKey) {
     await refundChargedToken(userId, debit.spendKey);
     return Response.json({ error: "Missing API key" }, { status: 500 });

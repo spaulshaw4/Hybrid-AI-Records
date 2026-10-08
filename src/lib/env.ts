@@ -18,10 +18,19 @@ if (isNodeRuntime) {
   dotenv.config({ path: ".env.development" });
   dotenv.config({ path: ".env" });
 
-  console.log(
-    "[ENV_CHECK] Fish Audio Key loaded:",
-    Boolean(process.env.FISH_API_KEY || process.env.FISH_AUDIO_API_KEY),
+  logAiMusicEnvCheck();
+}
+
+/** Startup check. Logs presence only — never the key value. */
+export function logAiMusicEnvCheck(): void {
+  const loaded = Boolean(
+    process.env.AIMUSIC_API_KEY?.trim() || process.env.AIMUSICAPI_KEY?.trim(),
   );
+  if (loaded) {
+    console.log("[ENV_CHECK] AIMusic key loaded");
+    return;
+  }
+  console.log("[ENV_CHECK] AIMusic key missing");
 }
 
 export type PipelineStage =

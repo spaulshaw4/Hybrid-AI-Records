@@ -120,6 +120,7 @@ export function extractUserFacingText(source: string): string[] {
 export function isServerOnlyPath(path: string): boolean {
   return (
     /\.server\.[jt]sx?$/.test(path) ||
+    /\.(test|spec)\.[jt]sx?$/.test(path) ||
     path.includes("/routes/api/") ||
     path.includes("/test/") ||
     path.includes("/e2e/") ||

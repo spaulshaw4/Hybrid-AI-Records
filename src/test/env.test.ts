@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getFishApiKey, readEnv, requireFishApiKey, requireStageKey } from "@/lib/env";
+import { getFishApiKey, logAiMusicEnvCheck, readEnv, requireFishApiKey, requireStageKey } from "@/lib/env";
 
 const KEYS = [
   "MUSIC_API_KEY",
@@ -165,6 +165,34 @@ describe("requireStageKey", () => {
     const message =
       "[PIPELINE_INIT_FAILED] Fish Audio (Vocals) failed: Missing FISH_AUDIO_API_KEY";
     expect(() => requireStageKey("FISH_AUDIO_API_KEY", "Fish Audio (Vocals)")).toThrow(message);
+  });
+
+  it("logs that the AIMusic key is loaded without printing it", () => {
+    const secret = "aimusic-startup-secret";
+    clear(["AIMUSIC_API_KEY", "AIMUSICAPI_KEY"]);
+    process.env.AIMUSIC_API_KEY = secret;
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    logAiMusicEnvCheck();
+    expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key loaded");
+    expect(log.mock.calls.flat().join(" ")).not.toContain(secret);
+    expect(log.mock.calls.flat().join(" ")).not.toContain("Fish");
+  });
+
+  it("accepts AIMUSICAPI_KEY when AIMUSIC_API_KEY is unset", () => {
+    clear(["AIMUSIC_API_KEY", "AIMUSICAPI_KEY"]);
+    process.env.AIMUSICAPI_KEY = "alias-startup-secret";
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    logAiMusicEnvCheck();
+    expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key loaded");
+    expect(log.mock.calls.flat().join(" ")).not.toContain("alias-startup-secret");
+  });
+
+  it("logs that the AIMusic key is missing when both names are unset", () => {
+    clear(["AIMUSIC_API_KEY", "AIMUSICAPI_KEY"]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    logAiMusicEnvCheck();
+    expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key missing");
+    expect(log.mock.calls.flat().join(" ")).not.toContain("Fish");
   });
 
   it("readEnv returns undefined instead of throwing", () => {

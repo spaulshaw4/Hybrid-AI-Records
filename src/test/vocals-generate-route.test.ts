@@ -102,12 +102,14 @@ function webhookRequest(body: Record<string, unknown>): Request {
 
 describe("POST /api/vocals/generate", () => {
   const originalKey = process.env.AIMUSIC_API_KEY;
+  const originalAlias = process.env.AIMUSICAPI_KEY;
   const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   beforeEach(() => {
     process.env.AIMUSIC_API_KEY = "test-key";
+    delete process.env.AIMUSICAPI_KEY;
     process.env.NEXT_PUBLIC_APP_URL = "http://127.0.0.1:8080";
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
@@ -135,6 +137,8 @@ describe("POST /api/vocals/generate", () => {
     resetVocalJobs();
     if (originalKey === undefined) delete process.env.AIMUSIC_API_KEY;
     else process.env.AIMUSIC_API_KEY = originalKey;
+    if (originalAlias === undefined) delete process.env.AIMUSICAPI_KEY;
+    else process.env.AIMUSICAPI_KEY = originalAlias;
     if (originalAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
     else process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -462,8 +466,39 @@ describe("POST /api/vocals/generate", () => {
     });
   });
 
+  it("accepts AIMUSICAPI_KEY when AIMUSIC_API_KEY is unset", async () => {
+    delete process.env.AIMUSIC_API_KEY;
+    process.env.AIMUSICAPI_KEY = "alias-vocal-key";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-alias-1" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({ title: "Alias", lyrics: "[Verse]\nline", styleTags: "dry" }),
+    );
+
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload).toEqual({ success: true, taskId: "task-alias-1" });
+    expect(JSON.stringify(payload)).not.toContain("alias-vocal-key");
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer alias-vocal-key");
+    expect(JSON.parse(String(init.body))).toEqual({
+      custom_mode: true,
+      mv: "sonic-v4-5",
+      title: "Alias",
+      tags: "dry",
+      prompt: "[Verse]\nline",
+      webhook_url: WEBHOOK,
+    });
+  });
+
   it("refunds the token when the API key is missing", async () => {
     delete process.env.AIMUSIC_API_KEY;
+    delete process.env.AIMUSICAPI_KEY;
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
