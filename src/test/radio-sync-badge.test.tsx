@@ -60,7 +60,9 @@ describe("sync badge aria-live announcements", () => {
     expect(screen.getByTestId("radio-sync-error-cluster")).toHaveAttribute("role", "group");
     expect(screen.getByTestId("radio-sync-error-cluster")).toHaveAttribute("tabindex", "-1");
     expect(badge.contains(screen.getByTestId("radio-sync-retry"))).toBe(false);
-    expect(screen.getByTestId("radio-sync-retry")).toHaveAccessibleName("Retry timestamp sync");
+    expect(screen.getByTestId("radio-sync-retry")).toHaveAccessibleName("Retry sync");
+    expect(screen.getByTestId("radio-sync-retry")).toHaveAttribute("aria-label", "Retry sync");
+    expect(screen.getByTestId("radio-sync-retry")).toHaveAttribute("title", "Retry sync");
   });
 
   it("appends the last aligned time only when not mid-resolution", () => {

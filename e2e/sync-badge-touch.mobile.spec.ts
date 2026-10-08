@@ -88,12 +88,12 @@ test.describe("SyncBadge tooltip — touch", () => {
   test("tapping Retry fires it without a stuck tooltip", async ({ page }) => {
     await openHarness(page);
     const scope = page.locator('[data-testid="badge-dark-error"]');
-    const retry = scope.getByRole("button", { name: "Retry timestamp sync" });
+    const retry = scope.getByRole("button", { name: "Retry sync" });
 
     await retry.tap();
 
     await expect(page.getByTestId("retry-count-dark-error")).toHaveText("Retry fired 1");
-    await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+    await expect(scope.getByRole("button", { name: "Retrying sync" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );

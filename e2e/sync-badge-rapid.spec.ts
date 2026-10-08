@@ -162,7 +162,7 @@ test.describe("sync badge — rapid phase transitions", () => {
   test("keyboard focus stays on Retry across repeated failure/retry churn", async ({ page }) => {
     await openHarness(page);
     const focused = await tabInto(page, "radio-sync-retry");
-    expect(focused.name).toBe("Retry timestamp sync");
+    expect(focused.name).toBe("Retry sync");
 
     // Five failure→retrying→failure cycles at ~40ms dwell: faster than a user
     // could react, which is exactly when focus normally gets dropped.
@@ -183,7 +183,7 @@ test.describe("sync badge — rapid phase transitions", () => {
     expect(samples.filter((s) => s!.disabled).length).toBe(5);
     expect(await focusedNode(page)).toMatchObject({
       testid: "radio-sync-retry",
-      name: "Retry timestamp sync",
+      name: "Retry sync",
       disabled: false,
     });
   });
@@ -223,7 +223,7 @@ test.describe("sync badge — rapid phase transitions", () => {
     expect(failures.length).toBeGreaterThanOrEqual(3);
     expect(failures.every((t) => t.includes(FAIL_MESSAGE))).toBe(true);
     // The retrying label must reach the live region, not just the pixels.
-    expect(texts.some((t) => t.includes("Retrying timestamp sync"))).toBe(true);
+    expect(texts.some((t) => t.includes("Retrying sync"))).toBe(true);
 
     const resolvingAt = texts.findIndex((t) => t.startsWith("Resolving playback timestamps"));
     const resolvedAt = texts.findIndex((t) => t.startsWith("Resolved."));

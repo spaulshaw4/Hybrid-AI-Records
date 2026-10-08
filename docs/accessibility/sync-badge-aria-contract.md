@@ -128,9 +128,11 @@ signal for tests is Radix's `data-state` attribute, not ARIA.
   button inside `role="alert"` with `tabindex="0"` is a `nested-interactive`
   failure. The two sit in a presentational cluster (`role="group"`,
   `tabindex="-1"`) so the pill still looks like one control.
-- Its accessible name MUST be exactly `Retry timestamp sync` when idle and
-  `Retrying timestamp sync` while in flight. The name MUST change with state —
+- Its accessible name MUST be exactly `Retry sync` when idle and
+  `Retrying sync` while in flight. The name MUST change with state —
   a static name leaves a screen-reader user unable to tell the retry started.
+- The same strings MUST be exposed as `title` (`Retry sync` idle, `Retrying sync`
+  in flight) so the control has an explicit name beside `aria-label`.
 - The icon MUST be `aria-hidden="true"`; the name comes from `aria-label`.
 - Retry MUST be reachable by <kbd>Tab</kbd> from the chip, and
   <kbd>Shift</kbd>+<kbd>Tab</kbd> MUST return to that same badge's chip.

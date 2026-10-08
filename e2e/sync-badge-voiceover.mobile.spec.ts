@@ -248,7 +248,7 @@ test.describe("VoiceOver (iOS) — Retry button state changes", () => {
     // Swipe 1: the alert chip. Swipe 2: the Retry button nested inside it.
     await swipe(page);
     const retry = await swipe(page);
-    expect(retry).toMatchObject({ role: "button", name: "Retry timestamp sync" });
+    expect(retry).toMatchObject({ role: "button", name: "Retry sync" });
     expect(retry!.states).toEqual([]);
     // Focusing Retry reads the failure reason, so the action has context.
     expect(retry!.description).toContain("Couldn't compare playback timestamps");
@@ -257,18 +257,18 @@ test.describe("VoiceOver (iOS) — Retry button state changes", () => {
     await expect(page.getByTestId("lab-retry-count")).toHaveText("Retry fired 1");
 
     const after = await reread(page);
-    expect(after!.name).toBe("Retrying timestamp sync");
+    expect(after!.name).toBe("Retrying sync");
     expect(after!.states).toEqual(expect.arrayContaining(["dimmed", "busy"]));
 
     // The state change is spoken through the assertive alert region.
     const spoken = await announcements(page);
-    expect(spoken.some((a) => a.politeness === "assertive" && /Retrying timestamp sync/.test(a.text))).toBe(
+    expect(spoken.some((a) => a.politeness === "assertive" && /Retrying sync/.test(a.text))).toBe(
       true,
     );
 
-    // No stale "Retry timestamp sync" affordance is left for a VO user to hit.
+    // No stale "Retry sync" affordance is left for a VO user to hit.
     await expect(
-      page.getByTestId("lab-badge").getByRole("button", { name: "Retry timestamp sync", exact: true }),
+      page.getByTestId("lab-badge").getByRole("button", { name: "Retry sync", exact: true }),
     ).toHaveCount(0);
   });
 
@@ -280,7 +280,7 @@ test.describe("VoiceOver (iOS) — Retry button state changes", () => {
     await page.getByTestId("radio-sync-retry").dispatchEvent("click");
     await expect(page.getByTestId("lab-retry-count")).toHaveText("Retry fired 1");
     await expect(
-      page.getByTestId("lab-badge").getByRole("button", { name: "Retrying timestamp sync" }),
+      page.getByTestId("lab-badge").getByRole("button", { name: "Retrying sync" }),
     ).toHaveAttribute("aria-disabled", "true");
   });
 
@@ -293,7 +293,7 @@ test.describe("VoiceOver (iOS) — Retry button state changes", () => {
 
     await swipe(page);
     const retry = await swipe(page);
-    expect(retry!.name).toBe("Retrying timestamp sync");
+    expect(retry!.name).toBe("Retrying sync");
     expect(retry!.states).toEqual(expect.arrayContaining(["dimmed", "busy"]));
 
     // Double-tapping a dimmed control must be inert.

@@ -65,12 +65,11 @@ export async function expectBadgeAria(scope: Locator, aria: BadgeAria) {
 /** Asserts the Retry control's role, accessible name and busy/disabled state. */
 export async function expectRetryAria(scope: Locator, opts: { retrying?: boolean } = {}) {
   const retry = scope.getByRole("button", {
-    name: opts.retrying ? "Retrying timestamp sync" : "Retry timestamp sync",
+    name: opts.retrying ? "Retrying sync" : "Retry sync",
   });
   await expect(retry).toBeVisible();
-  await expect(retry).toHaveAccessibleName(
-    opts.retrying ? "Retrying timestamp sync" : "Retry timestamp sync",
-  );
+  await expect(retry).toHaveAccessibleName(opts.retrying ? "Retrying sync" : "Retry sync");
+  await expect(retry).toHaveAttribute("title", opts.retrying ? "Retrying sync" : "Retry sync");
   // aria-disabled (not `disabled`) keeps focus on the button across phase churn.
   if (opts.retrying) {
     await expect(retry).toHaveAttribute("aria-disabled", "true");

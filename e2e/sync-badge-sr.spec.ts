@@ -197,10 +197,10 @@ for (const theme of ["dark", "light"] as const) {
 
       const next = await focusedNode(page);
       expect(next).toMatchObject({ tag: "button", owner, testid: "radio-sync-retry" });
-      expect(next?.name).toBe("Retry timestamp sync");
+      expect(next?.name).toBe("Retry sync");
 
       await expect(
-        page.locator(`[data-testid="${owner}"]`).getByRole("button", { name: "Retry timestamp sync" }),
+        page.locator(`[data-testid="${owner}"]`).getByRole("button", { name: "Retry sync" }),
       ).toBeFocused();
     });
 
@@ -214,16 +214,16 @@ for (const theme of ["dark", "light"] as const) {
       await page.keyboard.press("Enter");
 
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toHaveText("Retry fired 1");
-      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+      await expect(scope.getByRole("button", { name: "Retrying sync" })).toHaveAttribute(
         "aria-disabled",
         "true",
       );
-      // The old name must be gone — a stale "Retry timestamp sync" would let an
+      // The old name must be gone — a stale "Retry sync" would let an
       // AT user press a control that no longer does anything.
-      await expect(scope.getByRole("button", { name: "Retry timestamp sync", exact: true })).toHaveCount(0);
+      await expect(scope.getByRole("button", { name: "Retry sync", exact: true })).toHaveCount(0);
 
       const heard = await spoken(page);
-      expect(heard.some((a) => a.politeness === "assertive" && /Retrying timestamp sync/.test(a.text))).toBe(
+      expect(heard.some((a) => a.politeness === "assertive" && /Retrying sync/.test(a.text))).toBe(
         true,
       );
     });
@@ -238,13 +238,13 @@ for (const theme of ["dark", "light"] as const) {
       await page.keyboard.press("Space");
 
       await expect(page.getByTestId(`retry-count-${theme}-error`)).toHaveText("Retry fired 1");
-      await expect(scope.getByRole("button", { name: "Retrying timestamp sync" })).toHaveAttribute(
+      await expect(scope.getByRole("button", { name: "Retrying sync" })).toHaveAttribute(
         "aria-disabled",
         "true",
       );
 
       const heard = await spoken(page);
-      expect(heard.some((a) => /Retrying timestamp sync/.test(a.text))).toBe(true);
+      expect(heard.some((a) => /Retrying sync/.test(a.text))).toBe(true);
     });
 
     test("the failure alert is assertive while the settled phases stay polite", async ({ page }) => {

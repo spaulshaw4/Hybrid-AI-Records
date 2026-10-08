@@ -414,7 +414,8 @@ export function SyncBadge({
                 // context without the user hunting for the alert text.
                 aria-describedby={errorReasonId}
                 data-testid="radio-sync-retry"
-                aria-label={retrying ? "Retrying timestamp sync" : "Retry timestamp sync"}
+                aria-label={retrying ? "Retrying sync" : "Retry sync"}
+                title={retrying ? "Retrying sync" : "Retry sync"}
 
                 // While retrying, the busy state is shown with a dashed border
                 // (not reduced opacity) so the label keeps WCAG AA contrast.
@@ -504,7 +505,7 @@ export function SyncBadge({
                 <span
                   aria-hidden="true"
                   data-testid="radio-sync-static-progress"
-                  className="hidden shrink-0 rounded-full border border-current/40 px-1.5 py-px font-mono text-[8px] uppercase tracking-[0.18em] opacity-80 motion-reduce:inline-block"
+                  className="hidden shrink-0 rounded-full border border-current/40 px-1.5 py-px font-mono text-[8px] uppercase tracking-[0.18em] text-status-accent motion-reduce:inline-block"
                 >
                   In Progress
                 </span>

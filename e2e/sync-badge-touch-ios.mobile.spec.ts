@@ -225,11 +225,11 @@ test.describe("SyncBadge tooltip — iOS long-press", () => {
     await expect(page.getByTestId("retry-count-dark-error")).toHaveCount(0);
     expect((await ariaSnapshot(page, owner)).retryDisabled).toBeNull();
 
-    await scope.getByRole("button", { name: "Retry timestamp sync" }).tap();
+    await scope.getByRole("button", { name: "Retry sync" }).tap();
     await expect(page.getByTestId("retry-count-dark-error")).toHaveText("Retry fired 1");
 
     const after = await ariaSnapshot(page, owner);
-    expect(after.retryName).toBe("Retrying timestamp sync");
+    expect(after.retryName).toBe("Retrying sync");
     expect(after.retryDisabled).toBe("true");
     expect(after.retryBusy).toBe("true");
     expect(after.role).toBe("alert");

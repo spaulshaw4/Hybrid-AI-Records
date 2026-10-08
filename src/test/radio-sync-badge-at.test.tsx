@@ -83,14 +83,14 @@ describe("screen reader announcements (role + name queries)", () => {
     // Retry is a sibling of the alert (not nested) so the chip name stays the
     // failure sentence and axe nested-interactive stays clean.
     expect(alert).toHaveTextContent("Sync failed. Network unreachable");
-    expect(alert.contains(screen.getByRole("button", { name: "Retry timestamp sync" }))).toBe(false);
+    expect(alert.contains(screen.getByRole("button", { name: "Retry sync" }))).toBe(false);
   });
 
   it("names the retry control by its action, not by its icon", () => {
     const { rerender } = renderInPage({
       resolveState: { phase: "error", tracks: 0, message: "Network unreachable" },
     });
-    const retry = screen.getByRole("button", { name: "Retry timestamp sync" });
+    const retry = screen.getByRole("button", { name: "Retry sync" });
     expect(retry).toBeEnabled();
 
     rerender(
@@ -104,7 +104,7 @@ describe("screen reader announcements (role + name queries)", () => {
         <button type="button">After</button>
       </div>,
     );
-    const retrying = screen.getByRole("button", { name: "Retrying timestamp sync" });
+    const retrying = screen.getByRole("button", { name: "Retrying sync" });
     expect(retrying).toHaveAttribute("aria-disabled", "true");
     // Decorative spinner/static markers must not leak into the accessible name.
     expect(retrying).not.toHaveAccessibleName(/⋯/);
@@ -134,7 +134,7 @@ describe("focus order and keyboard reachability", () => {
     await user.tab();
     expect(screen.getByRole("alert")).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Retry timestamp sync" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Retry sync" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "After" })).toHaveFocus();
   });
@@ -153,7 +153,7 @@ describe("focus order and keyboard reachability", () => {
     expect(screen.getByRole("alert")).toHaveFocus();
     await user.tab();
     // aria-disabled rather than `disabled`, so focus is never dropped mid-retry.
-    const retry = screen.getByRole("button", { name: "Retrying timestamp sync" });
+    const retry = screen.getByRole("button", { name: "Retrying sync" });
     expect(retry).toHaveFocus();
     expect(retry).toHaveAttribute("aria-disabled", "true");
     await user.keyboard("{Enter}");
@@ -172,7 +172,7 @@ describe("focus order and keyboard reachability", () => {
         resolveState={{ phase: "error", tracks: 0, message: "Network unreachable" }}
       />,
     );
-    const retry = screen.getByRole("button", { name: "Retry timestamp sync" });
+    const retry = screen.getByRole("button", { name: "Retry sync" });
     retry.focus();
     await user.keyboard("{Enter}");
     await user.keyboard(" ");

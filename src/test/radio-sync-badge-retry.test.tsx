@@ -74,7 +74,7 @@ const settle = async (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole("button", { name: "settle" }));
 const finish = async (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole("button", { name: "finish" }));
-const retryButton = () => screen.getByRole("button", { name: /retry(ing)? timestamp sync/i });
+const retryButton = () => screen.getByRole("button", { name: /retry(ing)? sync/i });
 
 afterEach(() => cleanup());
 
@@ -111,7 +111,9 @@ describe("retry failure and recovery", () => {
     expect(alert).toHaveAccessibleName("Sync failed. Timed out after 10s");
     // Retry is re-armed rather than left disabled.
     expect(retryButton()).toBeEnabled();
-    expect(retryButton()).toHaveAccessibleName("Retry timestamp sync");
+    expect(retryButton()).toHaveAccessibleName("Retry sync");
+    expect(retryButton()).toHaveAttribute("aria-label", "Retry sync");
+    expect(retryButton()).toHaveAttribute("title", "Retry sync");
   });
 
   it("recovers on the next retry after a failure, ending in a resolved status", async () => {
@@ -224,7 +226,7 @@ describe("retry failure and recovery", () => {
     await user.click(retryButton());
     const inFlight = retryButton();
     expect(inFlight).toHaveAttribute("aria-disabled", "true");
-    expect(inFlight).toHaveAccessibleName("Retrying timestamp sync");
+    expect(inFlight).toHaveAccessibleName("Retrying sync");
     await user.click(inFlight);
     await user.click(inFlight);
     expect(attempted).toEqual([1]);
