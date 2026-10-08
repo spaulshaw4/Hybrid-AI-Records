@@ -47,25 +47,41 @@ describe("VocalStudioTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("matches the instrumental style controls, ghostwriter, track length, and Render Track", () => {
+  it("matches the shared studio order, ghostwriter, gender, track length, and Render Master Record", () => {
     render(<VocalStudioTab />);
 
+    const title = screen.getByRole("textbox", { name: "Song title" });
+    const lyrics = screen.getByRole("textbox", { name: "Lyrics" });
+    const style = screen.getByRole("textbox", { name: "Style" });
+    const gender = screen.getByRole("group", { name: "Vocal gender" });
+    const length = screen.getByLabelText("Track Length");
+    const submit = screen.getByRole("button", { name: "Render Master Record" });
+    expect(title).toHaveAttribute("placeholder", "Enter song title");
+    expect(title.compareDocumentPosition(lyrics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lyrics.compareDocumentPosition(style) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(style.compareDocumentPosition(gender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(gender.compareDocumentPosition(length) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(length.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    expect(screen.getByText("Lyrics & Structure")).toBeInTheDocument();
     expect(screen.getByText("Musical Style")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Style" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Surprise Me" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Templates" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear style" })).toBeInTheDocument();
     const ghostwriter = screen.getByRole("button", { name: "Studio Ghostwriter" });
     expect(ghostwriter.querySelector("svg")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Male", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Female", pressed: false })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /claude/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Render Track" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /render vocal/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Upload Vocal Audio / Reference")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Track Length")).toBeInTheDocument();
+    expect(length).toBeInTheDocument();
     expect(screen.getByLabelText("Track Length (Seconds)")).toHaveValue(180);
     expect(screen.getByRole("button", { name: "3 min", pressed: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Render Track" })).toBeInTheDocument();
     for (const marker of ["[Verse]", "[Chorus]", "[Bridge]", "[Outro]"]) {
-      expect(screen.getByRole("button", { name: marker })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: marker })).not.toBeInTheDocument();
     }
     expect(screen.getByRole("form", { name: "With Vocals" }).textContent).not.toMatch(
       /claude|wavespeed|aimusic|sonic|mureka|replicate|fable/i,
@@ -159,11 +175,13 @@ describe("VocalStudioTab", () => {
     });
   });
 
-  it("inserts a section marker from the lyric pills", async () => {
-    const user = userEvent.setup();
+  it("does not render lyric section pills", () => {
     render(<VocalStudioTab />);
-    await user.click(screen.getByRole("button", { name: "[Verse]" }));
-    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("[Verse]\n");
+    expect(screen.getByText("Lyrics & Structure")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Lyric sections" })).not.toBeInTheDocument();
+    for (const marker of ["[Verse]", "[Chorus]", "[Bridge]", "[Outro]"]) {
+      expect(screen.queryByRole("button", { name: marker })).not.toBeInTheDocument();
+    }
   });
 
   it("clears the style box from the trash control", async () => {
@@ -204,7 +222,7 @@ describe("VocalStudioTab", () => {
     expect(style).toHaveValue("warm rain");
   });
 
-  it("sends duration, persona id, and an audio-vault reference on Render Track", async () => {
+  it("sends duration, persona id, and an audio-vault reference on Render Master Record", async () => {
     const user = userEvent.setup();
     const reference = "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/take.wav";
     render(
@@ -223,7 +241,7 @@ describe("VocalStudioTab", () => {
     await user.type(screen.getByRole("textbox", { name: "Style" }), "dry vocal");
     await user.click(screen.getByRole("button", { name: "30 sec" }));
     fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-vocal-1" }));
-    await user.click(screen.getByRole("button", { name: "Render Track" }));
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

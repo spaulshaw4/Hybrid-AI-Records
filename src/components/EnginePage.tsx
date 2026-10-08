@@ -14,13 +14,6 @@ import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
-const EASY_INSTRUMENTAL_BEATS = [
-  "Heavy 808 trap beat, rolling hi-hats, dark minor synth pads, 140 BPM",
-  "Boom bap hip hop groove, vinyl crackle, soulful vocal chop, punchy kick, 90 BPM",
-  "Amapiano club rhythm, deep log drum bassline, airy shaker loops, 113 BPM",
-  "Modern melodic drill groove, sliding sub bass, atmospheric strings, 142 BPM",
-  "Lo-fi chill instrumental beat, warm Rhodes piano, dusty vinyl snare, 84 BPM",
-] as const;
 
 const compactActionClass =
   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
@@ -83,12 +76,21 @@ function modeTabStyle(active: boolean): CSSProperties {
   };
 }
 
-function referenceForCharacter(character: VocalCharacter | null): VocalStudioReference | undefined {
-  if (!character) return undefined;
-  const id = character.vocalId.trim();
-  if (!id) return { label: character.name };
-  if (/^https:\/\//i.test(id)) return { label: character.name, vocalAudioUrl: id };
-  return { label: character.name, personaId: id };
+function referenceForStudio(
+  character: VocalCharacter | null,
+  source: { url: string; label: string } | null,
+): VocalStudioReference | undefined {
+  const id = character?.vocalId.trim() ?? "";
+  const personaId = id && !/^https:\/\//i.test(id) ? id : undefined;
+  const characterAudio = id && /^https:\/\//i.test(id) ? id : undefined;
+  const vocalAudioUrl = source?.url.trim() || characterAudio || undefined;
+  const label = [character?.name, source?.label].filter(Boolean).join(" · ") || undefined;
+  if (!label && !personaId && !vocalAudioUrl) return undefined;
+  return {
+    ...(label ? { label } : {}),
+    ...(personaId ? { personaId } : {}),
+    ...(vocalAudioUrl ? { vocalAudioUrl } : {}),
+  };
 }
 
 function readPromptRecords(): SavedPromptItem[] {
@@ -198,6 +200,7 @@ export function EnginePage() {
     },
   ]);
   const [selectedCharacter, setSelectedCharacter] = useState<VocalCharacter | null>(null);
+  const [vocalSource, setVocalSource] = useState<{ url: string; label: string } | null>(null);
   const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [hasProLicense, setHasProLicense] = useState(false);
@@ -439,22 +442,23 @@ export function EnginePage() {
     const lyricValue = (lyrics ?? "").trim();
     const duration = trackLength || 180;
     const songTitle = title.trim() || "Feel It in the Rain";
-    if (!isInstrumental && !styleValue && !lyricValue) {
+    const onInstrumentalTab = activeTab === "easy";
+    const dispatchInstrumental = onInstrumentalTab || isInstrumental;
+    if (!dispatchInstrumental && !styleValue && !lyricValue) {
       console.error("HALT: Attempted to submit with empty prompt and lyrics.");
       alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
       return;
     }
-    if (!isInstrumental && !lyricValue) {
+    if (!dispatchInstrumental && !lyricValue) {
       console.error("HALT: Attempted to render a vocal master without lyrics.");
       alert("Generation halted: add lyrics before rendering a vocal master.");
       return;
     }
-    if (isInstrumental && !styleValue) {
+    if (dispatchInstrumental && !styleValue) {
       console.error("HALT: Attempted to submit an instrumental with an empty style prompt.");
       alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
       return;
     }
-    if (activeTab === "easy" && !styleValue) return;
     const effectivePrompt = styleValue;
     const effectiveTitle = songTitle;
     if (effectivePrompt) {
@@ -497,7 +501,7 @@ export function EnginePage() {
           duration,
           title: songTitle,
           gender,
-          isInstrumental,
+          isInstrumental: dispatchInstrumental,
           vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
           ...(ownerId ? { userId: ownerId } : {}),
         }),
@@ -562,15 +566,6 @@ export function EnginePage() {
       ? "Format & Polish"
       : "Studio Ghostwriter";
 
-  const handleMakeABeat = () => {
-    setIsInstrumental(true);
-    setPrompt((current) => {
-      const typed = current.trim();
-      if (typed) return typed;
-      const index = Math.floor(Math.random() * EASY_INSTRUMENTAL_BEATS.length);
-      return EASY_INSTRUMENTAL_BEATS[index] ?? EASY_INSTRUMENTAL_BEATS[0];
-    });
-  };
   const vocalsLocked = activeTab === "custom";
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
@@ -596,21 +591,14 @@ export function EnginePage() {
       }}
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
-            background: "transparent",
-            borderBottom: "1px solid rgba(244, 114, 182, 0.35)",
-            paddingBottom: 10,
-            marginBottom: 18,
-          }}
-        >
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }} role="tablist" aria-label="Studio mode">
-            <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} style={modeTabStyle(activeTab === "easy")}>
-              Easy
+        <div className="mb-[18px] flex flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div
+            className="flex flex-row gap-6 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="tablist"
+            aria-label="Studio mode"
+          >
+            <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} className="shrink-0 whitespace-nowrap" style={modeTabStyle(activeTab === "easy")}>
+              Instrumental
             </button>
             <button
               type="button"
@@ -621,15 +609,16 @@ export function EnginePage() {
                 setActiveTab("custom");
                 setIsCharacterModalOpen(false);
               }}
+              className="shrink-0 whitespace-nowrap"
               style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
             >
               Without Vocals
             </button>
-            <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
+            <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} className="shrink-0 whitespace-nowrap" style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
               With Vocals
             </button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="flex w-full items-center gap-3 sm:w-auto">
             <div
               style={{
                 display: "flex",
@@ -726,7 +715,7 @@ export function EnginePage() {
         ) : null}
 
         {activeTab === "vocals" ? (
-          <VocalStudioTab reference={referenceForCharacter(selectedCharacter)} />
+          <VocalStudioTab reference={referenceForStudio(selectedCharacter, vocalSource)} />
         ) : activeTab === "easy" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -847,48 +836,33 @@ export function EnginePage() {
                   padding: 0,
                 }}
               />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <button
-                  type="button"
-                  onClick={handleMakeABeat}
-                  style={{
-                    backgroundColor: isInstrumental ? "rgba(225, 29, 72, 0.2)" : "rgba(255,255,255,0.05)",
-                    border: isInstrumental ? "1px solid #e11d48" : "1px solid rgba(255,255,255,0.1)",
-                    color: isInstrumental ? "#fda4af" : "#cbd5e1",
-                    borderRadius: 20,
-                    padding: "8px 12px",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  + 🎹 Make a beat
-                </button>
-                <button
-                  type="button"
-                  aria-label="Send"
-                  disabled={isGenerating || !prompt.trim()}
-                  onClick={(event) => void handleGenerate(event)}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    flex: "0 0 auto",
-                    border: "none",
-                    borderRadius: 8,
-                    background: prompt.trim() ? "#0284c7" : "rgba(255,255,255,0.08)",
-                    color: "#f8fafc",
-                    fontSize: 16,
-                    fontWeight: 700,
-                    cursor: isGenerating || !prompt.trim() ? "not-allowed" : "pointer",
-                  }}
-                >
-                  ↑
-                </button>
-              </div>
             </div>
+            <div style={cardStyle}>
+              <DurationSlider maxSeconds={180} value={Math.min(trackLength, 180)} onChange={setTrackLength} />
+            </div>
+            <button
+              type="button"
+              disabled={isGenerating || !prompt.trim()}
+              onClick={(event) => void handleGenerate(event)}
+              className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
+            >
+              {isGenerating ? "Synthesizing & Vaulting..." : "Render Master Record"}
+            </button>
           </div>
         ) : (
           <form onSubmit={(event) => void handleGenerate(event)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
+              <input
+                type="text"
+                aria-label="Song title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Enter song title"
+                maxLength={50}
+                style={{ backgroundColor: "transparent", border: "none", color: "#f8fafc", outline: "none", fontSize: 14, width: "80%" }}
+              />
+              <span style={{ fontSize: 12, color: "#64748b" }}>{title.length}/50</span>
+            </div>
             <div style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
                 <span style={{ fontSize: 14, fontWeight: 700 }}>{isInstrumental ? "Lyrics disabled" : "Lyrics & Structure"}</span>
@@ -1003,7 +977,7 @@ export function EnginePage() {
             {isInstrumental ? null : (
               <div style={{ ...cardStyle, flex: "1 1 240px", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Vocal Gender</span>
-                <div style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
+                <div role="group" aria-label="Vocal gender" style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
                   <button
                     type="button"
                     aria-pressed={gender === "female"}
@@ -1044,19 +1018,6 @@ export function EnginePage() {
               <div style={{ ...cardStyle, flex: "1 1 280px" }}>
                 <DurationSlider value={trackLength} onChange={setTrackLength} />
               </div>
-            </div>
-
-            <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
-              <input
-                type="text"
-                aria-label="Song title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Enter song title"
-                maxLength={50}
-                style={{ backgroundColor: "transparent", border: "none", color: "#f8fafc", outline: "none", fontSize: 14, width: "80%" }}
-              />
-              <span style={{ fontSize: 12, color: "#64748b" }}>{title.length}/50</span>
             </div>
 
             <button
@@ -1225,7 +1186,9 @@ export function EnginePage() {
           onClose={() => setIsCharacterModalOpen(false)}
           characters={userCharacters}
           selectedCharacterId={selectedCharacter?.id || null}
+          selectedSourceUrl={vocalSource?.url ?? null}
           onSelectCharacter={(char) => setSelectedCharacter(char)}
+          onSelectSource={(source) => setVocalSource(source)}
           onOpenUpgradeModal={() => {
             setIsCharacterModalOpen(false);
             setIsUpgradeModalOpen(true);

@@ -47,7 +47,7 @@ export default function VocalUpgradeModal({ isOpen, onClose, onCompleteCheckout 
           Unlock Custom Vocal Studio
         </h2>
         <p style={{ margin: "0 0 24px", fontSize: 14, color: "#94a3b8", lineHeight: 1.5 }}>
-          Create and train permanent AI vocal characters trained on your own voice. Requires custom model
+          Create and train a permanent vocal profile from your own voice. Requires custom model
           provisioning.
         </p>
         <div
@@ -65,7 +65,7 @@ export default function VocalUpgradeModal({ isOpen, onClose, onCompleteCheckout 
         >
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, color: "#f8fafc" }}>Creator Voice License</div>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>1 Lifetime Character Slot</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>1 Lifetime Vocal Slot</div>
           </div>
           <div style={{ color: "#06b6d4", fontWeight: 800, fontSize: 14, whiteSpace: "nowrap" }}>
             5 Hybrid Tokens
@@ -87,7 +87,7 @@ export default function VocalUpgradeModal({ isOpen, onClose, onCompleteCheckout 
             cursor: "pointer",
           }}
         >
-          Unlock Character Slot
+          Unlock Vocal Slot
         </button>
         <button
           type="button"

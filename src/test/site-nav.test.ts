@@ -12,6 +12,10 @@ describe("site nav", () => {
     ]);
   });
 
+  it("uses short dock labels that fit a phone without clipping", () => {
+    expect(SITE_NAV.map((item) => item.short)).toEqual(["Create", "Catalog", "Merch", "Radio", "Packs"]);
+  });
+
   it("marks Hybrid AI Radio active on the homepage radio hash", () => {
     const item = SITE_NAV.find((entry) => entry.id === "radio")!;
     expect(isSiteNavActive(item, "/", {}, "radio")).toBe(true);

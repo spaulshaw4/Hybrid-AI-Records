@@ -1,4 +1,8 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
+import { AudioWaveform, Mic, X } from "lucide-react";
+
+import { supabase } from "@/integrations/supabase/client";
 
 export interface VocalCharacter {
   id: string;
@@ -9,40 +13,109 @@ export interface VocalCharacter {
   vocalId: string;
 }
 
+export type VocalSourceSelection = {
+  url: string;
+  label: string;
+};
+
 interface CharacterModalProps {
   isOpen: boolean;
   onClose: () => void;
   characters: VocalCharacter[];
   selectedCharacterId: string | null;
   onSelectCharacter: (char: VocalCharacter) => void;
+  onSelectSource?: (source: VocalSourceSelection) => void;
+  selectedSourceUrl?: string | null;
   onOpenUpgradeModal: () => void;
   hasProLicense: boolean;
 }
 
-type CharacterTab = "Mine" | "Liked";
+type VaultChoice = {
+  id: string;
+  title: string;
+  url: string;
+};
 
-function tabStyle(active: boolean): CSSProperties {
-  return {
-    backgroundColor: active ? "rgba(6,182,212,0.15)" : "transparent",
-    color: active ? "#06b6d4" : "#94a3b8",
-    border: active ? "1px solid #06b6d4" : "1px solid transparent",
-    borderRadius: 999,
-    padding: "6px 16px",
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
+type VaultPage = PromiseLike<{
+  data: Array<Record<string, unknown>> | null;
+  error: { message: string } | null;
+}>;
+
+type VaultOrdered = {
+  order: (column: string, options: { ascending: boolean }) => {
+    limit: (count: number) => VaultPage;
   };
+};
+
+type VaultQuery = {
+  select: (columns: string) => VaultOrdered & {
+    eq: (column: string, value: string) => VaultOrdered;
+  };
+};
+
+const RECORD_LIMIT_MS = 15_000;
+
+function publicAudioUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text) return null;
+  if (/^https:\/\//i.test(text)) return text;
+  if (text.includes("/storage/v1/object/")) return text.startsWith("https://") ? text : null;
+  const path = text.replace(/^\/+/, "");
+  if (!path || path.includes("..")) return null;
+  const { data } = supabase.storage.from("audio-vault").getPublicUrl(path);
+  return data.publicUrl?.startsWith("https://") ? data.publicUrl : null;
 }
 
-function MicIcon() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" stroke="#06b6d4" strokeWidth="1.6" />
-      <path d="M6.5 11.5a5.5 5.5 0 0 0 11 0" stroke="#06b6d4" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M12 17v3.2" stroke="#06b6d4" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M8.5 20.2h7" stroke="#06b6d4" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
+function choiceFromRow(row: Record<string, unknown>): VaultChoice | null {
+  const id = typeof row.id === "string" && row.id ? row.id : typeof row.task_id === "string" ? row.task_id : "";
+  if (!id) return null;
+  const url = publicAudioUrl(row.wav_url) || publicAudioUrl(row.mp3_url);
+  if (!url) return null;
+  const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Untitled Master";
+  return { id, title, url };
+}
+
+async function loadVaultChoices(): Promise<VaultChoice[]> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const sessionUser = sessionData.session?.user;
+  const accessToken = sessionData.session?.access_token?.trim() ?? "";
+  let rows: Array<Record<string, unknown>> = [];
+  if (sessionUser?.id) {
+    const query = await (supabase as unknown as { from: (table: string) => VaultQuery })
+      .from("vaulted_tracks")
+      .select("id, title, prompt, wav_url, mp3_url, created_at, user_id")
+      .eq("user_id", sessionUser.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (!query.error && Array.isArray(query.data) && query.data.length > 0) {
+      rows = query.data;
+    }
+  }
+  if (rows.length === 0) {
+    const response = accessToken
+      ? await fetch("/api/vault", { headers: { Authorization: `Bearer ${accessToken}` } })
+      : await fetch("/api/vault");
+    if (!response.ok) throw new Error("Could not load the vault.");
+    const payload: unknown = await response.json();
+    rows =
+      payload && typeof payload === "object" && Array.isArray((payload as { tracks?: unknown }).tracks)
+        ? (payload as { tracks: Array<Record<string, unknown>> }).tracks
+        : [];
+  }
+  return rows.flatMap((row) => {
+    const choice = choiceFromRow(row);
+    return choice ? [choice] : [];
+  });
+}
+
+function fileExtension(file: File): "wav" | "mp3" | null {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".mp3") || file.type === "audio/mpeg" || file.type === "audio/mp3") return "mp3";
+  if (name.endsWith(".wav") || file.type === "audio/wav" || file.type === "audio/x-wav" || file.type === "audio/wave") {
+    return "wav";
+  }
+  return null;
 }
 
 export default function CharacterModal({
@@ -51,16 +124,94 @@ export default function CharacterModal({
   characters,
   selectedCharacterId,
   onSelectCharacter,
+  onSelectSource,
+  selectedSourceUrl = null,
   onOpenUpgradeModal,
   hasProLicense,
 }: CharacterModalProps) {
-  const [activeTab, setActiveTab] = useState<CharacterTab>("Mine");
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const stopTimerRef = useRef<number | null>(null);
+  const tickTimerRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [takeLabel, setTakeLabel] = useState("");
+  const [recordError, setRecordError] = useState("");
+  const [vaultTracks, setVaultTracks] = useState<VaultChoice[]>([]);
+  const [vaultError, setVaultError] = useState("");
+  const [vaultLoading, setVaultLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  const releaseStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  };
+
+  const clearRecordTimers = () => {
+    if (stopTimerRef.current !== null) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    if (tickTimerRef.current !== null) {
+      window.clearInterval(tickTimerRef.current);
+      tickTimerRef.current = null;
+    }
+  };
+
+  const stopRecording = () => {
+    clearRecordTimers();
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    releaseStream();
+    setRecording(false);
+  };
 
   useEffect(() => {
-    if (isOpen) setActiveTab("Mine");
+    if (!isOpen) return;
+    previouslyFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      clearRecordTimers();
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      releaseStream();
+      setRecording(false);
+      const target = previouslyFocused.current;
+      previouslyFocused.current = null;
+      window.requestAnimationFrame(() => target?.focus());
+    };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setVaultLoading(true);
+    setVaultError("");
+    void loadVaultChoices()
+      .then((choices) => {
+        if (!cancelled) setVaultTracks(choices);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVaultTracks([]);
+          setVaultError("Could not load the vault.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setVaultLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  if (!isOpen || typeof document === "undefined") return null;
 
   const handleCreateClick = () => {
     if (!hasProLicense) {
@@ -70,252 +221,261 @@ export default function CharacterModal({
     window.alert("Opening vocal enrollment file uploader...");
   };
 
-  return (
+  const startRecording = async () => {
+    if (recording) return;
+    setRecordError("");
+    setTakeLabel("");
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setRecordError("Recording is unavailable in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      );
+      const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        chunksRef.current = [];
+        if (blob.size > 0) setTakeLabel("Take captured");
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      setElapsed(0);
+      const startedAt = Date.now();
+      tickTimerRef.current = window.setInterval(() => {
+        setElapsed(Math.min(15, Math.floor((Date.now() - startedAt) / 1000)));
+      }, 200);
+      stopTimerRef.current = window.setTimeout(() => {
+        stopRecording();
+      }, RECORD_LIMIT_MS);
+    } catch {
+      releaseStream();
+      setRecording(false);
+      setRecordError("Microphone access was denied.");
+    }
+  };
+
+  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const extension = fileExtension(file);
+    if (!extension) {
+      setUploadError("Upload a .wav or .mp3 file.");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id?.trim() ?? "";
+      if (!userId) {
+        setUploadError("Sign in to upload a vocal.");
+        return;
+      }
+      const id = crypto.randomUUID();
+      const path = `vocal-references/${userId}/${id}.${extension}`;
+      const { error } = await supabase.storage.from("audio-vault").upload(path, file, {
+        contentType: extension === "mp3" ? "audio/mpeg" : "audio/wav",
+        upsert: false,
+      });
+      if (error) {
+        setUploadError("Upload failed.");
+        return;
+      }
+      const { data } = supabase.storage.from("audio-vault").getPublicUrl(path);
+      const url = data.publicUrl?.trim() ?? "";
+      if (!url.startsWith("https://")) {
+        setUploadError("Upload failed.");
+        return;
+      }
+      onSelectSource?.({ url, label: file.name });
+    } catch {
+      setUploadError("Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return createPortal(
     <div
       role="presentation"
       onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.75)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-        padding: 16,
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md"
     >
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Character"
+        aria-labelledby="vocal-studio-title"
+        aria-describedby="vocal-studio-subtitle"
         onClick={(event) => event.stopPropagation()}
-        style={{
-          backgroundColor: "#161b26",
-          color: "#f8fafc",
-          colorScheme: "dark",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 14,
-          width: "100%",
-          maxWidth: 620,
-          minHeight: 460,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
         }}
+        className="relative z-[60] flex max-h-[min(760px,calc(100vh-2rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141018] text-white shadow-2xl"
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            padding: "20px 24px 8px",
-          }}
-        >
+        <div className="flex items-start justify-between gap-4 px-5 pb-2 pt-5">
           <div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#f8fafc" }}>Character</h2>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#94a3b8" }}>
-              Choose a character to perform your song
+            <h2 id="vocal-studio-title" className="m-0 text-lg font-bold text-white">
+              Vocal Studio
+            </h2>
+            <p id="vocal-studio-subtitle" className="mt-1 text-sm text-zinc-400">
+              Select, record, or inject a vocal into your production
             </p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            aria-label="Close character vault"
-            style={{
-              background: "transparent",
-              backgroundColor: "transparent",
-              border: "none",
-              color: "#94a3b8",
-              fontSize: 18,
-              cursor: "pointer",
-              lineHeight: 1,
-            }}
+            aria-label="Close"
+            className="rounded-md border-0 bg-transparent p-1 text-zinc-400 hover:text-white"
           >
-            ✕
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            padding: "10px 24px 4px",
-          }}
-        >
-          <div role="tablist" aria-label="Character library" style={{ display: "flex", gap: 8 }}>
-            {(["Mine", "Liked"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab}
-                onClick={() => setActiveTab(tab)}
-                style={tabStyle(activeTab === tab)}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-          <div style={{ position: "relative" }}>
+        <div className="px-5 pb-3">
+          <button
+            type="button"
+            onClick={handleCreateClick}
+            className="rounded-lg border-0 bg-gradient-to-r from-cyan-500 to-sky-600 px-3.5 py-2 text-sm font-bold text-white"
+          >
+            + Add Vocal
+            {hasProLicense ? null : (
+              <span className="ms-2 rounded bg-cyan-400 px-1.5 py-0.5 text-[10px] font-black text-slate-950">Pro</span>
+            )}
+          </button>
+        </div>
+
+        <div className="grid gap-4 overflow-y-auto px-5 pb-5 md:grid-cols-2">
+          <section className="flex flex-col gap-3 rounded-xl border border-white/10 bg-black/40 p-4">
+            <div className="flex items-center gap-2 text-cyan-300">
+              <Mic className="h-5 w-5" aria-hidden="true" />
+              <span className="text-xs font-semibold uppercase tracking-wider">Input Voice / Mic Capture</span>
+            </div>
+            <h3 className="m-0 text-base font-bold">Record / Input Your Voice</h3>
+            <p className="m-0 text-sm text-zinc-400">
+              Live mic capture (8–15s take) or select a saved vocal profile
+            </p>
             <button
               type="button"
-              onClick={handleCreateClick}
-              style={{
-                background: "linear-gradient(90deg, #06b6d4, #0284c7)",
-                backgroundColor: "#06b6d4",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: 8,
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
+              onClick={() => {
+                if (recording) stopRecording();
+                else void startRecording();
               }}
+              aria-label={recording ? "Stop recording" : "Record"}
+              className="w-fit rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300"
             >
-              + Create character
+              {recording ? `Stop ${elapsed}s` : "Record"}
             </button>
-            {hasProLicense ? null : (
-              <span
-                style={{
-                  position: "absolute",
-                  top: -8,
-                  right: -4,
-                  backgroundColor: "#06b6d4",
-                  color: "#0f172a",
-                  fontSize: 10,
-                  fontWeight: 900,
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  lineHeight: 1.2,
-                }}
-              >
-                Pro
-              </span>
+            {takeLabel ? <p className="m-0 text-xs text-zinc-300">{takeLabel}</p> : null}
+            {recordError ? (
+              <p role="alert" className="m-0 text-xs text-red-300">
+                {recordError}
+              </p>
+            ) : null}
+            {characters.length === 0 ? (
+              <p className="m-0 text-sm text-zinc-500">No saved vocal profiles yet.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Saved vocal profiles">
+                {characters.map((profile) => {
+                  const selected = selectedCharacterId === profile.id;
+                  return (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => onSelectCharacter(profile)}
+                      className={
+                        selected
+                          ? "rounded-lg border border-cyan-400 bg-cyan-500/10 px-3 py-3 text-left"
+                          : "rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-left hover:bg-white/10"
+                      }
+                    >
+                      <span className="block truncate text-sm font-bold">{profile.name}</span>
+                      <span className="mt-1 block text-xs text-zinc-400">{profile.timbreTag}</span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
-          </div>
-        </div>
+          </section>
 
-        <div style={{ flex: 1, padding: "16px 24px", overflowY: "auto" }}>
-          {characters.length === 0 ? (
-            <p style={{ margin: "40px 0 0", textAlign: "center", color: "#94a3b8", fontSize: 14 }}>
-              No custom vocal characters enrolled yet.
-            </p>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                gap: 16,
-              }}
-            >
-              {characters.map((char) => {
-                const isSelected = selectedCharacterId === char.id;
-                return (
-                  <button
-                    key={char.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectCharacter(char);
-                      onClose();
-                    }}
-                    style={{
-                      height: 240,
-                      background: "linear-gradient(180deg, #1e293b, #0f172a)",
-                      backgroundColor: "#1e293b",
-                      borderRadius: 12,
-                      border: isSelected ? "2px solid #06b6d4" : "2px solid transparent",
-                      cursor: "pointer",
-                      position: "relative",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "flex-end",
-                      padding: 16,
-                      color: "#f8fafc",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {char.isPublished ? (
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: 12,
-                          left: 12,
-                          backgroundColor: "rgba(6,182,212,0.2)",
-                          color: "#06b6d4",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                        }}
-                      >
-                        Published
-                      </span>
-                    ) : null}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 56,
-                        width: 72,
-                        height: 72,
-                        borderRadius: "50%",
-                        backgroundColor: "rgba(6,182,212,0.1)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {char.avatarUrl ? (
-                        <img
-                          src={char.avatarUrl}
-                          alt=""
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      ) : (
-                        <MicIcon />
-                      )}
-                    </div>
-                    <span
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        textAlign: "center",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {char.name}
-                    </span>
-                    <span style={{ display: "block", marginTop: 4, fontSize: 12, color: "#94a3b8" }}>
-                      {char.timbreTag}
-                    </span>
-                  </button>
-                );
-              })}
+          <section className="flex flex-col gap-3 rounded-xl border border-white/10 bg-black/40 p-4">
+            <div className="flex items-center gap-2 text-rose-300">
+              <AudioWaveform className="h-5 w-5" aria-hidden="true" />
+              <span className="text-xs font-semibold uppercase tracking-wider">Vocal Swap / Track Injection</span>
             </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            padding: "12px 24px 16px",
-            textAlign: "center",
-            fontSize: 12,
-            color: "#64748b",
-          }}
-        >
-          No more data
+            <h3 className="m-0 text-base font-bold">Vocal Swap / Track Inject</h3>
+            <p className="m-0 text-sm text-zinc-400">Apply this voice onto an existing track or upload</p>
+            <div>
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg border border-white/15 bg-transparent px-3 py-1.5 text-xs font-semibold text-zinc-200 disabled:opacity-60"
+              >
+                {uploading ? "Uploading..." : "Upload .wav or .mp3"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".wav,.mp3,audio/wav,audio/mpeg"
+                aria-label="Upload vocal audio"
+                className="sr-only"
+                onChange={(event) => void handleUpload(event)}
+              />
+            </div>
+            {uploadError ? (
+              <p role="alert" className="m-0 text-xs text-red-300">
+                {uploadError}
+              </p>
+            ) : null}
+            {vaultLoading ? <p className="m-0 text-xs text-zinc-500">Loading vault...</p> : null}
+            {vaultError ? (
+              <p role="alert" className="m-0 text-xs text-red-300">
+                {vaultError}
+              </p>
+            ) : null}
+            {!vaultLoading && !vaultError && vaultTracks.length === 0 ? (
+              <p className="m-0 text-sm text-zinc-500">No vaulted tracks yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2" role="group" aria-label="Vault tracks">
+                {vaultTracks.map((track) => {
+                  const selected = selectedSourceUrl === track.url;
+                  return (
+                    <button
+                      key={track.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => onSelectSource?.({ url: track.url, label: track.title })}
+                      className={
+                        selected
+                          ? "rounded-lg border border-rose-400 bg-rose-500/10 px-3 py-2 text-left text-sm font-semibold"
+                          : "rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-sm font-semibold hover:bg-white/10"
+                      }
+                    >
+                      {track.title}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

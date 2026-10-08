@@ -21,7 +21,7 @@ export const SITE_NAV: SiteNavItem[] = [
   {
     id: "packages",
     label: "Distribution & Video Packages",
-    short: "Packages",
+    short: "Packs",
     icon: "packages",
     to: "/portal",
   },

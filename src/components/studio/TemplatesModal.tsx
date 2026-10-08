@@ -1,175 +1,93 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
+
 import { MUREKA_CATEGORIES, MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
+
 interface TemplatesModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTemplate: (template: TrackTemplate) => void;
 }
+
 export default function TemplatesModal({ isOpen, onClose, onSelectTemplate }: TemplatesModalProps) {
   const [activeCategory, setActiveCategory] = useState("All");
-  if (!isOpen) return null;
-  const filtered = activeCategory === "All"
-    ? MUREKA_TEMPLATES
-    : MUREKA_TEMPLATES.filter((t) => t.category === activeCategory);
-  return (
+  if (!isOpen || typeof document === "undefined") return null;
+  const filtered =
+    activeCategory === "All" ? MUREKA_TEMPLATES : MUREKA_TEMPLATES.filter((template) => template.category === activeCategory);
+
+  return createPortal(
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(5, 2, 5, 0.92)",
-        backdropFilter: "blur(8px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 9999,
-        padding: 16,
-      }}
+      role="presentation"
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
     >
       <div
-        style={{
-          backgroundColor: "#120a10",
-          border: "1px solid rgba(244, 63, 94, 0.25)",
-          borderRadius: 14,
-          width: "100%",
-          maxWidth: 880,
-          maxHeight: "85vh",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 24px 60px rgba(0, 0, 0, 0.8)",
-          overflow: "hidden",
-        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Templates"
+        onClick={(event) => event.stopPropagation()}
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-rose-500/25 bg-[#120a10] text-white shadow-2xl"
       >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "18px 24px 14px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        >
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-6">
           <div>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#f8fafc" }}>
-              Templates
-            </h3>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>
-              Showing {filtered.length} production presets
-            </span>
+            <h3 className="m-0 text-lg font-bold text-slate-50">Templates</h3>
+            <span className="text-xs text-slate-400">Showing {filtered.length} production presets</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#94a3b8",
-              fontSize: 22,
-              cursor: "pointer",
-            }}
+            aria-label="Close"
+            className="border-0 bg-transparent text-xl leading-none text-slate-400"
           >
             ✕
           </button>
         </div>
-        {/* Category Pills Bar */}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            padding: "12px 24px",
-            overflowX: "auto",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        >
-          {MUREKA_CATEGORIES.map((cat) => (
+        <div className="mt-4 flex shrink-0 gap-2 overflow-x-auto px-6 py-2" role="group" aria-label="Genres">
+          {MUREKA_CATEGORIES.map((category) => (
             <button
-              key={cat}
+              key={category}
               type="button"
-              onClick={() => setActiveCategory(cat)}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 20,
-                fontSize: 12,
-                fontWeight: 600,
-                border: "none",
-                backgroundColor: activeCategory === cat ? "#e11d48" : "rgba(255, 255, 255, 0.06)",
-                color: activeCategory === cat ? "#ffffff" : "#94a3b8",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition: "background 0.15s",
-              }}
+              aria-pressed={activeCategory === category}
+              onClick={() => setActiveCategory(category)}
+              className={
+                activeCategory === category
+                  ? "whitespace-nowrap rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white"
+                  : "whitespace-nowrap rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-slate-400"
+              }
             >
-              {cat}
+              {category}
             </button>
           ))}
         </div>
-        {/* Card Grid */}
-        <div
-          style={{
-            padding: "20px 24px",
-            overflowY: "auto",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-            gap: 14,
-          }}
-        >
-          {filtered.map((tmpl) => (
-            <div
-              key={tmpl.id}
-              style={{
-                backgroundColor: "rgba(25, 14, 22, 0.85)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: 10,
-                padding: 16,
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "space-between",
-              }}
-            >
-              <div>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: "#f43f5e",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  {tmpl.category}
-                </span>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#f8fafc", margin: "4px 0 6px" }}>
-                  {tmpl.title}
-                </div>
-                <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.4, marginBottom: 14 }}>
-                  {tmpl.subtitle}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onSelectTemplate(tmpl);
-                  onClose();
-                }}
-                style={{
-                  width: "100%",
-                  padding: "9px 0",
-                  background: "linear-gradient(90deg, #e11d48 0%, #be123c 100%)",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
+        <div className="mt-4 max-h-[80vh] min-h-0 flex-1 overflow-y-auto px-6 pb-6" aria-label="Production presets">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5">
+            {filtered.map((template) => (
+              <div
+                key={template.id}
+                className="flex flex-col justify-between rounded-xl border border-white/10 bg-[rgba(25,14,22,0.85)] p-4"
               >
-                Use template
-              </button>
-            </div>
-          ))}
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-rose-500">{template.category}</span>
+                  <div className="mb-1.5 mt-1 text-sm font-bold text-slate-50">{template.title}</div>
+                  <div className="mb-3.5 text-xs leading-snug text-slate-400">{template.subtitle}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectTemplate(template);
+                    onClose();
+                  }}
+                  className="w-full rounded-md border-0 bg-gradient-to-r from-rose-600 to-rose-800 py-2 text-xs font-bold text-white"
+                >
+                  Use template
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

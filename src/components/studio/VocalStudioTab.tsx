@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Sparkles } from "lucide-react";
 
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -7,12 +7,8 @@ import { DurationSlider } from "@/components/studio/DurationSlider";
 import { supabase } from "@/integrations/supabase/client";
 import type { TrackTemplate } from "@/data/murekaTemplates";
 
-const GENDERS = ["Male Vocal", "Female Vocal", "Duet"] as const;
-const SECTION_TAGS = ["[Verse]", "[Chorus]", "[Bridge]", "[Outro]"] as const;
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
 const VENDOR_WORD = /wavespeed|aimusic|sonic|mureka|replicate|fable/i;
-
-type VocalGender = (typeof GENDERS)[number];
 
 export type VocalStudioReference = {
   label?: string;
@@ -104,11 +100,10 @@ async function postCoproducer(body: Record<string, string>): Promise<CoproducerD
 }
 
 export function VocalStudioTab({ reference }: { reference?: VocalStudioReference } = {}) {
-  const lyricsRef = useRef<HTMLTextAreaElement>(null);
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [styleText, setStyleText] = useState("");
-  const [vocalGender, setVocalGender] = useState<VocalGender>("Male Vocal");
+  const [gender, setGender] = useState<"male" | "female">("male");
   const [trackLength, setTrackLength] = useState(180);
   const [submitting, setSubmitting] = useState(false);
   const [styleAssistBusy, setStyleAssistBusy] = useState(false);
@@ -132,23 +127,6 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
     : lyrics.trim()
       ? "Format & Polish"
       : "Studio Ghostwriter";
-
-  const insertSection = (marker: string) => {
-    const token = `${marker}\n`;
-    const el = lyricsRef.current;
-    setLyrics((current) => {
-      const start = el?.selectionStart ?? current.length;
-      const end = el?.selectionEnd ?? current.length;
-      const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
-      const caret = start + token.length;
-      requestAnimationFrame(() => {
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(caret, caret);
-      });
-      return next;
-    });
-  };
 
   const handleStyleAssist = async () => {
     if (styleAssistBusy) return;
@@ -203,7 +181,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
 
   const handleApplyTemplate = (tmpl: TrackTemplate) => {
     setStyleText(tmpl.prompt);
-    setVocalGender(tmpl.recommendedGender === "female" ? "Female Vocal" : "Male Vocal");
+    setGender(tmpl.recommendedGender === "female" ? "female" : "male");
   };
 
   const saveRecords = (updated: SavedPromptItem[]) => {
@@ -259,7 +237,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
         body: JSON.stringify({
           title,
           lyrics,
-          vocalGender,
+          vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
           styleTags: styleText.trim(),
           duration: trackLength,
           ...(vocalAudioUrl ? { vocalAudioUrl } : {}),
@@ -286,40 +264,41 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
         className="flex flex-col gap-3.5"
         aria-label="With Vocals"
       >
-        <label className="flex flex-col gap-2 rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <span className="text-xs font-semibold text-zinc-400">Track title</span>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
           <input
-            aria-label="Track title"
+            aria-label="Song title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Track title"
-            maxLength={120}
+            placeholder="Enter song title"
+            maxLength={50}
             className={fieldClass}
           />
-        </label>
+          <span className="text-xs text-zinc-500">{title.length}/50</span>
+        </div>
+
+        {reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null}
 
         <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <span className="text-xs font-semibold text-zinc-400">Vocal gender</span>
-          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Vocal gender">
-            {GENDERS.map((gender) => {
-              const selected = vocalGender === gender;
-              return (
-                <button
-                  key={gender}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setVocalGender(gender)}
-                  className={
-                    selected
-                      ? "rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400"
-                      : "rounded-lg border border-white/10 bg-transparent px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-white/5"
-                  }
-                >
-                  {gender}
-                </button>
-              );
-            })}
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-bold text-white">Lyrics & Structure</span>
+            <button
+              type="button"
+              disabled={lyricsAssistBusy}
+              onClick={() => void handleLyricsAssist()}
+              className={badgeActionClass}
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              {lyricsAssistLabel}
+            </button>
           </div>
+          <textarea
+            aria-label="Lyrics"
+            value={lyrics}
+            onChange={(event) => setLyrics(event.target.value)}
+            placeholder="Enter lyrics..."
+            rows={5}
+            className={`${fieldClass} resize-y`}
+          />
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
@@ -383,48 +362,45 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <DurationSlider value={trackLength} onChange={setTrackLength} />
-        </div>
-
-        {reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null}
-
-        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-bold text-white">Lyrics</span>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex flex-wrap gap-2" role="group" aria-label="Lyric sections">
-                {SECTION_TAGS.map((marker) => (
-                  <button
-                    key={marker}
-                    type="button"
-                    onClick={() => insertSection(marker)}
-                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/20"
-                  >
-                    {marker}
-                  </button>
-                ))}
-              </div>
+        <div className="flex flex-wrap gap-3">
+          <div className="flex min-w-[240px] flex-1 items-center justify-between rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
+            <span className="text-[13px] font-semibold text-slate-400">Vocal Gender</span>
+            <div
+              role="group"
+              aria-label="Vocal gender"
+              className="flex rounded-md border border-slate-800 bg-[#0b0f19] p-[3px]"
+            >
               <button
                 type="button"
-                disabled={lyricsAssistBusy}
-                onClick={() => void handleLyricsAssist()}
-                className={badgeActionClass}
+                aria-pressed={gender === "female"}
+                onClick={() => setGender("female")}
+                className={
+                  gender === "female"
+                    ? "rounded px-[18px] py-[5px] text-xs font-bold text-white"
+                    : "rounded px-[18px] py-[5px] text-xs font-bold text-slate-400"
+                }
+                style={{ backgroundColor: gender === "female" ? "#9f1239" : "transparent" }}
               >
-                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                {lyricsAssistLabel}
+                Female
+              </button>
+              <button
+                type="button"
+                aria-pressed={gender === "male"}
+                onClick={() => setGender("male")}
+                className={
+                  gender === "male"
+                    ? "rounded px-[18px] py-[5px] text-xs font-bold text-white"
+                    : "rounded px-[18px] py-[5px] text-xs font-bold text-slate-400"
+                }
+                style={{ backgroundColor: gender === "male" ? "#9f1239" : "transparent" }}
+              >
+                Male
               </button>
             </div>
           </div>
-          <textarea
-            ref={lyricsRef}
-            aria-label="Lyrics"
-            value={lyrics}
-            onChange={(event) => setLyrics(event.target.value)}
-            placeholder="Write the topline"
-            rows={8}
-            className={`${fieldClass} resize-y`}
-          />
+          <div className="min-w-[280px] flex-[1_1_280px] rounded-xl border border-white/10 bg-black/30 p-3.5">
+            <DurationSlider value={trackLength} onChange={setTrackLength} />
+          </div>
         </div>
 
         <p className="text-xs font-semibold text-zinc-400">This render uses 1 Hybrid Token</p>
@@ -445,7 +421,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
           disabled={submitDisabled}
           className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
         >
-          {submitting ? "Synthesizing..." : "Render Track"}
+          {submitting ? "Synthesizing & Vaulting..." : "Render Master Record"}
         </button>
       </form>
       <TemplatesModal

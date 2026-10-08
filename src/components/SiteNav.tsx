@@ -39,8 +39,10 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
       className={cn("inline-flex items-center gap-2", className)}
       data-no-translate
     >
-      <LanguageSwitcher menuAlign="end" />
-      <CurrencySwitcher variant="pill" />
+      <div className="hidden items-center gap-2 sm:flex">
+        <LanguageSwitcher menuAlign="end" />
+        <CurrencySwitcher variant="pill" />
+      </div>
       <SettingsMenu />
       <UserAuthButton />
     </div>
@@ -83,7 +85,7 @@ function NavItem({
         className={cn(
           "rwb-flame rwb-flame-deep font-mono font-bold uppercase",
           compact
-            ? "max-w-full truncate text-center text-[9px] tracking-[0.08em]"
+            ? "whitespace-nowrap text-center text-[10px] leading-none tracking-tight"
             : "min-w-0 text-start text-[11px] tracking-[0.16em]",
         )}
       >
