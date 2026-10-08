@@ -22,6 +22,8 @@ vi.mock("@/integrations/supabase/client", () => ({
 import { AudioVaultList } from "./AudioVaultList";
 
 const EMPTY_COPY = "No ready masters yet. Create a track and it will show up here.";
+const LOCKED_COPY = "Sign in to access your private Audio Vault and release-ready masters.";
+const VAULT_COLUMNS = "id, title, prompt, wav_url, mp3_url, created_at, user_id";
 
 function jsonResult(body: unknown, status = 200) {
   return {
@@ -35,25 +37,33 @@ function jsonResult(body: unknown, status = 200) {
 function mockSignedInVault(rows: Array<Record<string, unknown>>) {
   const tables: string[] = [];
   const filters: Array<[string, string]> = [];
+  const selected: string[] = [];
+  const orders: Array<[string, boolean]> = [];
   getSession.mockResolvedValue({
     data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
   });
   from.mockImplementation((table: string) => {
     tables.push(table);
     return {
-      select: () => ({
-        eq: (column: string, value: string) => {
-          filters.push([column, value]);
-          return {
-            order: () => ({
-              limit: () => Promise.resolve({ data: rows, error: null }),
-            }),
-          };
-        },
-      }),
+      select: (columns: string) => {
+        selected.push(columns);
+        return {
+          eq: (column: string, value: string) => {
+            filters.push([column, value]);
+            return {
+              order: (columnName: string, options: { ascending: boolean }) => {
+                orders.push([columnName, options.ascending]);
+                return {
+                  limit: () => Promise.resolve({ data: rows, error: null }),
+                };
+              },
+            };
+          },
+        };
+      },
     };
   });
-  return { tables, filters };
+  return { tables, filters, selected, orders };
 }
 
 describe("AudioVaultList", () => {
@@ -73,20 +83,39 @@ describe("AudioVaultList", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the empty state when the vault fetch returns no masters", async () => {
+  it("locks the vault for a signed-out visitor and does not load tracks", async () => {
     getSession.mockResolvedValue({ data: { session: null } });
-    fetchMock.mockResolvedValue(jsonResult({ tracks: [] }));
+    fetchMock.mockResolvedValue(
+      jsonResult({
+        tracks: [
+          { id: "leak-1", title: "Feel It in the Rain" },
+          { id: "leak-2", title: "Go Crazy" },
+        ],
+      }),
+    );
 
-    render(<AudioVaultList revision={1} />);
+    render(
+      <AudioVaultList
+        revision={1}
+        pending={[
+          { id: "pending-1", title: "Feel It in the Rain", status: "Rendering" },
+          { id: "pending-2", title: "Go Crazy", status: "Failed" },
+        ]}
+      />,
+    );
 
-    expect(await screen.findByText(EMPTY_COPY)).toBeInTheDocument();
+    expect(await screen.findByText(LOCKED_COPY)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
     expect(screen.queryByText("Loading your vault...")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/vault");
+    expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
+    expect(screen.queryByText("Feel It in the Rain")).not.toBeInTheDocument();
+    expect(screen.queryByText("Go Crazy")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(from).not.toHaveBeenCalled();
   });
 
   it("renders a row title from vaulted_tracks", async () => {
-    const { tables, filters } = mockSignedInVault([
+    const { tables, filters, selected, orders } = mockSignedInVault([
       {
         id: "vault-42",
         title: "Glass Harbor",
@@ -100,7 +129,9 @@ describe("AudioVaultList", () => {
 
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
     expect(tables).toEqual(["vaulted_tracks"]);
+    expect(selected).toEqual([VAULT_COLUMNS]);
     expect(filters).toEqual([["user_id", "user-1"]]);
+    expect(orders).toEqual([["created_at", false]]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

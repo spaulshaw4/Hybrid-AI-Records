@@ -1,11 +1,14 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   AudioLines,
   Clapperboard,
   Library,
   Radio,
+  Settings,
   ShoppingBag,
+  X,
 } from "lucide-react";
 
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
@@ -29,9 +32,87 @@ const ICONS = {
   packages: Clapperboard,
 } as const;
 
+const GEAR_BUTTON =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none";
+
+/**
+ * Phone sheet for the same language and currency controls the header shows from sm up.
+ * The overlay covers the page so the pickers stay usable under the fixed chrome.
+ */
+function MobileLocaleSheet() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`${GEAR_BUTTON} sm:hidden`}
+        aria-label="Site settings"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? "mobile-locale-sheet" : undefined}
+        onClick={() => setOpen(true)}
+      >
+        <Settings className="size-3.5" aria-hidden="true" />
+      </button>
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              id="mobile-locale-sheet"
+              className="fixed inset-0 z-50 bg-zinc-950/95 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]"
+              role="presentation"
+              onClick={() => setOpen(false)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="mobile-locale-title"
+                className="mx-auto flex w-full max-w-md flex-col gap-6"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h2 id="mobile-locale-title" className="font-display text-xl font-semibold text-white">
+                    Language and currency
+                  </h2>
+                  <button
+                    type="button"
+                    aria-label="Close"
+                    onClick={() => setOpen(false)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] text-zinc-200"
+                  >
+                    <X className="size-4" aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="flex flex-col items-start gap-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">Language</p>
+                  <LanguageSwitcher menuAlign="start" />
+                </div>
+                <div className="flex flex-col items-start gap-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">Currency</p>
+                  <CurrencySwitcher variant="pill" />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
 /**
  * Language → currency → settings. Static inline flow only — never fixed/sticky.
  * Token balance lives on /engine and /tokens — not in this chrome.
+ * Below sm, language and currency move into the settings gear sheet.
  */
 export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
@@ -43,7 +124,10 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
         <LanguageSwitcher menuAlign="end" />
         <CurrencySwitcher variant="pill" />
       </div>
-      <SettingsMenu />
+      <MobileLocaleSheet />
+      <div className="hidden sm:inline-flex">
+        <SettingsMenu />
+      </div>
       <UserAuthButton />
     </div>
   );

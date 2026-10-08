@@ -71,6 +71,10 @@ describe("VocalStudioTab", () => {
     expect(screen.getByRole("button", { name: "Clear style" })).toBeInTheDocument();
     const ghostwriter = screen.getByRole("button", { name: "Studio Ghostwriter" });
     expect(ghostwriter.querySelector("svg")).toBeTruthy();
+    const genderLabel = screen.getByText("Vocal Gender");
+    expect(genderLabel.className).toContain("whitespace-nowrap");
+    expect(genderLabel.parentElement?.className).toContain("flex-col");
+    expect(genderLabel.compareDocumentPosition(gender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: "Male", pressed: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Female", pressed: false })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /claude/i })).not.toBeInTheDocument();

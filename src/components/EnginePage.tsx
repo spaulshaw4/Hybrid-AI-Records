@@ -6,7 +6,6 @@ import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
-import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { AudioVaultList } from "@/components/studio/AudioVaultList";
 import { DurationSlider } from "@/components/studio/DurationSlider";
 import { VocalStudioTab, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
@@ -14,6 +13,24 @@ import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
+const VIBE_PLACEHOLDER =
+  "Describe a vibe, tempo, or instruments (e.g., 90 BPM lo-fi hip hop with Rhodes piano & upright bass)...";
+const VIBE_SOUND_DESIGN =
+  "Act as a sound designer. Expand the rough instrumental vibe into detailed acoustic keywords: BPM, specific instrumentation, analog warmth, and rhythmic groove. No vocals.";
+
+function vibeEnhanceSeed(rough: string): string {
+  const vibe = rough.trim();
+  if (!vibe) {
+    return `${VIBE_SOUND_DESIGN} Invent one concrete instrumental production.`;
+  }
+  return `${VIBE_SOUND_DESIGN} Rough vibe: ${vibe}`;
+}
+
+function vibeEnhanceError(message: string): string {
+  if (/wavespeed|replicate|claude|aimusic/i.test(message)) return "Could not enhance that vibe.";
+  const text = message.trim();
+  return text || "Could not enhance that vibe.";
+}
 
 const compactActionClass =
   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
@@ -202,8 +219,6 @@ export function EnginePage() {
   const [selectedCharacter, setSelectedCharacter] = useState<VocalCharacter | null>(null);
   const [vocalSource, setVocalSource] = useState<{ url: string; label: string } | null>(null);
   const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
-  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
-  const [hasProLicense, setHasProLicense] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -214,6 +229,7 @@ export function EnginePage() {
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isVibeEnhancing, setIsVibeEnhancing] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
   const [trackLength, setTrackLength] = useState(180);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -351,6 +367,46 @@ export function EnginePage() {
       setErrorMessage(message || "AI request failed");
     } finally {
       setIsAiLoading(false);
+    }
+  };
+
+  const handleEnhanceVibe = async () => {
+    if (isVibeEnhancing) return;
+    const draft = prompt;
+    setIsVibeEnhancing(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch("/api/ai/coproducer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "enhance_style",
+          prompt: vibeEnhanceSeed(draft),
+          lyrics: "",
+        }),
+      });
+      const rawText = await res.text();
+      let data: { success?: boolean; style?: string; prompt?: string; error?: string; message?: string } = {};
+      try {
+        const parsed: unknown = JSON.parse(rawText);
+        if (parsed && typeof parsed === "object") {
+          data = parsed as { success?: boolean; style?: string; prompt?: string; error?: string; message?: string };
+        }
+      } catch {
+        throw new Error(`Server returned non-JSON (${res.status}): ${rawText.slice(0, 120)}`);
+      }
+      const enhanced = (data.style || data.prompt || "").trim();
+      if (!res.ok || !enhanced) {
+        throw new Error(
+          data.error || data.message || (res.ok ? "Style enhancement returned an empty prompt." : "Could not enhance that vibe."),
+        );
+      }
+      setPrompt(enhanced);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      setErrorMessage(vibeEnhanceError(message || "Could not enhance that vibe."));
+    } finally {
+      setIsVibeEnhancing(false);
     }
   };
 
@@ -498,7 +554,7 @@ export function EnginePage() {
           stylePrompt: styleValue,
           lyrics: lyricValue,
           lyricsText: lyricValue,
-          duration,
+          ...(onInstrumentalTab ? {} : { duration }),
           title: songTitle,
           gender,
           isInstrumental: dispatchInstrumental,
@@ -566,7 +622,13 @@ export function EnginePage() {
       ? "Format & Polish"
       : "Studio Ghostwriter";
 
-  const vocalsLocked = activeTab === "custom";
+  const vocalLockTitle =
+    activeTab === "easy"
+      ? "Vocals disabled in Instrumental mode"
+      : activeTab === "custom"
+        ? "Vocals disabled in instrumental mode"
+        : undefined;
+  const vocalsLocked = vocalLockTitle !== undefined;
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
     ? {
@@ -597,7 +659,17 @@ export function EnginePage() {
             role="tablist"
             aria-label="Studio mode"
           >
-            <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} className="shrink-0 whitespace-nowrap" style={modeTabStyle(activeTab === "easy")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "easy"}
+              onClick={() => {
+                setActiveTab("easy");
+                setIsCharacterModalOpen(false);
+              }}
+              className="shrink-0 whitespace-nowrap"
+              style={modeTabStyle(activeTab === "easy")}
+            >
               Instrumental
             </button>
             <button
@@ -668,14 +740,14 @@ export function EnginePage() {
             + Remix
           </button>
           <span
-            title={vocalsLocked ? "Vocals disabled in instrumental mode" : undefined}
+            title={vocalLockTitle}
             style={{ display: "flex" }}
           >
             <button
               type="button"
               disabled={vocalsLocked}
               aria-disabled={vocalsLocked}
-              title={vocalsLocked ? "Vocals disabled in instrumental mode" : undefined}
+              title={vocalLockTitle}
               onClick={() => {
                 if (vocalsLocked) return;
                 setIsCharacterModalOpen(true);
@@ -820,11 +892,23 @@ export function EnginePage() {
                 gap: 12,
               }}
             >
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  disabled={isVibeEnhancing}
+                  aria-busy={isVibeEnhancing}
+                  onClick={() => void handleEnhanceVibe()}
+                  className={badgeActionClass}
+                >
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  {isVibeEnhancing ? "Enhancing..." : "Enhance Vibe"}
+                </button>
+              </div>
               <input
                 aria-label="What's the vibe?"
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="What's the vibe?"
+                placeholder={VIBE_PLACEHOLDER}
                 style={{
                   width: "100%",
                   background: "transparent",
@@ -838,7 +922,7 @@ export function EnginePage() {
               />
             </div>
             <div style={cardStyle}>
-              <DurationSlider maxSeconds={180} value={Math.min(trackLength, 180)} onChange={setTrackLength} />
+              <DurationSlider maxSeconds={360} value={trackLength} onChange={setTrackLength} />
             </div>
             <button
               type="button"
@@ -975,8 +1059,8 @@ export function EnginePage() {
 
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             {isInstrumental ? null : (
-              <div style={{ ...cardStyle, flex: "1 1 240px", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Vocal Gender</span>
+              <div style={{ ...cardStyle, flex: "1 1 240px", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 8, padding: "10px 16px" }}>
+                <span style={{ display: "block", width: "100%", whiteSpace: "nowrap", fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Vocal Gender</span>
                 <div role="group" aria-label="Vocal gender" style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
                   <button
                     type="button"
@@ -1189,20 +1273,6 @@ export function EnginePage() {
           selectedSourceUrl={vocalSource?.url ?? null}
           onSelectCharacter={(char) => setSelectedCharacter(char)}
           onSelectSource={(source) => setVocalSource(source)}
-          onOpenUpgradeModal={() => {
-            setIsCharacterModalOpen(false);
-            setIsUpgradeModalOpen(true);
-          }}
-          hasProLicense={hasProLicense}
-        />
-        <VocalUpgradeModal
-          isOpen={isUpgradeModalOpen}
-          onClose={() => setIsUpgradeModalOpen(false)}
-          onCompleteCheckout={() => {
-            setHasProLicense(true);
-            setIsUpgradeModalOpen(false);
-            setIsCharacterModalOpen(true);
-          }}
         />
       </div>
     </main>

@@ -363,8 +363,8 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <div className="flex min-w-[240px] flex-1 items-center justify-between rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
-            <span className="text-[13px] font-semibold text-slate-400">Vocal Gender</span>
+          <div className="flex min-w-[240px] flex-1 flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
+            <span className="block w-full whitespace-nowrap text-[13px] font-semibold text-slate-400">Vocal Gender</span>
             <div
               role="group"
               aria-label="Vocal gender"

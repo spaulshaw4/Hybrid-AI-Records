@@ -9,6 +9,7 @@ type VaultRow = {
   prompt?: string | null;
   wav_url?: string | null;
   mp3_url?: string | null;
+  user_id?: string | null;
 };
 
 function vaultClient(): SupabaseClient | null {
@@ -23,8 +24,9 @@ function vaultClient(): SupabaseClient | null {
 
 /**
  * GET /api/vault
- * Newest 20 rows from vaulted_tracks. Client is created here so importing
- * this module does not throw when Supabase env is missing.
+ * Newest 20 vaulted_tracks for the bearer session user.
+ * No valid bearer session: 401 and no rows. Client is created here so
+ * importing this module does not throw when Supabase env is missing.
  */
 export async function GET(req?: Request): Promise<Response> {
   try {
@@ -46,7 +48,7 @@ function isUnauthorized(err: unknown): boolean {
   return name === "UnauthorizedSessionError" || status === 401;
 }
 
-/** Bearer session, when the list sends one. Empty when the caller is signed out. */
+/** Bearer session user. Empty when the caller is signed out or the token is missing. */
 async function sessionUserId(req?: Request): Promise<string> {
   const header = req?.headers.get("authorization") ?? "";
   if (!header.startsWith("Bearer ") || !header.slice("Bearer ".length).trim()) return "";
@@ -61,24 +63,32 @@ async function readVault(req?: Request): Promise<Response> {
   }
 
   const userId = await sessionUserId(req);
-  // Service-role read, limited to the session user when a bearer token is present.
-  let query = supabase.from("vaulted_tracks").select("*");
-  if (userId) query = query.eq("user_id", userId);
-  const { data, error } = await query.order("created_at", { ascending: false }).limit(20);
+  // Service role bypasses RLS, so a missing session must not read the table.
+  if (!userId) {
+    return Response.json({ error: "Unauthorized session" }, { status: 401 });
+  }
+  const { data, error } = await supabase
+    .from("vaulted_tracks")
+    .select("id, title, prompt, wav_url, mp3_url, created_at, user_id, task_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(20);
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  const tracks = ((data ?? []) as VaultRow[]).map((row) => ({
-    id: row.id || row.task_id,
-    title: row.title || "Untitled Master",
-    genre: String(row.prompt || "").slice(0, 24),
-    duration: "210s",
-    status: "Ready",
-    wav_url: resolvedAudioUrl(supabase, row.wav_url),
-    mp3_url: resolvedAudioUrl(supabase, row.mp3_url),
-  }));
+  const tracks = ((data ?? []) as VaultRow[])
+    .filter((row) => row.user_id === userId)
+    .map((row) => ({
+      id: row.id || row.task_id,
+      title: row.title || "Untitled Master",
+      genre: String(row.prompt || "").slice(0, 24),
+      duration: "210s",
+      status: "Ready",
+      wav_url: resolvedAudioUrl(supabase, row.wav_url),
+      mp3_url: resolvedAudioUrl(supabase, row.mp3_url),
+    }));
 
   return Response.json({ tracks });
 }

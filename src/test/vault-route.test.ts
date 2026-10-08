@@ -29,6 +29,14 @@ vi.mock("@/lib/studio-request-auth.server", () => ({
 import { GET } from "@/app/api/vault/route";
 
 const SUPABASE_URL = "https://example.supabase.co";
+const SESSION_USER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const VAULT_COLUMNS = "id, title, prompt, wav_url, mp3_url, created_at, user_id, task_id";
+
+function bearerRequest() {
+  return new Request("http://localhost/api/vault", {
+    headers: { authorization: "Bearer a.b.c" },
+  });
+}
 
 function restoreEnv(name: "NEXT_PUBLIC_SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY" | "NEXT_PUBLIC_SUPABASE_ANON_KEY", value: string | undefined) {
   if (value === undefined) delete process.env[name];
@@ -72,15 +80,35 @@ describe("GET /api/vault", () => {
     await expect(res.json()).resolves.toEqual({ error: "Supabase is not configured" });
   });
 
-  it("prefers the service role key and maps vaulted_tracks rows", async () => {
+  it("returns 401 and does not read vaulted_tracks without a bearer session", async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-test";
+    limitMock.mockResolvedValue({
+      data: [{ id: "row-1", user_id: SESSION_USER, title: "Feel It in the Rain" }],
+      error: null,
+    });
+
+    const res = await GET();
+
+    expect(res.status).toBe(401);
+    expect(fromMock).not.toHaveBeenCalled();
+    expect(selectMock).not.toHaveBeenCalled();
+    expect(eqMock).not.toHaveBeenCalled();
+    await expect(res.json()).resolves.toEqual({ error: "Unauthorized session" });
+  });
+
+  it("prefers the service role key and maps only that user's vaulted_tracks rows", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-test";
+    resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
     limitMock.mockResolvedValue({
       data: [
         {
           id: "row-1",
           task_id: "task-1",
+          user_id: SESSION_USER,
           title: "Night Drive",
           prompt: "Acoustic rock with a long tail",
           wav_url: "https://cdn.example/a.wav",
@@ -88,21 +116,31 @@ describe("GET /api/vault", () => {
         },
         {
           task_id: "task-2",
+          user_id: SESSION_USER,
           title: "",
           prompt: "",
           wav_url: null,
           mp3_url: null,
         },
+        {
+          id: "row-other",
+          user_id: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+          title: "Feel It in the Rain",
+          prompt: "not yours",
+          wav_url: "https://cdn.example/leak.wav",
+          mp3_url: "https://cdn.example/leak.mp3",
+        },
       ],
       error: null,
     });
 
-    const res = await GET();
+    const res = await GET(bearerRequest());
 
     expect(res.status).toBe(200);
     expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test");
     expect(fromMock).toHaveBeenCalledWith("vaulted_tracks");
-    expect(selectMock).toHaveBeenCalledWith("*");
+    expect(selectMock).toHaveBeenCalledWith(VAULT_COLUMNS);
+    expect(eqMock).toHaveBeenCalledWith("user_id", SESSION_USER);
     expect(orderMock).toHaveBeenCalledWith("created_at", { ascending: false });
     expect(limitMock).toHaveBeenCalledWith(20);
     await expect(res.json()).resolves.toEqual({
@@ -133,21 +171,24 @@ describe("GET /api/vault", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-test";
+    resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
     limitMock.mockResolvedValue({ data: [], error: null });
 
-    const res = await GET();
+    const res = await GET(bearerRequest());
 
     expect(res.status).toBe(200);
     expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "anon-test");
+    expect(eqMock).toHaveBeenCalledWith("user_id", SESSION_USER);
     await expect(res.json()).resolves.toEqual({ tracks: [] });
   });
 
   it("returns the query error message", async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
     limitMock.mockResolvedValue({ data: null, error: { message: "permission denied" } });
 
-    const res = await GET();
+    const res = await GET(bearerRequest());
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "permission denied" });
@@ -156,11 +197,12 @@ describe("GET /api/vault", () => {
   it("scopes a bearer session to that user_id", async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
-    resolveStudioSessionMock.mockResolvedValue({ userId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" });
+    resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
     limitMock.mockResolvedValue({
       data: [
         {
           id: "row-1",
+          user_id: SESSION_USER,
           title: "Like the wind",
           prompt: "open air",
           wav_url: "https://cdn.example/a.wav",

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { TrackActionsMenu } from "@/components/studio/TrackActionsMenu";
+import { openSiteSignIn } from "@/components/studio/UserAuthButton";
 
 const EMPTY_COPY = "No ready masters yet. Create a track and it will show up here.";
+const LOCKED_COPY = "Sign in to access your private Audio Vault and release-ready masters.";
 
 export type VaultPendingRow = {
   id: string;
@@ -92,6 +95,7 @@ function barsFor(id: string): number[] {
 export function AudioVaultList({ revision, pending = [] }: Props) {
   const [rows, setRows] = useState<VaultCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const switched = useRef(new Set<string>());
@@ -105,21 +109,29 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionUser = sessionData.session?.user;
         const accessToken = sessionData.session?.access_token?.trim() ?? "";
-        if (sessionUser?.id) {
-          const query = await (supabase as unknown as { from: (table: string) => VaultQuery })
-            .from("vaulted_tracks")
-            .select("id, title, prompt, wav_url, mp3_url, created_at, user_id")
-            .eq("user_id", sessionUser.id)
-            .order("created_at", { ascending: false })
-            .limit(20);
-          if (!query.error && Array.isArray(query.data) && query.data.length > 0) {
-            if (!cancelled) setRows(query.data.map(cardFromRow).filter((row): row is VaultCard => row !== null));
-            return;
+        if (!sessionUser?.id) {
+          if (!cancelled) {
+            setRows([]);
+            setLocked(true);
           }
+          return;
         }
-        const response = accessToken
-          ? await fetch("/api/vault", { headers: { Authorization: `Bearer ${accessToken}` } })
-          : await fetch("/api/vault");
+        if (!cancelled) setLocked(false);
+        const query = await (supabase as unknown as { from: (table: string) => VaultQuery })
+          .from("vaulted_tracks")
+          .select("id, title, prompt, wav_url, mp3_url, created_at, user_id")
+          .eq("user_id", sessionUser.id)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (!query.error && Array.isArray(query.data) && query.data.length > 0) {
+          if (!cancelled) setRows(query.data.map(cardFromRow).filter((row): row is VaultCard => row !== null));
+          return;
+        }
+        if (!accessToken) {
+          if (!cancelled) setRows([]);
+          return;
+        }
+        const response = await fetch("/api/vault", { headers: { Authorization: `Bearer ${accessToken}` } });
         if (!response.ok) throw new Error("Could not load the vault.");
         const payload: unknown = await response.json();
         const tracks =
@@ -167,6 +179,32 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
   };
 
   const visiblePending = pending.filter((row) => !rows.some((item) => item.id === row.id));
+
+  if (!loading && locked) {
+    return (
+      <div>
+        <Lock aria-hidden="true" size={18} color="#fda4af" style={{ marginTop: 12 }} />
+        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#94a3b8", lineHeight: 1.45 }}>{LOCKED_COPY}</p>
+        <button
+          type="button"
+          onClick={() => openSiteSignIn()}
+          style={{
+            marginTop: 12,
+            background: "linear-gradient(90deg, #e11d48 0%, #be123c 100%)",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: 8,
+            padding: "6px 14px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Sign In
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -9,6 +9,11 @@ function signInHref(): string {
   return `/auth?next=${encodeURIComponent(safe)}`;
 }
 
+/** Same sign-in navigation the header Sign In button uses. */
+export function openSiteSignIn(): void {
+  window.location.assign(signInHref());
+}
+
 export default function UserAuthButton() {
   const [user, setUser] = useState<User | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -47,7 +52,7 @@ export default function UserAuthButton() {
   };
 
   const handleSignInRedirect = () => {
-    window.location.assign(signInHref());
+    openSiteSignIn();
   };
 
   if (loading) {

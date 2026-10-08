@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { AudioWaveform, Mic, X } from "lucide-react";
 
@@ -26,8 +26,6 @@ interface CharacterModalProps {
   onSelectCharacter: (char: VocalCharacter) => void;
   onSelectSource?: (source: VocalSourceSelection) => void;
   selectedSourceUrl?: string | null;
-  onOpenUpgradeModal: () => void;
-  hasProLicense: boolean;
 }
 
 type VaultChoice = {
@@ -126,8 +124,6 @@ export default function CharacterModal({
   onSelectCharacter,
   onSelectSource,
   selectedSourceUrl = null,
-  onOpenUpgradeModal,
-  hasProLicense,
 }: CharacterModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -146,6 +142,7 @@ export default function CharacterModal({
   const [vaultLoading, setVaultLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
   const releaseStream = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -213,14 +210,6 @@ export default function CharacterModal({
 
   if (!isOpen || typeof document === "undefined") return null;
 
-  const handleCreateClick = () => {
-    if (!hasProLicense) {
-      onOpenUpgradeModal();
-      return;
-    }
-    window.alert("Opening vocal enrollment file uploader...");
-  };
-
   const startRecording = async () => {
     if (recording) return;
     setRecordError("");
@@ -263,10 +252,8 @@ export default function CharacterModal({
     }
   };
 
-  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
+  const uploadFile = async (file: File | undefined) => {
+    if (!file || uploading) return;
     const extension = fileExtension(file);
     if (!extension) {
       setUploadError("Upload a .wav or .mp3 file.");
@@ -303,6 +290,19 @@ export default function CharacterModal({
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    void uploadFile(file);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragOver(false);
+    void uploadFile(event.dataTransfer.files?.[0]);
   };
 
   return createPortal(
@@ -345,24 +345,11 @@ export default function CharacterModal({
           </button>
         </div>
 
-        <div className="px-5 pb-3">
-          <button
-            type="button"
-            onClick={handleCreateClick}
-            className="rounded-lg border-0 bg-gradient-to-r from-cyan-500 to-sky-600 px-3.5 py-2 text-sm font-bold text-white"
-          >
-            + Add Vocal
-            {hasProLicense ? null : (
-              <span className="ms-2 rounded bg-cyan-400 px-1.5 py-0.5 text-[10px] font-black text-slate-950">Pro</span>
-            )}
-          </button>
-        </div>
-
         <div className="grid gap-4 overflow-y-auto px-5 pb-5 md:grid-cols-2">
           <section className="flex flex-col gap-3 rounded-xl border border-white/10 bg-black/40 p-4">
-            <div className="flex items-center gap-2 text-cyan-300">
-              <Mic className="h-5 w-5" aria-hidden="true" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Input Voice / Mic Capture</span>
+            <div className="flex items-center gap-2 text-zinc-100">
+              <Mic className="h-5 w-5 text-red-500" aria-hidden="true" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-white">Input Voice / Mic Capture</span>
             </div>
             <h3 className="m-0 text-base font-bold">Record / Input Your Voice</h3>
             <p className="m-0 text-sm text-zinc-400">
@@ -399,7 +386,7 @@ export default function CharacterModal({
                       onClick={() => onSelectCharacter(profile)}
                       className={
                         selected
-                          ? "rounded-lg border border-cyan-400 bg-cyan-500/10 px-3 py-3 text-left"
+                          ? "rounded-lg border border-red-500 bg-red-600/10 px-3 py-3 text-left"
                           : "rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-left hover:bg-white/10"
                       }
                     >
@@ -419,29 +406,57 @@ export default function CharacterModal({
             </div>
             <h3 className="m-0 text-base font-bold">Vocal Swap / Track Inject</h3>
             <p className="m-0 text-sm text-zinc-400">Apply this voice onto an existing track or upload</p>
-            <div>
-              <button
-                type="button"
-                disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-lg border border-white/15 bg-transparent px-3 py-1.5 text-xs font-semibold text-zinc-200 disabled:opacity-60"
-              >
-                {uploading ? "Uploading..." : "Upload .wav or .mp3"}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".wav,.mp3,audio/wav,audio/mpeg"
-                aria-label="Upload vocal audio"
-                className="sr-only"
-                onChange={(event) => void handleUpload(event)}
-              />
+            <div
+              role="button"
+              tabIndex={uploading ? -1 : 0}
+              aria-disabled={uploading}
+              onClick={(event) => {
+                if (uploading || event.target === fileInputRef.current) return;
+                fileInputRef.current?.click();
+              }}
+              onKeyDown={(event) => {
+                if (uploading) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!uploading) setDragOver(true);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!uploading) setDragOver(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setDragOver(false);
+              }}
+              onDrop={handleDrop}
+              className={`border border-dashed border-white/20 hover:border-red-500/40 rounded-xl p-4 text-center cursor-pointer bg-white/5 text-sm text-zinc-200${
+                dragOver ? " border-red-500/40" : ""
+              }${uploading ? " opacity-60" : ""}`}
+            >
+              {uploading ? "Uploading..." : "Click or drag & drop a .wav or .mp3 track here."}
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".wav,.mp3,audio/wav,audio/mpeg"
+              aria-label="Upload vocal audio"
+              className="sr-only"
+              onChange={handleUpload}
+            />
             {uploadError ? (
               <p role="alert" className="m-0 text-xs text-red-300">
                 {uploadError}
               </p>
             ) : null}
+            <p className="m-0 text-sm font-semibold text-zinc-200">Or select from your Audio Vault:</p>
             {vaultLoading ? <p className="m-0 text-xs text-zinc-500">Loading vault...</p> : null}
             {vaultError ? (
               <p role="alert" className="m-0 text-xs text-red-300">
