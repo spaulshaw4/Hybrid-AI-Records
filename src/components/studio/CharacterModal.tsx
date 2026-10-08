@@ -65,6 +65,69 @@ const RECORD_LIMIT_MS = 30_000;
 const VOCAL_READY_MS = 400;
 const SHORT_TAKE_WARNING = "Sonic requires at least 15 seconds of audio for accurate voice profiling.";
 
+function audioContextCtor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  );
+}
+
+/** 16-bit PCM WAV. Channel samples are interleaved, little-endian. */
+function encodePcmWav(audio: AudioBuffer): Blob {
+  const channelCount = Math.max(1, audio.numberOfChannels);
+  const frames = audio.length;
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    channels.push(audio.getChannelData(channel));
+  }
+  const blockAlign = channelCount * 2;
+  const dataSize = frames * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeText = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeText(8, "WAVE");
+  writeText(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, audio.sampleRate, true);
+  view.setUint32(28, audio.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeText(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let frame = 0; frame < frames; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const sample = Math.max(-1, Math.min(1, channels[channel]?.[frame] ?? 0));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+/** Decode a MediaRecorder blob (audio/webm in Chromium) into a PCM WAV. */
+async function recordingToWavBlob(source: Blob): Promise<Blob> {
+  const Ctor = audioContextCtor();
+  if (!Ctor) throw new Error("This browser can't encode a vocal take.");
+  const ctx = new Ctor();
+  try {
+    const bytes = await source.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(bytes.slice(0));
+    return encodePcmWav(decoded);
+  } finally {
+    void safeCloseAudioContext(ctx);
+  }
+}
+
 type StopReason = "user" | "limit" | "discard";
 
 type CapturedTake = {
@@ -262,6 +325,7 @@ export default function CharacterModal({
   const stopRecordingRef = useRef<(reason?: StopReason) => void>(() => {});
   const openRef = useRef(isOpen);
   const startingRef = useRef(false);
+  const takeSerialRef = useRef(0);
   onSelectSourceRef.current = onSelectSource;
   onSelectVocalRef.current = onSelectVocal;
   selectedSourceUrlRef.current = selectedSourceUrl;
@@ -298,6 +362,7 @@ export default function CharacterModal({
 
   const stopRecording = (reason: StopReason = "user") => {
     clearRecordTimers();
+    if (reason === "discard") takeSerialRef.current += 1;
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       releaseStream();
@@ -382,6 +447,7 @@ export default function CharacterModal({
 
   const clearCapturedTake = () => {
     uploadSerialRef.current += 1;
+    takeSerialRef.current += 1;
     clearReadyTimer();
     savingTakeRef.current = false;
     vocalReadyRef.current = false;
@@ -414,9 +480,8 @@ export default function CharacterModal({
         setRecordError("Sign in to upload a vocal.");
         return;
       }
-      const declared = take.blob.type.split(";")[0]?.trim() || "audio/webm";
       const form = new FormData();
-      form.append("audio", new File([take.blob], "mic-take.wav", { type: declared }));
+      form.append("audio", take.blob, "vocal-take.wav");
       const response = await fetch("/api/vocals/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -461,7 +526,7 @@ export default function CharacterModal({
       setShortTakeWarning(SHORT_TAKE_WARNING);
       return;
     }
-    if (blob.size <= 0) return;
+    if (blob.size <= 0 || blob.type !== "audio/wav") return;
     const seconds = Math.min(30, Math.floor(elapsedMs / 1000));
     releasePreview();
     const preview = URL.createObjectURL(blob);
@@ -475,6 +540,7 @@ export default function CharacterModal({
 
   const startRecording = async () => {
     if (recording || startingRef.current || recorderRef.current?.state === "recording") return;
+    takeSerialRef.current += 1;
     setRecordError("");
     setShortTakeWarning("");
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
@@ -503,11 +569,26 @@ export default function CharacterModal({
         setRecording(false);
         const reason = stopReasonRef.current;
         const elapsedMs = pendingDurationMsRef.current;
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const recorded = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
         startedAtRef.current = null;
         if (reason === "discard") return;
-        acceptTake(blob, elapsedMs);
+        if (elapsedMs < MIN_RECORD_MS) {
+          setShortTakeWarning(SHORT_TAKE_WARNING);
+          return;
+        }
+        if (recorded.size <= 0) return;
+        const serial = takeSerialRef.current;
+        void (async () => {
+          try {
+            const wav = await recordingToWavBlob(recorded);
+            if (serial !== takeSerialRef.current) return;
+            acceptTake(wav, elapsedMs);
+          } catch {
+            if (serial !== takeSerialRef.current) return;
+            setRecordError("Could not read this vocal take.");
+          }
+        })();
       };
       recorderRef.current = recorder;
       stopReasonRef.current = "user";

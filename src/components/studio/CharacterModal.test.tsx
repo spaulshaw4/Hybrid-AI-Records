@@ -38,6 +38,29 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
+class FakeAudioBuffer {
+  numberOfChannels = 1;
+  sampleRate = 44100;
+  length = 4;
+  duration = 4 / 44100;
+  getChannelData() {
+    return new Float32Array([0, 0.5, -0.5, 1]);
+  }
+}
+
+class FakeAudioContext {
+  static instances: FakeAudioContext[] = [];
+  state: AudioContextState = "running";
+  decodeAudioData = vi.fn(async () => new FakeAudioBuffer());
+  close = vi.fn(async () => {
+    this.state = "closed";
+  });
+
+  constructor() {
+    FakeAudioContext.instances.push(this);
+  }
+}
+
 class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = [];
   static isTypeSupported(type: string) {
@@ -138,7 +161,9 @@ describe("CharacterModal voice capture", () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-take");
     revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     FakeMediaRecorder.instances = [];
+    FakeAudioContext.instances = [];
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
     fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit): Promise<StudioResponse> => {
       if (String(input).includes("/api/vocals/upload")) return uploadResult();
       return tracksResponse();
@@ -268,6 +293,7 @@ describe("CharacterModal voice capture", () => {
     expect(screen.queryByText(/Voice Captured/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Captured vocal")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Record" })).toBeInTheDocument();
+    expect(FakeAudioContext.instances).toHaveLength(0);
     expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
@@ -324,12 +350,18 @@ describe("CharacterModal voice capture", () => {
     expect(uploadCall[0]).toBe("/api/vocals/upload");
     const headers = uploadCall[1].headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer session-token");
-    expect(Object.keys(headers).some((key) => key.toLowerCase() === "content-type")).toBe(false);
+    const forcedType = Object.entries(headers).find(([key]) => key.toLowerCase() === "content-type")?.[1];
+    expect(forcedType).toBeUndefined();
+    expect(forcedType).not.toBe("multipart/form-data");
     expect(uploadCall[1].body).toBeInstanceOf(FormData);
     const posted = (uploadCall[1].body as FormData).get("audio");
     expect(posted).toBeInstanceOf(File);
-    expect((posted as File).name).toBe("mic-take.wav");
-    expect((posted as File).type).toBe("audio/webm");
+    expect((posted as File).name).toBe("vocal-take.wav");
+    expect((posted as File).type).toBe("audio/wav");
+    const postedBytes = new Uint8Array(await (posted as File).arrayBuffer());
+    expect(String.fromCharCode(...postedBytes.subarray(0, 4))).toBe("RIFF");
+    expect(String.fromCharCode(...postedBytes.subarray(8, 12))).toBe("WAVE");
+    expect((posted as File).type).not.toBe("audio/webm");
     expect(storageFrom).not.toHaveBeenCalled();
     expect(upload).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("modal-open")).toHaveTextContent("no"));

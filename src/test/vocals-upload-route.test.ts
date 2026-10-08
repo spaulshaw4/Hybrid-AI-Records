@@ -225,35 +225,56 @@ describe("POST /api/vocals/upload", () => {
     expect(responseText).not.toContain(VOCAL_KEY);
   });
 
-  it("stores non-RIFF bytes as webm", async () => {
-    const res = await POST(uploadRequest(webmBytes(), "Bearer a.b.c", "take.wav", "audio/wav"));
+  it("stores MPEG frame sync and ID3 bytes as audio/mpeg", async () => {
+    const frame = new Uint8Array([0xff, 0xfb, 0x90, 0xc4, 0x00, 0x00, 0x00, 0x00]);
+    const res = await POST(uploadRequest(frame, "Bearer a.b.c", "take.wav", "audio/wav"));
     expect(res.status).toBe(200);
-    const payload = (await res.json()) as { url: string; fileName: string };
-    expect(payload.fileName).toBe("voice-take-1700000021000.webm");
-    expect(payload.url).toBe(
-      `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocal-references/${SESSION_USER}/voice-take-1700000021000.webm`,
-    );
-    const [, body, options] = uploadMock.mock.calls[0] as unknown as [
+    const fileName = "voice-take-1700000021000.mp3";
+    const objectPath = `vocal-references/${SESSION_USER}/${fileName}`;
+    const payload = (await res.json()) as { url: string; fileName: string; taskId: string };
+    expect(payload).toEqual({
+      url: `${SUPABASE_URL}/storage/v1/object/public/audio-vault/${objectPath}`,
+      fileName,
+      taskId: VOICE_TASK,
+    });
+    const [path, body, options] = uploadMock.mock.calls[0] as unknown as [
       string,
       unknown,
       { contentType?: string; upsert?: boolean },
     ];
+    expect(path).toBe(objectPath);
     expect(Buffer.isBuffer(body)).toBe(true);
     expect(body).not.toBeInstanceOf(Blob);
-    expect(options).toMatchObject({ contentType: "audio/webm", upsert: true });
+    expect(options).toMatchObject({ contentType: "audio/mpeg", upsert: true });
 
     uploadMock.mockClear();
-    const plain = await POST(uploadRequest(new Uint8Array([1, 2, 3, 4]), "Bearer a.b.c", "note.txt", "text/plain"));
-    expect(plain.status).toBe(200);
-    const plainBody = (await plain.json()) as { fileName: string };
-    expect(plainBody.fileName).toBe("voice-take-1700000021000.webm");
-    const [, plainBuffer, plainOptions] = uploadMock.mock.calls[0] as unknown as [
+    const id3 = new Uint8Array([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    const tagged = await POST(uploadRequest(id3, "Bearer a.b.c", "take.webm", "audio/webm"));
+    expect(tagged.status).toBe(200);
+    const taggedBody = (await tagged.json()) as { fileName: string };
+    expect(taggedBody.fileName).toBe(fileName);
+    const [, id3Buffer, id3Options] = uploadMock.mock.calls[0] as unknown as [
       string,
       unknown,
-      { contentType?: string },
+      { contentType?: string; upsert?: boolean },
     ];
-    expect(Buffer.isBuffer(plainBuffer)).toBe(true);
-    expect(plainOptions.contentType).toBe("audio/webm");
+    expect(Buffer.isBuffer(id3Buffer)).toBe(true);
+    expect(id3Buffer).not.toBeInstanceOf(Blob);
+    expect(id3Options).toMatchObject({ contentType: "audio/mpeg", upsert: true });
+  });
+
+  it("rejects a webm/EBML buffer with 400 and does not upload", async () => {
+    const res = await POST(uploadRequest(webmBytes(), "Bearer a.b.c", "take.wav", "audio/wav"));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "Vocal take must be WAV or MPEG audio." });
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const plain = await POST(uploadRequest(new Uint8Array([1, 2, 3, 4]), "Bearer a.b.c", "note.txt", "text/plain"));
+    expect(plain.status).toBe(400);
+    await expect(plain.json()).resolves.toEqual({ error: "Vocal take must be WAV or MPEG audio." });
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a missing file, an empty file, and a file over 15 MB", async () => {

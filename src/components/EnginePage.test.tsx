@@ -301,6 +301,7 @@ describe("EnginePage instrumental tab", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     FakeMediaRecorder.instances = [];
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
     const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }));
     const previousMedia = navigator.mediaDevices;
     Object.defineProperty(navigator, "mediaDevices", {
@@ -380,7 +381,13 @@ describe("EnginePage instrumental tab", () => {
       expect(Object.keys(uploadCall[1].headers as Record<string, string>).some((key) => key.toLowerCase() === "content-type")).toBe(false);
       expect(uploadCall[1].body).toBeInstanceOf(FormData);
       expect((uploadCall[1].body as FormData).get("audio")).toBeTruthy();
-      expect(((uploadCall[1].body as FormData).get("audio") as File).name).toBe("mic-take.wav");
+      const posted = (uploadCall[1].body as FormData).get("audio") as File;
+      expect(posted.name).toBe("vocal-take.wav");
+      expect(posted.type).toBe("audio/wav");
+      const forcedType = Object.entries(uploadCall[1].headers as Record<string, string>).find(
+        ([key]) => key.toLowerCase() === "content-type",
+      )?.[1];
+      expect(forcedType).toBeUndefined();
 
       const vocalsForm = screen.getByRole("form", { name: "With Vocals" });
       const lyricsBox = screen.getByRole("textbox", { name: "Lyrics" });
@@ -473,6 +480,20 @@ describe("EnginePage instrumental tab", () => {
     expect(glass.contains(screen.getByRole("region", { name: "Your Audio Vault" }))).toBe(false);
   });
 });
+
+class FakeAudioContext {
+  state: AudioContextState = "running";
+  decodeAudioData = vi.fn(async () => ({
+    numberOfChannels: 1,
+    sampleRate: 44100,
+    length: 4,
+    duration: 4 / 44100,
+    getChannelData: () => new Float32Array([0, 0.5, -0.5, 1]),
+  }));
+  close = vi.fn(async () => {
+    this.state = "closed";
+  });
+}
 
 class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = [];

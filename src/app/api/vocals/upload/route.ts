@@ -5,7 +5,25 @@ const MAX_VOCAL_BYTES = 15 * 1024 * 1024;
 const CREATE_VOICE_URL = "https://api.aimusicapi.ai/api/v1/sonic/create-voice";
 const VOICE_WEBHOOK_URL = "https://hybrid-ai-records.com/api/webhooks/music";
 const REGISTER_ERROR = "Could not register this vocal take.";
+const UNSUPPORTED_AUDIO = "Vocal take must be WAV or MPEG audio.";
 const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+type VocalAudio = { contentType: "audio/wav" | "audio/mpeg"; extension: "wav" | "mp3" };
+
+/** RIFF/WAVE, or MPEG (frame sync 0xFFEx / 0xFFFx, or an ID3 header). */
+function sniffVocalAudio(buffer: Buffer): VocalAudio | null {
+  if (
+    buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WAVE"
+  ) {
+    return { contentType: "audio/wav", extension: "wav" };
+  }
+  const id3 = buffer.length >= 3 && buffer.toString("ascii", 0, 3) === "ID3";
+  const frame = buffer.length >= 2 && buffer[0] === 0xff && (buffer[1]! & 0xe0) === 0xe0;
+  if (id3 || frame) return { contentType: "audio/mpeg", extension: "mp3" };
+  return null;
+}
 
 type VaultAdmin = ReturnType<typeof vaultAdminClient>;
 
@@ -130,15 +148,16 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: "File empty or exceeds 15MB limit" }, { status: 400 });
     }
 
-    const isWav = buffer.subarray(0, 4).toString() === "RIFF";
-    const extension = isWav ? "wav" : "webm";
-    const mimeType = isWav ? "audio/wav" : "audio/webm";
-    const fileName = `voice-take-${Date.now()}.${extension}`;
+    const sniffed = sniffVocalAudio(buffer);
+    if (!sniffed) {
+      return Response.json({ error: UNSUPPORTED_AUDIO }, { status: 400 });
+    }
+    const fileName = `voice-take-${Date.now()}.${sniffed.extension}`;
     const storagePath = `vocal-references/${user.id}/${fileName}`;
 
     const admin = vaultAdminClient();
     const { error: uploadError } = await admin.storage.from("audio-vault").upload(storagePath, buffer, {
-      contentType: mimeType,
+      contentType: sniffed.contentType,
       upsert: true,
     });
     if (uploadError) {
