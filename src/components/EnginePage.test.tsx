@@ -6,19 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MUREKA_TEMPLATES } from "@/data/murekaTemplates";
 
-const { getSession, onAuthStateChange } = vi.hoisted(() => ({
+const { getSession, onAuthStateChange, upload, getPublicUrl, from } = vi.hoisted(() => ({
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+  upload: vi.fn(async () => ({ error: null })),
+  getPublicUrl: vi.fn((path: string) => ({
+    data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
+  })),
+  from: vi.fn(),
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: { getSession, onAuthStateChange },
-    from: vi.fn(),
+    from,
     storage: {
       from: vi.fn(() => ({
-        getPublicUrl: () => ({ data: { publicUrl: "https://example.com/audio.wav" } }),
-        upload: vi.fn(),
+        getPublicUrl,
+        upload,
       })),
     },
   },
@@ -43,6 +48,13 @@ describe("EnginePage instrumental tab", () => {
     localStorage.clear();
     getSession.mockReset();
     onAuthStateChange.mockClear();
+    upload.mockReset();
+    upload.mockResolvedValue({ error: null });
+    getPublicUrl.mockReset();
+    getPublicUrl.mockImplementation((path: string) => ({
+      data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
+    }));
+    from.mockReset();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     getSession.mockResolvedValue({ data: { session: null } });
@@ -225,6 +237,7 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByRole("heading", { name: "Vocal Studio" })).toBeInTheDocument();
     expect(screen.getByText("Select, record, or inject a vocal into your production")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Record / Input Your Voice" })).toBeInTheDocument();
+    expect(screen.getByText("Live mic capture (15–30s take).")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Vocal Swap / Track Inject" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /\+ Add Vocal/ })).not.toBeInTheDocument();
     const engineSource = readFileSync(join(process.cwd(), "src/components/EnginePage.tsx"), "utf8");
@@ -271,4 +284,117 @@ describe("EnginePage instrumental tab", () => {
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Templates" })).not.toBeInTheDocument();
   });
+
+  it("sends a captured audio-vault take as the With Vocals reference", async () => {
+    const user = userEvent.setup();
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-take");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    FakeMediaRecorder.instances = [];
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }));
+    const previousMedia = navigator.mediaDevices;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    from.mockImplementation(() => ({
+      select: () => ({
+        eq: () => ({
+          order: () => ({
+            limit: () => Promise.resolve({ data: [], error: null }),
+          }),
+        }),
+      }),
+    }));
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/vocals/generate")) return jsonResult({ success: true, taskId: "task-vocal-take" });
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    try {
+      render(<EnginePage />);
+      await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+      await user.click(screen.getByRole("button", { name: "+ Vocal" }));
+      expect(screen.getByText("Live mic capture (15–30s take).")).toBeInTheDocument();
+      expect(FakeMediaRecorder.instances).toHaveLength(0);
+      expect(getUserMedia).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Record" }));
+      await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+      expect(FakeMediaRecorder.instances[0]!.start).toHaveBeenCalledTimes(1);
+      const started = now;
+      now += 21_000;
+      fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+
+      expect(await screen.findByText("✓ Voice Captured 21s")).toBeInTheDocument();
+      const audio = screen.getByLabelText("Captured vocal");
+      expect(audio.tagName).toBe("AUDIO");
+      expect((audio as HTMLAudioElement).controls).toBe(true);
+      expect(audio).toHaveAttribute("src", "blob:voice-take");
+      expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
+
+      await waitFor(() => expect(upload).toHaveBeenCalled());
+      const [path, file, options] = upload.mock.calls[0] as [string, File, { contentType?: string }];
+      expect(path).toBe(`vocal-references/user-1/voice-take-${started + 21_000}.wav`);
+      expect(file.type).toBe("audio/wav");
+      expect(options).toMatchObject({ contentType: "audio/wav" });
+      const publicUrl = `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}`;
+      await waitFor(() => expect(screen.getByRole("button", { name: "✓ Voice Captured 21s" })).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByRole("button", { name: "✓ Voice Captured 21s" })).toBeInTheDocument();
+      expect(screen.getByText("Voice Captured 21s")).toBeInTheDocument();
+
+      await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
+      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
+      const generateCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(String(generateCall[1].body)) as { vocalAudioUrl?: string; personaId?: string };
+      expect(body.vocalAudioUrl).toBe(publicUrl);
+      expect(body).not.toHaveProperty("personaId");
+      expect(body.vocalAudioUrl).not.toMatch(/^blob:/);
+      expect(body.vocalAudioUrl).not.toMatch(/^http:/);
+    } finally {
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: previousMedia });
+    }
+  });
 });
+
+class FakeMediaRecorder {
+  static instances: FakeMediaRecorder[] = [];
+  static isTypeSupported(type: string) {
+    return type.startsWith("audio/webm");
+  }
+
+  state: "inactive" | "recording" = "inactive";
+  mimeType: string;
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+
+  constructor(_stream: MediaStream, options?: { mimeType?: string }) {
+    this.mimeType = options?.mimeType || "audio/webm";
+    FakeMediaRecorder.instances.push(this);
+  }
+
+  start = vi.fn(() => {
+    this.state = "recording";
+  });
+
+  stop = vi.fn(() => {
+    if (this.state === "inactive") return;
+    this.state = "inactive";
+    this.ondataavailable?.({ data: new Blob([new Uint8Array(2048)], { type: this.mimeType }) });
+    this.onstop?.();
+  });
+}

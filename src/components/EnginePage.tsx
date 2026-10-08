@@ -629,8 +629,12 @@ export function EnginePage() {
         ? "Vocals disabled in instrumental mode"
         : undefined;
   const vocalsLocked = vocalLockTitle !== undefined;
-  const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
-  const vocalButtonStyle: CSSProperties = selectedCharacter
+  const vocalLabel = vocalSource?.label
+    ? `✓ ${vocalSource.label}`
+    : selectedCharacter
+      ? `✓ ${selectedCharacter.name}`
+      : "+ Vocal";
+  const vocalButtonStyle: CSSProperties = vocalSource || selectedCharacter
     ? {
         ...pillStyle,
         backgroundColor: "rgba(6,182,212,0.15)",

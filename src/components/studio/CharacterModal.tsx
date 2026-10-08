@@ -24,7 +24,7 @@ interface CharacterModalProps {
   characters: VocalCharacter[];
   selectedCharacterId: string | null;
   onSelectCharacter: (char: VocalCharacter) => void;
-  onSelectSource?: (source: VocalSourceSelection) => void;
+  onSelectSource?: (source: VocalSourceSelection | null) => void;
   selectedSourceUrl?: string | null;
 }
 
@@ -51,7 +51,25 @@ type VaultQuery = {
   };
 };
 
-const RECORD_LIMIT_MS = 15_000;
+const MIN_RECORD_MS = 15_000;
+const RECORD_LIMIT_MS = 30_000;
+const SHORT_TAKE_WARNING = "Sonic requires at least 15 seconds of audio for accurate voice profiling.";
+
+type StopReason = "user" | "limit" | "discard";
+
+type CapturedTake = {
+  preview: string;
+  seconds: number;
+};
+
+function isAudioVaultHttpsUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password && parsed.pathname.includes("/audio-vault/");
+  } catch {
+    return false;
+  }
+}
 
 function publicAudioUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -133,9 +151,24 @@ export default function CharacterModal({
   const stopTimerRef = useRef<number | null>(null);
   const tickTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const startedAtRef = useRef<number | null>(null);
+  const pendingDurationMsRef = useRef(0);
+  const stopReasonRef = useRef<StopReason>("user");
+  const uploadSerialRef = useRef(0);
+  const previewUrlRef = useRef<string | null>(null);
+  const appliedReferenceRef = useRef<string | null>(null);
+  const onSelectSourceRef = useRef(onSelectSource);
+  const selectedSourceUrlRef = useRef(selectedSourceUrl);
+  const stopRecordingRef = useRef<(reason?: StopReason) => void>(() => {});
+  const openRef = useRef(isOpen);
+  const startingRef = useRef(false);
+  onSelectSourceRef.current = onSelectSource;
+  selectedSourceUrlRef.current = selectedSourceUrl;
+  openRef.current = isOpen;
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [takeLabel, setTakeLabel] = useState("");
+  const [captured, setCaptured] = useState<CapturedTake | null>(null);
+  const [shortTakeWarning, setShortTakeWarning] = useState("");
   const [recordError, setRecordError] = useState("");
   const [vaultTracks, setVaultTracks] = useState<VaultChoice[]>([]);
   const [vaultError, setVaultError] = useState("");
@@ -160,13 +193,20 @@ export default function CharacterModal({
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = (reason: StopReason = "user") => {
     clearRecordTimers();
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") recorder.stop();
-    releaseStream();
-    setRecording(false);
+    if (!recorder || recorder.state === "inactive") {
+      releaseStream();
+      setRecording(false);
+      return;
+    }
+    stopReasonRef.current = reason;
+    const started = startedAtRef.current ?? Date.now();
+    pendingDurationMsRef.current = reason === "limit" ? RECORD_LIMIT_MS : Math.max(0, Date.now() - started);
+    recorder.stop();
   };
+  stopRecordingRef.current = stopRecording;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -174,16 +214,18 @@ export default function CharacterModal({
     const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => {
       window.cancelAnimationFrame(frame);
-      clearRecordTimers();
-      const recorder = recorderRef.current;
-      if (recorder && recorder.state !== "inactive") recorder.stop();
-      releaseStream();
-      setRecording(false);
+      stopRecordingRef.current("discard");
       const target = previouslyFocused.current;
       previouslyFocused.current = null;
       window.requestAnimationFrame(() => target?.focus());
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -210,16 +252,92 @@ export default function CharacterModal({
 
   if (!isOpen || typeof document === "undefined") return null;
 
-  const startRecording = async () => {
-    if (recording) return;
+  const releasePreview = () => {
+    if (!previewUrlRef.current) return;
+    URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = null;
+  };
+
+  const clearCapturedTake = () => {
+    uploadSerialRef.current += 1;
+    const applied = appliedReferenceRef.current;
+    appliedReferenceRef.current = null;
+    if (applied && selectedSourceUrlRef.current === applied) onSelectSourceRef.current?.(null);
+    releasePreview();
+    setCaptured(null);
+    setShortTakeWarning("");
     setRecordError("");
-    setTakeLabel("");
+    setElapsed(0);
+  };
+
+  const uploadCapturedTake = async (blob: Blob, seconds: number, serial: number) => {
+    if (seconds < 15 || blob.size <= 0) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (serial !== uploadSerialRef.current) return;
+      const userId = sessionData.session?.user?.id?.trim() ?? "";
+      if (!userId) {
+        setRecordError("Sign in to upload a vocal.");
+        return;
+      }
+      const filename = `voice-take-${Date.now()}.wav`;
+      const path = `vocal-references/${userId}/${filename}`;
+      const file = new File([blob], filename, { type: "audio/wav" });
+      const { error } = await supabase.storage.from("audio-vault").upload(path, file, {
+        contentType: "audio/wav",
+        upsert: false,
+      });
+      if (serial !== uploadSerialRef.current) return;
+      if (error) {
+        setRecordError("Upload failed.");
+        return;
+      }
+      const { data } = supabase.storage.from("audio-vault").getPublicUrl(path);
+      const url = data.publicUrl?.trim() ?? "";
+      if (serial !== uploadSerialRef.current) return;
+      if (!isAudioVaultHttpsUrl(url)) {
+        setRecordError("Upload failed.");
+        return;
+      }
+      appliedReferenceRef.current = url;
+      onSelectSourceRef.current?.({ url, label: `Voice Captured ${seconds}s` });
+    } catch {
+      if (serial !== uploadSerialRef.current) return;
+      setRecordError("Upload failed.");
+    }
+  };
+
+  const acceptTake = (blob: Blob, elapsedMs: number) => {
+    if (elapsedMs < MIN_RECORD_MS) {
+      setShortTakeWarning(SHORT_TAKE_WARNING);
+      return;
+    }
+    if (blob.size <= 0) return;
+    const seconds = Math.min(30, Math.floor(elapsedMs / 1000));
+    releasePreview();
+    const preview = URL.createObjectURL(blob);
+    previewUrlRef.current = preview;
+    setCaptured({ preview, seconds });
+    setShortTakeWarning("");
+    setRecordError("");
+    void uploadCapturedTake(blob, seconds, uploadSerialRef.current);
+  };
+
+  const startRecording = async () => {
+    if (recording || startingRef.current || recorderRef.current?.state === "recording") return;
+    setRecordError("");
+    setShortTakeWarning("");
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setRecordError("Recording is unavailable in this browser.");
       return;
     }
+    startingRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!openRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) =>
         MediaRecorder.isTypeSupported(type),
@@ -230,25 +348,36 @@ export default function CharacterModal({
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
       recorder.onstop = () => {
+        releaseStream();
+        recorderRef.current = null;
+        setRecording(false);
+        const reason = stopReasonRef.current;
+        const elapsedMs = pendingDurationMsRef.current;
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
-        if (blob.size > 0) setTakeLabel("Take captured");
+        startedAtRef.current = null;
+        if (reason === "discard") return;
+        acceptTake(blob, elapsedMs);
       };
       recorderRef.current = recorder;
+      stopReasonRef.current = "user";
       recorder.start();
       setRecording(true);
       setElapsed(0);
       const startedAt = Date.now();
+      startedAtRef.current = startedAt;
       tickTimerRef.current = window.setInterval(() => {
-        setElapsed(Math.min(15, Math.floor((Date.now() - startedAt) / 1000)));
+        setElapsed(Math.min(30, Math.floor((Date.now() - startedAt) / 1000)));
       }, 200);
       stopTimerRef.current = window.setTimeout(() => {
-        stopRecording();
+        stopRecordingRef.current("limit");
       }, RECORD_LIMIT_MS);
     } catch {
       releaseStream();
       setRecording(false);
       setRecordError("Microphone access was denied.");
+    } finally {
+      startingRef.current = false;
     }
   };
 
@@ -352,21 +481,37 @@ export default function CharacterModal({
               <span className="text-xs font-semibold uppercase tracking-wider text-white">Input Voice / Mic Capture</span>
             </div>
             <h3 className="m-0 text-base font-bold">Record / Input Your Voice</h3>
-            <p className="m-0 text-sm text-zinc-400">
-              Live mic capture (8–15s take) or select a saved vocal profile
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (recording) stopRecording();
-                else void startRecording();
-              }}
-              aria-label={recording ? "Stop recording" : "Record"}
-              className="w-fit rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300"
-            >
-              {recording ? `Stop ${elapsed}s` : "Record"}
-            </button>
-            {takeLabel ? <p className="m-0 text-xs text-zinc-300">{takeLabel}</p> : null}
+            <p className="m-0 text-sm text-zinc-400">Live mic capture (15–30s take).</p>
+            {captured ? (
+              <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3" aria-label="Captured Vocal">
+                <p className="m-0 text-sm font-semibold text-emerald-300">✓ Voice Captured {captured.seconds}s</p>
+                <audio controls src={captured.preview} aria-label="Captured vocal" className="w-full" />
+                <button
+                  type="button"
+                  onClick={clearCapturedTake}
+                  className="w-fit rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-100"
+                >
+                  Re-record
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (recording) stopRecording("user");
+                  else void startRecording();
+                }}
+                aria-label={recording ? "Stop recording" : "Record"}
+                className="w-fit rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300"
+              >
+                {recording ? `Stop ${elapsed}s` : "Record"}
+              </button>
+            )}
+            {shortTakeWarning ? (
+              <p role="alert" className="m-0 text-xs text-red-300">
+                {shortTakeWarning}
+              </p>
+            ) : null}
             {recordError ? (
               <p role="alert" className="m-0 text-xs text-red-300">
                 {recordError}

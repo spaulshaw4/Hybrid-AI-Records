@@ -260,4 +260,26 @@ describe("VocalStudioTab", () => {
       personaId: "vocal_stephen_oct5_master",
     });
   });
+
+  it("posts a captured audio-vault https URL as the vocal reference", async () => {
+    const user = userEvent.setup();
+    const reference =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/voice-take-21.wav";
+    render(<VocalStudioTab reference={{ label: "Voice Captured 21s", vocalAudioUrl: reference }} />);
+    expect(screen.getByText("Voice Captured 21s")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
+    fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-vocal-take" }));
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/vocals/generate");
+    const body = JSON.parse(String(init.body)) as { vocalAudioUrl?: string; personaId?: string };
+    expect(body.vocalAudioUrl).toBe(reference);
+    expect(body.vocalAudioUrl).toMatch(/^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/audio-vault\//);
+    expect(body).not.toHaveProperty("personaId");
+    expect(body.vocalAudioUrl).not.toMatch(/^blob:/);
+    expect(body.vocalAudioUrl).not.toMatch(/^http:/);
+  });
 });
