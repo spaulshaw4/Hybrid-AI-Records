@@ -6,7 +6,7 @@ import { vaultAdminClient } from "@/lib/vault-admin.server";
 import { rememberVocalJob } from "@/lib/vocal-jobs.server";
 
 const CREATE_URL = "https://api.aimusicapi.ai/api/v1/sonic/create";
-const PRODUCTION_ORIGIN = "https://hybrid-ai-records.com";
+const MUSIC_WEBHOOK_URL = "https://hybrid-ai-records.com/api/webhooks/music";
 const INSUFFICIENT_TOKENS_ERROR = "Insufficient hybrid tokens";
 const TOKEN_DEDUCTION_ERROR = "Failed to process token deduction";
 const LYRICS_REQUIRED_ERROR = "Lyrics are required.";
@@ -50,18 +50,6 @@ function hasBearer(req: Request): boolean {
   const header = req.headers.get("authorization");
   if (!header?.startsWith("Bearer ")) return false;
   return header.slice("Bearer ".length).trim().length > 0;
-}
-
-function isLocalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, "");
-  return (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "0.0.0.0" ||
-    host === "[::1]"
-  );
 }
 
 function bareHost(hostname: string): string {
@@ -119,20 +107,6 @@ function gateReference(raw: string): { url: string } | null {
   if (bareHost(parsed.hostname) !== vaultHost) return { url: "" };
   if (!parsed.pathname.includes("/audio-vault/")) return { url: "" };
   return { url: raw };
-}
-
-/** Production callback. A localhost app URL must never be sent upstream. */
-function vocalWebhookUrl(): string {
-  const fallback = `${PRODUCTION_ORIGIN}/api/webhooks/aimusic`;
-  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim() ?? "";
-  if (!raw) return fallback;
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" || isLocalHost(parsed.hostname)) return fallback;
-    return `${parsed.origin}/api/webhooks/aimusic`;
-  } catch {
-    return fallback;
-  }
 }
 
 /** AIMUSIC_API_KEY, or AIMUSICAPI_KEY when the primary name is unset. */
@@ -260,6 +234,13 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Missing API key" }, { status: 500 });
   }
 
+  const webhookSecret = process.env.AIMUSICAPI_WEBHOOK_SECRET;
+  if (!webhookSecret?.trim()) {
+    console.error("[vocals] song callback is not configured");
+    await refundChargedToken(userId, debit.spendKey);
+    return Response.json({ error: "Failed to dispatch generation" }, { status: 500 });
+  }
+
   let response: Response;
   try {
     response = await fetch(CREATE_URL, {
@@ -274,7 +255,8 @@ export async function POST(req: Request): Promise<Response> {
         title,
         tags,
         prompt: lyrics,
-        webhook_url: vocalWebhookUrl(),
+        webhook_url: MUSIC_WEBHOOK_URL,
+        webhook_secret: webhookSecret,
         ...(reference.url ? { reference_audio_url: reference.url } : {}),
         ...(duration !== undefined ? { duration } : {}),
       }),

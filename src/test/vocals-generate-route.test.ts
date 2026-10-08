@@ -76,7 +76,8 @@ const OTHER_USER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const SUPABASE_URL = "https://project.supabase.co";
 const CREATE_URL = "https://api.aimusicapi.ai/api/v1/sonic/create";
 const AUDIO = "https://cdn.example/vocal.wav";
-const WEBHOOK = "https://hybrid-ai-records.com/api/webhooks/aimusic";
+const WEBHOOK = "https://hybrid-ai-records.com/api/webhooks/music";
+const WEBHOOK_SECRET = "vocal-song-webhook-secret";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -106,6 +107,7 @@ function webhookRequest(body: Record<string, unknown>): Request {
 describe("POST /api/vocals/generate", () => {
   const originalKey = process.env.AIMUSIC_API_KEY;
   const originalAlias = process.env.AIMUSICAPI_KEY;
+  const originalWebhookSecret = process.env.AIMUSICAPI_WEBHOOK_SECRET;
   const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -113,6 +115,7 @@ describe("POST /api/vocals/generate", () => {
   beforeEach(() => {
     process.env.AIMUSIC_API_KEY = "test-key";
     delete process.env.AIMUSICAPI_KEY;
+    process.env.AIMUSICAPI_WEBHOOK_SECRET = WEBHOOK_SECRET;
     process.env.NEXT_PUBLIC_APP_URL = "http://127.0.0.1:8080";
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
@@ -142,6 +145,8 @@ describe("POST /api/vocals/generate", () => {
     else process.env.AIMUSIC_API_KEY = originalKey;
     if (originalAlias === undefined) delete process.env.AIMUSICAPI_KEY;
     else process.env.AIMUSICAPI_KEY = originalAlias;
+    if (originalWebhookSecret === undefined) delete process.env.AIMUSICAPI_WEBHOOK_SECRET;
+    else process.env.AIMUSICAPI_WEBHOOK_SECRET = originalWebhookSecret;
     if (originalAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
     else process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -217,6 +222,7 @@ describe("POST /api/vocals/generate", () => {
       tags: "Female Vocal, close vocal, dry",
       prompt: "[Chorus]\nwe go",
       webhook_url: WEBHOOK,
+      webhook_secret: WEBHOOK_SECRET,
       reference_audio_url: reference,
     });
   });
@@ -389,6 +395,7 @@ describe("POST /api/vocals/generate", () => {
       tags: "Female Vocal, soulful, dry",
       prompt: "[Chorus]\nwe go",
       webhook_url: WEBHOOK,
+      webhook_secret: WEBHOOK_SECRET,
     });
     expect(WEBHOOK).not.toMatch(/localhost|127\.0\.0\.1/i);
     expect(readVocalJob("task-vocal-1")).toEqual({
@@ -446,6 +453,7 @@ describe("POST /api/vocals/generate", () => {
       tags: "",
       prompt: "[Verse]\nline",
       webhook_url: WEBHOOK,
+      webhook_secret: WEBHOOK_SECRET,
     };
 
     for (const duration of [30, 180, 360]) {
@@ -518,6 +526,8 @@ describe("POST /api/vocals/generate", () => {
     const payload = await res.json();
     expect(payload).toEqual({ success: true, taskId: "task-alias-1" });
     expect(JSON.stringify(payload)).not.toContain("alias-vocal-key");
+    expect(JSON.stringify(payload)).not.toContain(WEBHOOK_SECRET);
+    expect(payload).not.toHaveProperty("webhook_secret");
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer alias-vocal-key");
@@ -528,7 +538,58 @@ describe("POST /api/vocals/generate", () => {
       tags: "dry",
       prompt: "[Verse]\nline",
       webhook_url: WEBHOOK,
+      webhook_secret: WEBHOOK_SECRET,
     });
+  });
+
+  it("sends the music webhook callback and keeps the secret off the client JSON", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://studio.example.com";
+    process.env.AIMUSICAPI_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-webhook-1" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline", title: "Callback" }));
+
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload).toEqual({ success: true, taskId: "task-webhook-1" });
+    expect(JSON.stringify(payload)).not.toContain(WEBHOOK_SECRET);
+    expect(payload).not.toHaveProperty("webhook_secret");
+    expect(payload).not.toHaveProperty("webhook_url");
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      webhook_url: "https://hybrid-ai-records.com/api/webhooks/music",
+      webhook_secret: WEBHOOK_SECRET,
+    });
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain(WEBHOOK_SECRET);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(WEBHOOK_SECRET);
+  });
+
+  it("does not dispatch or reveal the secret when the webhook secret is unset", async () => {
+    const sentinel = "must-not-leak";
+    process.env.AIMUSICAPI_WEBHOOK_SECRET = sentinel;
+    delete process.env.AIMUSICAPI_WEBHOOK_SECRET;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline" }));
+
+    expect(res.status).toBe(500);
+    const payload = await res.json();
+    expect(payload).toEqual({ error: "Failed to dispatch generation" });
+    expect(JSON.stringify(payload)).not.toContain(sentinel);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(sentinel);
+    expect(errorSpy).toHaveBeenCalledWith("[vocals] song callback is not configured");
+    expect(refundGenerationTokenMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: SESSION_USER, amount: 1 }),
+    );
   });
 
   it("refunds the token when the API key is missing", async () => {
