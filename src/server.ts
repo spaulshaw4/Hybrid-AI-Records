@@ -1,9 +1,10 @@
 import dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
-dotenv.config({ path: ".env.development" });
-dotenv.config({ path: ".env" });
+import { logAiMusicEnvCheck } from "./lib/env";
 
-import "./lib/env";
+dotenv.config({ path: ".env.local", override: false });
+dotenv.config({ path: ".env.development", override: false });
+dotenv.config({ path: ".env", override: false });
+logAiMusicEnvCheck();
 import "./lib/error-capture";
 
 // Install heavy-pipeline worker handlers (SIGTERM fail+tmp purge, orphan sweep).
@@ -254,6 +255,17 @@ export default {
           });
         }
         const { POST } = await import("./app/api/vocals/generate/route");
+        return POST(request);
+      }
+
+      if (pathname === "/api/webhooks/music") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/webhooks/music/route");
         return POST(request);
       }
 

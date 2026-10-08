@@ -1,167 +1,172 @@
-import { resolveStudioSession, UnauthorizedSessionError } from "@/lib/studio-request-auth.server";
-import { audioVaultPublicUrl, vaultAdminClient } from "@/lib/vault-admin.server";
+import { resolveStudioSession } from "@/lib/studio-request-auth.server";
+import { vaultAdminClient } from "@/lib/vault-admin.server";
 
 const MAX_VOCAL_BYTES = 15 * 1024 * 1024;
-const BUCKET = "audio-vault";
+const CREATE_VOICE_URL = "https://api.aimusicapi.ai/api/v1/sonic/create-voice";
+const VOICE_WEBHOOK_URL = "https://hybrid-ai-records.com/api/webhooks/music";
+const REGISTER_ERROR = "Could not register this vocal take.";
+const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-type StoredAudio = {
-  ext: "wav" | "webm" | "ogg" | "mp3" | "m4a";
-  contentType: string;
-};
+type VaultAdmin = ReturnType<typeof vaultAdminClient>;
 
-function isUnauthorized(err: unknown): boolean {
-  if (err instanceof UnauthorizedSessionError) return true;
-  if (!err || typeof err !== "object") return false;
-  const name = (err as { name?: string }).name;
-  const status = (err as { status?: number }).status;
-  const message = err instanceof Error ? err.message : "";
-  return name === "UnauthorizedSessionError" || status === 401 || message === "Unauthorized session";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function hasBearer(req: Request): boolean {
-  const header = req.headers.get("authorization");
-  if (!header?.startsWith("Bearer ")) return false;
-  return header.slice("Bearer ".length).trim().length > 0;
+function readString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function findSequence(haystack: Uint8Array, needle: Uint8Array, from = 0): number {
-  if (needle.length === 0 || haystack.length < needle.length) return -1;
-  outer: for (let index = from; index <= haystack.length - needle.length; index += 1) {
-    for (let offset = 0; offset < needle.length; offset += 1) {
-      if (haystack[index + offset] !== needle[offset]) continue outer;
+function taskIdFromVoice(body: unknown): string {
+  if (!isRecord(body)) return "";
+  const direct = readString(body.task_id);
+  if (direct) return direct;
+  if (isRecord(body.data)) return readString(body.data.task_id);
+  return "";
+}
+
+/** Drop a token query only on the public object URL. Signed URLs are left unchanged. */
+function stripPublicObjectToken(raw: string): string {
+  if (!raw) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return raw;
+  }
+  if (!parsed.pathname.includes("/storage/v1/object/public/")) return raw;
+  if (!parsed.searchParams.has("token")) return raw;
+  parsed.searchParams.delete("token");
+  parsed.search = parsed.searchParams.toString();
+  return parsed.toString();
+}
+
+async function registerVocalTake(
+  admin: VaultAdmin,
+  publicUrl: string,
+  userId: string,
+): Promise<{ ok: true; taskId: string } | { ok: false }> {
+  const apiKey = (process.env.AIMUSIC_API_KEY || process.env.AIMUSICAPI_KEY || "").trim();
+  const webhookSecret = process.env.AIMUSICAPI_WEBHOOK_SECRET;
+  if (!apiKey || !webhookSecret?.trim()) {
+    console.error("[vocals] vocal take registration is not configured");
+    return { ok: false };
+  }
+
+  try {
+    const response = await fetch(CREATE_VOICE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        audio_url: publicUrl,
+        webhook_url: VOICE_WEBHOOK_URL,
+        webhook_secret: webhookSecret,
+      }),
+    });
+    if (!response.ok) {
+      console.error("[vocals] vocal take registration failed", response.status);
+      return { ok: false };
     }
-    return index;
-  }
-  return -1;
-}
 
-type MultipartAudio = { bytes: Uint8Array; type: string };
-
-/** Reads the audio part without relying on a cross-realm File from formData(). */
-async function readMultipartAudio(req: Request): Promise<MultipartAudio | "missing" | "invalid"> {
-  const contentType = req.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("multipart/form-data")) return "invalid";
-  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
-  const boundary = (boundaryMatch?.[1] || boundaryMatch?.[2] || "").trim();
-  if (!boundary) return "invalid";
-
-  const raw = new Uint8Array(await req.arrayBuffer());
-  const encoder = new TextEncoder();
-  const opening = encoder.encode(`--${boundary}`);
-  const delimiter = encoder.encode(`\r\n--${boundary}`);
-  const headerBreak = encoder.encode("\r\n\r\n");
-  let cursor = findSequence(raw, opening);
-  if (cursor < 0) return "invalid";
-  cursor += opening.length;
-  if (raw[cursor] === 45 && raw[cursor + 1] === 45) return "missing";
-  if (raw[cursor] === 13 && raw[cursor + 1] === 10) cursor += 2;
-
-  while (cursor < raw.length) {
-    const next = findSequence(raw, delimiter, cursor);
-    const part = next < 0 ? raw.subarray(cursor) : raw.subarray(cursor, next);
-    const headerEnd = findSequence(part, headerBreak);
-    if (headerEnd >= 0) {
-      const headerText = new TextDecoder().decode(part.subarray(0, headerEnd));
-      if (/name="(?:audio|file|vocal)"/i.test(headerText)) {
-        const type = /content-type:\s*([^\r\n;]+)/i.exec(headerText)?.[1]?.trim() ?? "";
-        return { bytes: part.subarray(headerEnd + headerBreak.length), type };
-      }
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
     }
-    if (next < 0) break;
-    cursor = next + delimiter.length;
-    if (raw[cursor] === 45 && raw[cursor + 1] === 45) break;
-    if (raw[cursor] === 13 && raw[cursor + 1] === 10) cursor += 2;
-  }
-  return "missing";
-}
+    const taskId = taskIdFromVoice(body);
+    if (!taskId || !TASK_ID.test(taskId)) {
+      console.error("[vocals] vocal take registration returned no task id");
+      return { ok: false };
+    }
 
-function startsWith(bytes: Uint8Array, signature: number[], offset = 0): boolean {
-  if (bytes.length < offset + signature.length) return false;
-  return signature.every((byte, index) => bytes[offset + index] === byte);
-}
-
-/** Bytes decide the object extension. A declared WAV type never relabels other audio. */
-function sniffAudio(bytes: Uint8Array, declaredType: string): StoredAudio | null {
-  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x41, 0x56, 0x45], 8)) {
-    return { ext: "wav", contentType: "audio/wav" };
+    const inserted = await admin.from("vocal_personas").insert({
+      task_id: taskId,
+      user_id: userId,
+      status: "processing",
+      audio_url: publicUrl,
+      updated_at: new Date().toISOString(),
+    });
+    if (inserted.error) {
+      console.error("[vocals] vocal persona insert failed");
+      return { ok: false };
+    }
+    return { ok: true, taskId };
+  } catch {
+    console.error("[vocals] vocal take registration failed");
+    return { ok: false };
   }
-  if (startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) {
-    return { ext: "webm", contentType: "audio/webm" };
-  }
-  if (startsWith(bytes, [0x4f, 0x67, 0x67, 0x53])) {
-    return { ext: "ogg", contentType: "audio/ogg" };
-  }
-  if (startsWith(bytes, [0x49, 0x44, 0x33]) || (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0)) {
-    return { ext: "mp3", contentType: "audio/mpeg" };
-  }
-  if (startsWith(bytes, [0x66, 0x74, 0x79, 0x70], 4)) {
-    return { ext: "m4a", contentType: "audio/mp4" };
-  }
-
-  const declared = declaredType.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (declared === "audio/webm") return { ext: "webm", contentType: "audio/webm" };
-  if (declared === "audio/ogg") return { ext: "ogg", contentType: "audio/ogg" };
-  if (declared === "audio/mpeg" || declared === "audio/mp3") return { ext: "mp3", contentType: "audio/mpeg" };
-  if (declared === "audio/mp4") return { ext: "m4a", contentType: "audio/mp4" };
-  return null;
 }
 
 export async function POST(req: Request): Promise<Response> {
-  if (!hasBearer(req)) {
-    return Response.json({ error: "Unauthorized session" }, { status: 401 });
-  }
-
-  let userId = "";
   try {
-    const session = await resolveStudioSession(req);
-    userId = session.userId.trim();
-  } catch (err: unknown) {
-    if (!isUnauthorized(err)) console.error("[vocals] session failed");
-    return Response.json({ error: "Unauthorized session" }, { status: 401 });
-  }
-  if (!userId || userId === "guest_user" || userId.includes("/") || userId.includes("\\") || userId.includes("..")) {
-    return Response.json({ error: "Unauthorized session" }, { status: 401 });
-  }
-
-  let audio: MultipartAudio | "missing" | "invalid";
-  try {
-    audio = await readMultipartAudio(req);
-  } catch {
-    return Response.json({ error: "Audio file is required." }, { status: 400 });
-  }
-  if (audio === "invalid" || audio === "missing") {
-    return Response.json({ error: "Audio file is required." }, { status: 400 });
-  }
-  if (audio.bytes.byteLength <= 0) {
-    return Response.json({ error: "Audio file is empty." }, { status: 400 });
-  }
-  if (audio.bytes.byteLength > MAX_VOCAL_BYTES) {
-    return Response.json({ error: "That vocal take is too large." }, { status: 413 });
-  }
-
-  const bytes = audio.bytes;
-  const sniffed = sniffAudio(bytes, audio.type);
-  if (!sniffed) {
-    return Response.json({ error: "Upload an audio file." }, { status: 400 });
-  }
-
-  const fileName = `voice-take-${Date.now()}.${sniffed.ext}`;
-  const objectPath = `vocal-references/${userId}/${fileName}`;
-
-  try {
-    const admin = vaultAdminClient();
-    const { error } = await admin.storage.from(BUCKET).upload(objectPath, bytes, {
-      contentType: sniffed.contentType,
-      upsert: false,
-    });
-    if (error) {
-      console.error("[vocals] reference upload failed");
-      return Response.json({ error: "Could not save this vocal take." }, { status: 500 });
+    const authorization = req.headers.get("authorization") ?? "";
+    if (!authorization.startsWith("Bearer ")) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-  } catch {
-    console.error("[vocals] reference upload failed");
-    return Response.json({ error: "Could not save this vocal take." }, { status: 500 });
-  }
 
-  return Response.json({ url: audioVaultPublicUrl(objectPath), fileName });
+    let user: { id: string };
+    try {
+      const session = await resolveStudioSession(req);
+      const id = session.userId.trim();
+      if (!id) return Response.json({ error: "Invalid session" }, { status: 401 });
+      user = { id };
+    } catch {
+      return Response.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    const formData = await req.formData();
+    const file = formData.get("audio");
+    if (!(file instanceof Blob)) {
+      return Response.json({ error: "No audio file provided" }, { status: 400 });
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    if (buffer.length === 0 || buffer.length > MAX_VOCAL_BYTES) {
+      return Response.json({ error: "File empty or exceeds 15MB limit" }, { status: 400 });
+    }
+
+    const isWav = buffer.subarray(0, 4).toString() === "RIFF";
+    const extension = isWav ? "wav" : "webm";
+    const mimeType = isWav ? "audio/wav" : "audio/webm";
+    const fileName = `voice-take-${Date.now()}.${extension}`;
+    const storagePath = `vocal-references/${user.id}/${fileName}`;
+
+    const admin = vaultAdminClient();
+    const { error: uploadError } = await admin.storage.from("audio-vault").upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+    if (uploadError) {
+      try {
+        console.error("[vocals] reference upload failed:", uploadError.message, JSON.stringify(uploadError, null, 2));
+      } catch {
+        console.error("[vocals] reference upload failed:", uploadError.message, uploadError);
+      }
+      return Response.json({ error: uploadError.message }, { status: 500 });
+    }
+
+    const { data } = admin.storage.from("audio-vault").getPublicUrl(storagePath);
+    const publicUrl = stripPublicObjectToken(typeof data?.publicUrl === "string" ? data.publicUrl : "");
+    if (!publicUrl) {
+      console.error("[vocals] public vocal url missing");
+      return Response.json({ error: REGISTER_ERROR }, { status: 502 });
+    }
+
+    const registered = await registerVocalTake(admin, publicUrl, user.id);
+    if (!registered.ok) {
+      return Response.json({ error: REGISTER_ERROR }, { status: 502 });
+    }
+    return Response.json({ url: publicUrl, fileName, taskId: registered.taskId }, { status: 200 });
+  } catch (err: unknown) {
+    console.error("[vocals] unexpected route exception:", err);
+    if (err instanceof Error) {
+      return Response.json({ error: err.message || "Internal server error" }, { status: 500 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
 }

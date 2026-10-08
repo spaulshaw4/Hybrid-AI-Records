@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Sparkles } from "lucide-react";
 
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -100,7 +100,13 @@ async function postCoproducer(body: Record<string, string>): Promise<CoproducerD
   return { ok: res.ok, ...data };
 }
 
-export function VocalStudioTab({ reference }: { reference?: VocalStudioReference } = {}) {
+export function VocalStudioTab({
+  reference,
+  vocalReference = null,
+}: {
+  reference?: VocalStudioReference;
+  vocalReference?: ReactNode;
+} = {}) {
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [styleText, setStyleText] = useState("");
@@ -278,7 +284,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
           <span className="text-xs text-zinc-500">{title.length}/50</span>
         </div>
 
-        {reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null}
+        {vocalReference ?? (reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null)}
 
         <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

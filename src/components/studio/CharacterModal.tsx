@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AudioWaveform, Mic, X } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { safeCloseAudioContext } from "@/lib/safe-media";
 
 export interface VocalCharacter {
   id: string;
@@ -61,15 +62,100 @@ type VaultQuery = {
 
 const MIN_RECORD_MS = 15_000;
 const RECORD_LIMIT_MS = 30_000;
+const VOCAL_READY_MS = 400;
 const SHORT_TAKE_WARNING = "Sonic requires at least 15 seconds of audio for accurate voice profiling.";
 
 type StopReason = "user" | "limit" | "discard";
 
 type CapturedTake = {
+  blob: Blob;
   preview: string;
   seconds: number;
-  readyUrl: string | null;
 };
+
+function drawTakeWaveform(canvas: HTMLCanvasElement, audio: AudioBuffer) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = 320;
+  const height = 48;
+  canvas.width = width;
+  canvas.height = height;
+  const data = audio.getChannelData(0);
+  const buckets = 48;
+  const size = Math.max(1, Math.floor(data.length / buckets));
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fb7185";
+  for (let i = 0; i < buckets; i += 1) {
+    let peak = 0;
+    for (let j = 0; j < size; j += 1) {
+      const sample = Math.abs(data[i * size + j] ?? 0);
+      if (sample > peak) peak = sample;
+    }
+    const bar = Math.max(2, peak * (height - 4));
+    const x = (width / buckets) * i;
+    ctx.fillRect(x, (height - bar) / 2, Math.max(1, width / buckets - 1), bar);
+  }
+}
+
+function TakeAudition({ blob, src }: { blob: Blob; src: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let cancelled = false;
+    let ctx: AudioContext | null = null;
+    void (async () => {
+      try {
+        const Ctx =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return;
+        const arrayBuffer = await blob.arrayBuffer();
+        if (cancelled) return;
+        ctx = new Ctx();
+        const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        if (cancelled) return;
+        drawTakeWaveform(canvas, decoded);
+      } catch {
+        // Playback still uses the blob URL when the buffer cannot be decoded.
+      } finally {
+        if (ctx) void safeCloseAudioContext(ctx);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blob]);
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <canvas ref={canvasRef} aria-hidden="true" className="h-12 w-full rounded bg-black/40" />
+      <audio ref={audioRef} src={src} aria-label="Captured vocal" preload="auto" onEnded={() => setPlaying(false)} />
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={playing ? "Pause" : "Play"}
+        className="w-fit rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-100"
+      >
+        {playing ? "Pause" : "Play"}
+      </button>
+    </div>
+  );
+}
 
 export function isAudioVaultHttpsUrl(value: string): boolean {
   try {
@@ -165,6 +251,9 @@ export default function CharacterModal({
   const pendingDurationMsRef = useRef(0);
   const stopReasonRef = useRef<StopReason>("user");
   const uploadSerialRef = useRef(0);
+  const savingTakeRef = useRef(false);
+  const vocalReadyRef = useRef(false);
+  const readyTimerRef = useRef<number | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const appliedReferenceRef = useRef<string | null>(null);
   const onSelectSourceRef = useRef(onSelectSource);
@@ -186,6 +275,8 @@ export default function CharacterModal({
   const [vaultError, setVaultError] = useState("");
   const [vaultLoading, setVaultLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [stagingTake, setStagingTake] = useState(false);
+  const [vocalReady, setVocalReady] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
@@ -236,6 +327,7 @@ export default function CharacterModal({
   useEffect(() => {
     return () => {
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      if (readyTimerRef.current !== null) window.clearTimeout(readyTimerRef.current);
     };
   }, []);
 
@@ -282,8 +374,19 @@ export default function CharacterModal({
     onSelectSourceRef.current?.({ url: vocal.url, label: vocal.name });
   };
 
+  const clearReadyTimer = () => {
+    if (readyTimerRef.current === null) return;
+    window.clearTimeout(readyTimerRef.current);
+    readyTimerRef.current = null;
+  };
+
   const clearCapturedTake = () => {
     uploadSerialRef.current += 1;
+    clearReadyTimer();
+    savingTakeRef.current = false;
+    vocalReadyRef.current = false;
+    setStagingTake(false);
+    setVocalReady(false);
     const applied = appliedReferenceRef.current;
     appliedReferenceRef.current = null;
     if (applied && selectedSourceUrlRef.current === applied) publishVocal(null);
@@ -294,20 +397,26 @@ export default function CharacterModal({
     setElapsed(0);
   };
 
-  const uploadCapturedTake = async (blob: Blob, seconds: number, serial: number) => {
-    if (seconds < 15 || blob.size <= 0) return;
+  const commitCapturedTake = async () => {
+    const take = captured;
+    if (!take || savingTakeRef.current || vocalReadyRef.current) return;
+    const serial = uploadSerialRef.current;
+    savingTakeRef.current = true;
+    setStagingTake(true);
+    vocalReadyRef.current = false;
+    setVocalReady(false);
+    setRecordError("");
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       if (serial !== uploadSerialRef.current) return;
       const accessToken = sessionData.session?.access_token?.trim() ?? "";
-      const userId = sessionData.session?.user?.id?.trim() ?? "";
-      if (!accessToken || !userId) {
+      if (!accessToken) {
         setRecordError("Sign in to upload a vocal.");
         return;
       }
-      const declared = blob.type.split(";")[0]?.trim() || "application/octet-stream";
+      const declared = take.blob.type.split(";")[0]?.trim() || "audio/webm";
       const form = new FormData();
-      form.append("audio", new File([blob], "voice-take", { type: declared }));
+      form.append("audio", new File([take.blob], "mic-take.wav", { type: declared }));
       const response = await fetch("/api/vocals/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -326,12 +435,24 @@ export default function CharacterModal({
         setRecordError("Could not save this vocal take.");
         return;
       }
-      appliedReferenceRef.current = url;
-      publishVocal({ url, name: "My Voice Take", duration: seconds, isReady: true });
-      setCaptured((current) => (current ? { ...current, readyUrl: url } : current));
+      vocalReadyRef.current = true;
+      setVocalReady(true);
+      clearReadyTimer();
+      readyTimerRef.current = window.setTimeout(() => {
+        readyTimerRef.current = null;
+        if (serial !== uploadSerialRef.current) return;
+        vocalReadyRef.current = false;
+        setVocalReady(false);
+        appliedReferenceRef.current = url;
+        publishVocal({ url, name: "Take 1", duration: take.seconds, isReady: true });
+        onClose();
+      }, VOCAL_READY_MS);
     } catch {
       if (serial !== uploadSerialRef.current) return;
       setRecordError("Could not save this vocal take.");
+    } finally {
+      savingTakeRef.current = false;
+      setStagingTake(false);
     }
   };
 
@@ -345,10 +466,11 @@ export default function CharacterModal({
     releasePreview();
     const preview = URL.createObjectURL(blob);
     previewUrlRef.current = preview;
-    setCaptured({ preview, seconds, readyUrl: null });
+    setCaptured({ blob, preview, seconds });
     setShortTakeWarning("");
     setRecordError("");
-    void uploadCapturedTake(blob, seconds, uploadSerialRef.current);
+    vocalReadyRef.current = false;
+    setVocalReady(false);
   };
 
   const startRecording = async () => {
@@ -517,18 +639,24 @@ export default function CharacterModal({
             {captured ? (
               <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3" aria-label="Captured Vocal">
                 <p className="m-0 text-sm font-semibold text-emerald-300">✓ Voice Captured {captured.seconds}s</p>
-                <audio controls src={captured.preview} aria-label="Captured vocal" className="w-full" />
-                {captured.readyUrl ? (
-                  <>
-                    <p className="m-0 text-sm font-semibold text-emerald-300">✓ Uploaded & Ready</p>
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="w-fit rounded-lg border-0 bg-emerald-500 px-4 py-2 text-sm font-bold text-black"
-                    >
-                      Apply Vocal to Song
-                    </button>
-                  </>
+                <TakeAudition blob={captured.blob} src={captured.preview} />
+                <button
+                  type="button"
+                  disabled={stagingTake || vocalReady}
+                  onClick={() => void commitCapturedTake()}
+                  className="w-fit rounded-lg border-0 bg-emerald-500 px-4 py-2 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Lock In Vocal Take
+                </button>
+                {stagingTake ? (
+                  <p role="status" className="m-0 text-sm font-semibold text-emerald-200">
+                    Staging vocal reference...
+                  </p>
+                ) : null}
+                {vocalReady ? (
+                  <p role="status" className="m-0 text-sm font-semibold text-emerald-300">
+                    ✓ Vocal Ready
+                  </p>
                 ) : null}
                 <button
                   type="button"

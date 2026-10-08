@@ -174,8 +174,13 @@ describe("requireStageKey", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     logAiMusicEnvCheck();
     expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key loaded");
+    expect(log).toHaveBeenCalledWith(
+      "[ENV CHECK] Webhook secret loaded:",
+      !!process.env.AIMUSICAPI_WEBHOOK_SECRET,
+    );
     expect(log.mock.calls.flat().join(" ")).not.toContain(secret);
     expect(log.mock.calls.flat().join(" ")).not.toContain("Fish");
+    expect(log.mock.calls.some((args) => typeof args[1] === "string")).toBe(false);
   });
 
   it("accepts AIMUSICAPI_KEY when AIMUSIC_API_KEY is unset", () => {
@@ -184,6 +189,10 @@ describe("requireStageKey", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     logAiMusicEnvCheck();
     expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key loaded");
+    expect(log).toHaveBeenCalledWith(
+      "[ENV CHECK] Webhook secret loaded:",
+      !!process.env.AIMUSICAPI_WEBHOOK_SECRET,
+    );
     expect(log.mock.calls.flat().join(" ")).not.toContain("alias-startup-secret");
   });
 
@@ -192,6 +201,10 @@ describe("requireStageKey", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     logAiMusicEnvCheck();
     expect(log).toHaveBeenCalledWith("[ENV_CHECK] AIMusic key missing");
+    expect(log).toHaveBeenCalledWith(
+      "[ENV CHECK] Webhook secret loaded:",
+      !!process.env.AIMUSICAPI_WEBHOOK_SECRET,
+    );
     expect(log.mock.calls.flat().join(" ")).not.toContain("Fish");
   });
 

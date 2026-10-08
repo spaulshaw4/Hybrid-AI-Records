@@ -29,7 +29,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
-import { EnginePage } from "./EnginePage";
+import { EnginePage, formatVocalReferenceClock } from "./EnginePage";
 
 function jsonResult(body: unknown, status = 200) {
   return {
@@ -41,6 +41,13 @@ function jsonResult(body: unknown, status = 200) {
 }
 
 describe("EnginePage instrumental tab", () => {
+  it("formats a docked vocal duration as m:ss", () => {
+    expect(formatVocalReferenceClock(29)).toBe("0:29");
+    expect(formatVocalReferenceClock(30)).toBe("0:30");
+    expect(formatVocalReferenceClock(21)).toBe("0:21");
+    expect(formatVocalReferenceClock(75)).toBe("1:15");
+  });
+
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -348,33 +355,46 @@ describe("EnginePage instrumental tab", () => {
       expect(await screen.findByText("✓ Voice Captured 21s")).toBeInTheDocument();
       const audio = screen.getByLabelText("Captured vocal");
       expect(audio.tagName).toBe("AUDIO");
-      expect((audio as HTMLAudioElement).controls).toBe(true);
       expect(audio).toHaveAttribute("src", "blob:voice-take");
+      expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Lock In Vocal Take" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByText("Live mic capture (15–30s take).")).toBeInTheDocument();
 
-      const activeVocal = /Active Vocal: My Voice Take \(21s\)/;
-      await waitFor(() => expect(screen.getByText(activeVocal)).toBeInTheDocument());
-      expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+      const activeVocal = "🎙️ Active Vocal Reference: Take 1 (0:21)";
+      expect(screen.queryByText(activeVocal)).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
       expect(upload).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
+      await waitFor(() => expect(screen.getByText(activeVocal)).toBeInTheDocument(), { timeout: 2000 });
+      expect(screen.queryByRole("heading", { name: "Vocal Studio" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "✓ Take 1" })).toBeInTheDocument();
       const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/upload")) as unknown as [
         string,
         RequestInit,
       ];
       expect(uploadCall[0]).toBe("/api/vocals/upload");
       expect((uploadCall[1].headers as Record<string, string>).Authorization).toBe("Bearer session-token");
+      expect(Object.keys(uploadCall[1].headers as Record<string, string>).some((key) => key.toLowerCase() === "content-type")).toBe(false);
       expect(uploadCall[1].body).toBeInstanceOf(FormData);
       expect((uploadCall[1].body as FormData).get("audio")).toBeTruthy();
+      expect(((uploadCall[1].body as FormData).get("audio") as File).name).toBe("mic-take.wav");
+
+      const vocalsForm = screen.getByRole("form", { name: "With Vocals" });
+      const lyricsBox = screen.getByRole("textbox", { name: "Lyrics" });
+      expect(vocalsForm).toHaveTextContent(activeVocal);
+      expect(screen.getByText(activeVocal).compareDocumentPosition(lyricsBox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(vocalsForm).toContainElement(screen.getByRole("textbox", { name: "Style" }));
+      expect(vocalsForm).toContainElement(screen.getByLabelText("Track Length"));
+      expect(screen.getByRole("region", { name: "Your Audio Vault" })).not.toHaveTextContent("Active Vocal Reference");
+      expect(screen.getByLabelText("Active vocal reference")).toHaveAttribute("src", publicUrl);
 
       fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
       fireEvent.change(screen.getByRole("textbox", { name: "Style" }), { target: { value: "dry vocal" } });
       fireEvent.change(screen.getByRole("textbox", { name: "Song title" }), { target: { value: "Night Drive" } });
       expect(screen.getByText(activeVocal)).toBeInTheDocument();
-
-      await user.click(screen.getByRole("button", { name: "Apply Vocal to Song" }));
-      expect(screen.queryByRole("heading", { name: "Vocal Studio" })).not.toBeInTheDocument();
-      expect(screen.getByText(activeVocal)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "✓ My Voice Take" })).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Render Master Record" }));
       await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
@@ -410,7 +430,7 @@ describe("EnginePage instrumental tab", () => {
       await user.click(screen.getByRole("tab", { name: "With Vocals" }));
       expect(screen.getByText(activeVocal)).toBeInTheDocument();
       await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
-      await user.click(screen.getByRole("button", { name: "Change" }));
+      await user.click(screen.getByRole("button", { name: "✓ Take 1" }));
       expect(screen.getByRole("heading", { name: "Vocal Studio" })).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Close" }));
       expect(screen.getByText(activeVocal)).toBeInTheDocument();

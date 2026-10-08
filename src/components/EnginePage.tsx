@@ -100,6 +100,60 @@ function modeTabStyle(active: boolean): CSSProperties {
   };
 }
 
+export function formatVocalReferenceClock(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(total / 60);
+  const remain = total % 60;
+  return `${minutes}:${remain.toString().padStart(2, "0")}`;
+}
+
+function ActiveVocalReference({ vocal, onRemove }: { vocal: SelectedVocal; onRemove: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-emerald-100">
+      <span>
+        🎙️ Active Vocal Reference: {vocal.name} ({formatVocalReferenceClock(vocal.duration)})
+      </span>
+      <span aria-hidden="true">|</span>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={playing}
+        className="border-0 bg-transparent p-0 font-semibold text-emerald-50 underline"
+      >
+        Preview
+      </button>
+      <span aria-hidden="true">|</span>
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            audioRef.current?.pause();
+          } catch {
+            /* jsdom has no media pause */
+          }
+          onRemove();
+        }}
+        className="border-0 bg-transparent p-0 font-semibold text-rose-200 underline"
+      >
+        Remove
+      </button>
+      <audio ref={audioRef} src={vocal.url} aria-label="Active vocal reference" onEnded={() => setPlaying(false)} />
+    </div>
+  );
+}
+
 function referenceForStudio(
   character: VocalCharacter | null,
   vocal: SelectedVocal | null,
@@ -799,61 +853,14 @@ export function EnginePage() {
 
         {activeTab === "vocals" ? (
           <>
-            {selectedVocal ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: 10,
-                  marginBottom: 12,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(16, 185, 129, 0.45)",
-                  backgroundColor: "rgba(6, 78, 59, 0.35)",
-                  color: "#a7f3d0",
-                  fontSize: 14,
-                  fontWeight: 700,
-                }}
-              >
-                <span>
-                  🎙️ Active Vocal: {selectedVocal.name} ({selectedVocal.duration}s) —
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsCharacterModalOpen(true)}
-                  style={{
-                    backgroundColor: "transparent",
-                    color: "#ecfdf5",
-                    border: "1px solid rgba(167, 243, 208, 0.45)",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Change
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedVocal(null)}
-                  style={{
-                    backgroundColor: "transparent",
-                    color: "#fecaca",
-                    border: "1px solid rgba(252, 165, 165, 0.45)",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            ) : null}
-            <VocalStudioTab reference={referenceForStudio(selectedCharacter, selectedVocal)} />
+            <VocalStudioTab
+              reference={referenceForStudio(selectedCharacter, selectedVocal)}
+              vocalReference={
+                selectedVocal ? (
+                  <ActiveVocalReference vocal={selectedVocal} onRemove={() => setSelectedVocal(null)} />
+                ) : null
+              }
+            />
           </>
         ) : activeTab === "easy" ? (
           <div className="flex flex-col gap-4">

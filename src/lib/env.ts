@@ -14,11 +14,10 @@ import dotenv from "dotenv";
 const isNodeRuntime = typeof process !== "undefined" && typeof process.cwd === "function";
 
 if (isNodeRuntime) {
-  dotenv.config({ path: ".env.local" });
-  dotenv.config({ path: ".env.development" });
-  dotenv.config({ path: ".env" });
-
-  logAiMusicEnvCheck();
+  // Process environment wins. Otherwise the first file wins, so .env.local beats .env.
+  dotenv.config({ path: ".env.local", override: false });
+  dotenv.config({ path: ".env.development", override: false });
+  dotenv.config({ path: ".env", override: false });
 }
 
 /** Startup check. Logs presence only — never the key value. */
@@ -28,9 +27,11 @@ export function logAiMusicEnvCheck(): void {
   );
   if (loaded) {
     console.log("[ENV_CHECK] AIMusic key loaded");
-    return;
+  } else {
+    console.log("[ENV_CHECK] AIMusic key missing");
   }
-  console.log("[ENV_CHECK] AIMusic key missing");
+  // Called from the server entry after .env.local and .env are applied.
+  console.log("[ENV CHECK] Webhook secret loaded:", !!process.env.AIMUSICAPI_WEBHOOK_SECRET);
 }
 
 export type PipelineStage =

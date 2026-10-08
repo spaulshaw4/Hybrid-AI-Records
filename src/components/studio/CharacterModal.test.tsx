@@ -78,6 +78,9 @@ function StudioHarness() {
       <p data-testid="selected-vocal-ready">{vocal?.isReady ? "yes" : ""}</p>
       <p data-testid="selected-persona">{characterId ?? ""}</p>
       <p data-testid="modal-open">{open ? "yes" : "no"}</p>
+      <button type="button" onClick={() => setOpen(true)}>
+        Reopen studio
+      </button>
       <CharacterModal
         isOpen={open}
         onClose={() => setOpen(false)}
@@ -225,14 +228,20 @@ describe("CharacterModal voice capture", () => {
     expect(await screen.findByText("✓ Voice Captured 30s")).toBeInTheDocument();
     expect(screen.queryByText(SHORT_TAKE_WARNING)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("✓ Uploaded & Ready")).toBeInTheDocument());
-    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lock In Vocal Take" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Apply Vocal to Song" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Staging vocal reference...")).not.toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
     expect(storageFrom).not.toHaveBeenCalled();
     expect(upload).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("30"));
-    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("My Voice Take");
-    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL);
+    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
+    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("");
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
   });
 
@@ -276,8 +285,12 @@ describe("CharacterModal voice capture", () => {
     stopAfter(15_000);
     expect(await screen.findByText("✓ Voice Captured 15s")).toBeInTheDocument();
     expect(screen.queryByText(SHORT_TAKE_WARNING)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("15"));
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Lock In Vocal Take" })).toBeInTheDocument();
+    expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(0);
     expect(storageFrom).not.toHaveBeenCalled();
   });
 
@@ -291,13 +304,19 @@ describe("CharacterModal voice capture", () => {
     expect(card).toContainElement(badge);
     const audio = screen.getByLabelText("Captured vocal");
     expect(audio.tagName).toBe("AUDIO");
-    expect((audio as HTMLAudioElement).controls).toBe(true);
     expect(audio).toHaveAttribute("src", "blob:voice-take");
     expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(document.querySelector("canvas")).toBeTruthy();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(0);
+    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(1),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
+    expect(await screen.findByText("✓ Vocal Ready")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(1));
     const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/upload")) as unknown as [
       string,
       RequestInit,
@@ -305,29 +324,25 @@ describe("CharacterModal voice capture", () => {
     expect(uploadCall[0]).toBe("/api/vocals/upload");
     const headers = uploadCall[1].headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer session-token");
+    expect(Object.keys(headers).some((key) => key.toLowerCase() === "content-type")).toBe(false);
     expect(uploadCall[1].body).toBeInstanceOf(FormData);
     const posted = (uploadCall[1].body as FormData).get("audio");
     expect(posted).toBeInstanceOf(File);
+    expect((posted as File).name).toBe("mic-take.wav");
     expect((posted as File).type).toBe("audio/webm");
     expect(storageFrom).not.toHaveBeenCalled();
     expect(upload).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL));
-    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("My Voice Take");
+    await waitFor(() => expect(screen.getByTestId("modal-open")).toHaveTextContent("no"));
+    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL);
+    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("Take 1");
     expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("21");
     expect(screen.getByTestId("selected-vocal-ready")).toHaveTextContent("yes");
-    expect(screen.getByText("✓ Uploaded & Ready")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply Vocal to Song" })).toBeInTheDocument();
     expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
-    expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
     expect(UPLOADED_URL.startsWith("https://")).toBe(true);
     expect(UPLOADED_URL).toContain("/audio-vault/");
     expect(UPLOADED_URL).not.toMatch(/^blob:/);
-
-    fireEvent.click(screen.getByRole("button", { name: "Apply Vocal to Song" }));
-    expect(screen.getByTestId("modal-open")).toHaveTextContent("no");
-    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL);
-    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(screen.getByTestId("selected-vocal-url").textContent).not.toMatch(/^blob:/);
   });
 
   it("keeps the local preview when upload fails or the public URL is not an audio-vault https URL", async () => {
@@ -346,7 +361,10 @@ describe("CharacterModal voice capture", () => {
     await beginRecording();
     stopAfter(21_000);
     expect(await screen.findByText("✓ Voice Captured 21s")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
     expect(await screen.findByText("Could not save this vocal take.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lock In Vocal Take" })).toBeEnabled();
     expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
     expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
@@ -368,6 +386,8 @@ describe("CharacterModal voice capture", () => {
     await beginRecording();
     stopAfter(18_000);
     expect(await screen.findByText("✓ Voice Captured 18s")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
     expect(await screen.findByText("Could not save this vocal take.")).toBeInTheDocument();
     expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
@@ -380,6 +400,9 @@ describe("CharacterModal voice capture", () => {
     await beginRecording();
     stopAfter(16_000);
     expect(await screen.findByText("✓ Voice Captured 16s")).toBeInTheDocument();
+    expect(screen.queryByText("Sign in to upload a vocal.")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
     expect(await screen.findByText("Sign in to upload a vocal.")).toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
     expect(upload).not.toHaveBeenCalled();
@@ -393,7 +416,12 @@ describe("CharacterModal voice capture", () => {
     render(<StudioHarness />);
     await beginRecording();
     stopAfter(21_000);
+    expect(await screen.findByText("✓ Voice Captured 21s")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
     await waitFor(() => expect(screen.getByTestId("selected-vocal-url").textContent).toMatch(/^https:\/\//));
+    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("Take 1");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen studio" }));
     fireEvent.click(screen.getByRole("button", { name: "Re-record" }));
     expect(revokeUrl).toHaveBeenCalledWith("blob:voice-take");
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
@@ -420,8 +448,11 @@ describe("CharacterModal voice capture", () => {
     await beginRecording();
     stopAfter(22_000);
     expect(await screen.findByText("✓ Voice Captured 22s")).toBeInTheDocument();
-    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
-    expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Lock In Vocal Take" }));
+    expect(await screen.findByText("Staging vocal reference...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lock In Vocal Take" })).toBeDisabled();
+    expect(screen.queryByText("✓ Vocal Ready")).not.toBeInTheDocument();
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     fireEvent.click(screen.getByRole("button", { name: "Re-record" }));
     releaseUpload({
