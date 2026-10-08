@@ -25,6 +25,18 @@ function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function readDuration(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < 30 || value > 360) return undefined;
+  return value;
+}
+
+function readPersonaId(value: unknown): string {
+  const id = readString(value);
+  if (!id || /^https?:\/\//i.test(id)) return "";
+  return id.slice(0, 128);
+}
+
 function isUnauthorized(err: unknown): boolean {
   if (err instanceof UnauthorizedSessionError) return true;
   if (!err || typeof err !== "object") return false;
@@ -227,6 +239,8 @@ export async function POST(req: Request): Promise<Response> {
   if (!reference) {
     return Response.json({ error: REFERENCE_ERROR }, { status: 400 });
   }
+  const duration = readDuration(record.duration);
+  const personaId = readPersonaId(record.personaId) || readPersonaId(record.vocalId);
 
   const debit = await debitOneHybridToken(userId);
   if (!debit.ok) {
@@ -255,6 +269,7 @@ export async function POST(req: Request): Promise<Response> {
         prompt: lyrics,
         webhook_url: vocalWebhookUrl(),
         ...(reference.url ? { reference_audio_url: reference.url } : {}),
+        ...(duration !== undefined ? { duration } : {}),
       }),
     });
   } catch {
@@ -279,6 +294,13 @@ export async function POST(req: Request): Promise<Response> {
 
   // vaulted_tracks.wav_url and mp3_url are NOT NULL, and Audio Vault lists those
   // columns with no status filter. A processing insert would fail or show a broken row.
-  rememberVocalJob({ taskId, userId, title, lyrics, tags });
+  rememberVocalJob({
+    taskId,
+    userId,
+    title,
+    lyrics,
+    tags,
+    ...(personaId ? { personaId } : {}),
+  });
   return Response.json({ success: true, taskId });
 }

@@ -391,6 +391,77 @@ describe("POST /api/vocals/generate", () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
+  it("forwards duration when it is an integer from 30 to 360 and omits it otherwise", async () => {
+    let n = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url !== CREATE_URL) throw new Error("unexpected fetch");
+      n += 1;
+      return jsonResponse({ data: { task_id: `task-dur-${n}` } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const lockedFields = {
+      custom_mode: true,
+      mv: "sonic-v4-5",
+      title: "Untitled Vocal",
+      tags: "",
+      prompt: "[Verse]\nline",
+      webhook_url: WEBHOOK,
+    };
+
+    for (const duration of [30, 180, 360]) {
+      fetchMock.mockClear();
+      const res = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline", duration }));
+      expect(res.status).toBe(200);
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(JSON.parse(String(init.body))).toEqual({ ...lockedFields, duration });
+    }
+
+    fetchMock.mockClear();
+    const absent = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline" }));
+    expect(absent.status).toBe(200);
+    const [, absentInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(absentInit.body))).toEqual(lockedFields);
+    expect(JSON.parse(String(absentInit.body))).not.toHaveProperty("duration");
+
+    for (const duration of [29, 361, 180.5, "180", null]) {
+      fetchMock.mockClear();
+      const ignored = await generateVocals(vocalRequest({ lyrics: "[Verse]\nline", duration }));
+      expect(ignored.status).toBe(200);
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("duration");
+      expect(body).toMatchObject(lockedFields);
+    }
+  });
+
+  it("stores personaId on the job and leaves it off the upstream body", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-persona-1" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({ lyrics: "[Verse]\nline", personaId: "vocal_stephen_oct5_master" }),
+    );
+
+    expect(res.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("personaId");
+    expect(body).not.toHaveProperty("vocalId");
+    expect(body).not.toHaveProperty("duration");
+    expect(readVocalJob("task-persona-1")).toEqual({
+      taskId: "task-persona-1",
+      userId: SESSION_USER,
+      title: "Untitled Vocal",
+      lyrics: "[Verse]\nline",
+      tags: "",
+      personaId: "vocal_stephen_oct5_master",
+    });
+  });
+
   it("refunds the token when the API key is missing", async () => {
     delete process.env.AIMUSIC_API_KEY;
     const fetchMock = vi.fn();
@@ -515,6 +586,37 @@ describe("POST /api/webhooks/aimusic", () => {
     );
     expect(again.status).toBe(200);
     expect(insertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes a remembered persona id into vocal_id_used", async () => {
+    const taskId = "task-vocal-persona";
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocals/${taskId}.wav`;
+    rememberVocalJob({
+      taskId,
+      userId: SESSION_USER,
+      title: "Night Drive",
+      lyrics: "[Verse]\nline",
+      tags: "Male Vocal",
+      personaId: "vocal_stephen_oct5_master",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(Buffer.from("RIFFvocal"), { status: 200 })),
+    );
+
+    const res = await receiveVocalWebhook(
+      webhookRequest({ task_id: taskId, data: { audio_url: AUDIO } }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: SESSION_USER,
+        vocal_id_used: "vocal_stephen_oct5_master",
+        wav_url: publicUrl,
+        task_id: taskId,
+      }),
+    );
   });
 
   it("stores the file and skips the insert when the pending job is gone", async () => {

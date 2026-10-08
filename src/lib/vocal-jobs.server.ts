@@ -9,6 +9,7 @@ export type VocalJob = {
   title: string;
   lyrics: string;
   tags: string;
+  personaId?: string;
 };
 
 const jobs = new Map<string, VocalJob>();

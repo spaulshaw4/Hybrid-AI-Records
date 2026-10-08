@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
-import { Sparkles } from "lucide-react";
+import { Lock, Sparkles } from "lucide-react";
 
 import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,7 +9,7 @@ import TemplatesModal from "@/components/studio/TemplatesModal";
 import VocalUpgradeModal from "@/components/studio/VocalUpgradeModal";
 import { AudioVaultList } from "@/components/studio/AudioVaultList";
 import { DurationSlider } from "@/components/studio/DurationSlider";
-import { VocalStudioTab } from "@/components/studio/VocalStudioTab";
+import { VocalStudioTab, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
@@ -81,6 +81,14 @@ function modeTabStyle(active: boolean): CSSProperties {
     paddingBottom: 6,
     cursor: "pointer",
   };
+}
+
+function referenceForCharacter(character: VocalCharacter | null): VocalStudioReference | undefined {
+  if (!character) return undefined;
+  const id = character.vocalId.trim();
+  if (!id) return { label: character.name };
+  if (/^https:\/\//i.test(id)) return { label: character.name, vocalAudioUrl: id };
+  return { label: character.name, personaId: id };
 }
 
 function readPromptRecords(): SavedPromptItem[] {
@@ -563,6 +571,7 @@ export function EnginePage() {
       return EASY_INSTRUMENTAL_BEATS[index] ?? EASY_INSTRUMENTAL_BEATS[0];
     });
   };
+  const vocalsLocked = activeTab === "custom";
   const vocalLabel = selectedCharacter ? `✓ ${selectedCharacter.name}` : "+ Vocal";
   const vocalButtonStyle: CSSProperties = selectedCharacter
     ? {
@@ -603,7 +612,17 @@ export function EnginePage() {
             <button type="button" role="tab" aria-selected={activeTab === "easy"} onClick={() => setActiveTab("easy")} style={modeTabStyle(activeTab === "easy")}>
               Easy
             </button>
-            <button type="button" role="tab" value="custom" aria-selected={activeTab === "custom"} onClick={() => setActiveTab("custom")} style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}>
+            <button
+              type="button"
+              role="tab"
+              value="custom"
+              aria-selected={activeTab === "custom"}
+              onClick={() => {
+                setActiveTab("custom");
+                setIsCharacterModalOpen(false);
+              }}
+              style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
+            >
               Without Vocals
             </button>
             <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
@@ -659,9 +678,34 @@ export function EnginePage() {
           <button type="button" onClick={() => setOpenModal("remix")} style={pillStyle}>
             + Remix
           </button>
-          <button type="button" onClick={() => setIsCharacterModalOpen(true)} style={vocalButtonStyle}>
-            {vocalLabel}
-          </button>
+          <span
+            title={vocalsLocked ? "Vocals disabled in instrumental mode" : undefined}
+            style={{ display: "flex" }}
+          >
+            <button
+              type="button"
+              disabled={vocalsLocked}
+              aria-disabled={vocalsLocked}
+              title={vocalsLocked ? "Vocals disabled in instrumental mode" : undefined}
+              onClick={() => {
+                if (vocalsLocked) return;
+                setIsCharacterModalOpen(true);
+              }}
+              style={{
+                ...vocalButtonStyle,
+                width: "100%",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                cursor: vocalsLocked ? "not-allowed" : "pointer",
+                opacity: vocalsLocked ? 0.7 : 1,
+              }}
+            >
+              {vocalsLocked ? <Lock size={14} aria-hidden="true" /> : null}
+              {vocalsLocked ? "+ Vocal" : vocalLabel}
+            </button>
+          </span>
         </div>
 
         {errorMessage ? (
@@ -682,7 +726,7 @@ export function EnginePage() {
         ) : null}
 
         {activeTab === "vocals" ? (
-          <VocalStudioTab />
+          <VocalStudioTab reference={referenceForCharacter(selectedCharacter)} />
         ) : activeTab === "easy" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -910,7 +954,14 @@ export function EnginePage() {
                   <button type="button" onClick={() => setIsTemplatesOpen(true)} className={secondaryActionClass}>
                     Templates
                   </button>
-                  <button type="button" onClick={() => setIsMyPromptsOpen(true)} className={secondaryActionClass}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPromptRecords(readPromptRecords());
+                      setIsMyPromptsOpen(true);
+                    }}
+                    className={secondaryActionClass}
+                  >
                     Saved
                   </button>
                 </div>

@@ -1,24 +1,16 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSession, storageFrom, upload, getPublicUrl } = vi.hoisted(() => {
-  const upload = vi.fn(async () => ({ data: { path: "ok" }, error: null }));
-  const getPublicUrl = vi.fn((path: string) => ({
-    data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
-  }));
-  return {
-    getSession: vi.fn(),
-    storageFrom: vi.fn(() => ({ upload, getPublicUrl })),
-    upload,
-    getPublicUrl,
-  };
-});
+import { MUREKA_TEMPLATES } from "@/data/murekaTemplates";
+
+const { getSession } = vi.hoisted(() => ({
+  getSession: vi.fn(),
+}));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: { getSession },
-    storage: { from: storageFrom },
   },
 }));
 
@@ -39,11 +31,8 @@ describe("VocalStudioTab", () => {
 
   beforeEach(() => {
     cleanup();
+    localStorage.clear();
     getSession.mockReset();
-    storageFrom.mockClear();
-    upload.mockReset();
-    upload.mockResolvedValue({ data: { path: "ok" }, error: null });
-    getPublicUrl.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     getSession.mockResolvedValue({
@@ -53,32 +42,37 @@ describe("VocalStudioTab", () => {
 
   afterEach(() => {
     cleanup();
+    localStorage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it("shows a Style field, Claude assists, section pills, and the vocal upload", () => {
+  it("matches the instrumental style controls, ghostwriter, track length, and Render Track", () => {
     render(<VocalStudioTab />);
 
+    expect(screen.getByText("Musical Style")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Style" })).toBeInTheDocument();
-    expect(screen.queryByText("Texture and mood")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "gritty" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "baritone" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "close-mic" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "soulful" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "dry" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Claude style assist" })).toHaveTextContent("Claude");
-    expect(screen.getByRole("button", { name: "Claude lyrics assist" })).toHaveTextContent("Claude");
+    expect(screen.getByRole("button", { name: "Surprise Me" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Templates" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear style" })).toBeInTheDocument();
+    const ghostwriter = screen.getByRole("button", { name: "Studio Ghostwriter" });
+    expect(ghostwriter.querySelector("svg")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /claude/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload Vocal Audio / Reference")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Track Length")).toBeInTheDocument();
+    expect(screen.getByLabelText("Track Length (Seconds)")).toHaveValue(180);
+    expect(screen.getByRole("button", { name: "3 min", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Render Track" })).toBeInTheDocument();
     for (const marker of ["[Verse]", "[Chorus]", "[Bridge]", "[Outro]"]) {
       expect(screen.getByRole("button", { name: marker })).toBeInTheDocument();
     }
-    expect(screen.getByLabelText("Upload Vocal Audio / Reference")).toBeInTheDocument();
     expect(screen.getByRole("form", { name: "With Vocals" }).textContent).not.toMatch(
-      /wavespeed|aimusic|sonic|mureka|replicate|fable/i,
+      /claude|wavespeed|aimusic|sonic|mureka|replicate|fable/i,
     );
   });
 
-  it("writes enhance_style into the Style field and keeps the draft when Claude fails", async () => {
+  it("writes enhance_style into the Style field and keeps the draft when assist fails", async () => {
     const user = userEvent.setup();
     render(<VocalStudioTab />);
     const style = screen.getByRole("textbox", { name: "Style" });
@@ -87,14 +81,14 @@ describe("VocalStudioTab", () => {
     fetchMock.mockResolvedValueOnce(
       textResult({ error: "Style enhancement returned an empty prompt." }, 500),
     );
-    await user.click(screen.getByRole("button", { name: "Claude style assist" }));
+    await user.click(screen.getByRole("button", { name: "Expand Style" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Style enhancement returned an empty prompt.");
     expect(style).toHaveValue("rain");
 
     fetchMock.mockResolvedValueOnce(
       textResult({ success: true, style: "warm close vocal, 92 BPM", prompt: "warm close vocal, 92 BPM" }),
     );
-    await user.click(screen.getByRole("button", { name: "Claude style assist" }));
+    await user.click(screen.getByRole("button", { name: "Expand Style" }));
     await waitFor(() => expect(style).toHaveValue("warm close vocal, 92 BPM"));
 
     const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
@@ -105,6 +99,19 @@ describe("VocalStudioTab", () => {
       lyrics: "",
     });
     expect(init.headers).toMatchObject({ Authorization: "Bearer session-token" });
+  });
+
+  it("calls enhance_style for Surprise Me when the style box is empty", async () => {
+    const user = userEvent.setup();
+    render(<VocalStudioTab />);
+    fetchMock.mockResolvedValueOnce(textResult({ style: "lo-fi keys", prompt: "lo-fi keys" }));
+    await user.click(screen.getByRole("button", { name: "Surprise Me" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue("lo-fi keys"));
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({
+      action: "enhance_style",
+      prompt: "",
+      lyrics: "",
+    });
   });
 
   it("calls generate_lyrics for a topic and format_lyrics for a draft without clearing on failure", async () => {
@@ -120,7 +127,7 @@ describe("VocalStudioTab", () => {
         result: "[Verse]\nline\n[Chorus]\nwe\n[Bridge]\nstay\n[Outro]\ngo",
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Claude lyrics assist" }));
+    await user.click(screen.getByRole("button", { name: "Studio Ghostwriter" }));
     await waitFor(() =>
       expect(lyrics).toHaveValue("[Verse]\nline\n[Chorus]\nwe\n[Bridge]\nstay\n[Outro]\ngo"),
     );
@@ -133,12 +140,12 @@ describe("VocalStudioTab", () => {
     await user.clear(lyrics);
     await user.type(lyrics, "keep me");
     fetchMock.mockResolvedValueOnce(textResult("not-json", 500));
-    await user.click(screen.getByRole("button", { name: "Claude lyrics assist" }));
+    await user.click(screen.getByRole("button", { name: "Format & Polish" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/non-JSON/);
     expect(lyrics).toHaveValue("keep me");
 
     fetchMock.mockResolvedValueOnce(textResult({ lyrics: "[Verse]\nkeep me\n[Outro]\ngo", result: "ok" }));
-    await user.click(screen.getByRole("button", { name: "Claude lyrics assist" }));
+    await user.click(screen.getByRole("button", { name: "Format & Polish" }));
     await waitFor(() => expect(lyrics).toHaveValue("[Verse]\nkeep me\n[Outro]\ngo"));
     const formatBody = JSON.parse(String((fetchMock.mock.calls[2] as [string, RequestInit])[1].body)) as {
       action: string;
@@ -159,38 +166,64 @@ describe("VocalStudioTab", () => {
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("[Verse]\n");
   });
 
-  it("rejects other file types and uploads wav or mp3 to audio-vault", async () => {
+  it("clears the style box from the trash control", async () => {
     const user = userEvent.setup();
     render(<VocalStudioTab />);
-    const input = screen.getByLabelText("Upload Vocal Audio / Reference");
-    const choose = (file: File) => {
-      fireEvent.change(input, { target: { files: [file] } });
-    };
+    const style = screen.getByRole("textbox", { name: "Style" });
+    await user.type(style, "rain");
+    await user.click(screen.getByRole("button", { name: "Clear style" }));
+    expect(style).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Surprise Me" })).toBeInTheDocument();
+  });
 
-    choose(new File(["notes"], "notes.txt", { type: "text/plain" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Upload a .wav or .mp3 file.");
-    expect(upload).not.toHaveBeenCalled();
-
-    choose(new File(["RIFF"], "take.wav", { type: "audio/wav" }));
-    expect(await screen.findByText("take.wav")).toBeInTheDocument();
-    const [wavPath, , wavOptions] = upload.mock.calls[0] as [string, File, { contentType: string; upsert: boolean }];
-    expect(wavPath).toMatch(
-      /^vocal-references\/user-1\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.wav$/,
+  it("loads a template and a saved prompt into the style box", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      "hybrid_prompt_records",
+      JSON.stringify([
+        {
+          id: "saved-1",
+          title: "Night",
+          prompt: "warm rain",
+          timestamp: Date.now(),
+          isBookmarked: true,
+        },
+      ]),
     );
-    expect(wavOptions).toEqual({ contentType: "audio/wav", upsert: false });
-    expect(storageFrom).toHaveBeenCalledWith("audio-vault");
+    render(<VocalStudioTab />);
+    const style = screen.getByRole("textbox", { name: "Style" });
 
-    choose(new File(["ID3"], "hook.mp3", { type: "audio/mpeg" }));
-    expect(await screen.findByText("hook.mp3")).toBeInTheDocument();
-    const [mp3Path, , mp3Options] = upload.mock.calls[1] as [string, File, { contentType: string }];
-    expect(mp3Path).toMatch(/\.mp3$/);
-    expect(mp3Options.contentType).toBe("audio/mpeg");
+    await user.click(screen.getByRole("button", { name: "Templates" }));
+    const useTemplate = screen.getAllByRole("button", { name: "Use template" })[0];
+    expect(useTemplate).toBeTruthy();
+    await user.click(useTemplate!);
+    expect(style).toHaveValue(MUREKA_TEMPLATES[0]!.prompt);
 
-    const publicUrl = `https://project.supabase.co/storage/v1/object/public/audio-vault/${mp3Path}`;
+    await user.click(screen.getByRole("button", { name: "Saved" }));
+    await user.click(screen.getByRole("button", { name: /Night/ }));
+    expect(style).toHaveValue("warm rain");
+  });
+
+  it("sends duration, persona id, and an audio-vault reference on Render Track", async () => {
+    const user = userEvent.setup();
+    const reference = "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/take.wav";
+    render(
+      <VocalStudioTab
+        reference={{
+          label: "My Voice - October 5",
+          personaId: "vocal_stephen_oct5_master",
+          vocalAudioUrl: reference,
+        }}
+      />,
+    );
+    expect(screen.getByText("My Voice - October 5")).toBeInTheDocument();
+    expect(screen.getByLabelText("Track Length (Seconds)")).toHaveValue(180);
+
     await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
     await user.type(screen.getByRole("textbox", { name: "Style" }), "dry vocal");
+    await user.click(screen.getByRole("button", { name: "30 sec" }));
     fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-vocal-1" }));
-    await user.click(screen.getByRole("button", { name: "Render vocal" }));
+    await user.click(screen.getByRole("button", { name: "Render Track" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -200,7 +233,9 @@ describe("VocalStudioTab", () => {
       lyrics: "hello line",
       vocalGender: "Male Vocal",
       styleTags: "dry vocal",
-      vocalAudioUrl: publicUrl,
+      duration: 30,
+      vocalAudioUrl: reference,
+      personaId: "vocal_stephen_oct5_master",
     });
   });
 });

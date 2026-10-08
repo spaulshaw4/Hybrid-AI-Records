@@ -1,18 +1,31 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Sparkles } from "lucide-react";
 
+import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
+import TemplatesModal from "@/components/studio/TemplatesModal";
+import { DurationSlider } from "@/components/studio/DurationSlider";
 import { supabase } from "@/integrations/supabase/client";
+import type { TrackTemplate } from "@/data/murekaTemplates";
 
 const GENDERS = ["Male Vocal", "Female Vocal", "Duet"] as const;
 const SECTION_TAGS = ["[Verse]", "[Chorus]", "[Bridge]", "[Outro]"] as const;
+const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
 const VENDOR_WORD = /wavespeed|aimusic|sonic|mureka|replicate|fable/i;
 
 type VocalGender = (typeof GENDERS)[number];
-type VocalFileSpec = { ext: "wav" | "mp3"; contentType: "audio/wav" | "audio/mpeg" };
+
+export type VocalStudioReference = {
+  label?: string;
+  personaId?: string;
+  vocalAudioUrl?: string;
+};
 
 const fieldClass =
   "w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500";
-const assistClass =
-  "rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60";
+const compactActionClass =
+  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
+const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
+const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
 
 function customerError(message: string): string {
   if (/api[_-]?key|api[_-]?token|authorization/i.test(message)) return "AI request failed.";
@@ -26,18 +39,25 @@ function customerError(message: string): string {
   return cleaned;
 }
 
-function vocalFileSpec(file: File): VocalFileSpec | null {
-  const match = file.name.trim().match(/\.(wav|mp3)$/i);
-  if (!match) return null;
-  const ext = match[1]!.toLowerCase() as "wav" | "mp3";
-  const type = file.type.trim().toLowerCase();
-  if (type && type !== "application/octet-stream") {
-    const wavTypes = new Set(["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"]);
-    const mp3Types = new Set(["audio/mpeg", "audio/mp3"]);
-    if (ext === "wav" && !wavTypes.has(type)) return null;
-    if (ext === "mp3" && !mp3Types.has(type)) return null;
+function readPromptRecords(): SavedPromptItem[] {
+  try {
+    const raw = localStorage.getItem(PROMPT_RECORDS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is SavedPromptItem => {
+      if (!item || typeof item !== "object") return false;
+      const row = item as Partial<SavedPromptItem>;
+      return (
+        typeof row.id === "string" &&
+        typeof row.title === "string" &&
+        typeof row.prompt === "string" &&
+        typeof row.timestamp === "number" &&
+        typeof row.isBookmarked === "boolean"
+      );
+    });
+  } catch {
+    return [];
   }
-  return { ext, contentType: ext === "wav" ? "audio/wav" : "audio/mpeg" };
 }
 
 type CoproducerData = {
@@ -83,22 +103,35 @@ async function postCoproducer(body: Record<string, string>): Promise<CoproducerD
   return { ok: res.ok, ...data };
 }
 
-export function VocalStudioTab() {
+export function VocalStudioTab({ reference }: { reference?: VocalStudioReference } = {}) {
   const lyricsRef = useRef<HTMLTextAreaElement>(null);
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [styleText, setStyleText] = useState("");
   const [vocalGender, setVocalGender] = useState<VocalGender>("Male Vocal");
-  const [vocalAudioUrl, setVocalAudioUrl] = useState("");
-  const [referenceName, setReferenceName] = useState("");
+  const [trackLength, setTrackLength] = useState(180);
   const [submitting, setSubmitting] = useState(false);
   const [styleAssistBusy, setStyleAssistBusy] = useState(false);
   const [lyricsAssistBusy, setLyricsAssistBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [taskId, setTaskId] = useState("");
   const [error, setError] = useState("");
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
+  const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
+
+  useEffect(() => {
+    setPromptRecords(readPromptRecords());
+  }, []);
 
   const submitDisabled = submitting || !lyrics.trim();
+  const styleAssistLabel = styleText.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
+  const lyricsAssistLabel = lyricsAssistBusy
+    ? lyrics.trim()
+      ? "Polishing..."
+      : "Drafting..."
+    : lyrics.trim()
+      ? "Format & Polish"
+      : "Studio Ghostwriter";
 
   const insertSection = (marker: string) => {
     const token = `${marker}\n`;
@@ -168,46 +201,42 @@ export function VocalStudioTab() {
     }
   };
 
-  const handleVocalFile = async (file: File | null) => {
-    if (!file) return;
-    const spec = vocalFileSpec(file);
-    if (!spec) {
-      setError("Upload a .wav or .mp3 file.");
+  const handleApplyTemplate = (tmpl: TrackTemplate) => {
+    setStyleText(tmpl.prompt);
+    setVocalGender(tmpl.recommendedGender === "female" ? "Female Vocal" : "Male Vocal");
+  };
+
+  const saveRecords = (updated: SavedPromptItem[]) => {
+    setPromptRecords(updated);
+    localStorage.setItem(PROMPT_RECORDS_KEY, JSON.stringify(updated));
+  };
+
+  const handleManualBookmark = () => {
+    const nextPrompt = styleText.trim();
+    if (!nextPrompt) return;
+    const existing = promptRecords.find((item) => item.prompt === nextPrompt);
+    if (existing) {
+      saveRecords(
+        promptRecords.map((item) =>
+          item.id === existing.id ? { ...item, isBookmarked: !item.isBookmarked } : item,
+        ),
+      );
       return;
     }
-    setUploading(true);
-    setError("");
-    try {
-      const { data } = await supabase.auth.getSession();
-      const owner = data.session?.user?.id?.trim() ?? "";
-      if (!owner) {
-        setError("Sign in to upload a vocal reference.");
-        return;
-      }
-      const id = crypto.randomUUID();
-      const path = `vocal-references/${owner}/${id}.${spec.ext}`;
-      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(path, file, {
-        contentType: spec.contentType,
-        upsert: false,
-      });
-      if (uploadError) {
-        setError(customerError(uploadError.message || "Vocal reference upload failed."));
-        return;
-      }
-      const { data: published } = supabase.storage.from("audio-vault").getPublicUrl(path);
-      const url = published.publicUrl?.trim() ?? "";
-      if (!url.startsWith("https://")) {
-        setError("Vocal reference upload failed.");
-        return;
-      }
-      setVocalAudioUrl(url);
-      setReferenceName(file.name);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "";
-      setError(customerError(message || "Vocal reference upload failed."));
-    } finally {
-      setUploading(false);
-    }
+    const entry: SavedPromptItem = {
+      id: Date.now().toString(),
+      title: title.trim() || "Untitled",
+      prompt: nextPrompt,
+      timestamp: Date.now(),
+      isBookmarked: true,
+    };
+    saveRecords([entry, ...promptRecords]);
+  };
+
+  const handleToggleBookmark = (id: string) => {
+    saveRecords(
+      promptRecords.map((item) => (item.id === id ? { ...item, isBookmarked: !item.isBookmarked } : item)),
+    );
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -216,6 +245,8 @@ export function VocalStudioTab() {
     setSubmitting(true);
     setError("");
     setTaskId("");
+    const personaId = reference?.personaId?.trim() ?? "";
+    const vocalAudioUrl = reference?.vocalAudioUrl?.trim() ?? "";
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token?.trim() ?? "";
@@ -230,7 +261,9 @@ export function VocalStudioTab() {
           lyrics,
           vocalGender,
           styleTags: styleText.trim(),
+          duration: trackLength,
           ...(vocalAudioUrl ? { vocalAudioUrl } : {}),
+          ...(personaId ? { personaId } : {}),
         }),
       });
       const data = (await res.json()) as { success?: boolean; taskId?: string; error?: string };
@@ -247,151 +280,186 @@ export function VocalStudioTab() {
   };
 
   return (
-    <form
-      onSubmit={(event) => void handleSubmit(event)}
-      className="flex flex-col gap-3.5"
-      aria-label="With Vocals"
-    >
-      <label className="flex flex-col gap-2 rounded-xl border border-white/10 bg-black/30 p-3.5">
-        <span className="text-xs font-semibold text-zinc-400">Track title</span>
-        <input
-          aria-label="Track title"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Track title"
-          maxLength={120}
-          className={fieldClass}
-        />
-      </label>
+    <>
+      <form
+        onSubmit={(event) => void handleSubmit(event)}
+        className="flex flex-col gap-3.5"
+        aria-label="With Vocals"
+      >
+        <label className="flex flex-col gap-2 rounded-xl border border-white/10 bg-black/30 p-3.5">
+          <span className="text-xs font-semibold text-zinc-400">Track title</span>
+          <input
+            aria-label="Track title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Track title"
+            maxLength={120}
+            className={fieldClass}
+          />
+        </label>
 
-      <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-        <span className="text-xs font-semibold text-zinc-400">Vocal gender</span>
-        <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Vocal gender">
-          {GENDERS.map((gender) => {
-            const selected = vocalGender === gender;
-            return (
-              <button
-                key={gender}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setVocalGender(gender)}
-                className={
-                  selected
-                    ? "rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400"
-                    : "rounded-lg border border-white/10 bg-transparent px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-white/5"
-                }
-              >
-                {gender}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <label htmlFor="vocal-style" className="text-xs font-semibold text-zinc-400">
-            Style
-          </label>
-          <button
-            type="button"
-            aria-label="Claude style assist"
-            disabled={styleAssistBusy}
-            onClick={() => void handleStyleAssist()}
-            className={assistClass}
-          >
-            {styleAssistBusy ? "Claude..." : "Claude"}
-          </button>
-        </div>
-        <textarea
-          id="vocal-style"
-          aria-label="Style"
-          value={styleText}
-          onChange={(event) => setStyleText(event.target.value)}
-          placeholder="Style keywords"
-          rows={4}
-          className={`${fieldClass} resize-y`}
-        />
-      </div>
-
-      <label className="flex flex-col gap-2 rounded-xl border border-white/10 bg-black/30 p-3.5">
-        <span className="text-xs font-semibold text-zinc-400">Upload Vocal Audio / Reference</span>
-        <input
-          aria-label="Upload Vocal Audio / Reference"
-          type="file"
-          accept=".wav,.mp3,audio/wav,audio/mpeg"
-          disabled={uploading}
-          onChange={(event) => {
-            const file = event.target.files?.[0] ?? null;
-            event.target.value = "";
-            void handleVocalFile(file);
-          }}
-          className="text-xs text-zinc-300 file:mr-3 file:rounded-lg file:border file:border-white/10 file:bg-transparent file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-zinc-200"
-        />
-        {uploading ? <span className="text-xs text-zinc-400">Uploading...</span> : null}
-        {referenceName ? (
-          <span className="text-xs text-zinc-300" role="status">
-            {referenceName}
-          </span>
-        ) : null}
-      </label>
-
-      <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm font-bold text-white">Lyrics</span>
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Lyric sections">
-            {SECTION_TAGS.map((marker) => (
-              <button
-                key={marker}
-                type="button"
-                onClick={() => insertSection(marker)}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/20"
-              >
-                {marker}
-              </button>
-            ))}
-            <button
-              type="button"
-              aria-label="Claude lyrics assist"
-              disabled={lyricsAssistBusy}
-              onClick={() => void handleLyricsAssist()}
-              className={assistClass}
-            >
-              {lyricsAssistBusy ? "Claude..." : "Claude"}
-            </button>
+        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
+          <span className="text-xs font-semibold text-zinc-400">Vocal gender</span>
+          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Vocal gender">
+            {GENDERS.map((gender) => {
+              const selected = vocalGender === gender;
+              return (
+                <button
+                  key={gender}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setVocalGender(gender)}
+                  className={
+                    selected
+                      ? "rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400"
+                      : "rounded-lg border border-white/10 bg-transparent px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-white/5"
+                  }
+                >
+                  {gender}
+                </button>
+              );
+            })}
           </div>
         </div>
-        <textarea
-          ref={lyricsRef}
-          aria-label="Lyrics"
-          value={lyrics}
-          onChange={(event) => setLyrics(event.target.value)}
-          placeholder="Write the topline"
-          rows={8}
-          className={`${fieldClass} resize-y`}
-        />
-      </div>
 
-      <p className="text-xs font-semibold text-zinc-400">This render uses 1 Hybrid Token</p>
+        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Musical Style</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={styleAssistBusy}
+                onClick={() => void handleStyleAssist()}
+                className={badgeActionClass}
+              >
+                {styleAssistBusy ? "Designing..." : styleAssistLabel}
+              </button>
+              <button type="button" onClick={() => setIsTemplatesOpen(true)} className={secondaryActionClass}>
+                Templates
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPromptRecords(readPromptRecords());
+                  setIsMyPromptsOpen(true);
+                }}
+                className={secondaryActionClass}
+              >
+                Saved
+              </button>
+            </div>
+          </div>
+          <textarea
+            id="vocal-style"
+            aria-label="Style"
+            value={styleText}
+            onChange={(event) => setStyleText(event.target.value)}
+            placeholder="Genre, mood, or instruments — or try Match Lyrics or Surprise Me"
+            maxLength={1000}
+            rows={4}
+            className={`${fieldClass} resize-y`}
+          />
+          <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-2 text-xs text-zinc-500">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleManualBookmark}
+                title="Bookmark this prompt"
+                aria-label="Bookmark this prompt"
+                className="border-none bg-transparent text-sm text-rose-500"
+              >
+                🔖
+              </button>
+              <button
+                type="button"
+                onClick={() => setStyleText("")}
+                aria-label="Clear style"
+                className="border-none bg-transparent text-sm text-zinc-500"
+              >
+                🗑️
+              </button>
+            </div>
+            <span>{styleText.length}/1000</span>
+          </div>
+        </div>
 
-      {error ? (
-        <p role="alert" className="rounded-lg border border-red-900 bg-red-950/80 px-4 py-3 text-sm text-red-100">
-          {error}
-        </p>
-      ) : null}
-      {taskId ? (
-        <p role="status" className="text-sm text-zinc-200">
-          Task {taskId}
-        </p>
-      ) : null}
+        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
+          <DurationSlider value={trackLength} onChange={setTrackLength} />
+        </div>
 
-      <button
-        type="submit"
-        disabled={submitDisabled}
-        className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
-      >
-        {submitting ? "Rendering vocal..." : "Render vocal"}
-      </button>
-    </form>
+        {reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null}
+
+        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-bold text-white">Lyrics</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Lyric sections">
+                {SECTION_TAGS.map((marker) => (
+                  <button
+                    key={marker}
+                    type="button"
+                    onClick={() => insertSection(marker)}
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/20"
+                  >
+                    {marker}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={lyricsAssistBusy}
+                onClick={() => void handleLyricsAssist()}
+                className={badgeActionClass}
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                {lyricsAssistLabel}
+              </button>
+            </div>
+          </div>
+          <textarea
+            ref={lyricsRef}
+            aria-label="Lyrics"
+            value={lyrics}
+            onChange={(event) => setLyrics(event.target.value)}
+            placeholder="Write the topline"
+            rows={8}
+            className={`${fieldClass} resize-y`}
+          />
+        </div>
+
+        <p className="text-xs font-semibold text-zinc-400">This render uses 1 Hybrid Token</p>
+
+        {error ? (
+          <p role="alert" className="rounded-lg border border-red-900 bg-red-950/80 px-4 py-3 text-sm text-red-100">
+            {error}
+          </p>
+        ) : null}
+        {taskId ? (
+          <p role="status" className="text-sm text-zinc-200">
+            Task {taskId}
+          </p>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={submitDisabled}
+          className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
+        >
+          {submitting ? "Synthesizing..." : "Render Track"}
+        </button>
+      </form>
+      <TemplatesModal
+        isOpen={isTemplatesOpen}
+        onClose={() => setIsTemplatesOpen(false)}
+        onSelectTemplate={handleApplyTemplate}
+      />
+      <MyPromptsModal
+        isOpen={isMyPromptsOpen}
+        onClose={() => setIsMyPromptsOpen(false)}
+        items={promptRecords}
+        onSelectPrompt={(loadedPrompt) => setStyleText(loadedPrompt)}
+        onToggleBookmark={handleToggleBookmark}
+      />
+    </>
   );
 }

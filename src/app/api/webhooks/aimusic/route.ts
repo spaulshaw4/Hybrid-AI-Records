@@ -143,7 +143,7 @@ export async function POST(req: Request): Promise<Response> {
       title: job?.title || "Untitled Vocal",
       prompt: job?.tags ?? "",
       lyrics: job?.lyrics ?? "",
-      vocal_id_used: null,
+      vocal_id_used: job?.personaId?.trim() || null,
       wav_url: publicUrl,
       mp3_url: publicUrl,
       task_id: taskId,
