@@ -118,6 +118,7 @@ async function registerVocalTake(
       console.error("[vocals] vocal persona insert failed");
       return { ok: false };
     }
+    console.log("[vocals] vocal persona inserted");
     return { ok: true, taskId };
   } catch {
     console.error("[vocals] vocal take registration failed");

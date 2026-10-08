@@ -169,6 +169,7 @@ async function markPersonaReady(payload: Record<string, unknown>, data: Record<s
     console.error("[webhook] vocal persona update failed");
     return Response.json({ error: "DB write failed" }, { status: 500 });
   }
+  console.log("[webhook] vocal persona updated");
 
   return Response.json({ status: "ok", type: "persona_ready" });
 }
