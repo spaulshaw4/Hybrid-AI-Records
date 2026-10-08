@@ -5,6 +5,7 @@ import {
   type ArtistCatalogTrack,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
+import { omitTracksMissingFromStorage } from "@/lib/catalog-player";
 
 const SELECT =
   "id, album_id, album_title, artist_name, title, track_number, track_total, audio_url, cover_url, storage_path, genre, credits, division, radio_ready, price_tokens";
@@ -28,7 +29,7 @@ export async function fetchArtistCatalogTracks(): Promise<CatalogPlayable[]> {
     return [];
   }
 
-  const tracks = mapRows(data as ArtistCatalogTrack[] | null);
+  const tracks = await omitTracksMissingFromStorage(mapRows(data as ArtistCatalogTrack[] | null));
   console.log(
     "[artist_tracks] fetched on mount:",
     tracks.length,

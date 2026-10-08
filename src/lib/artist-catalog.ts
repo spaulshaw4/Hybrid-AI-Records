@@ -11,9 +11,11 @@ export type ArtistCatalogTrack = {
   title: string;
   track_number: number;
   track_total: number | null;
-  audio_url: string;
+  /** Null or blank when the storage object was never written. */
+  audio_url: string | null;
   cover_url: string | null;
-  storage_path: string;
+  /** Null or blank when the bucket object is missing. */
+  storage_path: string | null;
   genre: string | null;
   credits: string | null;
   division: string | null;
@@ -41,13 +43,41 @@ export type CatalogPlayable = {
   radioReady?: boolean;
 };
 
+/** First non-empty audio field. Blank `audio_url` must not hide a real `src`. */
+export function catalogTrackAudioUrl(track: {
+  audio_url?: string | null;
+  src?: string | null;
+}): string {
+  const audio = (track.audio_url ?? "").trim();
+  if (audio) return audio;
+  return (track.src ?? "").trim();
+}
+
 export function isPlayableCatalogUrl(url: string | null | undefined): boolean {
   if (!url || typeof url !== "string") return false;
   const v = url.trim();
-  if (!v) return false;
+  if (!v || /^(null|undefined|about:blank|#)$/i.test(v)) return false;
   if (/^https?:\/\//i.test(v)) return true;
   if (v.startsWith("/")) return true;
   return false;
+}
+
+/**
+ * Drop catalog albums that have nothing to play: null/empty audio, or tracks
+ * already marked missing after a playback 404.
+ */
+export function omitUnplayableAlbums(
+  albums: Album[],
+  hiddenTrackIds?: ReadonlySet<string>,
+): Album[] {
+  return albums
+    .map((album) => ({
+      ...album,
+      tracks: album.tracks.filter(
+        (track) => !hiddenTrackIds?.has(track.id) && isPlayableCatalogUrl(track.src),
+      ),
+    }))
+    .filter((album) => album.tracks.length > 0);
 }
 
 /** Parse `01-Title.mp3`, `01. Title.wav`, or bare `Title.mp3`. */
@@ -112,8 +142,10 @@ function asDivision(raw: string | null | undefined): Division | undefined {
 
 /** Map a synced artist_tracks row into the global playable shape (`src` = CDN). */
 export function artistTrackToPlayable(row: ArtistCatalogTrack): CatalogPlayable | null {
-  if (!row?.id || !row.title || !isPlayableCatalogUrl(row.audio_url)) return null;
-  const audioUrl = row.audio_url.trim();
+  if (!row?.id || !row.title) return null;
+  const storagePath = typeof row.storage_path === "string" ? row.storage_path.trim() : "";
+  const audioUrl = (row.audio_url ?? "").trim();
+  if (!storagePath || !isPlayableCatalogUrl(audioUrl)) return null;
   return {
     id: row.id,
     title: row.title,
@@ -189,6 +221,7 @@ export function playableToRadioTrack(track: CatalogPlayable): RadioTrack {
 export function groupPlayablesAsAlbums(tracks: CatalogPlayable[]): Album[] {
   const byAlbum = new Map<string, CatalogPlayable[]>();
   for (const track of tracks) {
+    if (!isPlayableCatalogUrl(catalogTrackAudioUrl(track))) continue;
     const key = track.album || "Singles";
     const list = byAlbum.get(key) ?? [];
     list.push(track);

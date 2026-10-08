@@ -263,7 +263,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
     <>
       <form
         onSubmit={(event) => void handleSubmit(event)}
-        className="flex flex-col gap-3.5"
+        className="flex flex-col gap-4"
         aria-label="With Vocals"
       >
         <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
@@ -421,7 +421,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
         <button
           type="submit"
           disabled={submitDisabled}
-          className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
+          className="flex h-12 w-full items-center justify-center rounded-lg border border-red-500 bg-red-600 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800"
         >
           {submitting ? "Synthesizing & Vaulting..." : "Render Master Record"}
         </button>

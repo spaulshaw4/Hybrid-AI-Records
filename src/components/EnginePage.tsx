@@ -12,6 +12,7 @@ import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyProm
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import { AudioVaultList } from "@/components/studio/AudioVaultList";
 import { DurationSlider } from "@/components/studio/DurationSlider";
+import { PatriotGlassStudio } from "@/components/studio/PatriotGlassStudio";
 import { VocalStudioTab, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
@@ -39,6 +40,8 @@ function vibeEnhanceError(message: string): string {
 const compactActionClass =
   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
 const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
+const renderButtonClass =
+  "flex h-12 w-full items-center justify-center rounded-lg border border-red-500 bg-red-600 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800";
 const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
 
 type StudioModal = "reference" | "remix" | null;
@@ -660,6 +663,7 @@ export function EnginePage() {
       }}
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
+        <PatriotGlassStudio>
         <div className="mb-[18px] flex flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div
             className="flex flex-row gap-6 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -852,7 +856,7 @@ export function EnginePage() {
             <VocalStudioTab reference={referenceForStudio(selectedCharacter, selectedVocal)} />
           </>
         ) : activeTab === "easy" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="flex flex-col gap-4">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <h2
                 style={{
@@ -991,13 +995,13 @@ export function EnginePage() {
               type="button"
               disabled={isGenerating || !prompt.trim()}
               onClick={(event) => void handleGenerate(event)}
-              className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
+              className={renderButtonClass}
             >
               {isGenerating ? "Synthesizing & Vaulting..." : "Render Master Record"}
             </button>
           </div>
         ) : (
-          <form onSubmit={(event) => void handleGenerate(event)} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <form onSubmit={(event) => void handleGenerate(event)} className="flex flex-col gap-4">
             <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
               <input
                 type="text"
@@ -1170,12 +1174,13 @@ export function EnginePage() {
             <button
               type="submit"
               disabled={customCreateDisabled}
-              className="w-full rounded-lg border border-red-500 bg-red-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800 disabled:shadow-none"
+              className={renderButtonClass}
             >
               {isGenerating ? "Synthesizing & Vaulting..." : "Render Master Record"}
             </button>
           </form>
         )}
+        </PatriotGlassStudio>
 
         <section style={{ ...cardStyle, marginTop: 24 }} aria-label="Your Audio Vault">
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Audio Vault</h3>

@@ -36,6 +36,22 @@ describe("artist catalog playables", () => {
     expect(isPlayableCatalogUrl(row.audio_url)).toBe(true);
     expect(isPlayableCatalogUrl("/relative.mp3")).toBe(true);
     expect(isPlayableCatalogUrl("")).toBe(false);
+    expect(isPlayableCatalogUrl(null)).toBe(false);
+    expect(isPlayableCatalogUrl("null")).toBe(false);
+  });
+
+  it("skips rows with null audio, blank audio, or an empty storage path", () => {
+    expect(artistTrackToPlayable({ ...row, audio_url: null })).toBeNull();
+    expect(artistTrackToPlayable({ ...row, audio_url: "  " })).toBeNull();
+    expect(
+      artistTrackToPlayable({
+        ...row,
+        id: "golden-eyes-265",
+        title: "Golden Eyes 265",
+        album_title: "Golden Eyes 265",
+        storage_path: "",
+      }),
+    ).toBeNull();
   });
 
   it("maps artist_tracks rows to a shared playable with src = audio_url", () => {

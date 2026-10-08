@@ -432,6 +432,26 @@ describe("EnginePage instrumental tab", () => {
       Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: previousMedia });
     }
   });
+
+  it("keeps lyrics and render inside the glass studio and the audio vault outside", async () => {
+    const user = userEvent.setup();
+    render(<EnginePage />);
+
+    const glass = screen.getByTestId("patriot-glass-studio");
+    expect(glass).toHaveClass("relative", "group", "max-w-4xl");
+    expect(glass).toContainElement(screen.getByRole("tab", { name: "With Vocals" }));
+    expect(glass).toContainElement(screen.getByRole("button", { name: "Render Master Record" }));
+    expect(glass).toContainElement(screen.getByRole("slider", { name: "Track length slider" }));
+
+    const vault = screen.getByRole("region", { name: "Your Audio Vault" });
+    expect(glass.contains(vault)).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "Without Vocals" }));
+    expect(glass).toContainElement(screen.getByText("Lyrics & Structure"));
+    expect(glass).toContainElement(screen.getByRole("textbox", { name: "Lyrics" }));
+    expect(glass).toContainElement(screen.getByRole("button", { name: "Render Master Record" }));
+    expect(glass.contains(screen.getByRole("region", { name: "Your Audio Vault" }))).toBe(false);
+  });
 });
 
 class FakeMediaRecorder {

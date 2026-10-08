@@ -20,7 +20,10 @@ import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore
 import { TrackWaveform } from "@/components/TrackWaveform";
 import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
 import {
+  catalogTrackAudioUrl,
   groupPlayablesAsAlbums,
+  isPlayableCatalogUrl,
+  omitUnplayableAlbums,
   playableToStreamTrack,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
@@ -28,10 +31,13 @@ import { dedupeTracks } from "@/lib/radio-tracks";
 import { fetchArtistCatalogTracks } from "@/lib/fetch-artist-catalog";
 import {
   playCatalogTrack,
+  reportCatalogAudioMissing,
   seekCatalogPlayback,
+  subscribeCatalogAudioMissing,
   useCatalogPlayback,
 } from "@/lib/catalog-player";
 import { CoverImage } from "@/components/CoverImage";
+import { CatalogAlbumGrid } from "@/components/catalog/CatalogAlbumCard";
 import {
   Sheet,
   SheetContent,
@@ -118,15 +124,36 @@ function ArtistTracksPage() {
   const [popularity, setPopularity] = useState<Map<string, number>>(new Map());
   const [popularityError, setPopularityError] = useState(false);
   const [popularityRetry, setPopularityRetry] = useState(0);
+  const [unavailableIds, setUnavailableIds] = useState<Set<string>>(() => new Set());
 
-  const catalogAlbums = useMemo(() => groupPlayablesAsAlbums(catalog), [catalog]);
-  const albumsSource: Album[] = catalogAlbums.length ? catalogAlbums : ALBUMS;
+  const visibleCatalog = useMemo(
+    () =>
+      catalog.filter(
+        (track) =>
+          !unavailableIds.has(track.id) &&
+          isPlayableCatalogUrl(catalogTrackAudioUrl(track)),
+      ),
+    [catalog, unavailableIds],
+  );
+  const catalogAlbums = useMemo(
+    () => omitUnplayableAlbums(groupPlayablesAsAlbums(visibleCatalog), unavailableIds),
+    [visibleCatalog, unavailableIds],
+  );
+  const albumsSource: Album[] = useMemo(
+    () =>
+      catalog.length ? catalogAlbums : omitUnplayableAlbums(ALBUMS, unavailableIds),
+    [catalog.length, catalogAlbums, unavailableIds],
+  );
   const tracksSource: StreamTrack[] = useMemo(() => {
-    if (!catalog.length) return STREAM_TRACKS;
-    // Live artist_tracks is the only source once loaded — never merge with the
-    // static STREAM_TRACKS list (different ids / drifted titles caused doubles).
-    return dedupeTracks(catalog.map(playableToStreamTrack));
-  }, [catalog]);
+    const base = !catalog.length
+      ? STREAM_TRACKS
+      : // Live artist_tracks is the only source once loaded — never merge with the
+        // static STREAM_TRACKS list (different ids / drifted titles caused doubles).
+        dedupeTracks(visibleCatalog.map(playableToStreamTrack));
+    return base.filter(
+      (track) => !unavailableIds.has(track.id) && isPlayableCatalogUrl(track.src),
+    );
+  }, [catalog.length, visibleCatalog, unavailableIds]);
 
   const selectedAlbum =
     albumsSource.find((a) => a.id === albumParam) ??
@@ -153,6 +180,19 @@ function ArtistTracksPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(
+    () =>
+      subscribeCatalogAudioMissing((id) => {
+        setUnavailableIds((current) => {
+          if (current.has(id)) return current;
+          const next = new Set(current);
+          next.add(id);
+          return next;
+        });
+      }),
+    [],
+  );
 
   // Load anonymous popularity counts once.
   useEffect(() => {
@@ -330,6 +370,7 @@ function ArtistTracksPage() {
     console.log("Playing audio URL:", audioUrl, { id, title: track.title });
     if (!audioUrl) {
       console.error("[artists] no audio_url/src for track", id);
+      reportCatalogAudioMissing(id);
       return;
     }
     void playCatalogTrack(
@@ -529,54 +570,7 @@ function ArtistTracksPage() {
               : `${albums.length} album${albums.length === 1 ? "" : "s"}`}
           </p>
 
-          <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {albums.map((album, ai) => (
-              <li key={album.id}>
-                <button
-                  type="button"
-                  onClick={() => openAlbum(album.id)}
-                  className="group flex w-full flex-col overflow-hidden rounded-xl border border-border-strong bg-ink/50 text-start transition hover:border-primary/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                  aria-label={`Open album ${album.title} by ${album.artist}`}
-                >
-                  <span className="relative aspect-square w-full overflow-hidden bg-ink">
-                    {album.cover ? (
-                      <CoverImage
-                        src={album.cover}
-                        alt={`${album.title} album cover`}
-                        priority={ai < 4}
-                        sizes="(min-width: 1024px) 20vw, (min-width: 640px) 30vw, 50vw"
-                        width={640}
-                        height={640}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                        onError={() => {
-                          console.warn("[artists] album card cover failed:", {
-                            album: album.title,
-                            cover_url: album.cover,
-                          });
-                        }}
-                      />
-                    ) : (
-                      <span className="flex h-full w-full items-center justify-center font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        No cover
-                      </span>
-                    )}
-                  </span>
-                  <span className="border-t border-border-strong p-3">
-                    <span className="block truncate font-display text-sm font-semibold text-foreground">
-                      {album.title}
-                    </span>
-                    <span className="mt-0.5 block truncate font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {album.artist}
-                    </span>
-                    <span className="mt-2 block font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {album.tracks.length} track{album.tracks.length === 1 ? "" : "s"}
-                      {album.genre ? ` · ${album.genre}` : ""}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CatalogAlbumGrid albums={albums} onOpen={openAlbum} />
 
           {albums.length === 0 ? (
             <p className="mt-6 text-sm text-muted-foreground">No albums match that search.</p>
