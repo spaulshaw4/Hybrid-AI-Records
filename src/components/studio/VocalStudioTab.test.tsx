@@ -256,9 +256,10 @@ describe("VocalStudioTab", () => {
       vocalGender: "Male Vocal",
       styleTags: "dry vocal",
       duration: 30,
-      vocalAudioUrl: reference,
+      reference_audio_url: reference,
       personaId: "vocal_stephen_oct5_master",
     });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("vocalAudioUrl");
   });
 
   it("posts a captured audio-vault https URL as the vocal reference", async () => {
@@ -275,11 +276,28 @@ describe("VocalStudioTab", () => {
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/vocals/generate");
-    const body = JSON.parse(String(init.body)) as { vocalAudioUrl?: string; personaId?: string };
-    expect(body.vocalAudioUrl).toBe(reference);
-    expect(body.vocalAudioUrl).toMatch(/^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/audio-vault\//);
+    const body = JSON.parse(String(init.body)) as { reference_audio_url?: string; personaId?: string };
+    expect(body.reference_audio_url).toBe(reference);
+    expect(body.reference_audio_url).toMatch(/^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/audio-vault\//);
     expect(body).not.toHaveProperty("personaId");
-    expect(body.vocalAudioUrl).not.toMatch(/^blob:/);
-    expect(body.vocalAudioUrl).not.toMatch(/^http:/);
+    expect(body).not.toHaveProperty("vocalAudioUrl");
+    expect(body.reference_audio_url).not.toMatch(/^blob:/);
+    expect(body.reference_audio_url).not.toMatch(/^http:/);
   });
+
+  it.each(["blob:http://127.0.0.1/take", "http://project.supabase.co/storage/v1/object/public/audio-vault/take.wav"])(
+    "omits %s from the vocal render",
+    async (reference) => {
+      const user = userEvent.setup();
+      render(<VocalStudioTab reference={{ label: "Voice Captured 21s", vocalAudioUrl: reference }} />);
+      await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
+      fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-vocal-skip" }));
+      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("reference_audio_url");
+      expect(body).not.toHaveProperty("vocalAudioUrl");
+    },
+  );
 });

@@ -18,6 +18,13 @@ export type VocalSourceSelection = {
   label: string;
 };
 
+export type SelectedVocal = {
+  url: string;
+  name: string;
+  duration: number;
+  isReady: boolean;
+};
+
 interface CharacterModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -25,6 +32,7 @@ interface CharacterModalProps {
   selectedCharacterId: string | null;
   onSelectCharacter: (char: VocalCharacter) => void;
   onSelectSource?: (source: VocalSourceSelection | null) => void;
+  onSelectVocal?: (vocal: SelectedVocal | null) => void;
   selectedSourceUrl?: string | null;
 }
 
@@ -60,9 +68,10 @@ type StopReason = "user" | "limit" | "discard";
 type CapturedTake = {
   preview: string;
   seconds: number;
+  readyUrl: string | null;
 };
 
-function isAudioVaultHttpsUrl(value: string): boolean {
+export function isAudioVaultHttpsUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "https:" && !parsed.username && !parsed.password && parsed.pathname.includes("/audio-vault/");
@@ -141,6 +150,7 @@ export default function CharacterModal({
   selectedCharacterId,
   onSelectCharacter,
   onSelectSource,
+  onSelectVocal,
   selectedSourceUrl = null,
 }: CharacterModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -158,11 +168,13 @@ export default function CharacterModal({
   const previewUrlRef = useRef<string | null>(null);
   const appliedReferenceRef = useRef<string | null>(null);
   const onSelectSourceRef = useRef(onSelectSource);
+  const onSelectVocalRef = useRef(onSelectVocal);
   const selectedSourceUrlRef = useRef(selectedSourceUrl);
   const stopRecordingRef = useRef<(reason?: StopReason) => void>(() => {});
   const openRef = useRef(isOpen);
   const startingRef = useRef(false);
   onSelectSourceRef.current = onSelectSource;
+  onSelectVocalRef.current = onSelectVocal;
   selectedSourceUrlRef.current = selectedSourceUrl;
   openRef.current = isOpen;
   const [recording, setRecording] = useState(false);
@@ -258,11 +270,23 @@ export default function CharacterModal({
     previewUrlRef.current = null;
   };
 
+  const publishVocal = (vocal: SelectedVocal | null) => {
+    if (onSelectVocalRef.current) {
+      onSelectVocalRef.current(vocal);
+      return;
+    }
+    if (!vocal) {
+      onSelectSourceRef.current?.(null);
+      return;
+    }
+    onSelectSourceRef.current?.({ url: vocal.url, label: vocal.name });
+  };
+
   const clearCapturedTake = () => {
     uploadSerialRef.current += 1;
     const applied = appliedReferenceRef.current;
     appliedReferenceRef.current = null;
-    if (applied && selectedSourceUrlRef.current === applied) onSelectSourceRef.current?.(null);
+    if (applied && selectedSourceUrlRef.current === applied) publishVocal(null);
     releasePreview();
     setCaptured(null);
     setShortTakeWarning("");
@@ -275,35 +299,39 @@ export default function CharacterModal({
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       if (serial !== uploadSerialRef.current) return;
+      const accessToken = sessionData.session?.access_token?.trim() ?? "";
       const userId = sessionData.session?.user?.id?.trim() ?? "";
-      if (!userId) {
+      if (!accessToken || !userId) {
         setRecordError("Sign in to upload a vocal.");
         return;
       }
-      const filename = `voice-take-${Date.now()}.wav`;
-      const path = `vocal-references/${userId}/${filename}`;
-      const file = new File([blob], filename, { type: "audio/wav" });
-      const { error } = await supabase.storage.from("audio-vault").upload(path, file, {
-        contentType: "audio/wav",
-        upsert: false,
+      const declared = blob.type.split(";")[0]?.trim() || "application/octet-stream";
+      const form = new FormData();
+      form.append("audio", new File([blob], "voice-take", { type: declared }));
+      const response = await fetch("/api/vocals/upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
       });
       if (serial !== uploadSerialRef.current) return;
-      if (error) {
-        setRecordError("Upload failed.");
-        return;
+      let payload: { url?: unknown } = {};
+      try {
+        const parsed: unknown = await response.json();
+        if (parsed && typeof parsed === "object") payload = parsed as { url?: unknown };
+      } catch {
+        payload = {};
       }
-      const { data } = supabase.storage.from("audio-vault").getPublicUrl(path);
-      const url = data.publicUrl?.trim() ?? "";
-      if (serial !== uploadSerialRef.current) return;
-      if (!isAudioVaultHttpsUrl(url)) {
-        setRecordError("Upload failed.");
+      const url = typeof payload.url === "string" ? payload.url.trim() : "";
+      if (!response.ok || !isAudioVaultHttpsUrl(url)) {
+        setRecordError("Could not save this vocal take.");
         return;
       }
       appliedReferenceRef.current = url;
-      onSelectSourceRef.current?.({ url, label: `Voice Captured ${seconds}s` });
+      publishVocal({ url, name: "My Voice Take", duration: seconds, isReady: true });
+      setCaptured((current) => (current ? { ...current, readyUrl: url } : current));
     } catch {
       if (serial !== uploadSerialRef.current) return;
-      setRecordError("Upload failed.");
+      setRecordError("Could not save this vocal take.");
     }
   };
 
@@ -317,7 +345,7 @@ export default function CharacterModal({
     releasePreview();
     const preview = URL.createObjectURL(blob);
     previewUrlRef.current = preview;
-    setCaptured({ preview, seconds });
+    setCaptured({ preview, seconds, readyUrl: null });
     setShortTakeWarning("");
     setRecordError("");
     void uploadCapturedTake(blob, seconds, uploadSerialRef.current);
@@ -392,30 +420,34 @@ export default function CharacterModal({
     setUploadError("");
     try {
       const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token?.trim() ?? "";
       const userId = sessionData.session?.user?.id?.trim() ?? "";
-      if (!userId) {
+      if (!accessToken || !userId) {
         setUploadError("Sign in to upload a vocal.");
         return;
       }
-      const id = crypto.randomUUID();
-      const path = `vocal-references/${userId}/${id}.${extension}`;
-      const { error } = await supabase.storage.from("audio-vault").upload(path, file, {
-        contentType: extension === "mp3" ? "audio/mpeg" : "audio/wav",
-        upsert: false,
+      const form = new FormData();
+      form.append("audio", file);
+      const response = await fetch("/api/vocals/upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
       });
-      if (error) {
-        setUploadError("Upload failed.");
+      let payload: { url?: unknown } = {};
+      try {
+        const parsed: unknown = await response.json();
+        if (parsed && typeof parsed === "object") payload = parsed as { url?: unknown };
+      } catch {
+        payload = {};
+      }
+      const url = typeof payload.url === "string" ? payload.url.trim() : "";
+      if (!response.ok || !isAudioVaultHttpsUrl(url)) {
+        setUploadError("Could not save this vocal file.");
         return;
       }
-      const { data } = supabase.storage.from("audio-vault").getPublicUrl(path);
-      const url = data.publicUrl?.trim() ?? "";
-      if (!url.startsWith("https://")) {
-        setUploadError("Upload failed.");
-        return;
-      }
-      onSelectSource?.({ url, label: file.name });
+      publishVocal({ url, name: file.name, duration: 0, isReady: true });
     } catch {
-      setUploadError("Upload failed.");
+      setUploadError("Could not save this vocal file.");
     } finally {
       setUploading(false);
     }
@@ -486,6 +518,18 @@ export default function CharacterModal({
               <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3" aria-label="Captured Vocal">
                 <p className="m-0 text-sm font-semibold text-emerald-300">✓ Voice Captured {captured.seconds}s</p>
                 <audio controls src={captured.preview} aria-label="Captured vocal" className="w-full" />
+                {captured.readyUrl ? (
+                  <>
+                    <p className="m-0 text-sm font-semibold text-emerald-300">✓ Uploaded & Ready</p>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="w-fit rounded-lg border-0 bg-emerald-500 px-4 py-2 text-sm font-bold text-black"
+                    >
+                      Apply Vocal to Song
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={clearCapturedTake}
@@ -619,7 +663,9 @@ export default function CharacterModal({
                       key={track.id}
                       type="button"
                       aria-pressed={selected}
-                      onClick={() => onSelectSource?.({ url: track.url, label: track.title })}
+                      onClick={() =>
+                        publishVocal({ url: track.url, name: track.title, duration: 0, isReady: true })
+                      }
                       className={
                         selected
                           ? "rounded-lg border border-rose-400 bg-rose-500/10 px-3 py-2 text-left text-sm font-semibold"

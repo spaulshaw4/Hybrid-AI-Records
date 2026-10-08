@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { Lock, Sparkles } from "lucide-react";
 
-import CharacterModal, { type VocalCharacter } from "@/components/studio/CharacterModal";
+import CharacterModal, {
+  isAudioVaultHttpsUrl,
+  type SelectedVocal,
+  type VocalCharacter,
+} from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -95,13 +99,12 @@ function modeTabStyle(active: boolean): CSSProperties {
 
 function referenceForStudio(
   character: VocalCharacter | null,
-  source: { url: string; label: string } | null,
+  vocal: SelectedVocal | null,
 ): VocalStudioReference | undefined {
   const id = character?.vocalId.trim() ?? "";
   const personaId = id && !/^https:\/\//i.test(id) ? id : undefined;
-  const characterAudio = id && /^https:\/\//i.test(id) ? id : undefined;
-  const vocalAudioUrl = source?.url.trim() || characterAudio || undefined;
-  const label = [character?.name, source?.label].filter(Boolean).join(" · ") || undefined;
+  const vocalAudioUrl = vocal?.isReady && isAudioVaultHttpsUrl(vocal.url) ? vocal.url.trim() : undefined;
+  const label = [character?.name, vocal?.name].filter(Boolean).join(" · ") || undefined;
   if (!label && !personaId && !vocalAudioUrl) return undefined;
   return {
     ...(label ? { label } : {}),
@@ -217,7 +220,7 @@ export function EnginePage() {
     },
   ]);
   const [selectedCharacter, setSelectedCharacter] = useState<VocalCharacter | null>(null);
-  const [vocalSource, setVocalSource] = useState<{ url: string; label: string } | null>(null);
+  const [selectedVocal, setSelectedVocal] = useState<SelectedVocal | null>(null);
   const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
@@ -629,12 +632,12 @@ export function EnginePage() {
         ? "Vocals disabled in instrumental mode"
         : undefined;
   const vocalsLocked = vocalLockTitle !== undefined;
-  const vocalLabel = vocalSource?.label
-    ? `✓ ${vocalSource.label}`
+  const vocalLabel = selectedVocal?.name
+    ? `✓ ${selectedVocal.name}`
     : selectedCharacter
       ? `✓ ${selectedCharacter.name}`
       : "+ Vocal";
-  const vocalButtonStyle: CSSProperties = vocalSource || selectedCharacter
+  const vocalButtonStyle: CSSProperties = selectedVocal || selectedCharacter
     ? {
         ...pillStyle,
         backgroundColor: "rgba(6,182,212,0.15)",
@@ -791,7 +794,63 @@ export function EnginePage() {
         ) : null}
 
         {activeTab === "vocals" ? (
-          <VocalStudioTab reference={referenceForStudio(selectedCharacter, vocalSource)} />
+          <>
+            {selectedVocal ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(16, 185, 129, 0.45)",
+                  backgroundColor: "rgba(6, 78, 59, 0.35)",
+                  color: "#a7f3d0",
+                  fontSize: 14,
+                  fontWeight: 700,
+                }}
+              >
+                <span>
+                  🎙️ Active Vocal: {selectedVocal.name} ({selectedVocal.duration}s) —
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsCharacterModalOpen(true)}
+                  style={{
+                    backgroundColor: "transparent",
+                    color: "#ecfdf5",
+                    border: "1px solid rgba(167, 243, 208, 0.45)",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Change
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedVocal(null)}
+                  style={{
+                    backgroundColor: "transparent",
+                    color: "#fecaca",
+                    border: "1px solid rgba(252, 165, 165, 0.45)",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+            <VocalStudioTab reference={referenceForStudio(selectedCharacter, selectedVocal)} />
+          </>
         ) : activeTab === "easy" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -1274,9 +1333,9 @@ export function EnginePage() {
           onClose={() => setIsCharacterModalOpen(false)}
           characters={userCharacters}
           selectedCharacterId={selectedCharacter?.id || null}
-          selectedSourceUrl={vocalSource?.url ?? null}
+          selectedSourceUrl={selectedVocal?.url ?? null}
           onSelectCharacter={(char) => setSelectedCharacter(char)}
-          onSelectSource={(source) => setVocalSource(source)}
+          onSelectVocal={setSelectedVocal}
         />
       </div>
     </main>

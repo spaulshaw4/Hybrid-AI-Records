@@ -10,9 +10,12 @@ const {
   spendRpcMock,
   refundGenerationTokenMock,
 } = vi.hoisted(() => ({
-  uploadMock: vi.fn(async () => ({ data: { path: "vocals/task" }, error: null })),
-  insertMock: vi.fn(async () => ({ error: null })),
-  limitMock: vi.fn(async () => ({ data: [], error: null })),
+  uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "vocals/task" }, error: null })),
+  insertMock: vi.fn(async (..._args: unknown[]) => ({ error: null })),
+  limitMock: vi.fn(async (..._args: unknown[]): Promise<{ data: Array<Record<string, unknown>>; error: null }> => ({
+    data: [],
+    error: null,
+  })),
   fromMock: vi.fn(),
   resolveStudioSessionMock: vi.fn(),
   balanceMaybeSingleMock: vi.fn(),
@@ -218,6 +221,28 @@ describe("POST /api/vocals/generate", () => {
     });
   });
 
+  it("forwards reference_audio_url from the studio and ignores a body user id", async () => {
+    const reference = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocal-references/${SESSION_USER}/voice-take-21.wav`;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === CREATE_URL) return jsonResponse({ data: { task_id: "task-vocal-ref-field" } });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await generateVocals(
+      vocalRequest({
+        lyrics: "[Verse]\nline",
+        userId: OTHER_USER,
+        reference_audio_url: reference,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).reference_audio_url).toBe(reference);
+    expect(readVocalJob("task-vocal-ref-field")?.userId).toBe(SESSION_USER);
+  });
+
   it("forwards referenceUrl when vocalAudioUrl is empty", async () => {
     const reference = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocal-references/${SESSION_USER}/take.mp3`;
     const fetchMock = vi.fn(async (url: string) => {
@@ -262,6 +287,16 @@ describe("POST /api/vocals/generate", () => {
       expect(balanceMaybeSingleMock).not.toHaveBeenCalled();
       expect(refundGenerationTokenMock).not.toHaveBeenCalled();
     }
+
+    const httpReference = await generateVocals(
+      vocalRequest({
+        lyrics: "[Verse]\nline",
+        reference_audio_url: "http://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/take.wav",
+      }),
+    );
+    expect(httpReference.status).toBe(400);
+    expect(spendRpcMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("omits a foreign https reference from the upstream body", async () => {
@@ -524,8 +559,8 @@ describe("POST /api/webhooks/aimusic", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     limitMock.mockImplementation(async () => ({ data: stored.map((row) => ({ ...row })), error: null }));
-    insertMock.mockImplementation(async (row: { task_id?: string }) => {
-      stored.push(row);
+    insertMock.mockImplementation(async (row: unknown) => {
+      stored.push(row as { task_id?: string });
       return { error: null };
     });
     uploadMock.mockResolvedValue({ data: { path: "vocals/task" }, error: null });

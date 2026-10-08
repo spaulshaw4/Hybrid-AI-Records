@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import { DurationSlider } from "@/components/studio/DurationSlider";
+import { isAudioVaultHttpsUrl } from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
 import type { TrackTemplate } from "@/data/murekaTemplates";
 
@@ -224,7 +225,8 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
     setError("");
     setTaskId("");
     const personaId = reference?.personaId?.trim() ?? "";
-    const vocalAudioUrl = reference?.vocalAudioUrl?.trim() ?? "";
+    const referenceAudioUrl =
+      reference?.vocalAudioUrl && isAudioVaultHttpsUrl(reference.vocalAudioUrl) ? reference.vocalAudioUrl.trim() : "";
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token?.trim() ?? "";
@@ -240,7 +242,7 @@ export function VocalStudioTab({ reference }: { reference?: VocalStudioReference
           vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
           styleTags: styleText.trim(),
           duration: trackLength,
-          ...(vocalAudioUrl ? { vocalAudioUrl } : {}),
+          ...(referenceAudioUrl ? { reference_audio_url: referenceAudioUrl } : {}),
           ...(personaId ? { personaId } : {}),
         }),
       });

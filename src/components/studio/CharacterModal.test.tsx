@@ -2,11 +2,13 @@ import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import CharacterModal, { type VocalCharacter, type VocalSourceSelection } from "./CharacterModal";
+import CharacterModal, { type SelectedVocal, type VocalCharacter } from "./CharacterModal";
 
 const SHORT_TAKE_WARNING = "Sonic requires at least 15 seconds of audio for accurate voice profiling.";
 const LIVE_MIC_COPY = "Live mic capture (15–30s take).";
 const USER_ID = "user-1";
+const UPLOADED_URL = `https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/${USER_ID}/voice-take-1700000021000.wav`;
+const UPLOADED_NAME = "voice-take-1700000021000.wav";
 
 const CHARACTERS: VocalCharacter[] = [
   {
@@ -65,29 +67,60 @@ class FakeMediaRecorder {
 }
 
 function StudioHarness() {
-  const [source, setSource] = useState<VocalSourceSelection | null>(null);
+  const [vocal, setVocal] = useState<SelectedVocal | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
+  const [open, setOpen] = useState(true);
   return (
     <div>
-      <p data-testid="selected-vocal-url">{source?.url ?? ""}</p>
+      <p data-testid="selected-vocal-url">{vocal?.url ?? ""}</p>
+      <p data-testid="selected-vocal-name">{vocal?.name ?? ""}</p>
+      <p data-testid="selected-vocal-duration">{vocal ? String(vocal.duration) : ""}</p>
+      <p data-testid="selected-vocal-ready">{vocal?.isReady ? "yes" : ""}</p>
       <p data-testid="selected-persona">{characterId ?? ""}</p>
+      <p data-testid="modal-open">{open ? "yes" : "no"}</p>
       <CharacterModal
-        isOpen
-        onClose={() => undefined}
+        isOpen={open}
+        onClose={() => setOpen(false)}
         characters={CHARACTERS}
         selectedCharacterId={characterId}
         onSelectCharacter={(character) => setCharacterId(character.id)}
-        selectedSourceUrl={source?.url ?? null}
-        onSelectSource={setSource}
+        selectedSourceUrl={vocal?.url ?? null}
+        onSelectVocal={setVocal}
       />
     </div>
   );
+}
+
+type StudioResponse = {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+};
+
+function tracksResponse(): StudioResponse {
+  return {
+    ok: true,
+    status: 200,
+    json: async (): Promise<unknown> => ({ tracks: [] }),
+    text: async (): Promise<string> => "{}",
+  };
+}
+
+function uploadResult(url = UPLOADED_URL, fileName = UPLOADED_NAME, ok = true): StudioResponse {
+  return {
+    ok,
+    status: ok ? 200 : 500,
+    json: async (): Promise<unknown> => (ok ? { url, fileName } : { error: "Could not save this vocal take." }),
+    text: async (): Promise<string> => "{}",
+  };
 }
 
 describe("CharacterModal voice capture", () => {
   let now = 1_700_000_000_000;
   const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }));
   let revokeUrl: ReturnType<typeof vi.spyOn>;
+  let fetchMock: ReturnType<typeof vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<StudioResponse>>>;
 
   beforeEach(() => {
     cleanup();
@@ -103,14 +136,11 @@ describe("CharacterModal voice capture", () => {
     revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     FakeMediaRecorder.instances = [];
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ tracks: [] }),
-        text: async () => "{}",
-      })),
-    );
+    fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit): Promise<StudioResponse> => {
+      if (String(input).includes("/api/vocals/upload")) return uploadResult();
+      return tracksResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: { getUserMedia },
@@ -183,6 +213,7 @@ describe("CharacterModal voice capture", () => {
     expect(screen.queryByText(SHORT_TAKE_WARNING)).not.toBeInTheDocument();
     expect(screen.queryByText(/Voice Captured/)).not.toBeInTheDocument();
     expect(upload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
 
     now += 15_000;
     const limit = timeoutSpy.mock.calls.find((call) => call[1] === 30_000);
@@ -195,17 +226,13 @@ describe("CharacterModal voice capture", () => {
     expect(screen.queryByText(SHORT_TAKE_WARNING)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal").tagName).toBe("AUDIO");
     expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
-    const [path, file, options] = upload.mock.calls[0] as [string, File, { contentType?: string }];
-    expect(path).toMatch(new RegExp(`^vocal-references/${USER_ID}/voice-take-\\d+\\.wav$`));
-    expect(file.type).toBe("audio/wav");
-    expect(options).toMatchObject({ contentType: "audio/wav" });
-    expect(storageFrom).toHaveBeenCalledWith("audio-vault");
-    await waitFor(() =>
-      expect(screen.getByTestId("selected-vocal-url").textContent).toBe(
-        `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}`,
-      ),
-    );
+    await waitFor(() => expect(screen.getByText("✓ Uploaded & Ready")).toBeInTheDocument());
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(storageFrom).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("30"));
+    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("My Voice Take");
+    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL);
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
   });
 
@@ -240,6 +267,7 @@ describe("CharacterModal voice capture", () => {
     });
     expect(upload).not.toHaveBeenCalled();
     expect(storageFrom).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
   });
 
   it("accepts a stop at 15 seconds", async () => {
@@ -248,14 +276,15 @@ describe("CharacterModal voice capture", () => {
     stopAfter(15_000);
     expect(await screen.findByText("✓ Voice Captured 15s")).toBeInTheDocument();
     expect(screen.queryByText(SHORT_TAKE_WARNING)).not.toBeInTheDocument();
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("15"));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(1);
+    expect(storageFrom).not.toHaveBeenCalled();
   });
 
   it("renders the captured card and uploads a 21s take to the user folder", async () => {
     render(<StudioHarness />);
     await beginRecording();
     stopAfter(21_000);
-    const stampedAt = now;
     const badge = await screen.findByText("✓ Voice Captured 21s");
     const card = screen.getByLabelText("Captured Vocal");
     expect(screen.getByRole("heading", { name: "Record / Input Your Voice" }).closest("section")).toContainElement(card);
@@ -266,31 +295,64 @@ describe("CharacterModal voice capture", () => {
     expect(audio).toHaveAttribute("src", "blob:voice-take");
     expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
 
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
-    const [path, file, options] = upload.mock.calls[0] as [string, File, { contentType?: string }];
-    expect(path).toBe(`vocal-references/${USER_ID}/voice-take-${stampedAt}.wav`);
-    expect(file.type).toBe("audio/wav");
-    expect(file.name).toBe(`voice-take-${stampedAt}.wav`);
-    expect(options).toMatchObject({ contentType: "audio/wav", upsert: false });
-    const publicUrl = `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}`;
-    await waitFor(() => expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(publicUrl));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/upload"))).toHaveLength(1),
+    );
+    const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/upload")) as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(uploadCall[0]).toBe("/api/vocals/upload");
+    const headers = uploadCall[1].headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer session-token");
+    expect(uploadCall[1].body).toBeInstanceOf(FormData);
+    const posted = (uploadCall[1].body as FormData).get("audio");
+    expect(posted).toBeInstanceOf(File);
+    expect((posted as File).type).toBe("audio/webm");
+    expect(storageFrom).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL));
+    expect(screen.getByTestId("selected-vocal-name")).toHaveTextContent("My Voice Take");
+    expect(screen.getByTestId("selected-vocal-duration")).toHaveTextContent("21");
+    expect(screen.getByTestId("selected-vocal-ready")).toHaveTextContent("yes");
+    expect(screen.getByText("✓ Uploaded & Ready")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply Vocal to Song" })).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
     expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
-    expect(publicUrl.startsWith("https://")).toBe(true);
-    expect(publicUrl).toContain("/audio-vault/");
-    expect(publicUrl).not.toMatch(/^blob:/);
+    expect(UPLOADED_URL.startsWith("https://")).toBe(true);
+    expect(UPLOADED_URL).toContain("/audio-vault/");
+    expect(UPLOADED_URL).not.toMatch(/^blob:/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply Vocal to Song" }));
+    expect(screen.getByTestId("modal-open")).toHaveTextContent("no");
+    expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent(UPLOADED_URL);
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
   });
 
   it("keeps the local preview when upload fails or the public URL is not an audio-vault https URL", async () => {
-    upload.mockResolvedValueOnce({ error: { message: "row-level security" } });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/vocals/upload")) {
+        return {
+          ok: false,
+          status: 500,
+          json: async (): Promise<unknown> => ({ error: "row-level security" }),
+          text: async (): Promise<string> => "{}",
+        };
+      }
+      return tracksResponse();
+    });
     render(<StudioHarness />);
     await beginRecording();
     stopAfter(21_000);
     expect(await screen.findByText("✓ Voice Captured 21s")).toBeInTheDocument();
-    expect(await screen.findByText("Upload failed.")).toBeInTheDocument();
+    expect(await screen.findByText("Could not save this vocal take.")).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     expect(screen.queryByText(/row-level security/)).not.toBeInTheDocument();
+    expect(storageFrom).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -298,12 +360,16 @@ describe("CharacterModal voice capture", () => {
     "blob:http://127.0.0.1/take",
     "https://cdn.example/vocal.wav",
   ])("does not select %s", async (publicUrl) => {
-    getPublicUrl.mockReturnValue({ data: { publicUrl } });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/vocals/upload")) return uploadResult(publicUrl, "take.wav");
+      return tracksResponse();
+    });
     render(<StudioHarness />);
     await beginRecording();
     stopAfter(18_000);
     expect(await screen.findByText("✓ Voice Captured 18s")).toBeInTheDocument();
-    expect(await screen.findByText("Upload failed.")).toBeInTheDocument();
+    expect(await screen.findByText("Could not save this vocal take.")).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
   });
@@ -317,6 +383,8 @@ describe("CharacterModal voice capture", () => {
     expect(await screen.findByText("Sign in to upload a vocal.")).toBeInTheDocument();
     expect(screen.getByLabelText("Captured vocal")).toHaveAttribute("src", "blob:voice-take");
     expect(upload).not.toHaveBeenCalled();
+    expect(storageFrom).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
   });
@@ -332,30 +400,43 @@ describe("CharacterModal voice capture", () => {
     expect(screen.getByTestId("selected-persona")).toHaveTextContent("");
     expect(screen.queryByLabelText("Captured vocal")).not.toBeInTheDocument();
     expect(screen.queryByText(/Voice Captured/)).not.toBeInTheDocument();
+    expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Record" })).toBeInTheDocument();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(FakeMediaRecorder.instances).toHaveLength(1);
   });
 
   it("does not apply a late upload after re-record", async () => {
-    let releaseUpload: (value: { error: null }) => void = () => undefined;
-    upload.mockImplementation(
-      () =>
-        new Promise((resolve) => {
+    let releaseUpload: (value: StudioResponse) => void = () => undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      if (String(input).includes("/api/vocals/upload")) {
+        return new Promise<StudioResponse>((resolve) => {
           releaseUpload = resolve;
-        }),
-    );
+        });
+      }
+      return Promise.resolve(tracksResponse());
+    });
     render(<StudioHarness />);
     await beginRecording();
     stopAfter(22_000);
     expect(await screen.findByText("✓ Voice Captured 22s")).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     fireEvent.click(screen.getByRole("button", { name: "Re-record" }));
-    releaseUpload({ error: null });
+    releaseUpload({
+      ok: true,
+      status: 200,
+      json: async (): Promise<unknown> => ({ url: UPLOADED_URL, fileName: UPLOADED_NAME }),
+      text: async (): Promise<string> => "{}",
+    });
     await act(async () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId("selected-vocal-url")).toHaveTextContent("");
     expect(screen.queryByText(/Voice Captured/)).not.toBeInTheDocument();
+    expect(screen.queryByText("✓ Uploaded & Ready")).not.toBeInTheDocument();
+    expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+    expect(storageFrom).not.toHaveBeenCalled();
   });
 });

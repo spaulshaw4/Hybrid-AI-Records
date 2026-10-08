@@ -142,6 +142,7 @@ describe("EnginePage instrumental tab", () => {
     expect(body.seed).toBeUndefined();
     expect(body.webhook).toBeUndefined();
     expect(body).not.toHaveProperty("duration");
+    expect(body).not.toHaveProperty("reference_audio_url");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(false);
   });
 
@@ -311,9 +312,21 @@ describe("EnginePage instrumental tab", () => {
         }),
       }),
     }));
+    const publicUrl =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/voice-take-1700000021000.wav";
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/vocals/upload")) {
+        return jsonResult({ url: publicUrl, fileName: "voice-take-1700000021000.wav" });
+      }
       if (url.includes("/api/vocals/generate")) return jsonResult({ success: true, taskId: "task-vocal-take" });
+      if (url.includes("/api/generate")) {
+        return jsonResult({
+          success: true,
+          status: "ready",
+          wavUrl: "https://example.com/storage/v1/object/public/audio-vault/masters/ready.wav",
+        });
+      }
       if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
       return jsonResult({ tracks: [] });
     });
@@ -329,7 +342,6 @@ describe("EnginePage instrumental tab", () => {
       fireEvent.click(screen.getByRole("button", { name: "Record" }));
       await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
       expect(FakeMediaRecorder.instances[0]!.start).toHaveBeenCalledTimes(1);
-      const started = now;
       now += 21_000;
       fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
 
@@ -341,30 +353,81 @@ describe("EnginePage instrumental tab", () => {
       expect(screen.getByRole("button", { name: "Re-record" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /My Voice - October 5/ })).toHaveAttribute("aria-pressed", "false");
 
-      await waitFor(() => expect(upload).toHaveBeenCalled());
-      const [path, file, options] = upload.mock.calls[0] as [string, File, { contentType?: string }];
-      expect(path).toBe(`vocal-references/user-1/voice-take-${started + 21_000}.wav`);
-      expect(file.type).toBe("audio/wav");
-      expect(options).toMatchObject({ contentType: "audio/wav" });
-      const publicUrl = `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}`;
-      await waitFor(() => expect(screen.getByRole("button", { name: "✓ Voice Captured 21s" })).toBeInTheDocument());
-
-      await user.click(screen.getByRole("button", { name: "Close" }));
-      expect(screen.getByRole("button", { name: "✓ Voice Captured 21s" })).toBeInTheDocument();
-      expect(screen.getByText("Voice Captured 21s")).toBeInTheDocument();
-
-      await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
-      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
-      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
-      const generateCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as [
+      const activeVocal = /Active Vocal: My Voice Take \(21s\)/;
+      await waitFor(() => expect(screen.getByText(activeVocal)).toBeInTheDocument());
+      expect(screen.queryByText("Upload failed.")).not.toBeInTheDocument();
+      expect(upload).not.toHaveBeenCalled();
+      const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/upload")) as unknown as [
         string,
         RequestInit,
       ];
-      const body = JSON.parse(String(generateCall[1].body)) as { vocalAudioUrl?: string; personaId?: string };
-      expect(body.vocalAudioUrl).toBe(publicUrl);
+      expect(uploadCall[0]).toBe("/api/vocals/upload");
+      expect((uploadCall[1].headers as Record<string, string>).Authorization).toBe("Bearer session-token");
+      expect(uploadCall[1].body).toBeInstanceOf(FormData);
+      expect((uploadCall[1].body as FormData).get("audio")).toBeTruthy();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Style" }), { target: { value: "dry vocal" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Song title" }), { target: { value: "Night Drive" } });
+      expect(screen.getByText(activeVocal)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Apply Vocal to Song" }));
+      expect(screen.queryByRole("heading", { name: "Vocal Studio" })).not.toBeInTheDocument();
+      expect(screen.getByText(activeVocal)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "✓ My Voice Take" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
+      const generateCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as unknown as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(String(generateCall[1].body)) as {
+        reference_audio_url?: string;
+        vocalAudioUrl?: string;
+        personaId?: string;
+      };
+      expect(body.reference_audio_url).toBe(publicUrl);
+      expect(body).not.toHaveProperty("vocalAudioUrl");
       expect(body).not.toHaveProperty("personaId");
-      expect(body.vocalAudioUrl).not.toMatch(/^blob:/);
-      expect(body.vocalAudioUrl).not.toMatch(/^http:/);
+      expect(body.reference_audio_url).not.toMatch(/^blob:/);
+      expect(body.reference_audio_url).not.toMatch(/^http:/);
+      expect(screen.getByText(activeVocal)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: "Instrumental" }));
+      expect(screen.queryByText(activeVocal)).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole("textbox", { name: "What's the vibe?" }), { target: { value: "soft piano" } });
+      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/generate"))).toBe(true));
+      const instrumentalCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/generate")) as unknown as [
+        string,
+        RequestInit,
+      ];
+      const instrumentalBody = JSON.parse(String(instrumentalCall[1].body)) as Record<string, unknown>;
+      expect(instrumentalBody).not.toHaveProperty("reference_audio_url");
+      expect(instrumentalBody.isInstrumental).toBe(true);
+
+      await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+      expect(screen.getByText(activeVocal)).toBeInTheDocument();
+      await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "hello line");
+      await user.click(screen.getByRole("button", { name: "Change" }));
+      expect(screen.getByRole("heading", { name: "Vocal Studio" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByText(activeVocal)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Remove" }));
+      expect(screen.queryByText(activeVocal)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+      await waitFor(() =>
+        expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"))).toHaveLength(2),
+      );
+      const clearedCall = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate")).at(-1) as unknown as [
+        string,
+        RequestInit,
+      ];
+      const cleared = JSON.parse(String(clearedCall[1].body)) as Record<string, unknown>;
+      expect(cleared).not.toHaveProperty("reference_audio_url");
+      expect(cleared).not.toHaveProperty("vocalAudioUrl");
     } finally {
       Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: previousMedia });
     }

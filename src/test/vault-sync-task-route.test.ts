@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { createClientMock, uploadMock, insertMock, limitMock, resolveStudioSessionMock, fromMock } = vi.hoisted(
   () => ({
     createClientMock: vi.fn(),
-    uploadMock: vi.fn(async () => ({ data: { path: "masters/task" }, error: null })),
-    insertMock: vi.fn(async () => ({ error: null })),
-    limitMock: vi.fn(async () => ({ data: [], error: null })),
+    uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
+    insertMock: vi.fn(async (..._args: unknown[]) => ({ error: null })),
+    limitMock: vi.fn(async (..._args: unknown[]): Promise<{ data: Array<Record<string, unknown>>; error: null }> => ({
+      data: [],
+      error: null,
+    })),
     resolveStudioSessionMock: vi.fn(),
     fromMock: vi.fn(),
   }),
@@ -96,8 +99,9 @@ describe("POST /api/vault/sync-task", () => {
       },
     }));
     limitMock.mockImplementation(async () => ({ data: stored.map((row) => ({ ...row })), error: null }));
-    insertMock.mockImplementation(async (row: { wav_url?: string; mp3_url?: string }) => {
-      stored.push({ wav_url: String(row.wav_url), mp3_url: String(row.mp3_url) });
+    insertMock.mockImplementation(async (row: unknown) => {
+      const record = row as { wav_url?: string; mp3_url?: string };
+      stored.push({ wav_url: String(record.wav_url), mp3_url: String(record.mp3_url) });
       return { error: null };
     });
     resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
@@ -146,7 +150,7 @@ describe("POST /api/vault/sync-task", () => {
 
   it("polls the result endpoint and does not fetch a caller-supplied URL", async () => {
     const wav = silentWav();
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       const href = String(url);
       if (href.includes("evil.example") || href.includes("169.254.169.254")) {
         throw new Error("caller url downloaded");

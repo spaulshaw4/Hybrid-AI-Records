@@ -10,7 +10,7 @@ const {
   refundGenerationTokenMock,
 } = vi.hoisted(() => ({
   uploadMock: vi.fn(async (..._args: unknown[]) => ({ data: { path: "masters/task" }, error: null })),
-  insertMock: vi.fn(async () => ({ error: null })),
+  insertMock: vi.fn(async (..._args: unknown[]) => ({ error: null })),
   fromMock: vi.fn(),
   resolveStudioSessionMock: vi.fn(),
   balanceMaybeSingleMock: vi.fn(),

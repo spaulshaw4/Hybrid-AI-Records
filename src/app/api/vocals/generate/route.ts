@@ -240,7 +240,9 @@ export async function POST(req: Request): Promise<Response> {
   const vocalGender = readString(record.vocalGender);
   const styleTags = readString(record.styleTags);
   const tags = [vocalGender, styleTags].filter(Boolean).join(", ");
-  const reference = gateReference(readString(record.vocalAudioUrl) || readString(record.referenceUrl));
+  const reference = gateReference(
+    readString(record.reference_audio_url) || readString(record.vocalAudioUrl) || readString(record.referenceUrl),
+  );
   if (!reference) {
     return Response.json({ error: REFERENCE_ERROR }, { status: 400 });
   }

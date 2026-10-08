@@ -235,6 +235,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/vocals/upload") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/vocals/upload/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/vocals/generate") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {
