@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Trash2 } from "lucide-react";
 
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
@@ -26,6 +26,47 @@ export type VisualSongDraft = {
   pass?: "audio";
   acousticTags?: string;
 };
+
+/** Two clicks within 3 seconds clear lyrics. The first click only asks to confirm. */
+export function ClearLyricsButton({ lyrics, onClear }: { lyrics: string; onClear: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  if (!lyrics.trim()) return null;
+
+  const label = confirming ? "Confirm clear lyrics" : "Clear lyrics";
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="p-1 text-muted-foreground hover:text-destructive"
+      onClick={() => {
+        if (!confirming) {
+          if (timer.current !== null) window.clearTimeout(timer.current);
+          setConfirming(true);
+          timer.current = window.setTimeout(() => {
+            timer.current = null;
+            setConfirming(false);
+          }, 3000);
+          return;
+        }
+        if (timer.current !== null) window.clearTimeout(timer.current);
+        timer.current = null;
+        setConfirming(false);
+        onClear();
+      }}
+    >
+      <Trash2 className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+}
 
 /** Trim, drop one trailing comma, then join. Skip when the new tags already end the style. */
 export function appendAcousticTags(current: string, newTags: string): string {
@@ -388,15 +429,18 @@ export function VocalStudioTab({
         <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <span className="text-sm font-bold text-white">Lyrics & Structure</span>
-            <button
-              type="button"
-              disabled={lyricsAssistBusy}
-              onClick={() => void handleLyricsAssist()}
-              className={badgeActionClass}
-            >
-              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              {lyricsAssistLabel}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={lyricsAssistBusy}
+                onClick={() => void handleLyricsAssist()}
+                className={badgeActionClass}
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                {lyricsAssistLabel}
+              </button>
+              <ClearLyricsButton lyrics={lyrics} onClear={() => setLyrics("")} />
+            </div>
           </div>
           <textarea
             aria-label="Lyrics"

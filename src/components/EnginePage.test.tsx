@@ -42,17 +42,32 @@ function jsonResult(body: unknown, status = 200) {
   };
 }
 
-/** fmt chunk is PCM (format 1) at 16 bits per sample. */
-async function expectPcmWav16(blob: Blob) {
+/** fmt + data PCM: 16-bit, mono, 24000 Hz, at most 30 seconds. */
+async function expectReferencePcmWav(blob: Blob) {
   expect(blob.type).toBe("audio/wav");
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const text = (start: number, end: number) => String.fromCharCode(...bytes.slice(start, end));
   expect(text(0, 4)).toBe("RIFF");
   expect(text(8, 12)).toBe("WAVE");
   expect(text(12, 16)).toBe("fmt ");
+  expect(text(36, 40)).toBe("data");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  expect(view.getUint32(16, true)).toBe(16);
   expect(view.getUint16(20, true)).toBe(1);
+  expect(view.getUint16(22, true)).toBe(1);
+  expect(view.getUint32(24, true)).toBe(24_000);
   expect(view.getUint16(34, true)).toBe(16);
+  const dataSize = view.getUint32(40, true);
+  expect(bytes.byteLength).toBe(44 + dataSize);
+  const duration = dataSize / 2 / 24_000;
+  expect(duration).toBeLessThanOrEqual(30);
+  return duration;
+}
+
+async function confirmReferenceClip(user: ReturnType<typeof userEvent.setup>) {
+  const button = await screen.findByRole("button", { name: "Use Clip" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await user.click(button);
 }
 
 describe("EnginePage instrumental tab", () => {
@@ -83,6 +98,8 @@ describe("EnginePage instrumental tab", () => {
     }));
     from.mockReset();
     FakeAudioContext.instances = [];
+    FakeAudioContext.decoded = null;
+    FakeAudioContext.failDecode = false;
     vi.stubGlobal("AudioContext", FakeAudioContext);
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -535,7 +552,7 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByRole("button", { name: "Male" }).className).not.toContain("bg-red-600");
     expect(screen.queryByRole("checkbox", { name: "Instrumental" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear lyrics" })).toHaveAttribute("title", "Clear lyrics");
+    expect(screen.queryByRole("button", { name: "Clear lyrics" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Studio Ghostwriter" })).toBeEnabled();
     expect(screen.queryByText("OFF (INSTRUMENTAL)")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Female" })).toBeEnabled();
@@ -577,7 +594,7 @@ describe("EnginePage instrumental tab", () => {
     await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
     expect(screen.getByRole("tab", { name: "Instrumental" })).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Instrumental" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear lyrics" })).toHaveAttribute("title", "Clear lyrics");
+    expect(screen.queryByRole("button", { name: "Clear lyrics" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Studio Ghostwriter" })).toBeEnabled();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
@@ -622,6 +639,29 @@ describe("EnginePage instrumental tab", () => {
     const ready = screen.getByRole("button", { name: "Format and polish lyrics" });
     expect(ready).toBeEnabled();
     expect(ready).toHaveTextContent("\u2726 Format & Polish");
+  });
+
+  it("clears lyrics only after a second click", async () => {
+    const user = userEvent.setup();
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    expect(screen.queryByRole("button", { name: "Clear lyrics" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Instrumental" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "keep this verse" } });
+    const clear = screen.getByRole("button", { name: "Clear lyrics" });
+    expect(clear).toHaveAttribute("title", "Clear lyrics");
+    expect(clear.className).toContain("text-muted-foreground");
+    expect(clear.className).toContain("hover:text-destructive");
+    await user.click(clear);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("keep this verse");
+
+    const confirm = screen.getByRole("button", { name: "Confirm clear lyrics" });
+    expect(confirm).toHaveAttribute("title", "Confirm clear lyrics");
+    await user.click(confirm);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Clear lyrics" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm clear lyrics" })).not.toBeInTheDocument();
   });
 
   it("keeps vault playback private and does not offer reference or injection from the menu", async () => {
@@ -730,7 +770,9 @@ describe("EnginePage instrumental tab", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("create-voice"))).toBe(false);
   });
 
-  it("keeps a chosen reference file on the Vocals with AI pill and uploads it before vocals generate", async () => {
+  it(
+    "keeps a chosen reference file on the Vocals with AI pill and uploads it before vocals generate",
+    async () => {
     const user = userEvent.setup();
     const publicUrl =
       "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/reference-1.wav";
@@ -783,24 +825,46 @@ describe("EnginePage instrumental tab", () => {
     );
     expect(input.getAttribute("accept")).toContain("mpeg");
     expect(input.getAttribute("accept")).toContain("aac");
+    const sourceRate = 48_000;
+    const sourceFrames = 46 * sourceRate;
+    const left = new Float32Array(sourceFrames);
+    const right = new Float32Array(sourceFrames);
+    left[0] = 0.5;
+    right[0] = -0.5;
+    FakeAudioContext.decoded = {
+      numberOfChannels: 2,
+      sampleRate: sourceRate,
+      length: sourceFrames,
+      duration: sourceFrames / sourceRate,
+      getChannelData: (channel: number) => (channel === 0 ? left : right),
+    };
     await user.upload(input, file);
     expect(screen.getByText("Selected: Time Is Not My Friend.wav")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(upload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    expect(await screen.findByRole("button", { name: "Use Clip" })).toBeEnabled();
+    expect(screen.getByRole("slider", { name: "Clip start" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(screen.getByText("0:00–0:30")).toBeInTheDocument();
+    expect(upload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Use Clip" }));
 
     expect(screen.queryByRole("dialog", { name: "Reference" })).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Analyzing DNA...")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Analyzing reference...")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Remove reference" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ Reference" })).not.toBeInTheDocument();
-    const analyzingPill = screen.getByText("Analyzing DNA...").parentElement as HTMLElement;
+    const analyzingPill = screen.getByText("Analyzing reference...").parentElement as HTMLElement;
     expect(analyzingPill.className).toContain("flex");
     expect(analyzingPill.className).toContain("bg-red-950/50");
     expect(analyzingPill.className).toContain("border-red-500/60");
     expect(analyzingPill.querySelector(".animate-ping")).toBeTruthy();
     expect(analyzingPill.querySelector(".animate-pulse")).toBeNull();
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+    await waitFor(
+      () =>
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+      { timeout: 20_000 },
     );
     expect(FakeAudioContext.instances.length).toBeGreaterThan(0);
     expect(FakeAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalled();
@@ -815,7 +879,9 @@ describe("EnginePage instrumental tab", () => {
     expect(wavOptions).toEqual({ contentType: "audio/wav", upsert: true });
     expect(wavBody).toBeInstanceOf(Blob);
     expect(wavBody).not.toBe(file);
-    await expectPcmWav16(wavBody);
+    const duration = await expectReferencePcmWav(wavBody);
+    expect(duration).toBeGreaterThan(29);
+    expect(duration).toBeLessThanOrEqual(30);
     const analyzeCall = fetchMock.mock.calls.find(([url]) =>
       String(url).includes("/api/reference/audio-to-prompt"),
     ) as [string, RequestInit];
@@ -838,6 +904,7 @@ describe("EnginePage instrumental tab", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags));
     const pill = screen.getByRole("button", { name: "Remove reference" }).parentElement as HTMLElement;
     expect(pill).toHaveTextContent("Time Is Not My Friend.wav");
+    expect(screen.queryByRole("button", { name: "Use Clip" })).not.toBeInTheDocument();
     expect(pill.querySelector(".animate-pulse")).toBeTruthy();
     expect(pill.querySelector(".animate-ping")).toBeNull();
 
@@ -876,9 +943,11 @@ describe("EnginePage instrumental tab", () => {
     await user.click(screen.getByRole("button", { name: "Remove reference" }));
     expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
-  });
+  },
+    20_000,
+  );
 
-  it("uploads an MP3 reference as audio/mpeg without decoding it", async () => {
+  it("decodes an MP3 reference and uploads a 16-bit wav instead of the original file", async () => {
     const user = userEvent.setup();
     getSession.mockResolvedValue({
       data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
@@ -898,14 +967,20 @@ describe("EnginePage instrumental tab", () => {
     const mp3 = new File([new Uint8Array([0x49, 0x44, 0x33, 0x03, 0x00])], "clip.mp3", { type: "audio/mpeg" });
     const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
     await user.upload(input, mp3);
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(upload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    expect(await screen.findByRole("button", { name: "Use Clip" })).toBeInTheDocument();
+    expect(upload).not.toHaveBeenCalled();
+    await confirmReferenceClip(user);
 
     await waitFor(() => expect(upload).toHaveBeenCalled());
-    expect(FakeAudioContext.instances).toHaveLength(0);
+    expect(FakeAudioContext.instances.length).toBeGreaterThan(0);
+    expect(FakeAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalled();
     const [path, body, options] = upload.mock.calls[0] as [string, Blob, { contentType?: string; upsert?: boolean }];
-    expect(path).toMatch(/^references\/user-1\/\d+-clip\.mp3$/);
-    expect(options).toEqual({ contentType: "audio/mpeg", upsert: true });
-    expect(body).toBe(mp3);
+    expect(path).toMatch(/^references\/user-1\/\d+-clip\.wav$/);
+    expect(options).toEqual({ contentType: "audio/wav", upsert: true });
+    expect(body).not.toBe(mp3);
+    await expectReferencePcmWav(body);
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
     );
@@ -940,13 +1015,34 @@ describe("EnginePage instrumental tab", () => {
     bytes.set([0x57, 0x41, 0x56, 0x45], 8);
     const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
     await user.upload(input, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    await confirmReferenceClip(user);
 
     await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent(
       "Time Is Not My Friend.wav",
     );
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue("");
+  });
+
+  it("does not upload when reference decode fails", async () => {
+    const user = userEvent.setup();
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    FakeAudioContext.failDecode = true;
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "broken.wav", { type: "audio/wav" }));
+
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Use Clip" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
   });
 
   it("fills title, lyrics, and style from a visual injection and keeps them after remove", async () => {
@@ -1071,12 +1167,12 @@ describe("EnginePage instrumental tab", () => {
     bytes.set([0x57, 0x41, 0x56, 0x45], 8);
     const audioInput = document.getElementById("ref-audio-upload") as HTMLInputElement;
     await user.upload(audioInput, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    await confirmReferenceClip(user);
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged));
     expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
-    expect(screen.queryByText("Analyzing DNA...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Analyzing reference...")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent(
       "Time Is Not My Friend.wav",
     );
@@ -1085,11 +1181,11 @@ describe("EnginePage instrumental tab", () => {
     await user.click(screen.getByRole("button", { name: "+ Reference" }));
     const again = document.getElementById("ref-audio-upload") as HTMLInputElement;
     await user.upload(again, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
-    await user.click(screen.getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(screen.getByText("Analyzing DNA...")).toBeInTheDocument());
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(screen.getByText("Analyzing reference...")).toBeInTheDocument());
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged);
     releaseSecond(jsonResult({ success: true, tags: acousticTags, filename: "Time Is Not My Friend.wav" }));
-    await waitFor(() => expect(screen.queryByText("Analyzing DNA...")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Analyzing reference...")).not.toBeInTheDocument());
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged);
     expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
@@ -1103,14 +1199,26 @@ describe("EnginePage instrumental tab", () => {
 
 class FakeAudioContext {
   static instances: FakeAudioContext[] = [];
+  static failDecode = false;
+  static decoded: {
+    numberOfChannels: number;
+    sampleRate: number;
+    length: number;
+    duration: number;
+    getChannelData: (channel: number) => Float32Array;
+  } | null = null;
   state: AudioContextState = "running";
-  decodeAudioData = vi.fn(async () => ({
-    numberOfChannels: 1,
-    sampleRate: 44100,
-    length: 4,
-    duration: 4 / 44100,
-    getChannelData: () => new Float32Array([0, 0.5, -0.5, 1]),
-  }));
+  decodeAudioData = vi.fn(async () => {
+    if (FakeAudioContext.failDecode) throw new Error("decode failed");
+    if (FakeAudioContext.decoded) return FakeAudioContext.decoded;
+    return {
+      numberOfChannels: 1,
+      sampleRate: 44100,
+      length: 4,
+      duration: 4 / 44100,
+      getChannelData: () => new Float32Array([0, 0.5, -0.5, 1]),
+    };
+  });
   close = vi.fn(async () => {
     this.state = "closed";
   });

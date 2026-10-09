@@ -16,6 +16,7 @@ import { DurationSlider } from "@/components/studio/DurationSlider";
 import { PatriotGlassStudio } from "@/components/studio/PatriotGlassStudio";
 import { StudioFooter } from "@/components/studio/StudioFooter";
 import {
+  ClearLyricsButton,
   VocalGenderCard,
   VocalStudioTab,
   appendAcousticTags,
@@ -100,10 +101,8 @@ async function uploadReferenceWav(file: File, accessToken: string): Promise<stri
 
 type ReferenceExtension = "wav" | "mp3" | "aac" | "m4a";
 
-const GEMINI_WAV_RATE = 48_000;
-const TEN_MINUTES = 10 * 60;
-/** Only songs longer than 10 minutes are eligible, and only when the float buffer is huge. */
-const REFERENCE_MEMORY_CAP_BYTES = 512 * 1024 * 1024;
+const REFERENCE_CLIP_SECONDS = 30;
+const REFERENCE_SAMPLE_RATE = 24_000;
 
 function headerText(bytes: Uint8Array, start: number, end: number): string {
   let text = "";
@@ -175,25 +174,21 @@ function slicePcm(audio: PcmView, frames: number): PcmView {
   };
 }
 
-/** 48 kHz ceiling. Songs under 10 minutes stay full length. */
-function pcmForGemini(audio: AudioBuffer): PcmView {
-  const floatBytes = audio.length * Math.max(1, audio.numberOfChannels) * 4;
-  const source: PcmView =
-    audio.duration > TEN_MINUTES && floatBytes > REFERENCE_MEMORY_CAP_BYTES
-      ? slicePcm(audio, Math.floor(TEN_MINUTES * audio.sampleRate))
-      : audio;
-  if (source.sampleRate <= GEMINI_WAV_RATE) return source;
-  const channelCount = source.numberOfChannels;
-  const length = Math.max(1, Math.round((source.length * GEMINI_WAV_RATE) / source.sampleRate));
-  const ratio = source.sampleRate / GEMINI_WAV_RATE;
+function downsamplePcm(audio: PcmView, sampleRate: number): PcmView {
+  const inputRate = audio.sampleRate > 0 ? audio.sampleRate : sampleRate;
+  if (inputRate === sampleRate) return audio;
+  const channelCount = Math.max(1, audio.numberOfChannels);
+  const length = Math.max(1, Math.round((audio.length * sampleRate) / inputRate));
+  const ratio = inputRate / sampleRate;
   const channels: Float32Array[] = [];
   for (let channel = 0; channel < channelCount; channel += 1) {
-    const input = source.getChannelData(channel);
+    const input = audio.getChannelData(channel);
     const output = new Float32Array(length);
+    const last = Math.max(0, input.length - 1);
     for (let frame = 0; frame < length; frame += 1) {
       const position = frame * ratio;
       const index = Math.floor(position);
-      const next = Math.min(index + 1, Math.max(0, input.length - 1));
+      const next = Math.min(index + 1, last);
       const frac = position - index;
       const left = input[index] ?? 0;
       const right = input[next] ?? left;
@@ -204,10 +199,134 @@ function pcmForGemini(audio: AudioBuffer): PcmView {
   return {
     numberOfChannels: channelCount,
     length,
-    sampleRate: GEMINI_WAV_RATE,
-    duration: length / GEMINI_WAV_RATE,
+    sampleRate,
+    duration: length / sampleRate,
     getChannelData: (channel) => channels[channel] ?? new Float32Array(),
   };
+}
+
+function mixToMono(audio: PcmView): PcmView {
+  const channelCount = Math.max(1, audio.numberOfChannels);
+  const sampleRate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
+  if (channelCount === 1) {
+    return {
+      numberOfChannels: 1,
+      length: audio.length,
+      sampleRate,
+      duration: audio.length / sampleRate,
+      getChannelData: (channel) => (channel === 0 ? audio.getChannelData(0) : new Float32Array()),
+    };
+  }
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    channels.push(audio.getChannelData(channel));
+  }
+  const mono = new Float32Array(audio.length);
+  for (let frame = 0; frame < audio.length; frame += 1) {
+    let sum = 0;
+    for (let channel = 0; channel < channelCount; channel += 1) sum += channels[channel]?.[frame] ?? 0;
+    mono[frame] = sum / channelCount;
+  }
+  return {
+    numberOfChannels: 1,
+    length: audio.length,
+    sampleRate,
+    duration: audio.length / sampleRate,
+    getChannelData: (channel) => (channel === 0 ? mono : new Float32Array()),
+  };
+}
+
+function referenceWindow(audio: PcmView, startSeconds: number) {
+  const rate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
+  const duration = audio.duration > 0 && Number.isFinite(audio.duration) ? audio.duration : audio.length / rate;
+  const span = Math.min(REFERENCE_CLIP_SECONDS, Math.max(0, duration));
+  const maxStart = Math.max(0, duration - span);
+  const start = Math.min(Math.max(0, startSeconds), maxStart);
+  return { start, end: start + span, span, maxStart, duration };
+}
+
+function slicePcmFrom(audio: PcmView, startFrame: number, frames: number): PcmView {
+  const sampleRate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
+  const start = Math.max(0, Math.min(Math.floor(startFrame), Math.max(0, audio.length - 1)));
+  const count = Math.max(1, Math.min(Math.floor(frames), audio.length - start));
+  const channelCount = Math.max(1, audio.numberOfChannels);
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    channels.push(audio.getChannelData(channel).slice(start, start + count));
+  }
+  return {
+    numberOfChannels: channelCount,
+    length: count,
+    sampleRate,
+    duration: count / sampleRate,
+    getChannelData: (channel) => channels[channel] ?? new Float32Array(),
+  };
+}
+
+/** Chosen 30-second window, 24 kHz, mono. Mic takes do not use this. */
+function pcmForReferenceClip(audio: PcmView, startSeconds: number): PcmView {
+  const rate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
+  const window = referenceWindow(audio, startSeconds);
+  const startFrame = Math.min(Math.floor(window.start * rate), Math.max(0, audio.length - 1));
+  const frames = Math.max(1, Math.min(Math.round(window.span * rate) || 1, audio.length - startFrame));
+  const sliced = slicePcmFrom(audio, startFrame, frames);
+  const downsampled = downsamplePcm(sliced, REFERENCE_SAMPLE_RATE);
+  const mono = mixToMono(downsampled);
+  const maxOut = REFERENCE_CLIP_SECONDS * REFERENCE_SAMPLE_RATE;
+  return mono.length > maxOut ? slicePcm(mono, maxOut) : mono;
+}
+
+function ReferenceClipTimeline({
+  audio,
+  start,
+  playing,
+  onStart,
+  onToggle,
+}: {
+  audio: PcmView;
+  start: number;
+  playing: boolean;
+  onStart: (start: number) => void;
+  onToggle: () => void;
+}) {
+  const window = referenceWindow(audio, start);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <button
+          type="button"
+          onClick={onToggle}
+          style={{
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.16)",
+            color: "#f8fafc",
+            borderRadius: 8,
+            padding: "6px 10px",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          {playing ? "Pause" : "Play"}
+        </button>
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>{formatVocalReferenceClock(window.duration)}</span>
+        <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+          {formatVocalReferenceClock(window.start)}–{formatVocalReferenceClock(window.end)}
+        </span>
+      </div>
+      <input
+        type="range"
+        aria-label="Clip start"
+        min={0}
+        max={window.maxStart}
+        step={0.01}
+        value={window.start}
+        disabled={window.maxStart <= 0}
+        onChange={(event) => onStart(Number(event.target.value))}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
 }
 
 function audioContextCtor(): typeof AudioContext | undefined {
@@ -218,26 +337,11 @@ function audioContextCtor(): typeof AudioContext | undefined {
   );
 }
 
-async function referenceUploadBody(file: File): Promise<{ body: Blob; contentType: string; extension: ReferenceExtension } | null> {
-  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
-  const kind = referenceAudioKind(file, head);
-  if (!kind) return null;
-  if (kind === "mp3") return { body: file, contentType: "audio/mpeg", extension: "mp3" };
-  if (kind === "aac") return { body: file, contentType: "audio/aac", extension: "aac" };
-  if (kind === "m4a") return { body: file, contentType: "audio/mp4", extension: "m4a" };
-  const Ctor = audioContextCtor();
-  if (!Ctor) return null;
-  const ctx = new Ctor();
-  try {
-    const bytes = await file.arrayBuffer();
-    const decoded = await ctx.decodeAudioData(bytes.slice(0));
-    return { body: encodePcmWav(pcmForGemini(decoded)), contentType: "audio/wav", extension: "wav" };
-  } catch {
-    return null;
-  } finally {
-    void safeCloseAudioContext(ctx);
-  }
-}
+type StagedReference = {
+  name: string;
+  file: File;
+  audio: PcmView;
+};
 
 function safeReferenceName(originalName: string, extension: ReferenceExtension): string {
   const suffix = `.${extension}`;
@@ -431,6 +535,11 @@ export function EnginePage() {
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
   const [draftReferenceFile, setDraftReferenceFile] = useState<File | null>(null);
+  const [stagedReference, setStagedReference] = useState<StagedReference | null>(null);
+  const [clipStart, setClipStart] = useState(0);
+  const [clipPlaying, setClipPlaying] = useState(false);
+  const auditionRef = useRef<{ ctx: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const stageSeq = useRef(0);
   const [attachedReference, setAttachedReference] = useState<AttachedReference | null>(null);
   const [isAnalyzingReference, setIsAnalyzingReference] = useState(false);
   const referenceAnalysisSeq = useRef(0);
@@ -460,6 +569,16 @@ export function EnginePage() {
   useEffect(() => {
     return () => {
       if (lyricsCooldownTimer.current !== null) window.clearTimeout(lyricsCooldownTimer.current);
+      const audition = auditionRef.current;
+      auditionRef.current = null;
+      if (!audition) return;
+      try {
+        audition.source.onended = null;
+        audition.source.stop();
+      } catch {
+        /* already stopped */
+      }
+      void safeCloseAudioContext(audition.ctx);
     };
   }, []);
 
@@ -716,14 +835,113 @@ export function EnginePage() {
     );
   };
 
-  const analyzeReferenceFile = async (file: File) => {
-    const seq = ++referenceAnalysisSeq.current;
-    setIsAnalyzingReference(true);
+  const stopReferenceAudition = () => {
+    const audition = auditionRef.current;
+    auditionRef.current = null;
+    if (audition) {
+      try {
+        audition.source.onended = null;
+        audition.source.stop();
+      } catch {
+        /* already stopped */
+      }
+      void safeCloseAudioContext(audition.ctx);
+    }
+    setClipPlaying(false);
+  };
+
+  const clearStagedReference = () => {
+    stopReferenceAudition();
+    stageSeq.current += 1;
+    setStagedReference(null);
+    setDraftReferenceFile(null);
+    setClipStart(0);
+  };
+
+  const toggleReferenceAudition = () => {
+    if (!stagedReference) return;
+    if (auditionRef.current) {
+      stopReferenceAudition();
+      return;
+    }
+    const Ctor = audioContextCtor();
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    if (typeof ctx.createBufferSource !== "function") {
+      void safeCloseAudioContext(ctx);
+      return;
+    }
+    const window = referenceWindow(stagedReference.audio, clipStart);
+    if (window.span <= 0) {
+      void safeCloseAudioContext(ctx);
+      return;
+    }
+    let source: AudioBufferSourceNode;
+    try {
+      source = ctx.createBufferSource();
+      source.buffer = stagedReference.audio as unknown as AudioBuffer;
+      source.connect(ctx.destination);
+      source.start(0, window.start, window.span);
+    } catch {
+      void safeCloseAudioContext(ctx);
+      return;
+    }
+    const finish = () => {
+      if (auditionRef.current?.source !== source) return;
+      auditionRef.current = null;
+      void safeCloseAudioContext(ctx);
+      setClipPlaying(false);
+    };
+    source.onended = finish;
+    auditionRef.current = { ctx, source };
+    setClipPlaying(true);
+  };
+
+  const stageReferenceFile = async (file: File) => {
+    const seq = ++stageSeq.current;
+    stopReferenceAudition();
     setErrorMessage(null);
+    setDraftReferenceFile(file);
+    setStagedReference(null);
+    setClipStart(0);
+    const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    if (stageSeq.current !== seq) return;
+    if (!referenceAudioKind(file, head)) {
+      setErrorMessage("Could not read that reference.");
+      return;
+    }
+    const Ctor = audioContextCtor();
+    if (!Ctor) {
+      setErrorMessage("Could not read that reference.");
+      return;
+    }
+    const ctx = new Ctor();
+    try {
+      const bytes = await file.arrayBuffer();
+      const decoded = await ctx.decodeAudioData(bytes.slice(0));
+      if (stageSeq.current !== seq) return;
+      setStagedReference({ name: file.name || "reference.wav", file, audio: decoded });
+      setClipStart(0);
+    } catch {
+      if (stageSeq.current === seq) setErrorMessage("Could not read that reference.");
+    } finally {
+      void safeCloseAudioContext(ctx);
+    }
+  };
+
+  const uploadStagedReference = async (staged: StagedReference, startSeconds: number, seq: number) => {
     const fail = () => {
       if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
     };
     try {
+      await Promise.resolve();
+      let body: Blob;
+      try {
+        body = encodePcmWav(pcmForReferenceClip(staged.audio, startSeconds));
+      } catch {
+        fail();
+        return;
+      }
       let accessToken = "";
       let userId = "";
       try {
@@ -738,15 +956,10 @@ export function EnginePage() {
         fail();
         return;
       }
-      const prepared = await referenceUploadBody(file);
-      if (!prepared) {
-        fail();
-        return;
-      }
-      const safeName = safeReferenceName(file.name || "reference", prepared.extension);
+      const safeName = safeReferenceName(staged.name || "reference", "wav");
       const filePath = `references/${userId}/${Date.now()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, prepared.body, {
-        contentType: prepared.contentType,
+      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, body, {
+        contentType: "audio/wav",
         upsert: true,
       });
       if (uploadError) {
@@ -790,11 +1003,33 @@ export function EnginePage() {
         pass: "audio",
         acousticTags: tags,
       }));
+      if (referenceAnalysisSeq.current === seq) {
+        setStagedReference(null);
+        setDraftReferenceFile(null);
+        setClipStart(0);
+      }
     } catch {
       if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
     } finally {
       if (referenceAnalysisSeq.current === seq) setIsAnalyzingReference(false);
     }
+  };
+
+  const commitReferenceClip = () => {
+    const staged = stagedReference;
+    if (!staged || isAnalyzingReference) return;
+    const start = clipStart;
+    const seq = ++referenceAnalysisSeq.current;
+    stopReferenceAudition();
+    setAttachedReference({
+      kind: "file",
+      name: staged.name,
+      file: staged.file,
+    });
+    setIsAnalyzingReference(true);
+    setOpenModal(null);
+    setErrorMessage(null);
+    void uploadStagedReference(staged, start, seq);
   };
 
   const analyzeVisualFile = async (file: File) => {
@@ -1166,7 +1401,7 @@ export function EnginePage() {
               />
               <span className="font-mono truncate max-w-[140px]">
                 {isAnalyzingReference
-                  ? "Analyzing DNA..."
+                  ? "Analyzing reference..."
                   : attachedReference.kind === "file"
                     ? attachedReference.name
                     : attachedReference.title}
@@ -1176,7 +1411,10 @@ export function EnginePage() {
                   type="button"
                   title="Remove reference"
                   aria-label="Remove reference"
-                  onClick={() => setAttachedReference(null)}
+                  onClick={() => {
+                    clearStagedReference();
+                    setAttachedReference(null);
+                  }}
                   className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
                 >
                   ✕
@@ -1448,16 +1686,19 @@ export function EnginePage() {
             <div style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
                 <span style={{ fontSize: 14, fontWeight: 700 }}>Lyrics & Structure</span>
-                <button
-                  type="button"
-                  disabled={lyricsAssistDisabled}
-                  aria-label={lyrics.trim() ? "Format and polish lyrics" : undefined}
-                  onClick={() => void handleLyricsAssist()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-950/30 text-xs font-medium text-red-200 hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                >
-                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                  {lyricsAssistLabel}
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={lyricsAssistDisabled}
+                    aria-label={lyrics.trim() ? "Format and polish lyrics" : undefined}
+                    onClick={() => void handleLyricsAssist()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-950/30 text-xs font-medium text-red-200 hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                    {lyricsAssistLabel}
+                  </button>
+                  <ClearLyricsButton lyrics={lyrics} onClear={() => setLyrics("")} />
+                </div>
               </div>
               <textarea
                 aria-label="Lyrics"
@@ -1467,17 +1708,6 @@ export function EnginePage() {
                 rows={5}
                 style={fieldStyle}
               />
-              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setLyrics("")}
-                  aria-label="Clear lyrics"
-                  title="Clear lyrics"
-                  style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
-                >
-                  🗑️
-                </button>
-              </div>
             </div>
 
             <div style={cardStyle}>
@@ -1573,7 +1803,10 @@ export function EnginePage() {
         {openModal === "reference" ? (
           <div
             role="presentation"
-            onClick={() => setOpenModal(null)}
+            onClick={() => {
+              stopReferenceAudition();
+              setOpenModal(null);
+            }}
             style={{
               position: "fixed",
               inset: 0,
@@ -1609,7 +1842,10 @@ export function EnginePage() {
                 <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Reference</h2>
                 <button
                   type="button"
-                  onClick={() => setOpenModal(null)}
+                  onClick={() => {
+                    stopReferenceAudition();
+                    setOpenModal(null);
+                  }}
                   aria-label="Close reference"
                   style={{
                     background: "transparent",
@@ -1625,7 +1861,7 @@ export function EnginePage() {
                 </button>
               </div>
               <p style={{ margin: 0, fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 }}>
-                Add a reference recording. Nothing is uploaded until you choose to send it.
+                Add a reference recording. Nothing is uploaded until you choose Use Clip.
               </p>
               <input
                 id="ref-audio-upload"
@@ -1633,7 +1869,8 @@ export function EnginePage() {
                 accept="audio/wav,audio/mp3,audio/mpeg,audio/aac,audio/m4a,.wav,.mp3,.aac,.m4a"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) setDraftReferenceFile(file);
+                  event.target.value = "";
+                  if (file) void stageReferenceFile(file);
                 }}
                 style={{ display: "none" }}
               />
@@ -1657,37 +1894,37 @@ export function EnginePage() {
                 <span>{draftReferenceFile ? `Selected: ${draftReferenceFile.name}` : "Click here to add a reference"}</span>
                 <span style={{ color: "#64748b", fontSize: 11 }}>Supports MP3, WAV, AAC, FLAC, M4A</span>
               </label>
-              <button
-                type="button"
-                onClick={() => {
-                  const file = draftReferenceFile;
-                  if (file) {
-                    setAttachedReference({
-                      kind: "file",
-                      name: file.name || "reference.wav",
-                      file,
-                    });
-                    setIsAnalyzingReference(true);
-                    setOpenModal(null);
-                    void analyzeReferenceFile(file);
-                    return;
-                  }
-                  setOpenModal(null);
-                }}
-                style={{
-                  width: "100%",
-                  background: "linear-gradient(90deg, #e11d48, #be123c)",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "12px 0",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Done
-              </button>
+              {stagedReference ? (
+                <ReferenceClipTimeline
+                  audio={stagedReference.audio}
+                  start={clipStart}
+                  playing={clipPlaying}
+                  onStart={(next) => {
+                    stopReferenceAudition();
+                    setClipStart(next);
+                  }}
+                  onToggle={toggleReferenceAudition}
+                />
+              ) : null}
+              {stagedReference ? (
+                <button
+                  type="button"
+                  onClick={commitReferenceClip}
+                  style={{
+                    width: "100%",
+                    background: "linear-gradient(90deg, #e11d48, #be123c)",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "12px 0",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Use Clip
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}

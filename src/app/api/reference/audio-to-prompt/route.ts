@@ -58,25 +58,45 @@ function instrumentList(value: unknown): string[] {
   return instruments;
 }
 
+function logAnalysisGap(detail: string): void {
+  console.error(`[audio-to-prompt] ${detail}`);
+}
+
 function analysisFromOutput(output: unknown): ReferenceAnalysis | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripJsonFence(textFromOutput(output)));
   } catch {
+    logAnalysisGap("invalid json");
     return null;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    logAnalysisGap("invalid json");
+    return null;
+  }
   const row = parsed as Record<string, unknown>;
   const tags = nonEmptyString(row.tags);
   const key = nonEmptyString(row.key);
   const genre = nonEmptyString(row.genre);
   const groove = nonEmptyString(row.groove);
-  if (!tags || !key || !genre || !groove) return null;
+  const missing = [
+    tags ? "" : "tags",
+    key ? "" : "key",
+    genre ? "" : "genre",
+    groove ? "" : "groove",
+  ].filter((field) => field);
+  if (missing.length > 0) {
+    for (const field of missing) logAnalysisGap(`missing ${field}`);
+    return null;
+  }
   let bpm = typeof row.bpm === "number" ? row.bpm : parseInt(String(row.bpm), 10);
   if (!Number.isFinite(bpm)) bpm = 120;
   const vocalStyle = nonEmptyString(row.vocal_style) || "instrumental / none";
   const instruments = instrumentList(row.instruments);
-  if (instruments.length === 0) return null;
+  if (instruments.length === 0) {
+    logAnalysisGap("empty instruments");
+    return null;
+  }
   return {
     bpm,
     key,
@@ -182,8 +202,11 @@ export async function POST(req: Request): Promise<Response> {
     });
 
     const payload = (await upstream.json()) as { status?: unknown; output?: unknown };
+    if (!upstream.ok || payload.status !== "succeeded") {
+      return executionFailed(new Error(CLIENT_ERROR));
+    }
     const analysis = analysisFromOutput(payload.output);
-    if (!upstream.ok || payload.status !== "succeeded" || !analysis) {
+    if (!analysis) {
       return executionFailed(new Error(CLIENT_ERROR));
     }
     return Response.json({
