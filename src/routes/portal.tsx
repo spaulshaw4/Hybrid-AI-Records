@@ -3,7 +3,6 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import {
   Check,
-  ArrowUpRight,
   Film,
   FileText,
   MessageCircle,
@@ -19,6 +18,7 @@ import {
 } from "@/components/ui/accordion";
 
 import { ApplicationModal } from "@/components/ApplicationModal";
+import { DistributionReleasePanel } from "@/components/portal/DistributionReleasePanel";
 import { ContactModal } from "@/components/ContactModal";
 import { OrderIntakeSection } from "@/components/OrderIntakeSection";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
@@ -177,8 +177,8 @@ function DistributionPackagesPage() {
                       <p className="mt-2 max-w-2xl text-base text-muted-foreground">{dist.tagline}</p>
                     </div>
                     <div className="md:text-right">
-                      <p className="font-display text-4xl font-bold text-white">{dist.priceSingle}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Flat one-time fee</p>
+                      <p className="font-display text-4xl font-bold text-white">1 D-Token per Release</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Charged when Too Lost accepts the release</p>
                     </div>
                   </div>
 
@@ -226,16 +226,7 @@ function DistributionPackagesPage() {
                     </div>
                   )}
 
-                  <div className="mt-8">
-                    <button
-                      type="button"
-                      onClick={() => setApplyPackage(dist.applySingle)}
-                      className="inline-flex w-full items-center justify-center gap-2 bg-[#e11d2e] px-8 py-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition-colors hover:bg-[#c4162a] md:w-auto"
-                    >
-                      Distribute Your Track ($25)
-                      <ArrowUpRight size={14} aria-hidden />
-                    </button>
-                  </div>
+                  <DistributionReleasePanel />
                 </div>
               </div>
             ))}

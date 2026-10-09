@@ -8,15 +8,20 @@ const STRIPE_API_VERSION = "2026-03-25.dahlia" as const;
 const PRODUCT_DESCRIPTION = "Master release generation token for Hybrid AI Records Studio";
 
 const TOKEN_PACKS = {
-  single: { amount: 200, name: "1 Hybrid Token", tokens: 1 },
-  ep: { amount: 1000, name: "5 Hybrid Tokens (EP Pack)", tokens: 5 },
-  album: { amount: 2000, name: "12 Hybrid Tokens (Album Pack)", tokens: 12 },
+  single: { amount: 200, name: "1 Hybrid Token", tokens: 1, portalReturn: false },
+  ep: { amount: 1000, name: "5 Hybrid Tokens (EP Pack)", tokens: 5, portalReturn: false },
+  album: { amount: 2000, name: "12 Hybrid Tokens (Album Pack)", tokens: 12, portalReturn: false },
+  d5: { amount: 500, name: "5 D-Token", tokens: 5, portalReturn: true },
+  d10: { amount: 1000, name: "10 D-Token", tokens: 10, portalReturn: true },
+  d25: { amount: 2500, name: "25 D-Token", tokens: 25, portalReturn: true },
 } as const;
 
 type TokenTier = keyof typeof TOKEN_PACKS;
 
 function resolveTier(raw: unknown): TokenTier {
-  if (raw === "ep" || raw === "album" || raw === "single") return raw;
+  if (raw === "ep" || raw === "album" || raw === "single" || raw === "d5" || raw === "d10" || raw === "d25") {
+    return raw;
+  }
   return "single";
 }
 
@@ -65,6 +70,7 @@ export async function POST(req: Request): Promise<Response> {
 
     const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
     const origin = allowedOrigin(req.headers.get("origin")) ?? defaultSiteOrigin();
+    const returnPath = pack.portalReturn ? "/portal" : "/engine";
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
@@ -80,11 +86,12 @@ export async function POST(req: Request): Promise<Response> {
           },
         },
       ],
-      success_url: `${origin}/engine?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/engine?payment=cancelled`,
+      success_url: `${origin}${returnPath}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}${returnPath}?payment=cancelled`,
       metadata: {
         tokens: String(pack.tokens),
         userId,
+        ...(pack.portalReturn ? { pack: resolveTier(body.tier) } : {}),
       },
     });
 
