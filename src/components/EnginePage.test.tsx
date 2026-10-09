@@ -9,9 +9,15 @@ import { MUREKA_TEMPLATES } from "@/data/murekaTemplates";
 const { getSession, onAuthStateChange, upload, getPublicUrl, from } = vi.hoisted(() => ({
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
-  upload: vi.fn(async (_path: string, _body: Blob, _options?: { contentType?: string; upsert?: boolean }) => ({
-    error: null,
-  })),
+  upload: vi.fn(
+    async (
+      _path: string,
+      _body: Blob,
+      _options?: { contentType?: string; upsert?: boolean },
+    ): Promise<{ error: { message: string; statusCode?: string } | null }> => ({
+      error: null,
+    }),
+  ),
   getPublicUrl: vi.fn((path: string) => ({
     data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
   })),
@@ -1523,6 +1529,7 @@ class FakeAudioContext {
     length: number;
     duration: number;
     getChannelData: (channel: number) => Float32Array;
+    copyFromChannel?: (destination: Float32Array, channelNumber: number, bufferOffset?: number) => void;
   } | null = null;
   state: AudioContextState = "running";
   decodeAudioData = vi.fn(async () => {
