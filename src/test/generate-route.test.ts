@@ -60,6 +60,13 @@ const SESSION_USER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 const SONG_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song";
 const BGM_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-bgm";
+const TEST_WAVESPEED_KEY = "test_wavespeed_key";
+
+function expectWavespeedDispatch(url: string, init: RequestInit, expectedUrl: string) {
+  expect(url).toBe(expectedUrl);
+  expect(init.method).toBe("POST");
+  expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TEST_WAVESPEED_KEY}`);
+}
 const MALE_VOCAL_LEAD = "Deep soulful male vocal, baritone delivery, ";
 const FEMALE_VOCAL_LEAD = "Female vocal, ";
 const DEFAULT_STYLE = "Acoustic, heavy rock";
@@ -108,6 +115,7 @@ describe("POST /api/generate", () => {
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   beforeEach(() => {
+    process.env.WAVESPEED_API_KEY = TEST_WAVESPEED_KEY;
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     resolveStudioSessionMock.mockResolvedValue({ userId: SESSION_USER });
@@ -159,7 +167,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 502 when the queue response has no task id", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -173,9 +180,7 @@ describe("POST /api/generate", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(SONG_URL);
-    expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
+    expectWavespeedDispatch(url, init, SONG_URL);
     expectLockedPayload(JSON.parse(String(init.body)) as Record<string, unknown>, {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
@@ -184,7 +189,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns pending with the task id and does not hold the request open", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async (_url: string) => jsonResponse({ data: { id: "task-9" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -198,17 +202,16 @@ describe("POST /api/generate", () => {
       requestId: "task-9",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [pendingUrl, pendingInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(pendingUrl, pendingInit, SONG_URL);
+    const body = JSON.parse(String(pendingInit.body)) as Record<string, unknown>;
     expectLockedPayload(body, {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
       title: "Heavy Sky",
       output_format: "wav",
     });
-    expect(String((fetchMock.mock.calls[0] as [string, RequestInit?])[0])).not.toContain("/v1/mureka");
+    expect(pendingUrl).not.toContain("/v1/mureka");
     expect(readTrackJob("task-9")).toMatchObject({
       status: "processing",
       title: "Heavy Sky",
@@ -218,7 +221,6 @@ describe("POST /api/generate", () => {
   });
 
   it("accepts a code 200 envelope and a body that already has an id", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ code: 200, data: { id: "task-code" } }))
@@ -233,6 +235,8 @@ describe("POST /api/generate", () => {
       taskId: "task-code",
       requestId: "task-code",
     });
+    const [codedUrl, codedInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(codedUrl, codedInit, SONG_URL);
 
     const bare = await POST(generateRequest({ gender: "female" }));
     expect(bare.status).toBe(200);
@@ -242,16 +246,14 @@ describe("POST /api/generate", () => {
       taskId: "task-bare",
       requestId: "task-bare",
     });
-    const bareBody = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [bareUrl, bareInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(bareUrl, bareInit, SONG_URL);
+    const bareBody = JSON.parse(String(bareInit.body)) as Record<string, unknown>;
     expect(bareBody.gender).toBe("female");
     expect(bareBody).not.toHaveProperty("webhook");
   });
 
   it("marks the job failed when the backoff poll reaches 60 minutes", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     vi.useFakeTimers();
     vi.spyOn(AbortSignal, "timeout").mockImplementation(() => new AbortController().signal);
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -259,7 +261,10 @@ describe("POST /api/generate", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
-        if (url === SONG_URL) return jsonResponse({ code: 200, data: { id: "task-4" } });
+        if (url === SONG_URL) {
+          expectWavespeedDispatch(url, init as RequestInit, SONG_URL);
+          return jsonResponse({ code: 200, data: { id: "task-4" } });
+        }
         expect(url).toBe("https://api.wavespeed.ai/api/v3/predictions/task-4/result");
         expect(url).not.toContain("/v1/mureka");
         expect(init?.method).toBe("GET");
@@ -282,7 +287,6 @@ describe("POST /api/generate", () => {
   }, 20_000);
 
   it("returns 500 with the thrown message", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -300,7 +304,6 @@ describe("POST /api/generate", () => {
   });
 
   it("sends lyrics, wav output, and prompt or gender only when set", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -314,7 +317,7 @@ describe("POST /api/generate", () => {
     );
     expect(vocal.status).toBe(502);
     const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(songUrl).toBe(SONG_URL);
+    expectWavespeedDispatch(songUrl, songInit, SONG_URL);
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
     expectLockedPayload(songBody, {
       prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
@@ -347,7 +350,7 @@ describe("POST /api/generate", () => {
     );
     expect(withVoice.status).toBe(502);
     const [voicedUrl, voicedInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(voicedUrl).toBe(SONG_URL);
+    expectWavespeedDispatch(voicedUrl, voicedInit, SONG_URL);
     const voicedBody = JSON.parse(String(voicedInit.body)) as Record<string, unknown>;
     expectLockedPayload(voicedBody, {
       prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
@@ -390,7 +393,7 @@ describe("POST /api/generate", () => {
     );
     expect(instrumental.status).toBe(502);
     const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(bgmUrl).toBe(BGM_URL);
+    expectWavespeedDispatch(bgmUrl, bgmInit, BGM_URL);
     const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
     expectLockedPayload(bgmBody, {
       prompt: "Heavy southern rock, 74 BPM",
@@ -406,16 +409,14 @@ describe("POST /api/generate", () => {
   });
 
   it("never sends reference_id or vocal_id on generate-song or generate-bgm", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
     const vocal = await POST(generateRequest({ gender: "male", referenceId: "  ref-swamp  " }));
     expect(vocal.status).toBe(502);
-    const vocalBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [vocalUrl, vocalInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(vocalUrl, vocalInit, SONG_URL);
+    const vocalBody = JSON.parse(String(vocalInit.body)) as Record<string, unknown>;
     expectLockedPayload(vocalBody, {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
@@ -433,10 +434,9 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(withVoice.status).toBe(502);
-    const voicedBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [voicedUrl, voicedInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(voicedUrl, voicedInit, SONG_URL);
+    const voicedBody = JSON.parse(String(voicedInit.body)) as Record<string, unknown>;
     expectLockedPayload(voicedBody, {
       prompt: `${FEMALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
@@ -457,10 +457,9 @@ describe("POST /api/generate", () => {
       }),
     );
     expect(instrumental.status).toBe(502);
-    const bgmBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(bgmUrl, bgmInit, BGM_URL);
+    const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
     expectLockedPayload(bgmBody, {
       prompt: "Heavy southern rock, 74 BPM",
       output_format: "wav",
@@ -481,7 +480,6 @@ describe("POST /api/generate", () => {
   });
 
   it("sends Male (m) as male and leads the prompt with baritone delivery", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: {} }));
     vi.stubGlobal("fetch", fetchMock);
     const prompt = "Atmospheric downtempo soul, Rhodes piano, 75 BPM";
@@ -575,7 +573,6 @@ describe("POST /api/generate", () => {
   });
 
   it("aborts a blank vocal or instrumental request before fetch", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const lyricsRequired = { error: "Generation blocked: Lyrics are required." };
@@ -602,7 +599,6 @@ describe("POST /api/generate", () => {
   });
 
   it("accepts stylePrompt and lyricsText aliases and never sends an empty prompt", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "task-alias" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -619,7 +615,7 @@ describe("POST /api/generate", () => {
     );
     expect(aliased.status).toBe(200);
     const [aliasUrl, aliasInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(aliasUrl).toBe(SONG_URL);
+    expectWavespeedDispatch(aliasUrl, aliasInit, SONG_URL);
     expect(aliasUrl).not.toContain("/v1/mureka");
     const aliasBody = JSON.parse(String(aliasInit.body)) as Record<string, unknown>;
     expect(aliasBody.prompt).toContain("Close piano, 80 BPM");
@@ -645,7 +641,7 @@ describe("POST /api/generate", () => {
     );
     expect(lyricsOnly.status).toBe(200);
     const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(songUrl).toBe("https://api.wavespeed.ai/api/v3/mureka-ai/mureka-v9.5/generate-song");
+    expectWavespeedDispatch(songUrl, songInit, SONG_URL);
     expect(songUrl).not.toContain("/v1/mureka");
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
     expect(songBody).not.toHaveProperty("prompt");
@@ -677,7 +673,6 @@ describe("POST /api/generate", () => {
   });
 
   it("does not call generate-song without lyrics and ignores duration and seed", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async (url: string) => {
       if (url === BGM_URL) return jsonResponse({ data: { id: "task-bgm" } });
       return jsonResponse({ data: {} });
@@ -706,11 +701,11 @@ describe("POST /api/generate", () => {
     });
     expect(body).not.toHaveProperty("duration");
     expect(body).not.toHaveProperty("seed");
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(SONG_URL);
+    const [keptUrl, keptInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(keptUrl, keptInit, SONG_URL);
   });
 
   it("logs the completed task and downloads output.audio_url before the job is ready", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const logs: string[] = [];
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map((part) => String(part)).join(" "));
@@ -777,7 +772,6 @@ describe("POST /api/generate", () => {
   }
 
   it("commits a vaulted_tracks row when the completed job has a userId", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     const logs: string[] = [];
@@ -835,7 +829,6 @@ describe("POST /api/generate", () => {
   });
 
   it("does not commit a vault row or log success when userId is empty", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     const logs: string[] = [];
@@ -889,7 +882,6 @@ describe("POST /api/generate", () => {
   });
 
   it("routes instrumental masters to generate-bgm without lyrics or title", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async (url: string) => {
       if (url === BGM_URL) return jsonResponse({ data: { id: "task-bgm" } });
       return jsonResponse({ data: {} });
@@ -911,7 +903,7 @@ describe("POST /api/generate", () => {
     );
     expect(instrumental.status).toBe(200);
     const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(bgmUrl).toBe(BGM_URL);
+    expectWavespeedDispatch(bgmUrl, bgmInit, BGM_URL);
     expect(bgmUrl).not.toContain("/v1/mureka");
     expectLockedPayload(JSON.parse(String(bgmInit.body)) as Record<string, unknown>, {
       prompt: "Heavy southern rock, 74 BPM",
@@ -924,7 +916,6 @@ describe("POST /api/generate", () => {
   });
 
   it("sends vocal lyrics to mureka-v9.5 generate-song and instrumentals to generate-bgm", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async (url: string) => {
       if (url === SONG_URL) return jsonResponse({ data: { id: "task-song-split" } });
       if (url === BGM_URL) return jsonResponse({ data: { id: "task-bgm-split" } });
@@ -951,7 +942,7 @@ describe("POST /api/generate", () => {
     expect(vocal.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(songUrl).toBe(SONG_URL);
+    expectWavespeedDispatch(songUrl, songInit, SONG_URL);
     const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
     expectLockedPayload(songBody, {
       prompt: `${MALE_VOCAL_LEAD}dry vocal, 90 BPM`,
@@ -984,7 +975,7 @@ describe("POST /api/generate", () => {
     expect(instrumental.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(bgmUrl).toBe(BGM_URL);
+    expectWavespeedDispatch(bgmUrl, bgmInit, BGM_URL);
     const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
     expectLockedPayload(bgmBody, {
       prompt: "Heavy southern rock, 74 BPM",
@@ -997,7 +988,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 402 when the balance is 0 or the balance row is missing and does not call upstream", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "should-not-run" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1017,7 +1007,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 402 when the conditional debit matches no row", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     balanceMaybeSingleMock.mockResolvedValue({ data: { balance: 1 }, error: null });
@@ -1035,7 +1024,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 500 when the token deduction write fails and does not dispatch", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     spendRpcMock.mockResolvedValue({ data: null, error: { message: "ledger write failed" } });
@@ -1049,7 +1037,6 @@ describe("POST /api/generate", () => {
   });
 
   it("debits 1 hybrid token for the session user and still sends the locked vocal payload", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const order: string[] = [];
     balanceMaybeSingleMock.mockImplementation(async () => {
       order.push("read");
@@ -1083,10 +1070,9 @@ describe("POST /api/generate", () => {
     expect(order[0]).toBe("read");
     expect(order[1]).toBe("debit");
     expect(order[2]).toBe(SONG_URL);
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as Record<
-      string,
-      unknown
-    >;
+    const [paidUrl, paidInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expectWavespeedDispatch(paidUrl, paidInit, SONG_URL);
+    const body = JSON.parse(String(paidInit.body)) as Record<string, unknown>;
     expectLockedPayload(body, {
       prompt: `${MALE_VOCAL_LEAD}${DEFAULT_STYLE}`,
       lyrics: "[Verse]\nline\n[inst-short]",
@@ -1103,7 +1089,6 @@ describe("POST /api/generate", () => {
   });
 
   it("refunds 1 token when the submit throws after the debit and still returns the queue error", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const errors: string[] = [];
     vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
       errors.push(args.map((part) => String(part)).join(" "));
@@ -1137,7 +1122,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 400 for empty lyrics and does not debit", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1152,7 +1136,6 @@ describe("POST /api/generate", () => {
   });
 
   it("returns 401 without a session and does not debit", async () => {
-    process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
