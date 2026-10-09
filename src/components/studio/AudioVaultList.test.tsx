@@ -115,6 +115,9 @@ describe("AudioVaultList", () => {
 
     expect(await screen.findByText(LOCKED_COPY)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "\u2212 Minimize Vault" })).toBeInTheDocument();
+    expect(screen.queryByText("0 Masters")).not.toBeInTheDocument();
+    expect(screen.queryByText("1 Master")).not.toBeInTheDocument();
     expect(screen.queryByText("Loading your vault...")).not.toBeInTheDocument();
     expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
     expect(screen.queryByText("Feel It in the Rain")).not.toBeInTheDocument();
@@ -161,10 +164,11 @@ describe("AudioVaultList", () => {
     render(<AudioVaultList revision={3} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Track actions" }));
-    expect(screen.getByRole("menuitem", { name: "Use as Reference Track" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Track Injection (Swap)" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Download Master" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Track options" }));
+    expect(screen.queryByRole("menuitem", { name: "Use as Reference Track" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Track Injection (Swap)" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download MP3" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download WAV" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete from Vault" })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Delete from Vault" }));
 
@@ -196,7 +200,7 @@ describe("AudioVaultList", () => {
     render(<AudioVaultList revision={4} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("button", { name: "Track options" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete from Vault" }));
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -232,8 +236,6 @@ describe("AudioVaultList", () => {
     const user = userEvent.setup();
     const mp3 = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.mp3";
     const wav = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.wav";
-    const onUseAsReference = vi.fn();
-    const onTrackInjection = vi.fn();
     mockSignedInVault([
       {
         id: "vault-42",
@@ -243,9 +245,7 @@ describe("AudioVaultList", () => {
       },
     ]);
 
-    const { container } = render(
-      <AudioVaultList revision={6} onUseAsReference={onUseAsReference} onTrackInjection={onTrackInjection} />,
-    );
+    const { container } = render(<AudioVaultList revision={6} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
 
     const audio = container.querySelector("audio");
@@ -255,19 +255,29 @@ describe("AudioVaultList", () => {
     expect(audio?.className).toContain("h-8");
     expect(audio).toHaveAttribute("src", mp3);
 
-    await user.click(screen.getByRole("button", { name: "Track actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
-    expect(onUseAsReference).toHaveBeenCalledWith({ url: mp3, title: "Glass Harbor" });
+    const anchors: HTMLAnchorElement[] = [];
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const element = realCreate(tagName);
+      if (tagName.toLowerCase() === "a") {
+        element.click = () => undefined;
+        anchors.push(element as HTMLAnchorElement);
+      }
+      return element;
+    });
 
-    await user.click(screen.getByRole("button", { name: "Track actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Track Injection (Swap)" }));
-    expect(onTrackInjection).toHaveBeenCalledWith({ url: mp3, title: "Glass Harbor" });
+    await user.click(screen.getByRole("button", { name: "Track options" }));
+    expect(screen.queryByRole("menuitem", { name: "Use as Reference Track" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Track Injection (Swap)" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Download MP3" }));
+    expect(anchors[0]?.getAttribute("href")).toContain("download=");
+    expect(anchors[0]?.getAttribute("href")).toContain(encodeURIComponent("Glass_Harbor.mp3"));
+    expect(anchors[0]?.getAttribute("href")).toContain(mp3);
   });
 
-  it("uses the https audio-vault wav when the mp3 is not an audio-vault url", async () => {
+  it("uses the https audio-vault wav when the mp3 is not an https url", async () => {
     const user = userEvent.setup();
     const wav = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.wav";
-    const onUseAsReference = vi.fn();
     mockSignedInVault([
       {
         id: "vault-42",
@@ -277,14 +287,85 @@ describe("AudioVaultList", () => {
       },
     ]);
 
-    const { container } = render(<AudioVaultList revision={7} onUseAsReference={onUseAsReference} />);
+    const { container } = render(<AudioVaultList revision={7} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
     expect(container.querySelector("audio")).toHaveAttribute("src", wav);
 
-    await user.click(screen.getByRole("button", { name: "Track actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
-    expect(onUseAsReference).toHaveBeenCalledWith({ url: wav, title: "Glass Harbor" });
-    expect(onUseAsReference.mock.calls[0]?.[0].url).not.toMatch(/^http:/);
-    expect(onUseAsReference.mock.calls[0]?.[0].url).not.toMatch(/^blob:/);
+    const anchors: HTMLAnchorElement[] = [];
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const element = realCreate(tagName);
+      if (tagName.toLowerCase() === "a") {
+        element.click = () => undefined;
+        anchors.push(element as HTMLAnchorElement);
+      }
+      return element;
+    });
+
+    await user.click(screen.getByRole("button", { name: "Track options" }));
+    await user.click(screen.getByRole("menuitem", { name: "Download MP3" }));
+    expect(anchors[0]?.getAttribute("href")).toBe(`${wav}?download=${encodeURIComponent("Glass_Harbor.mp3")}`);
+    expect(anchors[0]?.getAttribute("href")).not.toMatch(/^http:/);
+  });
+
+  it("alerts instead of downloading a fake wav when mp3 and wav urls match", async () => {
+    const user = userEvent.setup();
+    const same = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.mp3";
+    mockSignedInVault([
+      {
+        id: "vault-42",
+        title: "Glass Harbor",
+        mp3_url: same,
+        wav_url: same,
+      },
+    ]);
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const anchors: HTMLAnchorElement[] = [];
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const element = realCreate(tagName);
+      if (tagName.toLowerCase() === "a") {
+        element.click = () => undefined;
+        anchors.push(element as HTMLAnchorElement);
+      }
+      return element;
+    });
+
+    render(<AudioVaultList revision={8} />);
+    expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Track options" }));
+    await user.click(screen.getByRole("menuitem", { name: "Download WAV" }));
+
+    expect(alertSpy).toHaveBeenCalledWith("WAV master is currently processing or unavailable for this take.");
+    expect(anchors).toHaveLength(0);
+  });
+
+  it("hides the track list when minimized and shows it again when expanded", async () => {
+    const user = userEvent.setup();
+    mockSignedInVault([
+      {
+        id: "vault-42",
+        title: "Glass Harbor",
+        mp3_url: null,
+        wav_url: null,
+      },
+    ]);
+
+    const { container } = render(<AudioVaultList revision={9} />);
+    expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
+    expect(screen.getByText("1 Master")).toBeInTheDocument();
+    const scroller = container.querySelector(".max-h-\\[380px\\]");
+    expect(scroller?.className).toContain("overflow-y-auto");
+    expect(scroller).toHaveTextContent("Glass Harbor");
+
+    await user.click(screen.getByRole("button", { name: "\u2212 Minimize Vault" }));
+    expect(screen.queryByText("Glass Harbor")).not.toBeInTheDocument();
+    expect(container.querySelector(".max-h-\\[380px\\]")).toBeNull();
+    expect(screen.getByRole("button", { name: "+ Expand Vault" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "+ Expand Vault" }));
+    expect(screen.getByText("Glass Harbor")).toBeInTheDocument();
+    expect(container.querySelector(".max-h-\\[380px\\]")?.className).toContain("overflow-y-auto");
   });
 });

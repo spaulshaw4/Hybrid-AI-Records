@@ -22,8 +22,6 @@ type VaultCard = {
   wavUrl: string | null;
   mp3Url: string | null;
   streamUrl: string | null;
-  referenceUrl: string | null;
-  downloadUrl: string | null;
   createdAt: string | null;
 };
 
@@ -35,8 +33,6 @@ export type VaultTrackReference = {
 type Props = {
   revision: number;
   pending?: VaultPendingRow[];
-  onUseAsReference?: (track: VaultTrackReference) => void;
-  onTrackInjection?: (track: VaultTrackReference) => void;
 };
 
 type VaultPage = PromiseLike<{
@@ -106,11 +102,13 @@ function cardFromRow(row: Record<string, unknown>): VaultCard | null {
     prompt: typeof row.prompt === "string" ? row.prompt : typeof row.genre === "string" ? row.genre : "",
     wavUrl,
     mp3Url,
-    referenceUrl,
-    downloadUrl: mp3Https,
     streamUrl: referenceUrl || wavHttps || mp3Https,
     createdAt: typeof row.created_at === "string" ? row.created_at : null,
   };
+}
+
+function masterCountLabel(count: number): string {
+  return count === 1 ? "1 Master" : `${count} Masters`;
 }
 
 function barsFor(id: string): number[] {
@@ -122,10 +120,11 @@ function barsFor(id: string): number[] {
   });
 }
 
-export function AudioVaultList({ revision, pending = [], onUseAsReference, onTrackInjection }: Props) {
+export function AudioVaultList({ revision, pending = [] }: Props) {
   const [rows, setRows] = useState<VaultCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const switched = useRef(new Set<string>());
@@ -214,10 +213,37 @@ export function AudioVaultList({ revision, pending = [], onUseAsReference, onTra
   };
 
   const visiblePending = pending.filter((row) => !rows.some((item) => item.id === row.id));
+  const showCount = !loading && !locked;
+
+  const header = (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Audio Vault</h3>
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>
+          Permanent dual delivery. Ready WAV and MP3 masters stay in this list.
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {showCount ? (
+          <span className="rounded-full border border-white/15 px-2 py-0.5 font-mono text-[10px] text-zinc-300">
+            {masterCountLabel(rows.length)}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setMinimized((value) => !value)}
+          className="rounded-lg border border-white/10 px-2 py-1 text-xs text-zinc-100"
+        >
+          {minimized ? "+ Expand Vault" : "\u2212 Minimize Vault"}
+        </button>
+      </div>
+    </div>
+  );
 
   if (!loading && locked) {
     return (
       <div>
+        {header}
         <Lock aria-hidden="true" size={18} color="#fda4af" style={{ marginTop: 12 }} />
         <p style={{ margin: "8px 0 0", fontSize: 13, color: "#94a3b8", lineHeight: 1.45 }}>{LOCKED_COPY}</p>
         <button
@@ -243,6 +269,9 @@ export function AudioVaultList({ revision, pending = [], onUseAsReference, onTra
 
   return (
     <div>
+      {header}
+      {minimized ? null : (
+      <div className="max-h-[380px] overflow-y-auto">
       {loading ? <p style={{ margin: "12px 0 0", fontSize: 13, color: "#94a3b8" }}>Loading your vault...</p> : null}
       {error ? <p style={{ margin: "12px 0 0", fontSize: 13, color: "#fda4af" }}>{error}</p> : null}
       {!loading && rows.length === 0 && visiblePending.length === 0 ? (
@@ -269,16 +298,8 @@ export function AudioVaultList({ revision, pending = [], onUseAsReference, onTra
               </div>
               <TrackActionsMenu
                 title={row.title}
-                mp3Url={row.downloadUrl}
-                referenceUrl={row.referenceUrl}
-                onUseAsReference={() => {
-                  if (!row.referenceUrl) return;
-                  onUseAsReference?.({ url: row.referenceUrl, title: row.title });
-                }}
-                onTrackInjection={() => {
-                  if (!row.referenceUrl) return;
-                  onTrackInjection?.({ url: row.referenceUrl, title: row.title });
-                }}
+                mp3Url={row.mp3Url}
+                wavUrl={row.wavUrl}
                 onDelete={() => void removeRow(row.id)}
               />
             </div>
@@ -315,6 +336,8 @@ export function AudioVaultList({ revision, pending = [], onUseAsReference, onTra
           </li>
         ))}
       </ul>
+      </div>
+      )}
     </div>
   );
 }

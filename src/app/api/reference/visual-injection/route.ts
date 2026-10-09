@@ -1,7 +1,7 @@
 import { resolveStudioSession } from "@/lib/studio-request-auth.server";
 
-/** Official model inputs are prompt, images, and videos. There is no image field. */
-const PREDICT_URL = "https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions";
+/** Official image input is images. There is no image field. */
+const PREDICT_URL = "https://api.replicate.com/v1/models/google/gemini-3.5-flash/predictions";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const VISUAL_PROMPT = `Analyze this image's mood, color palette, and narrative.

@@ -230,7 +230,6 @@ function readPromptRecords(): SavedPromptItem[] {
 
 export function EnginePage() {
   const [activeTab, setActiveTab] = useState<"custom" | "easy" | "vocals">("easy");
-  const [isInstrumental, setIsInstrumental] = useState(false);
   const [lyrics, setLyrics] = useState("");
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
@@ -268,10 +267,11 @@ export function EnginePage() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isVibeEnhancing, setIsVibeEnhancing] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
+  const [lyricsAssistCooling, setLyricsAssistCooling] = useState(false);
+  const lyricsCooldownTimer = useRef<number | null>(null);
   const [trackLength, setTrackLength] = useState(180);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const pageRef = useRef<HTMLElement>(null);
-  const generatorRef = useRef<HTMLDivElement>(null);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
   const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
   const [vaultTracks, setVaultTracks] = useState<VaultTrack[]>([]);
@@ -279,6 +279,12 @@ export function EnginePage() {
 
   useEffect(() => {
     setPromptRecords(readPromptRecords());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (lyricsCooldownTimer.current !== null) window.clearTimeout(lyricsCooldownTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -449,7 +455,7 @@ export function EnginePage() {
   };
 
   const handleLyricsAssist = async () => {
-    if (isLyricsLoading) return;
+    if (isLyricsLoading || lyricsAssistCooling) return;
     const styleText = prompt;
     const draft = lyrics;
     const hasDraft = draft.trim().length > 0;
@@ -486,13 +492,18 @@ export function EnginePage() {
       if (draft.trim()) setLyrics(draft);
     } finally {
       setIsLyricsLoading(false);
+      setLyricsAssistCooling(true);
+      if (lyricsCooldownTimer.current !== null) window.clearTimeout(lyricsCooldownTimer.current);
+      lyricsCooldownTimer.current = window.setTimeout(() => {
+        lyricsCooldownTimer.current = null;
+        setLyricsAssistCooling(false);
+      }, 2000);
     }
   };
 
   const handleApplyTemplate = (tmpl: TrackTemplate) => {
     setPrompt(tmpl.prompt);
     setGender(tmpl.recommendedGender);
-    setIsInstrumental(tmpl.isInstrumentalDefault);
     setGenre(tmpl.category);
   };
 
@@ -625,8 +636,7 @@ export function EnginePage() {
     const lyricValue = (lyrics ?? "").trim();
     const duration = trackLength || 180;
     const songTitle = title.trim() || "Feel It in the Rain";
-    const onInstrumentalTab = activeTab === "easy";
-    const dispatchInstrumental = onInstrumentalTab || isInstrumental;
+    const dispatchInstrumental = activeTab === "easy";
     if (!dispatchInstrumental && !styleValue && !lyricValue) {
       console.error("HALT: Attempted to submit with empty prompt and lyrics.");
       alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
@@ -735,7 +745,7 @@ export function EnginePage() {
           stylePrompt: styleValue,
           lyrics: lyricValue,
           lyricsText: lyricValue,
-          ...(onInstrumentalTab ? {} : { duration }),
+          ...(dispatchInstrumental ? {} : { duration }),
           title: songTitle,
           gender,
           isInstrumental: dispatchInstrumental,
@@ -792,36 +802,18 @@ export function EnginePage() {
     }
   };
 
-  const customCreateDisabled =
-    isGenerating || (!prompt.trim() && !lyrics.trim()) || (isInstrumental && !prompt.trim());
+  const customCreateDisabled = isGenerating || (!prompt.trim() && !lyrics.trim());
   const styleAssistLabel = prompt.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
   const lyricsAssistLabel = isLyricsLoading
     ? lyrics.trim()
       ? "Polishing..."
       : "Drafting..."
     : lyrics.trim()
-      ? "Format & Polish"
+      ? "\u2726 Format & Polish"
       : "Studio Ghostwriter";
+  const lyricsAssistDisabled = isLyricsLoading || lyricsAssistCooling;
 
-  const scrollToGenerator = () => {
-    const node = generatorRef.current;
-    if (node && typeof node.scrollIntoView === "function") {
-      node.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
-  const useVaultTrackAsReference = (track: VaultTrackReference) => {
-    const url = track.url.trim();
-    if (!isAudioVaultHttpsUrl(url)) return;
-    setAttachedReference({ kind: "vault", url, title: track.title.trim() || "Untitled Master" });
-    scrollToGenerator();
-  };
-
-  const injectVaultTrack = (track: VaultTrackReference) => {
-    setActiveTab("vocals");
-    useVaultTrackAsReference(track);
-  };
-
+  const vocalGenderEnabled = activeTab !== "easy";
   const vocalLockTitle =
     activeTab === "easy"
       ? "Vocals disabled in Instrumental mode"
@@ -899,7 +891,7 @@ export function EnginePage() {
               className="shrink-0 whitespace-nowrap"
               style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
             >
-              Without Vocals
+              Vocals with AI
             </button>
             <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} className="shrink-0 whitespace-nowrap" style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
               With Vocals
@@ -948,7 +940,7 @@ export function EnginePage() {
           </div>
         </div>
 
-        <div ref={generatorRef} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
           {attachedReference ? (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950/50 border border-red-500/60 text-xs text-red-200">
               <span
@@ -985,14 +977,14 @@ export function EnginePage() {
                 className={`h-2 w-2 shrink-0 rounded-full bg-red-500 ${isInjectingVisual ? "animate-ping" : "animate-pulse"}`}
                 aria-hidden="true"
               />
-              <span className="font-mono truncate max-w-[130px]">
-                {isInjectingVisual ? "Reading visual..." : visualName}
+              <span className="font-mono tracking-wide font-medium truncate max-w-[130px]">
+                {isInjectingVisual ? "Processing Visual..." : "Visual Injected"}
               </span>
               {isInjectingVisual ? null : (
                 <button
                   type="button"
-                  title="Remove visual"
-                  aria-label="Remove visual"
+                  title="Remove visual reference"
+                  aria-label="Remove visual reference"
                   onClick={() => setVisualName(null)}
                   className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
                 >
@@ -1209,7 +1201,7 @@ export function EnginePage() {
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-              <VocalGenderCard vocalsEnabled={false} gender={gender} onChange={setGender} />
+              <VocalGenderCard vocalsEnabled={vocalGenderEnabled} gender={gender} onChange={setGender} />
               <div style={cardStyle}>
                 <DurationSlider maxSeconds={360} value={trackLength} onChange={setTrackLength} />
               </div>
@@ -1239,52 +1231,37 @@ export function EnginePage() {
             </div>
             <div style={cardStyle}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{isInstrumental ? "Lyrics disabled" : "Lyrics & Structure"}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  {isInstrumental ? null : (
-                    <button
-                      type="button"
-                      disabled={isLyricsLoading}
-                      onClick={() => void handleLyricsAssist()}
-                      className={badgeActionClass}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                      {lyricsAssistLabel}
-                    </button>
-                  )}
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#94a3b8", cursor: "pointer" }}>
-                    Instrumental
-                    <input
-                      type="checkbox"
-                      checked={isInstrumental}
-                      onChange={(event) => setIsInstrumental(event.target.checked)}
-                      style={{ accentColor: "#e11d48", width: 16, height: 16, cursor: "pointer" }}
-                    />
-                  </label>
-                </div>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Lyrics & Structure</span>
+                <button
+                  type="button"
+                  disabled={lyricsAssistDisabled}
+                  aria-label={lyrics.trim() ? "Format and polish lyrics" : undefined}
+                  onClick={() => void handleLyricsAssist()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-950/30 text-xs font-medium text-red-200 hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  {lyricsAssistLabel}
+                </button>
               </div>
-              {isInstrumental ? null : (
-                <>
-                  <textarea
-                    aria-label="Lyrics"
-                    value={lyrics}
-                    onChange={(event) => setLyrics(event.target.value)}
-                    placeholder="Enter lyrics..."
-                    rows={5}
-                    style={fieldStyle}
-                  />
-                  <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
-                    <button
-                      type="button"
-                      onClick={() => setLyrics("")}
-                      aria-label="Clear lyrics"
-                      style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </>
-              )}
+              <textarea
+                aria-label="Lyrics"
+                value={lyrics}
+                onChange={(event) => setLyrics(event.target.value)}
+                placeholder="Enter lyrics..."
+                rows={5}
+                style={fieldStyle}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setLyrics("")}
+                  aria-label="Clear lyrics"
+                  title="Clear lyrics"
+                  style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
 
             <div style={cardStyle}>
@@ -1348,7 +1325,7 @@ export function EnginePage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-              <VocalGenderCard vocalsEnabled={false} gender={gender} onChange={setGender} />
+              <VocalGenderCard vocalsEnabled={vocalGenderEnabled} gender={gender} onChange={setGender} />
               <div style={{ ...cardStyle, flex: "1 1 280px" }}>
                 <DurationSlider value={trackLength} onChange={setTrackLength} />
               </div>
@@ -1366,17 +1343,11 @@ export function EnginePage() {
         </PatriotGlassStudio>
 
         <section style={{ ...cardStyle, marginTop: 24 }} aria-label="Your Audio Vault">
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Audio Vault</h3>
-          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>
-            Permanent dual delivery. Ready WAV and MP3 masters stay in this list.
-          </p>
           <AudioVaultList
             revision={vaultRevision}
             pending={vaultTracks
               .filter((row) => row.status === "Rendering" || row.status === "Failed")
               .map((row) => ({ id: row.id, title: row.title, status: row.status, genre: row.genre }))}
-            onUseAsReference={useVaultTrackAsReference}
-            onTrackInjection={injectVaultTrack}
           />
         </section>
 

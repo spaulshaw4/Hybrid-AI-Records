@@ -138,16 +138,15 @@ describe("POST /api/reference/audio-to-prompt", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions");
+    expect(url).toBe("https://api.replicate.com/v1/models/google/gemini-3.5-flash/predictions");
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
     expect(headers.get("prefer")).toBe("wait");
-    const sent = JSON.parse(String(init.body)) as { input: { prompt: string; videos: string[]; audio?: string }; userId?: string };
+    const sent = JSON.parse(String(init.body)) as { input: { prompt: string; audio: string; videos?: string[] }; userId?: string };
     expect(sent.userId).toBeUndefined();
     expect(sent.input.prompt).toBe(ANALYSIS_PROMPT);
-    expect(sent.input.audio).toBeUndefined();
-    expect(sent.input.videos).toHaveLength(1);
-    expect(sent.input.videos[0].startsWith("data:audio/wav;base64,")).toBe(true);
+    expect(sent.input.videos).toBeUndefined();
+    expect(sent.input.audio.startsWith("data:audio/wav;base64,")).toBe(true);
     expect(console.error).not.toHaveBeenCalled();
   });
 
@@ -162,9 +161,9 @@ describe("POST /api/reference/audio-to-prompt", () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "failed", detail: TOKEN }), { status: 500 }));
     const upstream = await POST(analyzeRequest(id3Bytes(), "Bearer session-token", "clip.mp3", "audio", "audio/mpeg"));
     const sent = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
-      input: { videos: string[] };
+      input: { audio: string };
     };
-    expect(sent.input.videos[0].startsWith("data:audio/mpeg;base64,")).toBe(true);
+    expect(sent.input.audio.startsWith("data:audio/mpeg;base64,")).toBe(true);
     expect(upstream.status).toBe(500);
     const upstreamBody = await upstream.json();
     expect(upstreamBody).toEqual({ error: "Failed to analyze audio" });

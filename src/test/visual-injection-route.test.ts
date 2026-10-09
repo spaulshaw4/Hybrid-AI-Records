@@ -152,7 +152,7 @@ describe("POST /api/reference/visual-injection", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions");
+    expect(url).toBe("https://api.replicate.com/v1/models/google/gemini-3.5-flash/predictions");
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
     expect(headers.get("prefer")).toBe("wait");

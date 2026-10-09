@@ -1,7 +1,7 @@
 import { resolveStudioSession } from "@/lib/studio-request-auth.server";
 
-/** Official model input has prompt, images, videos, and sampling controls. No audio field. */
-const PREDICT_URL = "https://api.replicate.com/v1/models/google/gemini-2.5-flash/predictions";
+/** Official model inputs include prompt, images, videos, and a single audio URI. */
+const PREDICT_URL = "https://api.replicate.com/v1/models/google/gemini-3.5-flash/predictions";
 const MAX_REFERENCE_BYTES = 50 * 1024 * 1024;
 
 const ANALYSIS_PROMPT =
@@ -41,7 +41,7 @@ function failed(): Response {
 /**
  * POST /api/reference/audio-to-prompt
  * Session bearer required. A form userId is ignored.
- * File input is mapped onto the model's videos URI field.
+ * File input is mapped onto the model's audio URI field.
  */
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -93,7 +93,7 @@ export async function POST(req: Request): Promise<Response> {
         body: JSON.stringify({
           input: {
             prompt: ANALYSIS_PROMPT,
-            videos: [dataUri],
+            audio: dataUri,
           },
         }),
       });

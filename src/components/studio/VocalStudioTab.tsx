@@ -132,7 +132,9 @@ export function VocalGenderCard({
           </span>
         </div>
         {vocalsEnabled ? null : (
-          <span className="text-[10px] text-zinc-500 font-mono uppercase">Off (Instrumental)</span>
+          <span className="shrink-0 whitespace-nowrap text-[10px] text-zinc-500 font-mono tracking-wider">
+            OFF (INSTRUMENTAL)
+          </span>
         )}
       </div>
       <div
@@ -142,6 +144,7 @@ export function VocalGenderCard({
       >
         <button
           type="button"
+          disabled={!vocalsEnabled}
           aria-pressed={gender === "female"}
           onClick={() => choose("female")}
           className={`w-full rounded-md px-3 py-2 text-xs font-bold ${tone(gender === "female")}`}
@@ -150,6 +153,7 @@ export function VocalGenderCard({
         </button>
         <button
           type="button"
+          disabled={!vocalsEnabled}
           aria-pressed={gender === "male"}
           onClick={() => choose("male")}
           className={`w-full rounded-md px-3 py-2 text-xs font-bold ${tone(gender === "male")}`}
