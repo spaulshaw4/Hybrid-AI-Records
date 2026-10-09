@@ -1,11 +1,18 @@
 import { resolveStudioSession } from "@/lib/studio-request-auth.server";
+import { vaultAdminClient } from "@/lib/vault-admin.server";
 
-/** Official model inputs include prompt, images, videos, and a single audio URI. */
+/** Official model inputs include prompt and a single audio URI. */
 const PREDICT_URL = "https://api.replicate.com/v1/models/google/gemini-3.5-flash/predictions";
 const MAX_REFERENCE_BYTES = 50 * 1024 * 1024;
+/** No temp-audio bucket is configured. Masters already live in audio-vault. */
+const AUDIO_BUCKET = "audio-vault";
 
-const ANALYSIS_PROMPT =
-  "You are an executive music producer for Hybrid AI Records. Analyze this audio recording and extract its musical DNA. Return ONLY a comma-separated list of: 1. Primary genre and subgenres 2. Key instruments (e.g. analog synth, heavy distorted bass, brass section) 3. Estimated tempo/rhythm feel (e.g. driving mid-tempo, 120 bpm) 4. Production mix aesthetic (e.g. tube saturation, wide stereo field, dry punchy drums) 5. Vocal profile if present (e.g. soaring rock tenor, soulful female alto) Keep the entire output under 150 characters, formatted strictly as plain text tags without bullet points or introductory commentary.";
+const ANALYSIS_PROMPT = `Listen to this master audio track closely.
+Extract its core acoustic and production DNA.
+Return ONLY valid JSON matching this schema:
+{
+  "tags": "BPM, key musical key, primary instrumentation, rhythmic groove, vocal texture (max 100 characters)"
+}`;
 
 function isWebmEbml(buffer: Buffer): boolean {
   return buffer.length >= 4 && buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
@@ -24,24 +31,64 @@ function isMpegAudio(buffer: Buffer): boolean {
   return buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
 }
 
-function tagsFromOutput(output: unknown): string {
-  if (typeof output === "string") return output.trim();
+function textFromOutput(output: unknown): string {
+  if (typeof output === "string") return output;
   if (!Array.isArray(output)) return "";
-  return output
-    .map((part) => (typeof part === "string" ? part : ""))
-    .join("")
-    .trim();
+  return output.map((part) => (typeof part === "string" ? part : "")).join("");
+}
+
+function stripJsonFence(raw: string): string {
+  const text = raw.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
+  return (fenced ? fenced[1] : text).trim();
+}
+
+function tagsFromOutput(output: unknown): string {
+  try {
+    const parsed: unknown = JSON.parse(stripJsonFence(textFromOutput(output)));
+    if (!parsed || typeof parsed !== "object") return "";
+    const tags = (parsed as { tags?: unknown }).tags;
+    return typeof tags === "string" ? tags.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function publicHttpsUrl(raw: string): string {
+  if (!raw) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "";
+  }
+  parsed.searchParams.delete("token");
+  parsed.search = parsed.searchParams.toString();
+  const url = parsed.toString();
+  if (parsed.protocol !== "https:" || url.includes("token=")) return "";
+  if (!url.includes("/audio-vault/references/")) return "";
+  return url;
+}
+
+/** Keep the session path, and force the extension from the byte sniff. */
+function storageObjectName(originalName: string, extension: "wav" | "mp3"): string {
+  const suffix = `.${extension}`;
+  const fallback = `reference${suffix}`;
+  const sanitized = (originalName.trim() || fallback).replace(/[^A-Za-z0-9._-]/g, "_");
+  if (sanitized.endsWith(suffix) && sanitized.length > suffix.length) return sanitized;
+  const stem = sanitized.replace(/\.[A-Za-z0-9]+$/i, "").replace(/\.+$/g, "");
+  return `${stem || "reference"}${suffix}`;
 }
 
 function failed(): Response {
-  console.error("[audio-to-prompt] analysis failed");
+  console.error("[audio-to-prompt] error");
   return Response.json({ error: "Failed to analyze audio" }, { status: 500 });
 }
 
 /**
  * POST /api/reference/audio-to-prompt
  * Session bearer required. A form userId is ignored.
- * File input is mapped onto the model's audio URI field.
+ * The sniffed bytes are stored in audio-vault and the public https URL is sent as audio.
  */
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -50,23 +97,26 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    let userId = "";
     try {
       const session = await resolveStudioSession(req);
-      if (!session.userId.trim()) return Response.json({ error: "Unauthorized" }, { status: 401 });
+      userId = session.userId.trim();
     } catch {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const formData = await req.formData();
-    const uploaded = formData.get("file") ?? formData.get("audio");
+    const uploaded = formData.get("file");
     if (!(uploaded instanceof Blob)) {
-      return Response.json({ error: "No audio file provided" }, { status: 400 });
+      return Response.json({ error: "Missing audio file" }, { status: 400 });
     }
     if (uploaded.size <= 0 || uploaded.size > MAX_REFERENCE_BYTES) {
       return Response.json({ error: "File empty or exceeds 50MB limit" }, { status: 400 });
     }
 
-    const uploadBytes = Buffer.from(await uploaded.arrayBuffer());
+    const arrayBuffer = await uploaded.arrayBuffer();
+    const uploadBytes = Buffer.from(arrayBuffer);
     if (uploadBytes.length <= 0 || uploadBytes.length > MAX_REFERENCE_BYTES) {
       return Response.json({ error: "File empty or exceeds 50MB limit" }, { status: 400 });
     }
@@ -77,9 +127,29 @@ export async function POST(req: Request): Promise<Response> {
     const token = process.env.REPLICATE_API_TOKEN?.trim() ?? "";
     if (!token) return failed();
 
-    const mime = isRiffWav(uploadBytes) ? "audio/wav" : "audio/mpeg";
-    const dataUri = `data:${mime};base64,${uploadBytes.toString("base64")}`;
-    const filename = uploaded instanceof File && uploaded.name.trim() ? uploaded.name.trim() : "reference.wav";
+    const wav = isRiffWav(uploadBytes);
+    const contentType = wav ? "audio/wav" : "audio/mpeg";
+    const extension = wav ? "wav" : "mp3";
+    const filename =
+      uploaded instanceof File && uploaded.name.trim() ? uploaded.name.trim() : `reference.${extension}`;
+    const storagePath = `references/${userId}/${Date.now()}-${storageObjectName(filename, extension)}`;
+
+    let admin: ReturnType<typeof vaultAdminClient>;
+    try {
+      admin = vaultAdminClient();
+    } catch {
+      return failed();
+    }
+
+    const { error: uploadError } = await admin.storage.from(AUDIO_BUCKET).upload(storagePath, uploadBytes, {
+      contentType,
+      upsert: true,
+    });
+    if (uploadError) return failed();
+
+    const { data } = admin.storage.from(AUDIO_BUCKET).getPublicUrl(storagePath);
+    const audioUrl = publicHttpsUrl(typeof data?.publicUrl === "string" ? data.publicUrl : "");
+    if (!audioUrl) return failed();
 
     let upstream: Response;
     try {
@@ -93,7 +163,7 @@ export async function POST(req: Request): Promise<Response> {
         body: JSON.stringify({
           input: {
             prompt: ANALYSIS_PROMPT,
-            audio: dataUri,
+            audio: audioUrl,
           },
         }),
       });

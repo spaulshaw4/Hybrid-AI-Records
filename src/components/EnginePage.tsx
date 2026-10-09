@@ -14,7 +14,13 @@ import { AudioVaultList, type VaultTrackReference } from "@/components/studio/Au
 import { DurationSlider } from "@/components/studio/DurationSlider";
 import { PatriotGlassStudio } from "@/components/studio/PatriotGlassStudio";
 import { StudioFooter } from "@/components/studio/StudioFooter";
-import { VocalGenderCard, VocalStudioTab, type VisualSongDraft, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
+import {
+  VocalGenderCard,
+  VocalStudioTab,
+  appendAcousticTags,
+  type VisualSongDraft,
+  type VocalStudioReference,
+} from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
@@ -573,7 +579,15 @@ export function EnginePage() {
         setErrorMessage("Could not read that reference.");
         return;
       }
-      setPrompt(tags);
+      setPrompt((current) => appendAcousticTags(current, tags));
+      setVisualSongDraft((current) => ({
+        revision: seq,
+        title: current?.title ?? "",
+        lyrics: current?.lyrics ?? "",
+        tags: appendAcousticTags(current?.tags ?? "", tags),
+        pass: "audio",
+        acousticTags: tags,
+      }));
     } catch {
       if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
     } finally {

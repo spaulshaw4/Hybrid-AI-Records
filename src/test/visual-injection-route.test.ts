@@ -55,7 +55,11 @@ function imageRequest(
   mime = "image/gif",
 ): Request {
   const form = new FormData();
-  if (bytes) form.append("file", new File([bytes], filename, { type: mime }));
+  if (bytes) {
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    form.append("file", new File([copy], filename, { type: mime }));
+  }
   form.append("userId", OTHER_USER);
   const headers = new Headers();
   if (authorization) headers.set("authorization", authorization);

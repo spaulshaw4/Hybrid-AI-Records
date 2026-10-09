@@ -5,7 +5,10 @@ const { createClientMock, fromMock, selectMock, orderMock, limitMock, eqMock, re
   const orderMock = vi.fn(() => ({ limit: limitMock }));
   const eqMock = vi.fn(() => ({ order: orderMock }));
   const selectMock = vi.fn(() => ({ order: orderMock, eq: eqMock }));
-  const fromMock = vi.fn(() => ({ select: selectMock }));
+  const fromMock = vi.fn((_table?: string): {
+    select: (...args: unknown[]) => unknown;
+    delete?: (...args: unknown[]) => unknown;
+  } => ({ select: selectMock }));
   const createClientMock = vi.fn((..._args: unknown[]) => ({ from: fromMock }));
   const resolveStudioSessionMock = vi.fn();
   return { createClientMock, fromMock, selectMock, orderMock, limitMock, eqMock, resolveStudioSessionMock };
@@ -292,7 +295,7 @@ describe("DELETE /api/vault/:id", () => {
       wav_url: `${SUPABASE_URL}/storage/v1/object/public/audio-vault/masters/shared.wav`,
       mp3_url: `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocals/${taskId}.mp3`,
     };
-    fromMock.mockImplementation((table: string) => {
+    fromMock.mockImplementation((table?: string) => {
       expect(table).toBe("vaulted_tracks");
       return {
         select: () => {

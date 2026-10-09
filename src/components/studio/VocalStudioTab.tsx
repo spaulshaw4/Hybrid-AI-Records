@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Sparkles } from "lucide-react";
 
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -22,7 +22,21 @@ export type VisualSongDraft = {
   title: string;
   lyrics: string;
   tags: string;
+  /** Audio passes append tags. Visual passes replace title, lyrics, and style. */
+  pass?: "audio";
+  acousticTags?: string;
 };
+
+/** Trim, drop one trailing comma, then join. Skip when the new tags already end the style. */
+export function appendAcousticTags(current: string, newTags: string): string {
+  const next = newTags.trim();
+  if (!next) return current;
+  const trimmed = current.trim();
+  if (!trimmed) return next;
+  const cleaned = trimmed.endsWith(",") ? trimmed.slice(0, -1).trimEnd() : trimmed;
+  if (cleaned.endsWith(next)) return cleaned;
+  return `${cleaned}, ${next}`;
+}
 
 const fieldClass =
   "w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500";
@@ -187,6 +201,7 @@ export function VocalStudioTab({
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
   const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
+  const draftSeeded = useRef(false);
 
   useEffect(() => {
     setPromptRecords(readPromptRecords());
@@ -194,9 +209,24 @@ export function VocalStudioTab({
 
   useEffect(() => {
     if (!songDraft) return;
+    if (songDraft.pass === "audio") {
+      const draft = songDraft;
+      setStyleText((current) => {
+        if (!current.trim()) return draft.tags;
+        if (!draft.acousticTags) return current;
+        return appendAcousticTags(current, draft.acousticTags);
+      });
+      if (!draftSeeded.current) {
+        setTitle((current) => (current.trim() ? current : draft.title));
+        setLyrics((current) => (current.trim() ? current : draft.lyrics));
+        draftSeeded.current = true;
+      }
+      return;
+    }
     setTitle(songDraft.title);
     setLyrics(songDraft.lyrics);
     setStyleText(songDraft.tags);
+    draftSeeded.current = true;
   }, [songDraft]);
 
   const submitDisabled = submitting || !lyrics.trim();

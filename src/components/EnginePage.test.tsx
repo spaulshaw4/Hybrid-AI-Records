@@ -947,6 +947,83 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
   });
+
+  it("appends audio tags after a visual fill and leaves title and lyrics", async () => {
+    const user = userEvent.setup();
+    const nextTitle = "Glass Harbor";
+    const visualTags = "amber rock, 96 bpm";
+    const nextLyrics = "[Verse 1]\nhello line";
+    const acousticTags = "dry punchy drums, 120 bpm";
+    const merged = `${visualTags}, ${acousticTags}`;
+    let audioPasses = 0;
+    let releaseSecond: (value: ReturnType<typeof jsonResult>) => void = () => {};
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/visual-injection")) {
+        return jsonResult({ success: true, title: nextTitle, tags: visualTags, lyrics: nextLyrics, filename: "cover.png" });
+      }
+      if (url.includes("/api/reference/audio-to-prompt")) {
+        audioPasses += 1;
+        if (audioPasses === 1) {
+          return jsonResult({ success: true, tags: acousticTags, filename: "Time Is Not My Friend.wav" });
+        }
+        return new Promise<ReturnType<typeof jsonResult>>((resolve) => {
+          releaseSecond = resolve;
+        });
+      }
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Visual Injection" }));
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const visualInput = document.getElementById("visual-injection-upload") as HTMLInputElement;
+    await user.upload(visualInput, new File([png], "cover.png", { type: "image/png" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle));
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(visualTags);
+
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const audioInput = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(audioInput, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged));
+    expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+    expect(screen.queryByText("Analyzing DNA...")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent(
+      "Time Is Not My Friend.wav",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove reference" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const again = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(again, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByText("Analyzing DNA...")).toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged);
+    releaseSecond(jsonResult({ success: true, tags: acousticTags, filename: "Time Is Not My Friend.wav" }));
+    await waitFor(() => expect(screen.queryByText("Analyzing DNA...")).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged);
+    expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+
+    await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(merged));
+    expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+  });
 });
 
 class FakeAudioContext {
