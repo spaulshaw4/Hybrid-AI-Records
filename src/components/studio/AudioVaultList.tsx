@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { isAudioVaultHttpsUrl } from "@/components/studio/CharacterModal";
 import { TrackActionsMenu } from "@/components/studio/TrackActionsMenu";
 import { openSiteSignIn } from "@/components/studio/UserAuthButton";
 
@@ -21,12 +22,21 @@ type VaultCard = {
   wavUrl: string | null;
   mp3Url: string | null;
   streamUrl: string | null;
+  referenceUrl: string | null;
+  downloadUrl: string | null;
   createdAt: string | null;
+};
+
+export type VaultTrackReference = {
+  url: string;
+  title: string;
 };
 
 type Props = {
   revision: number;
   pending?: VaultPendingRow[];
+  onUseAsReference?: (track: VaultTrackReference) => void;
+  onTrackInjection?: (track: VaultTrackReference) => void;
 };
 
 type VaultPage = PromiseLike<{
@@ -67,18 +77,38 @@ function sameResource(current: string, target: string): boolean {
   }
 }
 
+function httpsUrl(value: string | null): string | null {
+  const text = value?.trim() ?? "";
+  if (!text || !/^https:\/\//i.test(text)) return null;
+  return text;
+}
+
+/** mp3 when it is a non-empty https audio-vault URL; otherwise an https audio-vault wav. */
+function referenceAudioUrl(mp3Url: string | null, wavUrl: string | null): string | null {
+  const mp3 = httpsUrl(mp3Url);
+  if (mp3 && isAudioVaultHttpsUrl(mp3)) return mp3;
+  const wav = httpsUrl(wavUrl);
+  if (wav && isAudioVaultHttpsUrl(wav)) return wav;
+  return null;
+}
+
 function cardFromRow(row: Record<string, unknown>): VaultCard | null {
   const id = typeof row.id === "string" && row.id ? row.id : typeof row.task_id === "string" ? row.task_id : "";
   if (!id) return null;
   const mp3Url = publicAudioUrl(row.mp3_url);
   const wavUrl = publicAudioUrl(row.wav_url);
+  const referenceUrl = referenceAudioUrl(mp3Url, wavUrl);
+  const wavHttps = httpsUrl(wavUrl);
+  const mp3Https = httpsUrl(mp3Url);
   return {
     id,
     title: typeof row.title === "string" && row.title.trim() ? row.title : "Untitled Master",
     prompt: typeof row.prompt === "string" ? row.prompt : typeof row.genre === "string" ? row.genre : "",
     wavUrl,
     mp3Url,
-    streamUrl: mp3Url || wavUrl,
+    referenceUrl,
+    downloadUrl: mp3Https,
+    streamUrl: referenceUrl || wavHttps || mp3Https,
     createdAt: typeof row.created_at === "string" ? row.created_at : null,
   };
 }
@@ -92,7 +122,7 @@ function barsFor(id: string): number[] {
   });
 }
 
-export function AudioVaultList({ revision, pending = [] }: Props) {
+export function AudioVaultList({ revision, pending = [], onUseAsReference, onTrackInjection }: Props) {
   const [rows, setRows] = useState<VaultCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState(false);
@@ -155,7 +185,12 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
     if (!window.confirm("Permanently delete this master from the vault?")) return;
     setError(null);
     try {
-      const response = await fetch(`/api/vault/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token?.trim() ?? "";
+      const response = await fetch(`/api/vault/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
       const raw = await response.text();
       let data: { error?: string } = {};
       try {
@@ -233,11 +268,18 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
                 </p>
               </div>
               <TrackActionsMenu
-                trackId={row.id}
                 title={row.title}
-                mp3Url={row.mp3Url}
-                wavUrl={row.wavUrl}
-                onDelete={(id) => void removeRow(id)}
+                mp3Url={row.downloadUrl}
+                referenceUrl={row.referenceUrl}
+                onUseAsReference={() => {
+                  if (!row.referenceUrl) return;
+                  onUseAsReference?.({ url: row.referenceUrl, title: row.title });
+                }}
+                onTrackInjection={() => {
+                  if (!row.referenceUrl) return;
+                  onTrackInjection?.({ url: row.referenceUrl, title: row.title });
+                }}
+                onDelete={() => void removeRow(row.id)}
               />
             </div>
             <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 32, marginTop: 8 }}>
@@ -255,17 +297,18 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
                   else audioRefs.current.delete(row.id);
                 }}
                 controls
+                controlsList="nodownload noplaybackrate"
+                className="mt-2 w-full h-8"
                 preload="none"
                 src={row.streamUrl}
-                style={{ width: "100%", marginTop: 8 }}
                 onError={(event) => {
                   const element = event.currentTarget;
-                  if (switched.current.has(row.id) || !row.mp3Url || !row.wavUrl || row.mp3Url === row.wavUrl) return;
+                  const fallback = httpsUrl(row.wavUrl);
+                  if (switched.current.has(row.id) || !fallback || !row.streamUrl || fallback === row.streamUrl) return;
                   const current = element.currentSrc || element.src;
-                  if (!sameResource(current, row.mp3Url) || sameResource(current, row.wavUrl)) return;
+                  if (!sameResource(current, row.streamUrl) || sameResource(current, fallback)) return;
                   switched.current.add(row.id);
-                  element.src = row.wavUrl;
-                  void element.play().catch(() => undefined);
+                  element.src = fallback;
                 }}
               />
             ) : null}

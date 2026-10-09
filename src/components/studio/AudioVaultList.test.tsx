@@ -2,6 +2,14 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+function installMenuPolyfills() {
+  const proto = HTMLElement.prototype;
+  if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
+  if (!proto.setPointerCapture) proto.setPointerCapture = () => undefined;
+  if (!proto.releasePointerCapture) proto.releasePointerCapture = () => undefined;
+  if (!proto.scrollIntoView) proto.scrollIntoView = () => undefined;
+}
+
 const { getSession, from } = vi.hoisted(() => ({
   getSession: vi.fn(),
   from: vi.fn(),
@@ -71,6 +79,7 @@ describe("AudioVaultList", () => {
 
   beforeEach(() => {
     cleanup();
+    installMenuPolyfills();
     getSession.mockReset();
     from.mockReset();
     fetchMock.mockReset();
@@ -152,12 +161,19 @@ describe("AudioVaultList", () => {
     render(<AudioVaultList revision={3} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Actions for Glass Harbor" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    expect(screen.getByRole("menuitem", { name: "Use as Reference Track" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Track Injection (Swap)" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download Master" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete from Vault" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Delete from Vault" }));
 
     expect(confirmSpy).toHaveBeenCalledWith("Permanently delete this master from the vault?");
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/vault/vault-42", { method: "DELETE" });
+      expect(fetchMock).toHaveBeenCalledWith("/api/vault/vault-42", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer session-token" },
+      });
     });
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(["/api/vault/vault-42"]);
     await waitFor(() => {
@@ -180,8 +196,8 @@ describe("AudioVaultList", () => {
     render(<AudioVaultList revision={4} />);
     expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Actions for Glass Harbor" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete from Vault" }));
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByText("Glass Harbor")).toBeInTheDocument();
@@ -210,5 +226,65 @@ describe("AudioVaultList", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/vault", {
       headers: { Authorization: "Bearer session-token" },
     });
+  });
+
+  it("hides the native audio menu and prefers an https audio-vault mp3", async () => {
+    const user = userEvent.setup();
+    const mp3 = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.mp3";
+    const wav = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.wav";
+    const onUseAsReference = vi.fn();
+    const onTrackInjection = vi.fn();
+    mockSignedInVault([
+      {
+        id: "vault-42",
+        title: "Glass Harbor",
+        mp3_url: mp3,
+        wav_url: wav,
+      },
+    ]);
+
+    const { container } = render(
+      <AudioVaultList revision={6} onUseAsReference={onUseAsReference} onTrackInjection={onTrackInjection} />,
+    );
+    expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
+
+    const audio = container.querySelector("audio");
+    expect(audio).toHaveAttribute("controls");
+    expect(audio).toHaveAttribute("controlsList", "nodownload noplaybackrate");
+    expect(audio?.className).toContain("w-full");
+    expect(audio?.className).toContain("h-8");
+    expect(audio).toHaveAttribute("src", mp3);
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
+    expect(onUseAsReference).toHaveBeenCalledWith({ url: mp3, title: "Glass Harbor" });
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Track Injection (Swap)" }));
+    expect(onTrackInjection).toHaveBeenCalledWith({ url: mp3, title: "Glass Harbor" });
+  });
+
+  it("uses the https audio-vault wav when the mp3 is not an audio-vault url", async () => {
+    const user = userEvent.setup();
+    const wav = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.wav";
+    const onUseAsReference = vi.fn();
+    mockSignedInVault([
+      {
+        id: "vault-42",
+        title: "Glass Harbor",
+        mp3_url: "http://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.mp3",
+        wav_url: wav,
+      },
+    ]);
+
+    const { container } = render(<AudioVaultList revision={7} onUseAsReference={onUseAsReference} />);
+    expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
+    expect(container.querySelector("audio")).toHaveAttribute("src", wav);
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
+    expect(onUseAsReference).toHaveBeenCalledWith({ url: wav, title: "Glass Harbor" });
+    expect(onUseAsReference.mock.calls[0]?.[0].url).not.toMatch(/^http:/);
+    expect(onUseAsReference.mock.calls[0]?.[0].url).not.toMatch(/^blob:/);
   });
 });

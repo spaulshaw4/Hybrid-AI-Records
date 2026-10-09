@@ -1,83 +1,137 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TrackActionsMenu } from "./TrackActionsMenu";
 
-const MP3 = "Download MP3 (320 kbps)";
-const WAV = "Download Master WAV";
+const MP3 = "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/night.mp3";
+
+function installMenuPolyfills() {
+  const proto = HTMLElement.prototype;
+  if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
+  if (!proto.setPointerCapture) proto.setPointerCapture = () => undefined;
+  if (!proto.releasePointerCapture) proto.releasePointerCapture = () => undefined;
+  if (!proto.scrollIntoView) proto.scrollIntoView = () => undefined;
+}
 
 describe("TrackActionsMenu", () => {
-  it("opens from the options button and shows both download actions", async () => {
+  beforeEach(() => {
+    installMenuPolyfills();
+  });
+
+  it("opens the four vault actions and closes on Escape", async () => {
     const user = userEvent.setup();
     render(
       <TrackActionsMenu
-        trackId="track-9"
         title="Night Drive"
-        mp3Url="/masters/night.mp3"
-        wavUrl="/masters/night.wav"
+        mp3Url={MP3}
+        referenceUrl={MP3}
+        onUseAsReference={vi.fn()}
+        onTrackInjection={vi.fn()}
         onDelete={vi.fn()}
       />,
     );
 
-    const options = screen.getByRole("button", { name: "Actions for Night Drive" });
+    const options = screen.getByRole("button", { name: "Track actions" });
     expect(options).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("menuitem", { name: MP3 })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Use as Reference Track" })).not.toBeInTheDocument();
 
     await user.click(options);
 
     expect(options).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("menuitem", { name: MP3 })).toBeEnabled();
-    expect(screen.getByRole("menuitem", { name: WAV })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Use as Reference Track" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Track Injection (Swap)" })).toBeEnabled();
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download Master" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Delete from Vault" })).toBeEnabled();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("disables a download when that url is missing", async () => {
+  it("disables reference and download when those urls are missing", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(
+    render(
       <TrackActionsMenu
-        trackId="track-9"
         title="Night Drive"
         mp3Url={null}
-        wavUrl="/masters/night.wav"
+        referenceUrl={null}
+        onUseAsReference={vi.fn()}
+        onTrackInjection={vi.fn()}
         onDelete={vi.fn()}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Actions for Night Drive" }));
-    expect(screen.getByRole("menuitem", { name: MP3 })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: WAV })).toBeEnabled();
-
-    rerender(
-      <TrackActionsMenu
-        trackId="track-9"
-        title="Night Drive"
-        mp3Url="/masters/night.mp3"
-        wavUrl={null}
-        onDelete={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("menuitem", { name: MP3 })).toBeEnabled();
-    expect(screen.getByRole("menuitem", { name: WAV })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    expect(screen.getByRole("menuitem", { name: "Use as Reference Track" })).toHaveAttribute("data-disabled");
+    expect(screen.getByRole("menuitem", { name: "Track Injection (Swap)" })).toHaveAttribute("data-disabled");
+    expect(screen.getByRole("menuitem", { name: "Download Master" })).toHaveAttribute("data-disabled");
+    expect(screen.getByRole("menuitem", { name: "Delete from Vault" })).toBeEnabled();
   });
 
-  it("calls onDelete with the track id from the vault delete action", async () => {
+  it("downloads the https mp3 using the track title as the filename", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => new Blob(["mp3"], { type: "audio/mpeg" }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:master");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const click = vi.fn();
+    const anchors: HTMLAnchorElement[] = [];
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const element = realCreate(tagName);
+      if (tagName.toLowerCase() === "a") {
+        element.click = click;
+        anchors.push(element as HTMLAnchorElement);
+      }
+      return element;
+    });
+
+    render(
+      <TrackActionsMenu
+        title="Night Drive"
+        mp3Url={MP3}
+        referenceUrl={MP3}
+        onUseAsReference={vi.fn()}
+        onTrackInjection={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Download Master" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(MP3, { credentials: "omit" });
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(anchors[0]).toHaveAttribute("download", "Night Drive.mp3");
+    expect(click).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("calls onDelete from Delete from Vault and closes on an outside click", async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
     render(
-      <TrackActionsMenu
-        trackId="track-9"
-        title="Night Drive"
-        mp3Url={null}
-        wavUrl={null}
-        onDelete={onDelete}
-      />,
+      <div>
+        <button type="button">Outside</button>
+        <TrackActionsMenu
+          title="Night Drive"
+          mp3Url={null}
+          referenceUrl={null}
+          onUseAsReference={vi.fn()}
+          onTrackInjection={vi.fn()}
+          onDelete={onDelete}
+        />
+      </div>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Actions for Night Drive" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete from Vault" }));
 
     expect(onDelete).toHaveBeenCalledTimes(1);
-    expect(onDelete).toHaveBeenCalledWith("track-9");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });

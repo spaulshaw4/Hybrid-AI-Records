@@ -52,6 +52,11 @@ describe("EnginePage instrumental tab", () => {
 
   beforeEach(() => {
     cleanup();
+    const proto = HTMLElement.prototype;
+    if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
+    if (!proto.setPointerCapture) proto.setPointerCapture = () => undefined;
+    if (!proto.releasePointerCapture) proto.releasePointerCapture = () => undefined;
+    if (!proto.scrollIntoView) proto.scrollIntoView = () => undefined;
     localStorage.clear();
     getSession.mockReset();
     onAuthStateChange.mockClear();
@@ -478,6 +483,412 @@ describe("EnginePage instrumental tab", () => {
     expect(glass).toContainElement(screen.getByRole("textbox", { name: "Lyrics" }));
     expect(glass).toContainElement(screen.getByRole("button", { name: "Render Master Record" }));
     expect(glass.contains(screen.getByRole("region", { name: "Your Audio Vault" }))).toBe(false);
+  });
+
+  it("shows one Hybrid Engine 2.0 badge and keeps vocal gender when vocals are off", async () => {
+    const user = userEvent.setup();
+    render(<EnginePage />);
+
+    expect(screen.getAllByText("Hybrid Engine 2.0")).toHaveLength(1);
+    const badge = screen.getByText("Hybrid Engine 2.0");
+    const instrumentalTab = screen.getByRole("tab", { name: "Instrumental" });
+    expect(badge.compareDocumentPosition(instrumentalTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(badge.closest(".mb-2")?.nextElementSibling).toBe(screen.getByRole("tablist", { name: "Studio mode" }));
+
+    const gender = screen.getByRole("group", { name: "Vocal gender" });
+    const card = gender.parentElement;
+    expect(screen.getByText("Off (Instrumental)")).toBeInTheDocument();
+    expect(card).toContainElement(screen.getByText("Off (Instrumental)"));
+    expect(card?.className).toContain("p-4");
+    expect(card?.className).toContain("rounded-xl");
+    expect(card?.className).toContain("border");
+    expect(card?.className).not.toContain("items-stretch");
+    expect(card?.parentElement?.className).toContain("items-start");
+    expect(card?.textContent).toContain("Female");
+    expect(card?.textContent).toContain("Male");
+    expect(gender.className).toContain("opacity-35");
+    expect(gender.className).toContain("pointer-events-none");
+    expect(screen.getByRole("button", { name: "Male" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Female" }).className).not.toContain("bg-red-600");
+    expect(screen.getByRole("button", { name: "Male" }).className).toContain("bg-zinc-800/80");
+
+    fireEvent.click(screen.getByRole("button", { name: "Female" }));
+    expect(screen.getByRole("button", { name: "Female" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Male" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("tab", { name: "Without Vocals" }));
+    expect(screen.getAllByText("Hybrid Engine 2.0")).toHaveLength(1);
+    expect(screen.getByText("Off (Instrumental)")).toBeInTheDocument();
+    const withoutGender = screen.getByRole("group", { name: "Vocal gender" });
+    expect(withoutGender.className).toContain("pointer-events-none");
+    expect(withoutGender.parentElement?.className).toContain("p-4");
+    expect(withoutGender.parentElement?.parentElement?.className).toContain("items-start");
+    expect(screen.getByRole("button", { name: "Female" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Male" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Female" }));
+    expect(screen.getByRole("button", { name: "Male" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+    expect(screen.getAllByText("Hybrid Engine 2.0")).toHaveLength(1);
+    expect(screen.queryByText("Off (Instrumental)")).not.toBeInTheDocument();
+    const withGender = screen.getByRole("group", { name: "Vocal gender" });
+    expect(withGender.className).not.toContain("pointer-events-none");
+    expect(withGender.className).not.toContain("opacity-35");
+    expect(screen.getByRole("button", { name: "Male" }).className).toContain("bg-red-600");
+    expect(screen.getByRole("button", { name: "Female" }).className).toContain("bg-zinc-800/80");
+    await user.click(screen.getByRole("button", { name: "Female" }));
+    expect(screen.getByRole("button", { name: "Female" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Female" }).className).toContain("bg-red-600");
+    expect(screen.getByRole("button", { name: "Male" }).className).not.toContain("bg-red-600");
+  });
+
+  it("shows a vault reference chip and sends that https audio-vault url only on With Vocals", async () => {
+    const user = userEvent.setup();
+    const mp3 =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.mp3";
+    const wav =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/glass.wav";
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    from.mockImplementation(() => ({
+      select: () => ({
+        eq: () => ({
+          order: () => ({
+            limit: () =>
+              Promise.resolve({
+                data: [
+                  {
+                    id: "vault-42",
+                    title: "Glass Harbor",
+                    prompt: "amber glass",
+                    mp3_url: mp3,
+                    wav_url: wav,
+                    user_id: "user-1",
+                  },
+                ],
+                error: null,
+              }),
+          }),
+        }),
+      }),
+    }));
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/vocals/generate")) return jsonResult({ success: true, taskId: "task-vocal-bed" });
+      if (url.includes("/api/generate")) {
+        return jsonResult({
+          success: true,
+          status: "ready",
+          wavUrl: "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/ready.wav",
+        });
+      }
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    const vault = await screen.findByRole("region", { name: "Your Audio Vault" });
+    expect(await screen.findByText("Glass Harbor")).toBeInTheDocument();
+    const audio = vault.querySelector("audio");
+    expect(audio).toHaveAttribute("controlsList", "nodownload noplaybackrate");
+    expect(audio?.className).toContain("w-full");
+    expect(audio?.className).toContain("h-8");
+    expect(audio).toHaveAttribute("src", mp3);
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    expect(screen.getByRole("menuitem", { name: "Use as Reference Track" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Track Injection (Swap)" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download Master" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete from Vault" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
+
+    const pill = screen.getByRole("button", { name: "Remove reference" }).parentElement as HTMLElement;
+    expect(pill).toHaveTextContent("Glass Harbor");
+    expect(pill.className).toContain("bg-red-950/50");
+    expect(pill.className).toContain("border-red-500/60");
+    expect(pill.className).toContain("text-red-200");
+    expect(pill.querySelector(".animate-pulse")).toBeTruthy();
+    expect(pill.querySelector(".font-mono")?.className).toContain("truncate");
+    expect(pill.querySelector(".font-mono")?.className).toContain("max-w-[140px]");
+    expect(screen.queryByRole("button", { name: "+ Reference" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Instrumental", selected: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove reference" }));
+    expect(screen.queryByRole("button", { name: "Remove reference" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+    await user.click(screen.getByRole("button", { name: "+ Vocal" }));
+    await user.click(screen.getByRole("button", { name: /My Voice - October 5/ }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("button", { name: "✓ My Voice - October 5" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Track Injection (Swap)" }));
+    expect(screen.getByRole("tab", { name: "With Vocals", selected: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent("Glass Harbor");
+    expect(screen.getByRole("button", { name: "✓ My Voice - October 5" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("create-voice"))).toBe(false);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
+    const vocalCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as [string, RequestInit];
+    const vocalBody = JSON.parse(String(vocalCall[1].body)) as {
+      reference_audio_url?: string;
+      personaId?: string;
+    };
+    expect(vocalBody.reference_audio_url).toBe(mp3);
+    expect(vocalBody.personaId).toBe("vocal_stephen_oct5_master");
+    expect(vocalBody.reference_audio_url).not.toMatch(/^blob:/);
+    expect(vocalBody.reference_audio_url).not.toMatch(/^http:/);
+
+    await user.click(screen.getByRole("button", { name: "Remove reference" }));
+    expect(screen.queryByRole("button", { name: "Remove reference" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"))).toHaveLength(2),
+    );
+    const clearedCall = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate")).at(-1) as [
+      string,
+      RequestInit,
+    ];
+    const cleared = JSON.parse(String(clearedCall[1].body)) as { reference_audio_url?: string; personaId?: string };
+    expect(cleared).not.toHaveProperty("reference_audio_url");
+    expect(cleared.personaId).toBe("vocal_stephen_oct5_master");
+
+    await user.click(screen.getByRole("button", { name: "Track actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Use as Reference Track" }));
+    expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent("Glass Harbor");
+    const vocalCallsBeforeInstrumental = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate")).length;
+    await user.click(screen.getByRole("tab", { name: "Instrumental" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "What's the vibe?" }), { target: { value: "soft piano" } });
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/generate"))).toBe(true));
+    const instrumentalCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/generate")) as [string, RequestInit];
+    const instrumentalBody = JSON.parse(String(instrumentalCall[1].body)) as Record<string, unknown>;
+    expect(instrumentalBody).not.toHaveProperty("reference_audio_url");
+    expect(instrumentalBody).not.toHaveProperty("webhook");
+    expect(instrumentalBody.isInstrumental).toBe(true);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"))).toHaveLength(
+      vocalCallsBeforeInstrumental,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("create-voice"))).toBe(false);
+  });
+
+  it("keeps a chosen reference file on the Without Vocals pill and uploads it before vocals generate", async () => {
+    const user = userEvent.setup();
+    const publicUrl =
+      "https://project.supabase.co/storage/v1/object/public/audio-vault/vocal-references/user-1/reference-1.wav";
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    from.mockImplementation(() => ({
+      select: () => ({
+        eq: () => ({
+          order: () => ({
+            limit: () => Promise.resolve({ data: [], error: null }),
+          }),
+        }),
+      }),
+    }));
+    const tags = "driving rock, analog synth, 120 bpm";
+    let releaseAnalysis: (value: ReturnType<typeof jsonResult>) => void = () => {};
+    const pendingAnalysis = new Promise<ReturnType<typeof jsonResult>>((resolve) => {
+      releaseAnalysis = resolve;
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/audio-to-prompt")) return pendingAnalysis;
+      if (url.includes("/api/vocals/reference")) return jsonResult({ url: publicUrl });
+      if (url.includes("/api/vocals/upload")) return jsonResult({ error: "mic path" }, 400);
+      if (url.includes("/api/vocals/generate")) return jsonResult({ success: true, taskId: "task-ref-1" });
+      if (url.includes("/api/generate")) {
+        return jsonResult({
+          success: true,
+          status: "ready",
+          wavUrl: "https://project.supabase.co/storage/v1/object/public/audio-vault/masters/ready.wav",
+        });
+      }
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Without Vocals" }));
+    expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const file = new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" });
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, file);
+    expect(screen.getByText("Selected: Time Is Not My Friend.wav")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(screen.queryByRole("dialog", { name: "Reference" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Analyzing DNA...")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Remove reference" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Reference" })).not.toBeInTheDocument();
+    const analyzingPill = screen.getByText("Analyzing DNA...").parentElement as HTMLElement;
+    expect(analyzingPill.className).toContain("flex");
+    expect(analyzingPill.className).toContain("bg-red-950/50");
+    expect(analyzingPill.className).toContain("border-red-500/60");
+    expect(analyzingPill.querySelector(".animate-ping")).toBeTruthy();
+    expect(analyzingPill.querySelector(".animate-pulse")).toBeNull();
+
+    const analyzeCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/reference/audio-to-prompt"),
+    ) as [string, RequestInit];
+    expect(analyzeCall[0]).toBe("/api/reference/audio-to-prompt");
+    expect(analyzeCall[1].headers).toEqual({ Authorization: "Bearer session-token" });
+    expect(analyzeCall[1].body).toBeInstanceOf(FormData);
+    expect((analyzeCall[1].body as FormData).get("userId")).toBeNull();
+    expect(((analyzeCall[1].body as FormData).get("file") as File).name).toBe("Time Is Not My Friend.wav");
+
+    releaseAnalysis(jsonResult({ success: true, tags, filename: "Time Is Not My Friend.wav" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags));
+    const pill = screen.getByRole("button", { name: "Remove reference" }).parentElement as HTMLElement;
+    expect(pill).toHaveTextContent("Time Is Not My Friend.wav");
+    expect(pill.querySelector(".animate-pulse")).toBeTruthy();
+    expect(pill.querySelector(".animate-ping")).toBeNull();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
+    expect(screen.getByRole("button", { name: "Remove reference" })).toBeInTheDocument();
+    expect(pill).toHaveTextContent("Time Is Not My Friend.wav");
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
+
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
+    const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/reference")) as [string, RequestInit];
+    expect(uploadCall[0]).toBe("/api/vocals/reference");
+    expect((uploadCall[1].headers as Record<string, string>).Authorization).toBe("Bearer session-token");
+    expect(uploadCall[1].body).toBeInstanceOf(FormData);
+    expect((uploadCall[1].body as FormData).get("userId")).toBeNull();
+    expect(((uploadCall[1].body as FormData).get("audio") as File).name).toBe("Time Is Not My Friend.wav");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("create-voice"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
+
+    const vocalCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as [string, RequestInit];
+    const vocalBody = JSON.parse(String(vocalCall[1].body)) as { reference_audio_url?: string; styleTags?: string };
+    expect(vocalBody.reference_audio_url).toBe(publicUrl);
+    expect(vocalBody.styleTags).toBe(tags);
+    expect(vocalBody.reference_audio_url).not.toMatch(/^blob:/);
+    expect(vocalBody.reference_audio_url).not.toMatch(/^http:/);
+    expect(screen.getByText(/Rendering/)).toBeInTheDocument();
+    expect(screen.queryByText(/no wavUrl/i)).not.toBeInTheDocument();
+
+    const calledUrls = fetchMock.mock.calls.map(([url]) => String(url));
+    const uploadAt = calledUrls.findIndex((url) => url.includes("/api/vocals/reference"));
+    const vocalAt = calledUrls.findIndex((url) => url.includes("/api/vocals/generate"));
+    expect(uploadAt).toBeGreaterThan(-1);
+    expect(vocalAt).toBeGreaterThan(uploadAt);
+
+    await user.click(screen.getByRole("button", { name: "Remove reference" }));
+    expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
+  });
+
+  it("keeps the reference file when analysis fails", async () => {
+    const user = userEvent.setup();
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/audio-to-prompt")) return jsonResult({ error: "Failed to analyze audio" }, 500);
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Without Vocals" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent(
+      "Time Is Not My Friend.wav",
+    );
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue("");
+  });
+
+  it("fills title, lyrics, and style from a visual injection and keeps them after remove", async () => {
+    const user = userEvent.setup();
+    const nextTitle = "Glass Harbor";
+    const tags = "amber rock, 96 bpm, analog synth";
+    const nextLyrics = "[Verse 1]\nhello line\n[Chorus]\nhold on";
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    let releaseVisual: (value: ReturnType<typeof jsonResult>) => void = () => {};
+    const pendingVisual = new Promise<ReturnType<typeof jsonResult>>((resolve) => {
+      releaseVisual = resolve;
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/visual-injection")) return pendingVisual;
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Without Vocals" }));
+    expect(screen.getByRole("button", { name: "+ Visual Injection" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Remix" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ Visual Injection" }));
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const input = document.getElementById("visual-injection-upload") as HTMLInputElement;
+    expect(input).toHaveAttribute("accept", ".png,.jpg,.jpeg,.webp");
+    await user.upload(input, new File([png], "cover.png", { type: "image/png" }));
+    expect(screen.getByText("cover.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(screen.getByText("Reading visual...")).toBeInTheDocument());
+    const reading = screen.getByText("Reading visual...");
+    expect(reading.className).toContain("font-mono");
+    expect(reading.className).toContain("truncate");
+    expect(reading.className).toContain("max-w-[130px]");
+    expect(reading.parentElement?.className).toContain("bg-red-950/40");
+    expect(reading.parentElement?.className).toContain("border-red-500/50");
+    expect(reading.parentElement?.querySelector(".animate-ping")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove visual" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Visual Injection" })).not.toBeInTheDocument();
+
+    const visualCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/reference/visual-injection"),
+    ) as [string, RequestInit];
+    expect(visualCall[0]).toBe("/api/reference/visual-injection");
+    expect(visualCall[1].headers).toEqual({ Authorization: "Bearer session-token" });
+    expect(visualCall[1].body).toBeInstanceOf(FormData);
+    expect(((visualCall[1].body as FormData).get("file") as File).name).toBe("cover.png");
+    expect((visualCall[1].body as FormData).get("userId")).toBeNull();
+
+    releaseVisual(jsonResult({ success: true, title: nextTitle, tags, lyrics: nextLyrics, filename: "cover.png" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle));
+    expect(screen.getByText("cover.png")).toBeInTheDocument();
+    expect(screen.getByText("cover.png").parentElement?.querySelector(".animate-pulse")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
+
+    await user.click(screen.getByRole("tab", { name: "With Vocals" }));
+    expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
+
+    await user.click(screen.getByRole("button", { name: "Remove visual" }));
+    expect(screen.getByRole("button", { name: "+ Visual Injection" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Song title" })).toHaveValue(nextTitle);
+    expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue(nextLyrics);
+    expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
   });
 });
 

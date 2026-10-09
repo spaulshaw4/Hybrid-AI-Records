@@ -22,6 +22,14 @@ function vaultClient(): SupabaseClient | null {
   return createClient(url, key);
 }
 
+/** Service role only. A vault delete must not run with the anon key. */
+function vaultDeleteClient(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
 /**
  * GET /api/vault
  * Newest 20 vaulted_tracks for the bearer session user.
@@ -111,7 +119,14 @@ function resolvedAudioUrl(supabase: SupabaseClient, value: unknown): string | nu
   return data.publicUrl || null;
 }
 
-function mastersPath(value: unknown): string | null {
+function safeTaskId(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text || !/^[A-Za-z0-9_-]+$/.test(text)) return "";
+  return text;
+}
+
+function audioVaultObjectPath(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
   if (!text || text.includes("..")) return null;
@@ -120,19 +135,42 @@ function mastersPath(value: unknown): string | null {
       ? text
       : `https://project.supabase.co${text.startsWith("/") ? text : `/${text}`}`;
     const object = storageObjectFromUrl(href);
-    if (!object || object.bucket !== "audio-vault" || !object.path.startsWith("masters/")) return null;
-    return object.path;
+    if (!object || object.bucket !== "audio-vault" || object.path.includes("..")) return null;
+    return object.path.replace(/^\/+/, "");
   }
   const path = text.replace(/^\/+/, "");
-  return path.startsWith("masters/") ? path : null;
+  return path || null;
 }
+
+/** Storage removal is limited to this user's prefix or vocals/{taskId}.mp3. */
+function ownedAudioVaultPath(value: unknown, userId: string, taskId: string): string | null {
+  const path = audioVaultObjectPath(value);
+  if (!path) return null;
+  if (taskId && path === `vocals/${taskId}.mp3`) return path;
+  if (path.startsWith(`${userId}/`) || path.includes(`/${userId}/`)) return path;
+  return null;
+}
+
+type OwnedVaultRow = {
+  id?: string | null;
+  user_id?: string | null;
+  task_id?: string | null;
+  wav_url?: string | null;
+  mp3_url?: string | null;
+};
 
 /**
  * DELETE /api/vault/:id
- * Removes audio-vault masters named on that vaulted_tracks row, then the row.
+ * Bearer session required. Deletes vaulted_tracks where id and user_id match
+ * that session. A body userId is ignored. Storage objects are removed only
+ * when the path is under the session user's prefix or vocals/{taskId}.mp3.
  */
 export async function DELETE(req: Request): Promise<Response> {
   try {
+    const userId = await sessionUserId(req);
+    if (!userId) {
+      return Response.json({ error: "Unauthorized session" }, { status: 401 });
+    }
     const url = new URL(req.url);
     const parts = url.pathname.replace(/\/$/, "").split("/");
     const last = decodeURIComponent(parts[parts.length - 1] ?? "").trim();
@@ -140,34 +178,50 @@ export async function DELETE(req: Request): Promise<Response> {
     if (!id) {
       return Response.json({ error: "Vault row id is required." }, { status: 400 });
     }
-    const supabase = vaultClient();
+    const supabase = vaultDeleteClient();
     if (!supabase) {
       return Response.json({ error: "Supabase is not configured" }, { status: 500 });
     }
     const { data, error } = await supabase
       .from("vaulted_tracks")
-      .select("id, wav_url, mp3_url")
+      .select("id, user_id, task_id, wav_url, mp3_url")
       .eq("id", id)
+      .eq("user_id", userId)
       .maybeSingle();
     if (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
-    if (!data?.id) {
+    const row = (data ?? null) as OwnedVaultRow | null;
+    if (!row?.id || row.user_id !== userId) {
       return Response.json({ error: "Vault track not found." }, { status: 404 });
     }
-    const paths = [...new Set([mastersPath(data.wav_url), mastersPath(data.mp3_url)].filter((path): path is string => Boolean(path)))];
+    const taskId = safeTaskId(row.task_id);
+    const paths = [
+      ...new Set(
+        [ownedAudioVaultPath(row.wav_url, userId, taskId), ownedAudioVaultPath(row.mp3_url, userId, taskId)].filter(
+          (path): path is string => Boolean(path),
+        ),
+      ),
+    ];
     if (paths.length > 0) {
       const { error: removeError } = await supabase.storage.from("audio-vault").remove(paths);
       if (removeError) {
-        return Response.json({ error: removeError.message }, { status: 500 });
+        console.error("[vault] storage remove failed");
       }
     }
-    const { error: deleteError } = await supabase.from("vaulted_tracks").delete().eq("id", data.id);
+    const { error: deleteError } = await supabase
+      .from("vaulted_tracks")
+      .delete()
+      .eq("id", row.id)
+      .eq("user_id", userId);
     if (deleteError) {
       return Response.json({ error: deleteError.message }, { status: 500 });
     }
     return Response.json({ success: true });
   } catch (err) {
+    if (isUnauthorized(err)) {
+      return Response.json({ error: "Unauthorized session" }, { status: 401 });
+    }
     const message = err instanceof Error ? err.message : "Supabase query failed";
     return Response.json({ error: message }, { status: 500 });
   }

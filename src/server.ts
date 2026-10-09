@@ -144,6 +144,28 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/reference/audio-to-prompt") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/reference/audio-to-prompt/route");
+        return POST(request);
+      }
+
+      if (pathname === "/api/reference/visual-injection") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/reference/visual-injection/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/stripe/webhook") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {
@@ -233,6 +255,17 @@ export default {
           });
         }
         const { POST } = await import("./app/api/vault/sync-task/route");
+        return POST(request);
+      }
+
+      if (pathname === "/api/vocals/reference") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/vocals/reference/route");
         return POST(request);
       }
 

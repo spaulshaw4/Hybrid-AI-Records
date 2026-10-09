@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { Lock, Sparkles } from "lucide-react";
 
 import CharacterModal, {
@@ -10,10 +10,11 @@ import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
-import { AudioVaultList } from "@/components/studio/AudioVaultList";
+import { AudioVaultList, type VaultTrackReference } from "@/components/studio/AudioVaultList";
 import { DurationSlider } from "@/components/studio/DurationSlider";
 import { PatriotGlassStudio } from "@/components/studio/PatriotGlassStudio";
-import { VocalStudioTab, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
+import { StudioFooter } from "@/components/studio/StudioFooter";
+import { VocalGenderCard, VocalStudioTab, type VisualSongDraft, type VocalStudioReference } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
@@ -37,6 +38,12 @@ function vibeEnhanceError(message: string): string {
   return text || "Could not enhance that vibe.";
 }
 
+function studioPublicError(message: string, fallback: string): string {
+  if (/wavespeed|replicate|gemini|claude|supabase|aimusic/i.test(message)) return fallback;
+  const text = message.trim();
+  return text || fallback;
+}
+
 const compactActionClass =
   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
 const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
@@ -44,7 +51,7 @@ const renderButtonClass =
   "flex h-12 w-full items-center justify-center rounded-lg border border-red-500 bg-red-600 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800";
 const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
 
-type StudioModal = "reference" | "remix" | null;
+type StudioModal = "reference" | "visual" | null;
 
 interface VaultTrack {
   id: string;
@@ -54,6 +61,33 @@ interface VaultTrack {
   status: string;
   wav_url: string;
   mp3_url: string;
+}
+
+type AttachedReference =
+  | { kind: "file"; name: string; file: File }
+  | { kind: "vault"; url: string; title: string };
+
+async function uploadReferenceWav(file: File, accessToken: string): Promise<string> {
+  const body = new FormData();
+  body.append("audio", file, file.name || "reference.wav");
+  const response = await fetch("/api/vocals/reference", {
+    method: "POST",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    body,
+  });
+  const raw = await response.text();
+  let payload: { url?: unknown; error?: unknown } = {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") payload = parsed as { url?: unknown; error?: unknown };
+  } catch {
+    throw new Error("Could not upload that reference.");
+  }
+  if (!response.ok || typeof payload.url !== "string") {
+    const message = typeof payload.error === "string" ? payload.error : "Could not upload that reference.";
+    throw new Error(message);
+  }
+  return payload.url.trim();
 }
 
 const cardStyle: CSSProperties = {
@@ -157,10 +191,13 @@ function ActiveVocalReference({ vocal, onRemove }: { vocal: SelectedVocal; onRem
 function referenceForStudio(
   character: VocalCharacter | null,
   vocal: SelectedVocal | null,
+  bed: VaultTrackReference | null = null,
 ): VocalStudioReference | undefined {
   const id = character?.vocalId.trim() ?? "";
   const personaId = id && !/^https:\/\//i.test(id) ? id : undefined;
-  const vocalAudioUrl = vocal?.isReady && isAudioVaultHttpsUrl(vocal.url) ? vocal.url.trim() : undefined;
+  const dockedVocal = vocal?.isReady && isAudioVaultHttpsUrl(vocal.url) ? vocal.url.trim() : undefined;
+  const bedUrl = bed && isAudioVaultHttpsUrl(bed.url) ? bed.url.trim() : undefined;
+  const vocalAudioUrl = bedUrl || dockedVocal;
   const label = [character?.name, vocal?.name].filter(Boolean).join(" · ") || undefined;
   if (!label && !personaId && !vocalAudioUrl) return undefined;
   return {
@@ -191,74 +228,6 @@ function readPromptRecords(): SavedPromptItem[] {
   }
 }
 
-function DarkModal({
-  label,
-  onClose,
-  children,
-}: {
-  label: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      role="presentation"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 80,
-        background: "rgba(8, 2, 6, 0.78)",
-        backgroundColor: "rgba(8, 2, 6, 0.78)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        onClick={(event) => event.stopPropagation()}
-        style={{
-          width: "min(440px, 100%)",
-          background: "#150913",
-          backgroundColor: "#150913",
-          color: "#f8fafc",
-          colorScheme: "dark",
-          border: "1px solid #6b2144",
-          borderRadius: 12,
-          padding: 18,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          boxShadow: "0 24px 48px rgba(0, 0, 0, 0.45)",
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>{label}</h2>
-        {children}
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            backgroundColor: "#3b1024",
-            color: "#f8fafc",
-            border: "1px solid #9f1239",
-            borderRadius: 8,
-            padding: "10px 0",
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          Done
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function EnginePage() {
   const [activeTab, setActiveTab] = useState<"custom" | "easy" | "vocals">("easy");
   const [isInstrumental, setIsInstrumental] = useState(false);
@@ -286,7 +255,15 @@ export function EnginePage() {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [openModal, setOpenModal] = useState<StudioModal>(null);
-  const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
+  const [draftReferenceFile, setDraftReferenceFile] = useState<File | null>(null);
+  const [attachedReference, setAttachedReference] = useState<AttachedReference | null>(null);
+  const [isAnalyzingReference, setIsAnalyzingReference] = useState(false);
+  const referenceAnalysisSeq = useRef(0);
+  const [draftVisualFile, setDraftVisualFile] = useState<File | null>(null);
+  const [visualName, setVisualName] = useState<string | null>(null);
+  const [isInjectingVisual, setIsInjectingVisual] = useState(false);
+  const visualAnalysisSeq = useRef(0);
+  const [visualSongDraft, setVisualSongDraft] = useState<VisualSongDraft | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isVibeEnhancing, setIsVibeEnhancing] = useState(false);
@@ -294,6 +271,7 @@ export function EnginePage() {
   const [trackLength, setTrackLength] = useState(180);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const pageRef = useRef<HTMLElement>(null);
+  const generatorRef = useRef<HTMLDivElement>(null);
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false);
   const [promptRecords, setPromptRecords] = useState<SavedPromptItem[]>([]);
   const [vaultTracks, setVaultTracks] = useState<VaultTrack[]>([]);
@@ -551,6 +529,95 @@ export function EnginePage() {
     );
   };
 
+  const analyzeReferenceFile = async (file: File) => {
+    const seq = ++referenceAnalysisSeq.current;
+    setIsAnalyzingReference(true);
+    setErrorMessage(null);
+    try {
+      let accessToken = "";
+      try {
+        const { data } = await supabase.auth.getSession();
+        accessToken = data.session?.access_token?.trim() ?? "";
+      } catch {
+        accessToken = "";
+      }
+      const body = new FormData();
+      body.append("file", file, file.name || "reference.wav");
+      const response = await fetch("/api/reference/audio-to-prompt", {
+        method: "POST",
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        body,
+      });
+      const raw = await response.text();
+      let payload: { success?: boolean; tags?: unknown } = {};
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") payload = parsed as { success?: boolean; tags?: unknown };
+      } catch {
+        payload = {};
+      }
+      if (referenceAnalysisSeq.current !== seq) return;
+      const tags = typeof payload.tags === "string" ? payload.tags.trim() : "";
+      if (!response.ok || payload.success !== true || !tags) {
+        setErrorMessage("Could not read that reference.");
+        return;
+      }
+      setPrompt(tags);
+    } catch {
+      if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
+    } finally {
+      if (referenceAnalysisSeq.current === seq) setIsAnalyzingReference(false);
+    }
+  };
+
+  const analyzeVisualFile = async (file: File) => {
+    const seq = ++visualAnalysisSeq.current;
+    setIsInjectingVisual(true);
+    setErrorMessage(null);
+    try {
+      let accessToken = "";
+      try {
+        const { data } = await supabase.auth.getSession();
+        accessToken = data.session?.access_token?.trim() ?? "";
+      } catch {
+        accessToken = "";
+      }
+      const body = new FormData();
+      body.append("file", file, file.name || "image.png");
+      const response = await fetch("/api/reference/visual-injection", {
+        method: "POST",
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        body,
+      });
+      const raw = await response.text();
+      let payload: { success?: boolean; title?: unknown; tags?: unknown; lyrics?: unknown } = {};
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          payload = parsed as { success?: boolean; title?: unknown; tags?: unknown; lyrics?: unknown };
+        }
+      } catch {
+        payload = {};
+      }
+      if (visualAnalysisSeq.current !== seq) return;
+      const nextTitle = typeof payload.title === "string" ? payload.title.trim() : "";
+      const nextTags = typeof payload.tags === "string" ? payload.tags.trim() : "";
+      const nextLyrics = typeof payload.lyrics === "string" ? payload.lyrics.trim() : "";
+      if (!response.ok || payload.success !== true || !nextTitle || !nextTags || !nextLyrics) {
+        setErrorMessage("Could not read that image.");
+        return;
+      }
+      setTitle(nextTitle);
+      setLyrics(nextLyrics);
+      setPrompt(nextTags);
+      setVisualSongDraft({ revision: seq, title: nextTitle, lyrics: nextLyrics, tags: nextTags });
+    } catch {
+      if (visualAnalysisSeq.current === seq) setErrorMessage("Could not read that image.");
+    } finally {
+      if (visualAnalysisSeq.current === seq) setIsInjectingVisual(false);
+    }
+  };
+
   const handleGenerate = async (event: FormEvent | MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (isGenerating) return;
@@ -603,6 +670,60 @@ export function EnginePage() {
     }
     if (ownerId && ownerId !== authUserId) setAuthUserId(ownerId);
     try {
+      let referenceAudioUrl = "";
+      const dispatchReference = activeTab === "custom" && !dispatchInstrumental && attachedReference !== null;
+      if (dispatchReference && attachedReference) {
+        const rawUrl =
+          attachedReference.kind === "file"
+            ? await uploadReferenceWav(attachedReference.file, accessToken)
+            : attachedReference.url;
+        if (!isAudioVaultHttpsUrl(rawUrl)) {
+          throw new Error("Reference audio must be a public audio-vault URL.");
+        }
+        referenceAudioUrl = rawUrl.trim();
+      }
+      if (referenceAudioUrl) {
+        const vocalRes = await fetch("/api/vocals/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({
+            title: songTitle,
+            lyrics: lyricValue,
+            vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
+            styleTags: styleValue,
+            duration,
+            reference_audio_url: referenceAudioUrl,
+            ...(selectedCharacter && selectedCharacter.vocalId && !/^https:\/\//i.test(selectedCharacter.vocalId)
+              ? { personaId: selectedCharacter.vocalId.trim() }
+              : {}),
+          }),
+        });
+        const vocalData = (await vocalRes.json().catch(() => ({}))) as {
+          success?: boolean;
+          taskId?: string;
+          error?: string;
+        };
+        if (!vocalRes.ok || vocalData.success !== true || !vocalData.taskId) {
+          throw new Error(studioPublicError(vocalData.error || "", "Could not attach that reference."));
+        }
+        const localId = `local-${vocalData.taskId}`;
+        setVaultTracks((current) => [
+          {
+            id: localId,
+            title: effectiveTitle,
+            genre: effectivePrompt.slice(0, 24),
+            duration: "210s",
+            status: "Rendering",
+            wav_url: "",
+            mp3_url: "",
+          },
+          ...current,
+        ]);
+        return;
+      }
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: {
@@ -682,6 +803,25 @@ export function EnginePage() {
       ? "Format & Polish"
       : "Studio Ghostwriter";
 
+  const scrollToGenerator = () => {
+    const node = generatorRef.current;
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const useVaultTrackAsReference = (track: VaultTrackReference) => {
+    const url = track.url.trim();
+    if (!isAudioVaultHttpsUrl(url)) return;
+    setAttachedReference({ kind: "vault", url, title: track.title.trim() || "Untitled Master" });
+    scrollToGenerator();
+  };
+
+  const injectVaultTrack = (track: VaultTrackReference) => {
+    setActiveTab("vocals");
+    useVaultTrackAsReference(track);
+  };
+
   const vocalLockTitle =
     activeTab === "easy"
       ? "Vocals disabled in Instrumental mode"
@@ -706,6 +846,7 @@ export function EnginePage() {
   return (
     <main
       ref={pageRef}
+      className="min-h-screen overflow-y-auto"
       style={{
         minHeight: "100vh",
         color: "#f8fafc",
@@ -719,6 +860,15 @@ export function EnginePage() {
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
         <PatriotGlassStudio>
         <div className="mb-[18px] flex flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="min-w-0">
+          <div className="flex items-center justify-between mb-2">
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700/60 shadow-inner">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-[11px] font-mono tracking-wider font-semibold text-zinc-300 uppercase">
+                Hybrid Engine 2.0
+              </span>
+            </div>
+          </div>
           <div
             className="flex flex-row gap-6 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role="tablist"
@@ -754,6 +904,7 @@ export function EnginePage() {
             <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} className="shrink-0 whitespace-nowrap" style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
               With Vocals
             </button>
+          </div>
           </div>
           <div className="flex w-full items-center gap-3 sm:w-auto">
             <div
@@ -797,13 +948,70 @@ export function EnginePage() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <button type="button" onClick={() => setOpenModal("reference")} style={pillStyle}>
-            + Reference
-          </button>
-          <button type="button" onClick={() => setOpenModal("remix")} style={pillStyle}>
-            + Remix
-          </button>
+        <div ref={generatorRef} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+          {attachedReference ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950/50 border border-red-500/60 text-xs text-red-200">
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 ${isAnalyzingReference ? "animate-ping" : "animate-pulse"}`}
+                aria-hidden="true"
+              />
+              <span className="font-mono truncate max-w-[140px]">
+                {isAnalyzingReference
+                  ? "Analyzing DNA..."
+                  : attachedReference.kind === "file"
+                    ? attachedReference.name
+                    : attachedReference.title}
+              </span>
+              {isAnalyzingReference ? null : (
+                <button
+                  type="button"
+                  title="Remove reference"
+                  aria-label="Remove reference"
+                  onClick={() => setAttachedReference(null)}
+                  className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ) : (
+            <button type="button" onClick={() => setOpenModal("reference")} style={pillStyle}>
+              + Reference
+            </button>
+          )}
+          {visualName ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950/40 border border-red-500/50 text-xs text-red-200">
+              <span
+                className={`h-2 w-2 shrink-0 rounded-full bg-red-500 ${isInjectingVisual ? "animate-ping" : "animate-pulse"}`}
+                aria-hidden="true"
+              />
+              <span className="font-mono truncate max-w-[130px]">
+                {isInjectingVisual ? "Reading visual..." : visualName}
+              </span>
+              {isInjectingVisual ? null : (
+                <button
+                  type="button"
+                  title="Remove visual"
+                  aria-label="Remove visual"
+                  onClick={() => setVisualName(null)}
+                  className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftVisualFile(null);
+                setOpenModal("visual");
+              }}
+              style={pillStyle}
+            >
+              + Visual Injection
+            </button>
+          )}
           <span
             title={vocalLockTitle}
             style={{ display: "flex" }}
@@ -854,7 +1062,12 @@ export function EnginePage() {
         {activeTab === "vocals" ? (
           <>
             <VocalStudioTab
-              reference={referenceForStudio(selectedCharacter, selectedVocal)}
+              songDraft={visualSongDraft}
+              reference={referenceForStudio(
+                selectedCharacter,
+                selectedVocal,
+                attachedReference?.kind === "vault" ? attachedReference : null,
+              )}
               vocalReference={
                 selectedVocal ? (
                   <ActiveVocalReference vocal={selectedVocal} onRemove={() => setSelectedVocal(null)} />
@@ -995,8 +1208,11 @@ export function EnginePage() {
                 }}
               />
             </div>
-            <div style={cardStyle}>
-              <DurationSlider maxSeconds={360} value={trackLength} onChange={setTrackLength} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+              <VocalGenderCard vocalsEnabled={false} gender={gender} onChange={setGender} />
+              <div style={cardStyle}>
+                <DurationSlider maxSeconds={360} value={trackLength} onChange={setTrackLength} />
+              </div>
             </div>
             <button
               type="button"
@@ -1131,48 +1347,8 @@ export function EnginePage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {isInstrumental ? null : (
-              <div style={{ ...cardStyle, flex: "1 1 240px", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 8, padding: "10px 16px" }}>
-                <span style={{ display: "block", width: "100%", whiteSpace: "nowrap", fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Vocal Gender</span>
-                <div role="group" aria-label="Vocal gender" style={{ display: "flex", backgroundColor: "#0b0f19", borderRadius: 6, padding: 3, border: "1px solid #1e293b" }}>
-                  <button
-                    type="button"
-                    aria-pressed={gender === "female"}
-                    onClick={() => setGender("female")}
-                    style={{
-                      padding: "5px 18px",
-                      backgroundColor: gender === "female" ? "#9f1239" : "transparent",
-                      color: gender === "female" ? "#ffffff" : "#94a3b8",
-                      border: "none",
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Female
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={gender === "male"}
-                    onClick={() => setGender("male")}
-                    style={{
-                      padding: "5px 18px",
-                      backgroundColor: gender === "male" ? "#9f1239" : "transparent",
-                      color: gender === "male" ? "#ffffff" : "#94a3b8",
-                      border: "none",
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Male
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+              <VocalGenderCard vocalsEnabled={false} gender={gender} onChange={setGender} />
               <div style={{ ...cardStyle, flex: "1 1 280px" }}>
                 <DurationSlider value={trackLength} onChange={setTrackLength} />
               </div>
@@ -1199,6 +1375,8 @@ export function EnginePage() {
             pending={vaultTracks
               .filter((row) => row.status === "Rendering" || row.status === "Failed")
               .map((row) => ({ id: row.id, title: row.title, status: row.status, genre: row.genre }))}
+            onUseAsReference={useVaultTrackAsReference}
+            onTrackInjection={injectVaultTrack}
           />
         </section>
 
@@ -1267,8 +1445,8 @@ export function EnginePage() {
                 type="file"
                 accept="audio/*"
                 onChange={(event) => {
-                  const name = event.target.files?.[0]?.name;
-                  if (name) setReferenceFileName(name);
+                  const file = event.target.files?.[0];
+                  if (file) setDraftReferenceFile(file);
                 }}
                 style={{ display: "none" }}
               />
@@ -1289,12 +1467,26 @@ export function EnginePage() {
                 }}
               >
                 <span aria-hidden="true">🎧</span>
-                <span>{referenceFileName ? `Selected: ${referenceFileName}` : "Click here to add a reference"}</span>
+                <span>{draftReferenceFile ? `Selected: ${draftReferenceFile.name}` : "Click here to add a reference"}</span>
                 <span style={{ color: "#64748b", fontSize: 11 }}>Supports MP3, WAV, FLAC, M4A</span>
               </label>
               <button
                 type="button"
-                onClick={() => setOpenModal(null)}
+                onClick={() => {
+                  const file = draftReferenceFile;
+                  if (file) {
+                    setAttachedReference({
+                      kind: "file",
+                      name: file.name || "reference.wav",
+                      file,
+                    });
+                    setIsAnalyzingReference(true);
+                    setOpenModal(null);
+                    void analyzeReferenceFile(file);
+                    return;
+                  }
+                  setOpenModal(null);
+                }}
                 style={{
                   width: "100%",
                   background: "linear-gradient(90deg, #e11d48, #be123c)",
@@ -1313,24 +1505,121 @@ export function EnginePage() {
           </div>
         ) : null}
 
-        {openModal === "remix" ? (
-          <DarkModal label="Remix" onClose={() => setOpenModal(null)}>
-            <p style={{ margin: 0, fontSize: 13, color: "#e9d5ff" }}>
-              Describe how the new master should move. The original stays in the vault.
-            </p>
-            <textarea
-              aria-label="Remix direction"
-              rows={4}
-              placeholder="Harder drums, keep the vocal, half-time chorus"
+        {openModal === "visual" ? (
+          <div
+            role="presentation"
+            onClick={() => setOpenModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100,
+              background: "rgba(0,0,0,0.8)",
+              backdropFilter: "blur(6px)",
+              WebkitBackdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Visual Injection"
+              onClick={(event) => event.stopPropagation()}
               style={{
-                ...fieldStyle,
-                backgroundColor: "#1c0c14",
-                border: "1px solid #4c1d3a",
-                borderRadius: 8,
-                padding: 8,
+                width: "100%",
+                maxWidth: 440,
+                background: "#141018",
+                color: "#f8fafc",
+                border: "1px solid rgba(225, 29, 72, 0.4)",
+                borderRadius: 12,
+                padding: 22,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
               }}
-            />
-          </DarkModal>
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Visual Injection</h2>
+                <button
+                  type="button"
+                  onClick={() => setOpenModal(null)}
+                  aria-label="Close visual"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#f8fafc",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: 0,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 }}>
+                Add a cover image. Nothing is sent until you choose Done.
+              </p>
+              <input
+                id="visual-injection-upload"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) setDraftVisualFile(file);
+                }}
+                style={{ display: "none" }}
+              />
+              <label
+                htmlFor="visual-injection-upload"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  border: "1px dashed rgba(225, 29, 72, 0.5)",
+                  background: "rgba(255,255,255,0.02)",
+                  borderRadius: 8,
+                  padding: "24px 16px",
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+              >
+                <span>{draftVisualFile ? draftVisualFile.name : "Click here to add an image"}</span>
+                <span style={{ color: "#64748b", fontSize: 11 }}>PNG, JPG, or WebP</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const file = draftVisualFile;
+                  if (!file) {
+                    setOpenModal(null);
+                    return;
+                  }
+                  setVisualName(file.name || "image.png");
+                  setIsInjectingVisual(true);
+                  setOpenModal(null);
+                  void analyzeVisualFile(file);
+                }}
+                style={{
+                  width: "100%",
+                  background: "linear-gradient(90deg, #e11d48, #be123c)",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 0",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
         ) : null}
 
         <MyPromptsModal
@@ -1350,6 +1639,7 @@ export function EnginePage() {
           onSelectVocal={setSelectedVocal}
         />
       </div>
+      <StudioFooter />
     </main>
   );
 }

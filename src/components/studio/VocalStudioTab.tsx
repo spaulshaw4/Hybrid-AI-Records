@@ -17,6 +17,13 @@ export type VocalStudioReference = {
   vocalAudioUrl?: string;
 };
 
+export type VisualSongDraft = {
+  revision: number;
+  title: string;
+  lyrics: string;
+  tags: string;
+};
+
 const fieldClass =
   "w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500";
 const compactActionClass =
@@ -100,12 +107,68 @@ async function postCoproducer(body: Record<string, string>): Promise<CoproducerD
   return { ok: res.ok, ...data };
 }
 
+export function VocalGenderCard({
+  vocalsEnabled,
+  gender,
+  onChange,
+}: {
+  vocalsEnabled: boolean;
+  gender: "male" | "female";
+  onChange: (gender: "male" | "female") => void;
+}) {
+  const choose = (next: "male" | "female") => {
+    if (!vocalsEnabled) return;
+    onChange(next);
+  };
+  const tone = (selected: boolean) =>
+    selected && vocalsEnabled ? "bg-red-600 text-white" : "bg-zinc-800/80 text-zinc-400";
+
+  return (
+    <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex flex-col">
+          <span className="whitespace-nowrap text-xs font-semibold tracking-wider text-zinc-300 uppercase">
+            Vocal Gender
+          </span>
+        </div>
+        {vocalsEnabled ? null : (
+          <span className="text-[10px] text-zinc-500 font-mono uppercase">Off (Instrumental)</span>
+        )}
+      </div>
+      <div
+        role="group"
+        aria-label="Vocal gender"
+        className={`grid grid-cols-2 gap-2${vocalsEnabled ? "" : " opacity-35 pointer-events-none"}`}
+      >
+        <button
+          type="button"
+          aria-pressed={gender === "female"}
+          onClick={() => choose("female")}
+          className={`w-full rounded-md px-3 py-2 text-xs font-bold ${tone(gender === "female")}`}
+        >
+          Female
+        </button>
+        <button
+          type="button"
+          aria-pressed={gender === "male"}
+          onClick={() => choose("male")}
+          className={`w-full rounded-md px-3 py-2 text-xs font-bold ${tone(gender === "male")}`}
+        >
+          Male
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function VocalStudioTab({
   reference,
   vocalReference = null,
+  songDraft = null,
 }: {
   reference?: VocalStudioReference;
   vocalReference?: ReactNode;
+  songDraft?: VisualSongDraft | null;
 } = {}) {
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
@@ -124,6 +187,13 @@ export function VocalStudioTab({
   useEffect(() => {
     setPromptRecords(readPromptRecords());
   }, []);
+
+  useEffect(() => {
+    if (!songDraft) return;
+    setTitle(songDraft.title);
+    setLyrics(songDraft.lyrics);
+    setStyleText(songDraft.tags);
+  }, [songDraft]);
 
   const submitDisabled = submitting || !lyrics.trim();
   const styleAssistLabel = styleText.trim() ? "Expand Style" : lyrics.trim() ? "Match Lyrics" : "Surprise Me";
@@ -370,42 +440,8 @@ export function VocalStudioTab({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <div className="flex min-w-[240px] flex-1 flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
-            <span className="block w-full whitespace-nowrap text-[13px] font-semibold text-slate-400">Vocal Gender</span>
-            <div
-              role="group"
-              aria-label="Vocal gender"
-              className="flex rounded-md border border-slate-800 bg-[#0b0f19] p-[3px]"
-            >
-              <button
-                type="button"
-                aria-pressed={gender === "female"}
-                onClick={() => setGender("female")}
-                className={
-                  gender === "female"
-                    ? "rounded px-[18px] py-[5px] text-xs font-bold text-white"
-                    : "rounded px-[18px] py-[5px] text-xs font-bold text-slate-400"
-                }
-                style={{ backgroundColor: gender === "female" ? "#9f1239" : "transparent" }}
-              >
-                Female
-              </button>
-              <button
-                type="button"
-                aria-pressed={gender === "male"}
-                onClick={() => setGender("male")}
-                className={
-                  gender === "male"
-                    ? "rounded px-[18px] py-[5px] text-xs font-bold text-white"
-                    : "rounded px-[18px] py-[5px] text-xs font-bold text-slate-400"
-                }
-                style={{ backgroundColor: gender === "male" ? "#9f1239" : "transparent" }}
-              >
-                Male
-              </button>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          <VocalGenderCard vocalsEnabled gender={gender} onChange={setGender} />
           <div className="min-w-[280px] flex-[1_1_280px] rounded-xl border border-white/10 bg-black/30 p-3.5">
             <DurationSlider value={trackLength} onChange={setTrackLength} />
           </div>
