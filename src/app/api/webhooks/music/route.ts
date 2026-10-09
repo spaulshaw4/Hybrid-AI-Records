@@ -182,7 +182,7 @@ function clipTitle(clip: Record<string, unknown>, index: number, total: number, 
 async function titlesFor(supabase: AdminClient, table: "vaulted_tracks" | "tracks", userId: string, taskId: string): Promise<Set<string>> {
   const existing = await supabase.from(table).select("title").eq("user_id", userId).eq("task_id", taskId);
   if (existing.error) {
-    console.error("[webhook] vault lookup failed");
+    console.error("[webhook] vault lookup failed:", { table, userId, taskId, error: existing.error });
     throw new Error("Internal error");
   }
   const rows = Array.isArray(existing.data) ? existing.data : [];

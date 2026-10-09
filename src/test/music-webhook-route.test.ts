@@ -20,6 +20,7 @@ const { createClientMock, uploadMock, db } = vi.hoisted(() => ({
     trackRows: [] as Array<Record<string, unknown>>,
     personaRows: [] as Array<Record<string, unknown>>,
     personaUpdateError: null as { message: string } | null,
+    selectError: null as { message: string; code?: string } | null,
   },
 }));
 
@@ -57,6 +58,7 @@ function queryBuilder(table: string) {
         op: "select",
         filters: query.filters.map((pair) => [pair[0], pair[1]]),
       });
+      if (db.selectError) return { data: null, error: db.selectError };
       return { data: rowsFor(table), error: null };
     }
     const op = query.op || "update";
@@ -135,16 +137,19 @@ describe("POST /api/webhooks/music", () => {
   const originalSecret = process.env.AIMUSICAPI_WEBHOOK_SECRET;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   beforeEach(() => {
     process.env.AIMUSICAPI_WEBHOOK_SECRET = SECRET;
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-test";
     db.calls.length = 0;
     db.vaultRows.length = 0;
     db.trackRows.length = 0;
     db.personaRows.length = 0;
     db.personaUpdateError = null;
+    db.selectError = null;
     uploadMock.mockReset();
     uploadMock.mockResolvedValue({ data: { path: "vocals/task.wav" }, error: null });
     createClientMock.mockReset();
@@ -170,6 +175,8 @@ describe("POST /api/webhooks/music", () => {
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
     if (originalService === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     else process.env.SUPABASE_SERVICE_ROLE_KEY = originalService;
+    if (originalAnon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalAnon;
   });
 
   it("returns 500 when the webhook secret is missing and does not log it", async () => {
@@ -454,6 +461,11 @@ describe("POST /api/webhooks/music", () => {
     const res = await POST(signedRequest(payload));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ status: "ok", type: "music_ready" });
+    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test", {
+      auth: { persistSession: false },
+    });
+    expect(createClientMock.mock.calls.every((call) => call[1] === "service-role-test")).toBe(true);
+    expect(createClientMock.mock.calls.some((call) => call[1] === "anon-test")).toBe(false);
     expect(fetchMock).toHaveBeenCalledWith(AUDIO, expect.objectContaining({ redirect: "error" }));
     expect(uploadMock).toHaveBeenCalledTimes(1);
     const [path, body, options] = uploadMock.mock.calls[0] as unknown as [string, Buffer, { contentType?: string; upsert?: boolean }];
@@ -501,6 +513,54 @@ describe("POST /api/webhooks/music", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(uploadMock).toHaveBeenCalledTimes(1);
     expect(db.calls.filter((call) => call.op === "insert")).toHaveLength(2);
+  });
+
+  it("logs the vault lookup error from the service-role client", async () => {
+    const taskId = "task-lookup-fail";
+    const lookupError = { message: "permission denied for table vaulted_tracks", code: "42501" };
+    db.selectError = lookupError;
+    rememberVocalJob({
+      taskId,
+      userId: SESSION_USER,
+      title: "Job Title",
+      lyrics: "job lyrics",
+      tags: "job tags",
+      personaId: "persona-from-job",
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => {
+      throw new Error("must not fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = {
+      event: "song.completed",
+      code: 200,
+      task_id: taskId,
+      userId: OTHER_USER,
+      data: [{ state: "succeeded", title: "Night Drive", audio_url: AUDIO, lyric: "secret-lyric-body", prompt: "gritty" }],
+    };
+    const res = await POST(signedRequest(payload));
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: "Internal error" });
+    expect(errorSpy).toHaveBeenCalledWith("[webhook] vault lookup failed:", {
+      table: "vaulted_tracks",
+      userId: SESSION_USER,
+      taskId,
+      error: lookupError,
+    });
+    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test", {
+      auth: { persistSession: false },
+    });
+    expect(createClientMock.mock.calls.every((call) => call[1] === "service-role-test")).toBe(true);
+    expect(createClientMock.mock.calls.some((call) => call[1] === "anon-test")).toBe(false);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).not.toContain(SECRET);
+    expect(logged).not.toContain(AUDIO);
+    expect(logged).not.toContain("secret-lyric-body");
+    expect(logged).not.toContain("Authorization");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(uploadMock).not.toHaveBeenCalled();
   });
 
   it("uses the vocal_personas user id when the in-memory job is gone", async () => {

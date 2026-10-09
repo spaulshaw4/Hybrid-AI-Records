@@ -17,7 +17,7 @@ export function vaultAdminClient(): SupabaseClient {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
-  return createClient(supabaseUrl, serviceKey);
+  return createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 }
 
 export function audioVaultPublicUrl(objectPath: string): string {
