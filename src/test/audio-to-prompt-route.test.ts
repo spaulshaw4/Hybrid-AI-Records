@@ -135,7 +135,15 @@ describe("POST /api/reference/audio-to-prompt", () => {
       await expect(response.json()).resolves.toEqual({ error: CLIENT_ERROR });
     }
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(console.error).not.toHaveBeenCalled();
+    const logged = vi
+      .mocked(console.error)
+      .mock.calls.map((parts) => parts.map((part) => String(part)).join(" "))
+      .join("\n");
+    expect(logged).toContain("[audio-to-prompt] validation failed:");
+    expect(logged).toContain("audioUrl");
+    expect(logged).not.toContain(TOKEN);
+    expect(logged).not.toContain("fixture");
+    expect(logged).not.toContain("token=");
   });
 
   it("sends the public url as input.audio with the exact prompt", async () => {
@@ -211,6 +219,51 @@ describe("POST /api/reference/audio-to-prompt", () => {
     expect(sent.input.audio).not.toContain("/object/sign/");
     expect(String(init.body)).not.toContain("data:");
     expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("accepts extra body keys and a VITE project host without calling out a bad content-type", async () => {
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    process.env.VITE_SUPABASE_URL = SUPABASE_URL;
+    process.env.SUPABASE_URL = "postgresql://postgres:db-secret@aws-0.pooler.supabase.com:6543/postgres";
+    const audioUrl = publicAudioUrl();
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "succeeded",
+          output: JSON.stringify({
+            bpm: 100,
+            key: "C minor",
+            genre: "rock",
+            instruments: ["guitar"],
+            groove: "straight",
+            tags: "100 BPM",
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+    const response = await POST(
+      new Request("http://localhost/api/reference/audio-to-prompt", {
+        method: "POST",
+        headers: { "content-type": "text/plain", authorization: "Bearer session-token" },
+        body: JSON.stringify({ audioUrl, userId: OTHER_USER, note: "extra" }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ success: true, tags: "100 BPM", bpm: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const sent = JSON.parse(String(init.body)) as { input?: { audio?: string }; userId?: string; note?: string };
+    expect(sent.input?.audio).toBe(audioUrl);
+    expect(sent.userId).toBeUndefined();
+    expect(sent.note).toBeUndefined();
+    const logged = vi
+      .mocked(console.error)
+      .mock.calls.map((parts) => parts.map((part) => String(part)).join(" "))
+      .join("\n");
+    expect(logged).not.toContain(TOKEN);
+    expect(logged).not.toContain("db-secret");
+    expect(logged).not.toContain(audioUrl);
   });
 
   it("returns 500 without the upstream message when analysis fails", async () => {

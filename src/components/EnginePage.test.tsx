@@ -32,6 +32,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import { EnginePage, formatVocalReferenceClock } from "./EnginePage";
+import * as CharacterModalModule from "@/components/studio/CharacterModal";
 
 function jsonResult(body: unknown, status = 200) {
   return {
@@ -848,6 +849,7 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByText("0:00–0:30")).toBeInTheDocument();
     expect(upload).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await user.click(screen.getByRole("button", { name: "Use Clip" }));
 
     expect(screen.queryByRole("dialog", { name: "Reference" })).not.toBeInTheDocument();
@@ -876,7 +878,7 @@ describe("EnginePage instrumental tab", () => {
     ];
     expect(wavPath).toMatch(/^references\/user-1\/\d+-Time_Is_Not_My_Friend\.wav$/);
     expect(getPublicUrl).toHaveBeenCalledWith(wavPath);
-    expect(wavOptions).toEqual({ contentType: "audio/wav", upsert: true });
+    expect(wavOptions).toEqual({ contentType: "audio/wav", upsert: false });
     expect(wavBody).toBeInstanceOf(Blob);
     expect(wavBody).not.toBe(file);
     const duration = await expectReferencePcmWav(wavBody);
@@ -897,6 +899,15 @@ describe("EnginePage instrumental tab", () => {
     });
     expect(posted.audioUrl).toContain("/storage/v1/object/public/audio-vault/references/user-1/");
     expect(String(analyzeCall[1].body)).toBe(JSON.stringify({ audioUrl: posted.audioUrl }));
+    expect(logSpy.mock.calls.some((args) => args[0] === "[AudioRef] Sliced Blob:" && args[2] === "audio/wav" && Number(args[1]) > 0)).toBe(
+      true,
+    );
+    expect(
+      logSpy.mock.calls.some(
+        (args) => args[0] === "[AudioRef] sliced buffer" && Number(args[1]) > 29 && Number(args[1]) <= 30 && args[2] === 24_000,
+      ),
+    ).toBe(true);
+    expect(logSpy.mock.calls.some((args) => args[0] === "[AudioRef]" && args[1] === posted.audioUrl)).toBe(true);
     expect(String(analyzeCall[1].body)).not.toContain(file.name);
     expect(String(analyzeCall[1].body)).not.toContain("RIFF");
 
@@ -978,7 +989,7 @@ describe("EnginePage instrumental tab", () => {
     expect(FakeAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalled();
     const [path, body, options] = upload.mock.calls[0] as [string, Blob, { contentType?: string; upsert?: boolean }];
     expect(path).toMatch(/^references\/user-1\/\d+-clip\.wav$/);
-    expect(options).toEqual({ contentType: "audio/wav", upsert: true });
+    expect(options).toEqual({ contentType: "audio/wav", upsert: false });
     expect(body).not.toBe(mp3);
     await expectReferencePcmWav(body);
     await waitFor(() =>
@@ -1015,9 +1026,15 @@ describe("EnginePage instrumental tab", () => {
     bytes.set([0x57, 0x41, 0x56, 0x45], 8);
     const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
     await user.upload(input, new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" }));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await confirmReferenceClip(user);
 
     await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[AudioRef] API responded:",
+      500,
+      JSON.stringify({ error: "Failed to analyze audio" }),
+    );
     expect(screen.getByRole("button", { name: "Remove reference" }).parentElement).toHaveTextContent(
       "Time Is Not My Friend.wav",
     );
@@ -1043,6 +1060,174 @@ describe("EnginePage instrumental tab", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Use Clip" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+  });
+
+  it("does not upload when the sliced wav is empty or the channel read throws", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    const encodeSpy = vi.spyOn(CharacterModalModule, "encodePcmWav").mockReturnValue(new Blob([], { type: "audio/wav" }));
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "empty.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    expect(errorSpy.mock.calls.some((args) => args[0] === "[AudioRef] refusing upload:" && args[1] === "byteLength is 0")).toBe(
+      true,
+    );
+    encodeSpy.mockRestore();
+
+    cleanup();
+    errorSpy.mockClear();
+    upload.mockClear();
+    FakeAudioContext.decoded = {
+      numberOfChannels: 1,
+      sampleRate: 24_000,
+      length: 24_000,
+      duration: 1,
+      copyFromChannel() {
+        throw new Error("channel index exceeds number of channels");
+      },
+      getChannelData() {
+        throw new Error("detached");
+      },
+    };
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const again = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(again, new File([bytes], "detached.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith("[AudioRef] gate failed: decode or slice returned null");
+  });
+
+  it("still uploads when copyFromChannel throws and channel data is readable", async () => {
+    const user = userEvent.setup();
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/audio-to-prompt")) return jsonResult({ success: true, tags: "mono clip" });
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+    const samples = new Float32Array(24_000);
+    samples[0] = 0.25;
+    FakeAudioContext.decoded = {
+      numberOfChannels: 1,
+      sampleRate: 48_000,
+      length: 48_000,
+      duration: 1,
+      copyFromChannel() {
+        throw new Error("mono buffer has no channel 1");
+      },
+      getChannelData: (channel: number) => (channel === 0 ? samples : new Float32Array()),
+    };
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "mono.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(upload).toHaveBeenCalled());
+    const body = upload.mock.calls[0]?.[1] as Blob;
+    await expectReferencePcmWav(body);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true);
+  });
+
+  it("logs a storage failure and does not call audio-to-prompt", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const storageError = { message: "new row violates row-level security policy", statusCode: "403" };
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    upload.mockResolvedValue({ error: storageError });
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "clip.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(upload).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith("[AudioRef] Supabase upload failed:", storageError);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+  });
+
+  it("names the session and public URL gates and does not call audio-to-prompt", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getSession.mockResolvedValue({ data: { session: null } });
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const bytes = new Uint8Array(44);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, new File([bytes], "clip.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(screen.getByText("Could not read that reference.")).toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith("[AudioRef] gate failed: no session / no user id");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+
+    cleanup();
+    errorSpy.mockClear();
+    upload.mockClear();
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    getPublicUrl.mockImplementation(() => ({ data: { publicUrl: "" } }));
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const emptyUrl = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(emptyUrl, new File([bytes], "clip.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith("[AudioRef] gate failed: getPublicUrl empty"));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+
+    cleanup();
+    errorSpy.mockClear();
+    getPublicUrl.mockImplementation(() => ({
+      data: {
+        publicUrl:
+          "https://project.supabase.co/storage/v1/object/sign/audio-vault/references/user-1/clip.wav?token=fixture",
+      },
+    }));
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const signed = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(signed, new File([bytes], "clip.wav", { type: "audio/wav" }));
+    await confirmReferenceClip(user);
+    await waitFor(() =>
+      expect(errorSpy).toHaveBeenCalledWith("[AudioRef] gate failed: publicReferenceAudioUrl", "signed url"),
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    const logged = errorSpy.mock.calls.map((args) => args.map((part) => String(part)).join(" ")).join("\n");
+    expect(logged).not.toContain("fixture");
+    expect(logged).not.toContain("token=");
   });
 
   it("fills title, lyrics, and style from a visual injection and keeps them after remove", async () => {

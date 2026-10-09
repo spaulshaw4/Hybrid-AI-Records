@@ -159,17 +159,47 @@ type PcmView = {
   getChannelData(channel: number): Float32Array;
 };
 
-function slicePcm(audio: PcmView, frames: number): PcmView {
-  const count = Math.max(1, Math.min(frames, audio.length));
-  const channels: Float32Array[] = [];
-  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
-    channels.push(audio.getChannelData(channel).slice(0, count));
+/** Copy one channel into a fresh array. Never pass a subarray to copyFromChannel. */
+function readChannel(audio: PcmView, channel: number, start: number, count: number): Float32Array {
+  const frames = Math.max(0, Math.floor(count));
+  const out = new Float32Array(frames);
+  const channelCount = Math.max(0, audio.numberOfChannels);
+  if (channel < 0 || (channelCount > 0 && channel >= channelCount)) return out;
+  const copyFromChannel = (audio as AudioBuffer).copyFromChannel;
+  if (typeof copyFromChannel === "function") {
+    try {
+      copyFromChannel.call(audio, out, channel, Math.max(0, Math.floor(start)));
+      return out;
+    } catch {
+      // Mono buffers throw on a stereo index. Chrome also throws when the destination is a view.
+    }
   }
+  const data = audio.getChannelData(channel);
+  const begin = Math.max(0, Math.floor(start));
+  const end = Math.min(data.length, begin + frames);
+  if (begin >= data.length || end <= begin) return out;
+  try {
+    out.set(data.subarray(begin, end));
+  } catch {
+    for (let index = begin; index < end; index += 1) out[index - begin] = data[index] ?? 0;
+  }
+  return out;
+}
+
+function slicePcm(audio: PcmView, frames: number): PcmView | null {
+  const count = Math.max(0, Math.min(frames, audio.length));
+  if (count <= 0) return null;
+  const channelCount = Math.max(1, audio.numberOfChannels);
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    channels.push(readChannel(audio, channel, 0, count));
+  }
+  const sampleRate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
   return {
-    numberOfChannels: audio.numberOfChannels,
+    numberOfChannels: channelCount,
     length: count,
-    sampleRate: audio.sampleRate,
-    duration: count / audio.sampleRate,
+    sampleRate,
+    duration: count / sampleRate,
     getChannelData: (channel) => channels[channel] ?? new Float32Array(),
   };
 }
@@ -245,14 +275,15 @@ function referenceWindow(audio: PcmView, startSeconds: number) {
   return { start, end: start + span, span, maxStart, duration };
 }
 
-function slicePcmFrom(audio: PcmView, startFrame: number, frames: number): PcmView {
+function slicePcmFrom(audio: PcmView, startFrame: number, frames: number): PcmView | null {
+  if (!(audio.length > 0)) return null;
   const sampleRate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
   const start = Math.max(0, Math.min(Math.floor(startFrame), Math.max(0, audio.length - 1)));
   const count = Math.max(1, Math.min(Math.floor(frames), audio.length - start));
   const channelCount = Math.max(1, audio.numberOfChannels);
   const channels: Float32Array[] = [];
   for (let channel = 0; channel < channelCount; channel += 1) {
-    channels.push(audio.getChannelData(channel).slice(start, start + count));
+    channels.push(readChannel(audio, channel, start, count));
   }
   return {
     numberOfChannels: channelCount,
@@ -264,16 +295,25 @@ function slicePcmFrom(audio: PcmView, startFrame: number, frames: number): PcmVi
 }
 
 /** Chosen 30-second window, 24 kHz, mono. Mic takes do not use this. */
-function pcmForReferenceClip(audio: PcmView, startSeconds: number): PcmView {
-  const rate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
-  const window = referenceWindow(audio, startSeconds);
-  const startFrame = Math.min(Math.floor(window.start * rate), Math.max(0, audio.length - 1));
-  const frames = Math.max(1, Math.min(Math.round(window.span * rate) || 1, audio.length - startFrame));
-  const sliced = slicePcmFrom(audio, startFrame, frames);
-  const downsampled = downsamplePcm(sliced, REFERENCE_SAMPLE_RATE);
-  const mono = mixToMono(downsampled);
-  const maxOut = REFERENCE_CLIP_SECONDS * REFERENCE_SAMPLE_RATE;
-  return mono.length > maxOut ? slicePcm(mono, maxOut) : mono;
+function pcmForReferenceClip(audio: PcmView, startSeconds: number): PcmView | null {
+  if (!audio || !(audio.length > 0)) return null;
+  try {
+    const rate = audio.sampleRate > 0 ? audio.sampleRate : REFERENCE_SAMPLE_RATE;
+    const window = referenceWindow(audio, startSeconds);
+    if (!(window.span > 0)) return null;
+    const startFrame = Math.min(Math.floor(window.start * rate), Math.max(0, audio.length - 1));
+    const frames = Math.max(1, Math.min(Math.round(window.span * rate) || 1, audio.length - startFrame));
+    const sliced = slicePcmFrom(audio, startFrame, frames);
+    if (!sliced || !(sliced.length > 0)) return null;
+    const downsampled = downsamplePcm(sliced, REFERENCE_SAMPLE_RATE);
+    const mono = mixToMono(downsampled);
+    const maxOut = REFERENCE_CLIP_SECONDS * REFERENCE_SAMPLE_RATE;
+    if (!(mono.length > 0)) return null;
+    if (mono.length > maxOut) return slicePcm(mono, maxOut);
+    return mono;
+  } catch {
+    return null;
+  }
 }
 
 function ReferenceClipTimeline({
@@ -350,24 +390,97 @@ function safeReferenceName(originalName: string, extension: ReferenceExtension):
   return `${stem || "reference"}${suffix}`;
 }
 
-/** Drop a token query. Signed object URLs are not reference audio. */
-function publicReferenceAudioUrl(raw: string, userId: string): string {
-  if (!raw || !userId) return "";
+function canonicalStoragePath(pathname: string): string {
+  let path = pathname;
+  try {
+    path = decodeURIComponent(pathname);
+  } catch {
+    path = pathname;
+  }
+  return path.replace(/\/{2,}/g, "/");
+}
+
+/** Why a public URL was rejected. Never includes the query string. */
+function referenceUrlRejection(raw: string, userId: string): string {
+  if (!raw) return "empty";
+  if (!userId) return "no user id";
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
   } catch {
-    return "";
+    return "invalid url";
   }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password) return "";
-  if (parsed.pathname.includes("/object/sign/")) return "";
+  if (parsed.protocol !== "https:") return "protocol";
+  if (parsed.username || parsed.password) return "credentials";
+  const path = canonicalStoragePath(parsed.pathname);
+  if (path.includes("/object/sign/")) return "signed url";
   parsed.searchParams.delete("token");
   parsed.search = parsed.searchParams.toString();
-  const url = parsed.toString();
-  if (/[?&]token=/i.test(url)) return "";
+  if (/[?&]token=/i.test(parsed.toString())) return "token query";
   const marker = `/storage/v1/object/public/audio-vault/references/${userId}/`;
-  if (!parsed.pathname.includes(marker)) return "";
-  return url;
+  if (!path.toLowerCase().includes(marker.toLowerCase())) return "path";
+  return "";
+}
+
+/** Drop a token query. Signed object URLs are not reference audio. */
+function publicReferenceAudioUrl(raw: string, userId: string): string {
+  if (referenceUrlRejection(raw, userId)) return "";
+  const parsed = new URL(raw.trim());
+  parsed.searchParams.delete("token");
+  parsed.search = parsed.searchParams.toString();
+  return parsed.toString();
+}
+
+/**
+ * Slice while the decode context is still open. A closed or detached buffer
+ * is decoded again on a new context before that context is closed.
+ */
+async function sliceReferenceClip(
+  audio: PcmView,
+  file: File,
+  startSeconds: number,
+  ctx: AudioContext | null,
+): Promise<PcmView | null> {
+  if (ctx && ctx.state === "suspended" && typeof ctx.resume === "function") {
+    try {
+      await ctx.resume();
+    } catch {
+      /* Channel copies do not need a running output device. */
+    }
+  }
+  if (!ctx || ctx.state !== "closed") {
+    const sliced = pcmForReferenceClip(audio, startSeconds);
+    if (sliced && sliced.length > 0) return sliced;
+  }
+  console.log("[AudioRef] AudioContext", ctx?.state ?? "missing", "decoding on a live context");
+  return decodeReferenceClip(file, startSeconds);
+}
+
+async function decodeReferenceClip(file: File, startSeconds: number): Promise<PcmView | null> {
+  const Ctor = audioContextCtor();
+  if (!Ctor) return null;
+  let ctx = new Ctor();
+  try {
+    if (ctx.state === "closed") {
+      void safeCloseAudioContext(ctx);
+      ctx = new Ctor();
+    }
+    if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+      try {
+        await ctx.resume();
+      } catch {
+        /* decodeAudioData can still succeed while the context is suspended. */
+      }
+    }
+    if (ctx.state === "closed") return null;
+    const bytes = await file.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(bytes.slice(0));
+    return pcmForReferenceClip(decoded, startSeconds);
+  } catch {
+    return null;
+  } finally {
+    void safeCloseAudioContext(ctx);
+  }
 }
 
 const cardStyle: CSSProperties = {
@@ -539,6 +652,7 @@ export function EnginePage() {
   const [clipStart, setClipStart] = useState(0);
   const [clipPlaying, setClipPlaying] = useState(false);
   const auditionRef = useRef<{ ctx: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const decodeCtxRef = useRef<AudioContext | null>(null);
   const stageSeq = useRef(0);
   const [attachedReference, setAttachedReference] = useState<AttachedReference | null>(null);
   const [isAnalyzingReference, setIsAnalyzingReference] = useState(false);
@@ -571,6 +685,9 @@ export function EnginePage() {
       if (lyricsCooldownTimer.current !== null) window.clearTimeout(lyricsCooldownTimer.current);
       const audition = auditionRef.current;
       auditionRef.current = null;
+      const decodeCtx = decodeCtxRef.current;
+      decodeCtxRef.current = null;
+      void safeCloseAudioContext(decodeCtx);
       if (!audition) return;
       try {
         audition.source.onended = null;
@@ -850,8 +967,15 @@ export function EnginePage() {
     setClipPlaying(false);
   };
 
+  const releaseDecodeContext = () => {
+    const ctx = decodeCtxRef.current;
+    decodeCtxRef.current = null;
+    void safeCloseAudioContext(ctx);
+  };
+
   const clearStagedReference = () => {
     stopReferenceAudition();
+    releaseDecodeContext();
     stageSeq.current += 1;
     setStagedReference(null);
     setDraftReferenceFile(null);
@@ -866,7 +990,14 @@ export function EnginePage() {
     }
     const Ctor = audioContextCtor();
     if (!Ctor) return;
-    const ctx = new Ctor();
+    let ctx = new Ctor();
+    if (ctx.state === "closed") {
+      void safeCloseAudioContext(ctx);
+      ctx = new Ctor();
+    }
+    if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+      void ctx.resume().catch(() => undefined);
+    }
     if (typeof ctx.createBufferSource !== "function") {
       void safeCloseAudioContext(ctx);
       return;
@@ -900,6 +1031,7 @@ export function EnginePage() {
   const stageReferenceFile = async (file: File) => {
     const seq = ++stageSeq.current;
     stopReferenceAudition();
+    releaseDecodeContext();
     setErrorMessage(null);
     setDraftReferenceFile(file);
     setStagedReference(null);
@@ -907,25 +1039,41 @@ export function EnginePage() {
     const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
     if (stageSeq.current !== seq) return;
     if (!referenceAudioKind(file, head)) {
+      console.error("[AudioRef] gate failed: reference kind");
       setErrorMessage("Could not read that reference.");
       return;
     }
     const Ctor = audioContextCtor();
     if (!Ctor) {
+      console.error("[AudioRef] gate failed: decode or slice returned null");
       setErrorMessage("Could not read that reference.");
       return;
     }
     const ctx = new Ctor();
+    let retained = false;
     try {
+      if (ctx.state === "closed") throw new Error("AudioContext closed");
       const bytes = await file.arrayBuffer();
-      const decoded = await ctx.decodeAudioData(bytes.slice(0));
+      let decoded: AudioBuffer;
+      try {
+        decoded = await ctx.decodeAudioData(bytes.slice(0));
+      } catch (error) {
+        if (ctx.state !== "suspended" || typeof ctx.resume !== "function") throw error;
+        await ctx.resume();
+        decoded = await ctx.decodeAudioData(bytes.slice(0));
+      }
       if (stageSeq.current !== seq) return;
+      decodeCtxRef.current = ctx;
+      retained = true;
       setStagedReference({ name: file.name || "reference.wav", file, audio: decoded });
       setClipStart(0);
     } catch {
-      if (stageSeq.current === seq) setErrorMessage("Could not read that reference.");
+      if (stageSeq.current === seq) {
+        console.error("[AudioRef] gate failed: decode or slice returned null");
+        setErrorMessage("Could not read that reference.");
+      }
     } finally {
-      void safeCloseAudioContext(ctx);
+      if (!retained) void safeCloseAudioContext(ctx);
     }
   };
 
@@ -935,12 +1083,18 @@ export function EnginePage() {
     };
     try {
       await Promise.resolve();
-      let body: Blob;
-      try {
-        body = encodePcmWav(pcmForReferenceClip(staged.audio, startSeconds));
-      } catch {
-        fail();
-        return;
+      const sliced = await sliceReferenceClip(staged.audio, staged.file, startSeconds, decodeCtxRef.current);
+      if (!sliced || !(sliced.length > 0)) {
+        console.error("[AudioRef] gate failed: decode or slice returned null");
+        throw new Error("Could not slice that reference.");
+      }
+      const body = encodePcmWav(sliced);
+      console.log("[AudioRef] Sliced Blob:", body.size, body.type);
+      console.log("[AudioRef] sliced buffer", sliced.duration, sliced.sampleRate);
+      if (body.type !== "audio/wav" || body.size === 0) {
+        const reason = body.size === 0 ? "byteLength is 0" : "blob type is not audio/wav";
+        console.error("[AudioRef] refusing upload:", reason, body.size, body.type);
+        throw new Error(reason);
       }
       let accessToken = "";
       let userId = "";
@@ -953,25 +1107,32 @@ export function EnginePage() {
         userId = "";
       }
       if (!accessToken || !userId) {
-        fail();
-        return;
+        console.error("[AudioRef] gate failed: no session / no user id");
+        throw new Error("no session / no user id");
       }
       const safeName = safeReferenceName(staged.name || "reference", "wav");
       const filePath = `references/${userId}/${Date.now()}-${safeName}`;
       const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, body, {
         contentType: "audio/wav",
-        upsert: true,
+        // references/ allows INSERT only. upsert also requires UPDATE and 403s before the API.
+        upsert: false,
       });
       if (uploadError) {
-        fail();
-        return;
+        console.error("[AudioRef] Supabase upload failed:", uploadError);
+        throw new Error("Supabase upload failed.");
       }
       const { data } = supabase.storage.from("audio-vault").getPublicUrl(filePath);
-      const audioUrl = publicReferenceAudioUrl(typeof data?.publicUrl === "string" ? data.publicUrl : "", userId);
-      if (!audioUrl) {
-        fail();
-        return;
+      const rawUrl = typeof data?.publicUrl === "string" ? data.publicUrl.trim() : "";
+      if (!rawUrl) {
+        console.error("[AudioRef] gate failed: getPublicUrl empty");
+        throw new Error("Reference public URL was empty.");
       }
+      const audioUrl = publicReferenceAudioUrl(rawUrl, userId);
+      if (!audioUrl) {
+        console.error("[AudioRef] gate failed: publicReferenceAudioUrl", referenceUrlRejection(rawUrl, userId));
+        throw new Error("Reference public URL was rejected.");
+      }
+      console.log("[AudioRef]", audioUrl);
       const response = await fetch("/api/reference/audio-to-prompt", {
         method: "POST",
         headers: {
@@ -980,18 +1141,24 @@ export function EnginePage() {
         },
         body: JSON.stringify({ audioUrl }),
       });
-      const raw = await response.text();
+      const bodyText = await response.text();
+      if (!response.ok) {
+        console.error("[AudioRef] API responded:", response.status, bodyText);
+        fail();
+        return;
+      }
       let payload: { success?: boolean; tags?: unknown } = {};
       try {
-        const parsed: unknown = JSON.parse(raw);
+        const parsed: unknown = JSON.parse(bodyText);
         if (parsed && typeof parsed === "object") payload = parsed as { success?: boolean; tags?: unknown };
       } catch {
         payload = {};
       }
       if (referenceAnalysisSeq.current !== seq) return;
       const tags = typeof payload.tags === "string" ? payload.tags.trim() : "";
-      if (!response.ok || payload.success !== true || !tags) {
-        setErrorMessage("Could not read that reference.");
+      if (payload.success !== true || !tags) {
+        console.error("[AudioRef] gate failed: analysis payload");
+        fail();
         return;
       }
       setPrompt((current) => appendAcousticTags(current, tags));
@@ -1004,12 +1171,14 @@ export function EnginePage() {
         acousticTags: tags,
       }));
       if (referenceAnalysisSeq.current === seq) {
+        releaseDecodeContext();
         setStagedReference(null);
         setDraftReferenceFile(null);
         setClipStart(0);
       }
-    } catch {
-      if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
+    } catch (error) {
+      console.error("[AudioRef] gate failed:", error instanceof Error ? error.message : "unexpected");
+      fail();
     } finally {
       if (referenceAnalysisSeq.current === seq) setIsAnalyzingReference(false);
     }

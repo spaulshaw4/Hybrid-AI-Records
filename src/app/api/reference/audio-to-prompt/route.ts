@@ -109,13 +109,20 @@ function analysisFromOutput(output: unknown): ReferenceAnalysis | null {
 }
 
 function projectHost(): string {
-  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim() || "";
-  if (!raw) return "";
-  try {
-    return new URL(raw).hostname.toLowerCase().replace(/\.$/, "");
-  } catch {
-    return "";
+  const names = ["NEXT_PUBLIC_SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_URL"] as const;
+  for (const name of names) {
+    const raw = process.env[name]?.trim();
+    if (!raw) continue;
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      const host = url.hostname.toLowerCase().replace(/\.$/, "");
+      if (host) return host;
+    } catch {
+      continue;
+    }
   }
+  return "";
 }
 
 function isBlockedHost(hostname: string): boolean {
@@ -125,27 +132,72 @@ function isBlockedHost(hostname: string): boolean {
   return /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
+function validationFailed(field: string, reason: string): void {
+  console.error(`[audio-to-prompt] validation failed: ${field} ${reason}`);
+}
+
+function canonicalStoragePath(pathname: string): string {
+  let path = pathname;
+  try {
+    path = decodeURIComponent(pathname);
+  } catch {
+    path = pathname;
+  }
+  return path.replace(/\/{2,}/g, "/");
+}
+
 /** Public audio-vault reference for this session. Signed URLs are rejected. */
 function gatePublicReferenceUrl(raw: string, userId: string): string {
   const trimmed = raw.trim();
-  if (!trimmed || !userId) return "";
+  if (!trimmed) {
+    validationFailed("audioUrl", "empty");
+    return "";
+  }
+  if (!userId) {
+    validationFailed("audioUrl", "session user");
+    return "";
+  }
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
+    validationFailed("audioUrl", "invalid");
     return "";
   }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password) return "";
+  if (parsed.protocol !== "https:") {
+    validationFailed("audioUrl", "protocol");
+    return "";
+  }
+  if (parsed.username || parsed.password) {
+    validationFailed("audioUrl", "credentials");
+    return "";
+  }
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
-  if (isBlockedHost(host)) return "";
+  if (isBlockedHost(host)) {
+    validationFailed("audioUrl", "blocked host");
+    return "";
+  }
   const expected = projectHost();
-  if (!expected || host !== expected) return "";
-  if (parsed.pathname.includes("/object/sign/")) return "";
+  if (!expected || host !== expected) {
+    validationFailed("audioUrl", "host");
+    return "";
+  }
+  const path = canonicalStoragePath(parsed.pathname);
+  if (path.includes("/object/sign/")) {
+    validationFailed("audioUrl", "signed");
+    return "";
+  }
   for (const key of parsed.searchParams.keys()) {
-    if (key.toLowerCase() === "token") return "";
+    if (key.toLowerCase() === "token") {
+      validationFailed("audioUrl", "token query");
+      return "";
+    }
   }
   const marker = `/storage/v1/object/public/audio-vault/references/${userId}/`;
-  if (!parsed.pathname.includes(marker)) return "";
+  if (!path.toLowerCase().includes(marker.toLowerCase())) {
+    validationFailed("audioUrl", "path");
+    return "";
+  }
   return trimmed;
 }
 
@@ -163,6 +215,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const authorization = req.headers.get("authorization") ?? "";
     if (!authorization.startsWith("Bearer ") || !authorization.slice("Bearer ".length).trim()) {
+      validationFailed("authorization", "missing");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -171,12 +224,27 @@ export async function POST(req: Request): Promise<Response> {
       const session = await resolveStudioSession(req);
       userId = session.userId.trim();
     } catch {
+      validationFailed("session", "unauthorized");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      validationFailed("session", "missing user");
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { audioUrl } = (await req.json()) as { audioUrl?: unknown };
+    let requestBody: unknown;
+    try {
+      requestBody = await req.json();
+    } catch {
+      validationFailed("audioUrl", "json");
+      return Response.json({ error: CLIENT_ERROR }, { status: 400 });
+    }
+    const audioUrl =
+      requestBody && typeof requestBody === "object" && !Array.isArray(requestBody)
+        ? (requestBody as { audioUrl?: unknown }).audioUrl
+        : undefined;
     if (typeof audioUrl !== "string" || !audioUrl.trim()) {
+      validationFailed("audioUrl", "missing");
       return Response.json({ error: "Missing audioUrl" }, { status: 400 });
     }
 
