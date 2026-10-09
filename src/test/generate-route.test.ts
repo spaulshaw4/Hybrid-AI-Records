@@ -923,6 +923,79 @@ describe("POST /api/generate", () => {
     );
   });
 
+  it("sends vocal lyrics to mureka-v9.5 generate-song and instrumentals to generate-bgm", async () => {
+    process.env.WAVESPEED_API_KEY = "test-key";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === SONG_URL) return jsonResponse({ data: { id: "task-song-split" } });
+      if (url === BGM_URL) return jsonResponse({ data: { id: "task-bgm-split" } });
+      return jsonResponse({ data: {} });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const vocal = await POST(
+      generateRequest({
+        provider: "wavespeed",
+        model: "mureka-9.5",
+        prompt: "dry vocal, 90 BPM",
+        stylePrompt: "dry vocal, 90 BPM",
+        lyrics: "hello line",
+        title: "Night Drive",
+        gender: "male",
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        reference_audio_url:
+          "https://project.supabase.co/storage/v1/object/public/audio-vault/references/user-1/clip.wav",
+        vocalId: "clone-voice",
+        vocal_id: "clone-voice",
+      }),
+    );
+    expect(vocal.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [songUrl, songInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(songUrl).toBe(SONG_URL);
+    const songBody = JSON.parse(String(songInit.body)) as Record<string, unknown>;
+    expectLockedPayload(songBody, {
+      prompt: `${MALE_VOCAL_LEAD}dry vocal, 90 BPM`,
+      lyrics: "hello line",
+      title: "Night Drive",
+      gender: "male",
+      output_format: "wav",
+    });
+    expect(songBody).not.toHaveProperty("reference_audio_url");
+    expect(songBody).not.toHaveProperty("vocal_id");
+    expect(songBody).not.toHaveProperty("userId");
+    expect(readTrackJob("task-song-split")?.userId).toBe(SESSION_USER);
+    expect(fetchMock.mock.calls.some((call) => String((call as [string])[0]).includes("vocal-clone"))).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => String((call as [string])[0]).includes("/api/vocals"))).toBe(false);
+
+    fetchMock.mockClear();
+    const instrumental = await POST(
+      generateRequest({
+        isInstrumental: true,
+        provider: "wavespeed",
+        model: "mureka-9.5",
+        prompt: "Heavy southern rock, 74 BPM",
+        lyrics: "hello line",
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        reference_audio_url:
+          "https://project.supabase.co/storage/v1/object/public/audio-vault/references/user-1/clip.wav",
+        vocalId: "clone-voice",
+      }),
+    );
+    expect(instrumental.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [bgmUrl, bgmInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(bgmUrl).toBe(BGM_URL);
+    const bgmBody = JSON.parse(String(bgmInit.body)) as Record<string, unknown>;
+    expectLockedPayload(bgmBody, {
+      prompt: "Heavy southern rock, 74 BPM",
+      output_format: "wav",
+    });
+    expect(bgmBody).not.toHaveProperty("lyrics");
+    expect(bgmBody).not.toHaveProperty("reference_audio_url");
+    expect(bgmBody).not.toHaveProperty("vocal_id");
+    expect(readTrackJob("task-bgm-split")?.userId).toBe(SESSION_USER);
+  });
+
   it("returns 402 when the balance is 0 or the balance row is missing and does not call upstream", async () => {
     process.env.WAVESPEED_API_KEY = "test-key";
     const fetchMock = vi.fn(async () => jsonResponse({ data: { id: "should-not-run" } }));

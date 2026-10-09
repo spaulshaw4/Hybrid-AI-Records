@@ -211,7 +211,7 @@ describe("EnginePage instrumental tab", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(false);
   });
 
-  it("keeps Vocals with AI on the music API and does not call the instrumental engine", async () => {
+  it("sends Vocals with AI to Mureka 9.5 and does not call the music API", async () => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -230,19 +230,26 @@ describe("EnginePage instrumental tab", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Style" }), { target: { value: "dry vocal, 90 BPM" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
     await user.click(screen.getByRole("button", { name: "Render Master Record" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
-    const vocalCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"));
-    expect(vocalCalls).toHaveLength(1);
-    const vocalCall = vocalCalls[0] as [string, RequestInit];
-    expect(vocalCall[0]).toBe("/api/vocals/generate");
-    const body = JSON.parse(String(vocalCall[1].body)) as Record<string, unknown>;
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(true));
+    const generateCalls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/generate");
+    expect(generateCalls).toHaveLength(1);
+    const generateCall = generateCalls[0] as [string, RequestInit];
+    expect(generateCall[0]).toBe("/api/generate");
+    const body = JSON.parse(String(generateCall[1].body)) as Record<string, unknown>;
     expect(body.lyrics).toBe("hello line");
-    expect(body.styleTags).toBe("dry vocal, 90 BPM");
-    expect(body).not.toHaveProperty("provider");
-    expect(body).not.toHaveProperty("model");
+    expect(body.prompt).toBe("dry vocal, 90 BPM");
+    expect(body.stylePrompt).toBe("dry vocal, 90 BPM");
+    expect(body.provider).toBe("wavespeed");
+    expect(body.model).toBe("mureka-9.5");
+    expect(body.gender).toBe("male");
+    expect(body).not.toHaveProperty("isInstrumental");
     expect(body).not.toHaveProperty("reference_audio_url");
     expect(body).not.toHaveProperty("vocalId");
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
+    expect(body).not.toHaveProperty("vocal_id");
+    expect(body).not.toHaveProperty("userId");
+    expect(body).not.toHaveProperty("webhook");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => /wavespeed\.ai/i.test(String(url)))).toBe(false);
   });
 
   it("enhances an instrumental vibe through enhance_style and keeps the draft when it fails", async () => {
@@ -501,16 +508,23 @@ describe("EnginePage instrumental tab", () => {
         string,
         RequestInit,
       ];
+      expect(generateCall[0]).toBe("/api/vocals/generate");
       const body = JSON.parse(String(generateCall[1].body)) as {
         reference_audio_url?: string;
         vocalAudioUrl?: string;
         personaId?: string;
+        provider?: string;
+        model?: string;
       };
       expect(body.reference_audio_url).toBe(publicUrl);
       expect(body).not.toHaveProperty("vocalAudioUrl");
       expect(body).not.toHaveProperty("personaId");
+      expect(body).not.toHaveProperty("provider");
+      expect(body).not.toHaveProperty("model");
       expect(body.reference_audio_url).not.toMatch(/^blob:/);
       expect(body.reference_audio_url).not.toMatch(/^http:/);
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => /wavespeed/i.test(String(url)))).toBe(false);
       expect(screen.getByText(activeVocal)).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Instrumental" }));
@@ -807,8 +821,13 @@ describe("EnginePage instrumental tab", () => {
       reference_audio_url?: string;
       personaId?: string;
     };
+    expect(vocalCall[0]).toBe("/api/vocals/generate");
     expect(vocalBody).not.toHaveProperty("reference_audio_url");
+    expect(vocalBody).not.toHaveProperty("provider");
+    expect(vocalBody).not.toHaveProperty("model");
     expect(vocalBody.personaId).toBe("vocal_stephen_oct5_master");
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => /wavespeed/i.test(String(url)))).toBe(false);
 
     const vocalCallsBeforeInstrumental = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate")).length;
     await user.click(screen.getByRole("tab", { name: "Instrumental" }));
@@ -830,7 +849,7 @@ describe("EnginePage instrumental tab", () => {
   });
 
   it(
-    "keeps a chosen reference file on the Vocals with AI pill and uploads it before vocals generate",
+    "keeps a chosen reference on Vocals with AI and sends its style tags to Mureka 9.5",
     async () => {
     const user = userEvent.setup();
     const publicUrl =
@@ -983,31 +1002,33 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
 
     await user.click(screen.getByRole("button", { name: "Render Master Record" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
-    const uploadCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/reference")) as [string, RequestInit];
-    expect(uploadCall[0]).toBe("/api/vocals/reference");
-    expect((uploadCall[1].headers as Record<string, string>).Authorization).toBe("Bearer session-token");
-    expect(uploadCall[1].body).toBeInstanceOf(FormData);
-    expect((uploadCall[1].body as FormData).get("userId")).toBeNull();
-    expect(((uploadCall[1].body as FormData).get("audio") as File).name).toBe("Time Is Not My Friend.wav");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(true));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/generate")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/reference"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/upload"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("create-voice"))).toBe(false);
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => /wavespeed\.ai|vocal-clone/i.test(String(url)))).toBe(false);
 
-    const vocalCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/vocals/generate")) as [string, RequestInit];
-    const vocalBody = JSON.parse(String(vocalCall[1].body)) as { reference_audio_url?: string; styleTags?: string };
-    expect(vocalBody.reference_audio_url).toBe(publicUrl);
-    expect(vocalBody.styleTags).toBe(tags);
-    expect(vocalBody.reference_audio_url).not.toMatch(/^blob:/);
-    expect(vocalBody.reference_audio_url).not.toMatch(/^http:/);
-    expect(screen.getByText(/Rendering/)).toBeInTheDocument();
+    const generateCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/generate") as [string, RequestInit];
+    const generateBody = JSON.parse(String(generateCall[1].body)) as Record<string, unknown>;
+    expect(generateBody.prompt).toBe(tags);
+    expect(generateBody.stylePrompt).toBe(tags);
+    expect(generateBody.lyrics).toBe("hello line");
+    expect(generateBody.provider).toBe("wavespeed");
+    expect(generateBody.model).toBe("mureka-9.5");
+    expect(generateBody).not.toHaveProperty("isInstrumental");
+    expect(generateBody).not.toHaveProperty("reference_audio_url");
+    expect(generateBody).not.toHaveProperty("vocalId");
+    expect(generateBody).not.toHaveProperty("vocal_id");
+    expect(generateBody).not.toHaveProperty("userId");
     expect(screen.queryByText(/no wavUrl/i)).not.toBeInTheDocument();
 
     const calledUrls = fetchMock.mock.calls.map(([url]) => String(url));
-    const uploadAt = calledUrls.findIndex((url) => url.includes("/api/vocals/reference"));
-    const vocalAt = calledUrls.findIndex((url) => url.includes("/api/vocals/generate"));
-    expect(uploadAt).toBeGreaterThan(-1);
-    expect(vocalAt).toBeGreaterThan(uploadAt);
+    const analyzeAt = calledUrls.findIndex((url) => url.includes("/api/reference/audio-to-prompt"));
+    const generateAt = calledUrls.findIndex((url) => url === "/api/generate");
+    expect(analyzeAt).toBeGreaterThan(-1);
+    expect(generateAt).toBeGreaterThan(analyzeAt);
 
     await user.click(screen.getByRole("button", { name: "Remove reference" }));
     expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();

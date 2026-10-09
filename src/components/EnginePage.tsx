@@ -1296,18 +1296,17 @@ export function EnginePage() {
     const lyricValue = (lyrics ?? "").trim();
     const duration = trackLength || 180;
     const songTitle = title.trim() || "Feel It in the Rain";
-    const dispatchInstrumental = activeTab === "easy";
-    if (!dispatchInstrumental && !styleValue && !lyricValue) {
+    if (activeTab !== "easy" && !styleValue && !lyricValue) {
       console.error("HALT: Attempted to submit with empty prompt and lyrics.");
       alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
       return;
     }
-    if (!dispatchInstrumental && !lyricValue) {
+    if (activeTab !== "easy" && !lyricValue) {
       console.error("HALT: Attempted to render a vocal master without lyrics.");
       alert("Generation halted: add lyrics before rendering a vocal master.");
       return;
     }
-    if (dispatchInstrumental && !styleValue) {
+    if (activeTab === "easy" && !styleValue) {
       console.error("HALT: Attempted to submit an instrumental with an empty style prompt.");
       alert("Generation halted: Lyrics or style prompt are empty. Check your input to avoid burning API credits.");
       return;
@@ -1340,21 +1339,33 @@ export function EnginePage() {
     }
     if (ownerId && ownerId !== authUserId) setAuthUserId(ownerId);
     try {
-      if (dispatchInstrumental) {
+      if (activeTab === "easy" || activeTab === "custom") {
+        const murekaBody =
+          activeTab === "easy"
+            ? {
+                prompt: styleValue,
+                stylePrompt: styleValue,
+                title: songTitle,
+                isInstrumental: true,
+                provider: "wavespeed",
+                model: "mureka-9.5",
+              }
+            : {
+                prompt: styleValue,
+                stylePrompt: styleValue,
+                title: songTitle,
+                lyrics: lyricValue,
+                gender,
+                provider: "wavespeed",
+                model: "mureka-9.5",
+              };
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           },
-          body: JSON.stringify({
-            prompt: styleValue,
-            stylePrompt: styleValue,
-            title: songTitle,
-            isInstrumental: true,
-            provider: "wavespeed",
-            model: "mureka-9.5",
-          }),
+          body: JSON.stringify(murekaBody),
         });
         const data = (await res.json()) as {
           success?: boolean;
@@ -1399,6 +1410,8 @@ export function EnginePage() {
         setVaultRevision((value) => value + 1);
         return;
       }
+
+      if (activeTab !== "vocals") return;
 
       let referenceAudioUrl = "";
       if (attachedReference) {
