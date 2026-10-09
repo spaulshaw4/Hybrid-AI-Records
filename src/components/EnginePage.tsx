@@ -42,13 +42,13 @@ function vibeEnhanceSeed(rough: string): string {
 }
 
 function vibeEnhanceError(message: string): string {
-  if (/wavespeed|replicate|claude|aimusic/i.test(message)) return "Could not enhance that vibe.";
+  if (/wavespeed|mureka|replicate|claude|aimusic|fish|sonic/i.test(message)) return "Could not enhance that vibe.";
   const text = message.trim();
   return text || "Could not enhance that vibe.";
 }
 
 function studioPublicError(message: string, fallback: string): string {
-  if (/wavespeed|replicate|gemini|claude|supabase|aimusic/i.test(message)) return fallback;
+  if (/wavespeed|mureka|replicate|gemini|claude|supabase|aimusic|fish|sonic/i.test(message)) return fallback;
   const text = message.trim();
   return text || fallback;
 }
@@ -1340,9 +1340,68 @@ export function EnginePage() {
     }
     if (ownerId && ownerId !== authUserId) setAuthUserId(ownerId);
     try {
+      if (dispatchInstrumental) {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({
+            prompt: styleValue,
+            stylePrompt: styleValue,
+            title: songTitle,
+            isInstrumental: true,
+            provider: "wavespeed",
+            model: "mureka-9.5",
+          }),
+        });
+        const data = (await res.json()) as {
+          success?: boolean;
+          status?: string;
+          taskId?: string;
+          error?: string;
+          wavUrl?: string;
+          mp3Url?: string;
+        };
+        if (!res.ok || !data.success) {
+          throw new Error(studioPublicError(data.error || "", "Generation rejected by upstream engine"));
+        }
+        let wavUrl = data.wavUrl ?? "";
+        const localId = data.taskId ? `local-${data.taskId}` : `local-${Date.now()}`;
+        if (data.status === "pending" && data.taskId) {
+          setVaultTracks((current) => [
+            {
+              id: localId,
+              title: effectiveTitle,
+              genre: effectivePrompt.slice(0, 24),
+              duration: "210s",
+              status: "Rendering",
+              wav_url: "",
+              mp3_url: "",
+            },
+            ...current,
+          ]);
+          try {
+            const ready = await waitForVaultedTrack(data.taskId);
+            wavUrl = ready.wavUrl;
+          } catch (waitErr: unknown) {
+            setVaultTracks((current) =>
+              current.map((row) => (row.id === localId ? { ...row, status: "Failed" } : row)),
+            );
+            throw waitErr;
+          }
+        }
+        if (!wavUrl) {
+          throw new Error(studioPublicError(data.error || "", "Generation rejected by upstream engine"));
+        }
+        setVaultTracks((current) => current.filter((row) => row.id !== localId));
+        setVaultRevision((value) => value + 1);
+        return;
+      }
+
       let referenceAudioUrl = "";
-      const dispatchReference = activeTab === "custom" && !dispatchInstrumental && attachedReference !== null;
-      if (dispatchReference && attachedReference) {
+      if (attachedReference) {
         const rawUrl =
           attachedReference.kind === "file"
             ? await uploadReferenceWav(attachedReference.file, accessToken)
@@ -1352,111 +1411,49 @@ export function EnginePage() {
         }
         referenceAudioUrl = rawUrl.trim();
       }
-      if (referenceAudioUrl) {
-        const vocalRes = await fetch("/api/vocals/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          },
-          body: JSON.stringify({
-            title: songTitle,
-            lyrics: lyricValue,
-            vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
-            styleTags: styleValue,
-            duration,
-            reference_audio_url: referenceAudioUrl,
-            ...(selectedCharacter && selectedCharacter.vocalId && !/^https:\/\//i.test(selectedCharacter.vocalId)
-              ? { personaId: selectedCharacter.vocalId.trim() }
-              : {}),
-          }),
-        });
-        const vocalData = (await vocalRes.json().catch(() => ({}))) as {
-          success?: boolean;
-          taskId?: string;
-          error?: string;
-        };
-        if (!vocalRes.ok || vocalData.success !== true || !vocalData.taskId) {
-          throw new Error(studioPublicError(vocalData.error || "", "Could not attach that reference."));
-        }
-        const localId = `local-${vocalData.taskId}`;
-        setVaultTracks((current) => [
-          {
-            id: localId,
-            title: effectiveTitle,
-            genre: effectivePrompt.slice(0, 24),
-            duration: "210s",
-            status: "Rendering",
-            wav_url: "",
-            mp3_url: "",
-          },
-          ...current,
-        ]);
-        return;
-      }
-      const res = await fetch("/api/generate", {
+      const vocalRes = await fetch("/api/vocals/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({
-          prompt: styleValue,
-          stylePrompt: styleValue,
-          lyrics: lyricValue,
-          lyricsText: lyricValue,
-          ...(dispatchInstrumental ? {} : { duration }),
           title: songTitle,
-          gender,
-          isInstrumental: dispatchInstrumental,
-          vocalId: selectedCharacter ? selectedCharacter.vocalId : null,
-          ...(ownerId ? { userId: ownerId } : {}),
+          lyrics: lyricValue,
+          vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
+          styleTags: styleValue,
+          duration,
+          ...(referenceAudioUrl ? { reference_audio_url: referenceAudioUrl } : {}),
+          ...(selectedCharacter && selectedCharacter.vocalId && !/^https:\/\//i.test(selectedCharacter.vocalId)
+            ? { personaId: selectedCharacter.vocalId.trim() }
+            : {}),
         }),
       });
-      const data = (await res.json()) as {
+      const vocalData = (await vocalRes.json().catch(() => ({}))) as {
         success?: boolean;
-        status?: string;
         taskId?: string;
         error?: string;
-        wavUrl?: string;
-        mp3Url?: string;
       };
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Generation rejected by upstream engine");
+      if (!vocalRes.ok || vocalData.success !== true || !vocalData.taskId) {
+        throw new Error(studioPublicError(vocalData.error || "", "Could not attach that reference."));
       }
-      let wavUrl = data.wavUrl ?? "";
-      const localId = data.taskId ? `local-${data.taskId}` : `local-${Date.now()}`;
-      if (data.status === "pending" && data.taskId) {
-        setVaultTracks((current) => [
-          {
-            id: localId,
-            title: effectiveTitle,
-            genre: effectivePrompt.slice(0, 24),
-            duration: "210s",
-            status: "Rendering",
-            wav_url: "",
-            mp3_url: "",
-          },
-          ...current,
-        ]);
-        try {
-          const ready = await waitForVaultedTrack(data.taskId);
-          wavUrl = ready.wavUrl;
-        } catch (waitErr: unknown) {
-          setVaultTracks((current) =>
-            current.map((row) => (row.id === localId ? { ...row, status: "Failed" } : row)),
-          );
-          throw waitErr;
-        }
-      }
-      if (!wavUrl) {
-        throw new Error(data.error || "Generation rejected by upstream engine");
-      }
-      setVaultTracks((current) => current.filter((row) => row.id !== localId));
-      setVaultRevision((value) => value + 1);
+      const vocalLocalId = `local-${vocalData.taskId}`;
+      setVaultTracks((current) => [
+        {
+          id: vocalLocalId,
+          title: effectiveTitle,
+          genre: effectivePrompt.slice(0, 24),
+          duration: "210s",
+          status: "Rendering",
+          wav_url: "",
+          mp3_url: "",
+        },
+        ...current,
+      ]);
+      return;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
-      setErrorMessage(message || "An unexpected error occurred during synthesis.");
+      setErrorMessage(studioPublicError(message, "An unexpected error occurred during synthesis."));
     } finally {
       setIsGenerating(false);
     }

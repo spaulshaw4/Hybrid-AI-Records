@@ -187,7 +187,10 @@ describe("EnginePage instrumental tab", () => {
       prompt: string;
       stylePrompt: string;
       isInstrumental: boolean;
+      provider?: string;
+      model?: string;
       vocal_id?: string;
+      vocalId?: string;
       reference_id?: string;
       seed?: number;
       webhook?: string;
@@ -195,13 +198,51 @@ describe("EnginePage instrumental tab", () => {
     expect(body.prompt).toBe(grunge!.prompt);
     expect(body.stylePrompt).toBe(grunge!.prompt);
     expect(body.isInstrumental).toBe(true);
+    expect(body.provider).toBe("wavespeed");
+    expect(body.model).toBe("mureka-9.5");
     expect(body.vocal_id).toBeUndefined();
+    expect(body).not.toHaveProperty("vocalId");
     expect(body.reference_id).toBeUndefined();
     expect(body.seed).toBeUndefined();
     expect(body.webhook).toBeUndefined();
     expect(body).not.toHaveProperty("duration");
     expect(body).not.toHaveProperty("reference_audio_url");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/generate"))).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(false);
+  });
+
+  it("keeps Vocals with AI on the music API and does not call the instrumental engine", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/vocals/generate")) return jsonResult({ success: true, taskId: "task-vocal-ai" });
+      if (url.includes("/api/generate")) {
+        return jsonResult({
+          success: true,
+          status: "ready",
+          wavUrl: "https://example.com/storage/v1/object/public/audio-vault/masters/ready.wav",
+        });
+      }
+      return jsonResult({ tracks: [] });
+    });
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Style" }), { target: { value: "dry vocal, 90 BPM" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "hello line" } });
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/vocals/generate"))).toBe(true));
+    const vocalCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"));
+    expect(vocalCalls).toHaveLength(1);
+    const vocalCall = vocalCalls[0] as [string, RequestInit];
+    expect(vocalCall[0]).toBe("/api/vocals/generate");
+    const body = JSON.parse(String(vocalCall[1].body)) as Record<string, unknown>;
+    expect(body.lyrics).toBe("hello line");
+    expect(body.styleTags).toBe("dry vocal, 90 BPM");
+    expect(body).not.toHaveProperty("provider");
+    expect(body).not.toHaveProperty("model");
+    expect(body).not.toHaveProperty("reference_audio_url");
+    expect(body).not.toHaveProperty("vocalId");
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generate")).toBe(false);
   });
 
   it("enhances an instrumental vibe through enhance_style and keeps the draft when it fails", async () => {
@@ -483,7 +524,11 @@ describe("EnginePage instrumental tab", () => {
       ];
       const instrumentalBody = JSON.parse(String(instrumentalCall[1].body)) as Record<string, unknown>;
       expect(instrumentalBody).not.toHaveProperty("reference_audio_url");
+      expect(instrumentalBody).not.toHaveProperty("vocalId");
       expect(instrumentalBody.isInstrumental).toBe(true);
+      expect(instrumentalBody.provider).toBe("wavespeed");
+      expect(instrumentalBody.model).toBe("mureka-9.5");
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/generate")).toHaveLength(1);
 
       await user.click(screen.getByRole("tab", { name: "With Vocals" }));
       expect(screen.getByText(activeVocal)).toBeInTheDocument();
@@ -774,7 +819,10 @@ describe("EnginePage instrumental tab", () => {
     const instrumentalBody = JSON.parse(String(instrumentalCall[1].body)) as Record<string, unknown>;
     expect(instrumentalBody).not.toHaveProperty("reference_audio_url");
     expect(instrumentalBody).not.toHaveProperty("webhook");
+    expect(instrumentalBody).not.toHaveProperty("vocalId");
     expect(instrumentalBody.isInstrumental).toBe(true);
+    expect(instrumentalBody.provider).toBe("wavespeed");
+    expect(instrumentalBody.model).toBe("mureka-9.5");
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/vocals/generate"))).toHaveLength(
       vocalCallsBeforeInstrumental,
     );

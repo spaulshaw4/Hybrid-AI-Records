@@ -39,7 +39,7 @@ const AUDIO = "https://cdn.example/master.wav";
 
 function rowsFor(table: string): Array<Record<string, unknown>> {
   if (table === "vaulted_tracks") return db.vaultRows.map((row) => ({ ...row }));
-  if (table === "tracks") return db.trackRows.map((row) => ({ ...row }));
+  if (table === "Track") return db.trackRows.map((row) => ({ ...row }));
   if (table === "vocal_personas") return db.personaRows.map((row) => ({ ...row }));
   return [];
 }
@@ -326,7 +326,7 @@ describe("POST /api/webhooks/music", () => {
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(SECRET);
   });
 
-  it("marks song.failed on vocal_personas and tracks without inserting a vault row", async () => {
+  it("marks song.failed on vocal_personas without inserting a vault row", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -352,14 +352,7 @@ describe("POST /api/webhooks/music", () => {
         filters: [["task_id", "task-fail-1"]],
       }),
     );
-    expect(db.calls).toContainEqual(
-      expect.objectContaining({
-        table: "tracks",
-        op: "update",
-        payload: expect.objectContaining({ status: "failed", error_message: "render failed" }),
-        filters: [["task_id", "task-fail-1"]],
-      }),
-    );
+    expect(db.calls.some((call) => call.table === "tracks" || call.table === "Track")).toBe(false);
     expect(db.calls.some((call) => call.op === "insert")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(uploadMock).not.toHaveBeenCalled();
@@ -381,13 +374,7 @@ describe("POST /api/webhooks/music", () => {
     );
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ status: "ok", received: "failed_logged" });
-    expect(db.calls).toContainEqual(
-      expect.objectContaining({
-        table: "tracks",
-        op: "update",
-        payload: expect.objectContaining({ status: "failed" }),
-      }),
-    );
+    expect(db.calls.some((call) => call.table === "tracks" || call.table === "Track")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -426,7 +413,7 @@ describe("POST /api/webhooks/music", () => {
     expect(db.calls.some((call) => call.op === "insert")).toBe(false);
   });
 
-  it("rehosts a signed song.completed master into vaulted_tracks and tracks", async () => {
+  it("rehosts a signed song.completed master into vaulted_tracks", async () => {
     const taskId = "task-song-ok";
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/vocals/${taskId}.wav`;
     rememberVocalJob({
@@ -489,30 +476,25 @@ describe("POST /api/webhooks/music", () => {
         },
       }),
     );
-    expect(db.calls).toContainEqual(
-      expect.objectContaining({
-        table: "tracks",
-        op: "insert",
-        payload: {
-          user_id: SESSION_USER,
-          title: "Night Drive",
-          genre_prompt: "gritty",
-          lyrics: "[Verse]\nline",
-          master_url: publicUrl,
-          task_id: taskId,
-          status: "completed",
-        },
-      }),
-    );
+    expect(db.calls.some((call) => call.table === "tracks" || call.table === "Track")).toBe(false);
     expect(publicUrl).not.toBe(AUDIO);
     expect(JSON.stringify(db.calls)).not.toContain(OTHER_USER);
+    expect(db.calls.filter((call) => call.op === "select")).toEqual([
+      expect.objectContaining({
+        table: "vaulted_tracks",
+        filters: [
+          ["user_id", SESSION_USER],
+          ["task_id", taskId],
+        ],
+      }),
+    ]);
 
     const again = await POST(signedRequest(payload));
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toEqual({ status: "ok", type: "music_ready" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(uploadMock).toHaveBeenCalledTimes(1);
-    expect(db.calls.filter((call) => call.op === "insert")).toHaveLength(2);
+    expect(db.calls.filter((call) => call.op === "insert")).toHaveLength(1);
   });
 
   it("logs the vault lookup error from the service-role client", async () => {

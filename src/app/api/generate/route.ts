@@ -162,7 +162,7 @@ function hasIdOrStatus(body: JsonRecord): boolean {
 
 function customerMessage(message: string, fallback: string): string {
   const text = message.trim();
-  if (!text || /wavespeed/i.test(text)) return fallback;
+  if (!text || /wavespeed|mureka|replicate|gemini|claude|supabase|aimusic|fish|sonic/i.test(text)) return fallback;
   return text;
 }
 

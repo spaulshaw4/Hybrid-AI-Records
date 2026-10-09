@@ -130,17 +130,6 @@ async function markFailed(payload: Record<string, unknown>): Promise<Response> {
     console.error("[webhook] vocal persona failure update failed");
   }
 
-  const song = await supabase
-    .from("tracks")
-    .update({
-      status: "failed",
-      error_message: detail,
-    })
-    .eq("task_id", taskId);
-  if (song.error) {
-    console.error("[webhook] song failure update failed");
-  }
-
   return Response.json({ status: "ok", received: "failed_logged" });
 }
 
@@ -179,7 +168,7 @@ function clipTitle(clip: Record<string, unknown>, index: number, total: number, 
   return total > 1 ? `${base} (${index + 1})` : base;
 }
 
-async function titlesFor(supabase: AdminClient, table: "vaulted_tracks" | "tracks", userId: string, taskId: string): Promise<Set<string>> {
+async function titlesFor(supabase: AdminClient, table: "vaulted_tracks", userId: string, taskId: string): Promise<Set<string>> {
   const existing = await supabase.from(table).select("title").eq("user_id", userId).eq("task_id", taskId);
   if (existing.error) {
     console.error("[webhook] vault lookup failed:", { table, userId, taskId, error: existing.error });
@@ -267,7 +256,6 @@ async function storeCompletedSong(payload: Record<string, unknown>): Promise<Res
 
   const job = readVocalJob(taskId);
   const vaultTitles = await titlesFor(supabase, "vaulted_tracks", owner.userId, taskId);
-  const trackTitles = await titlesFor(supabase, "tracks", owner.userId, taskId);
 
   for (let index = 0; index < clips.length; index += 1) {
     const clip = clips[index] ?? {};
@@ -275,55 +263,31 @@ async function storeCompletedSong(payload: Record<string, unknown>): Promise<Res
     if (!isSafeAudioUrl(audioUrl)) continue;
 
     const title = clipTitle(clip, index, clips.length, job?.title ?? "");
-    const needsVault = !vaultTitles.has(title);
-    const needsTrack = !trackTitles.has(title);
-    if (!needsVault && !needsTrack) continue;
+    if (vaultTitles.has(title)) continue;
 
     const objectPath = index === 0 ? `vocals/${taskId}.wav` : `vocals/${taskId}-${index}.wav`;
-    let publicUrl = audioVaultPublicUrl(objectPath);
-    if (needsVault) {
-      const stored = await storeMaster(supabase, objectPath, audioUrl);
-      if (!stored.ok) return Response.json({ error: stored.error }, { status: stored.status });
-      publicUrl = stored.publicUrl;
-    }
+    const stored = await storeMaster(supabase, objectPath, audioUrl);
+    if (!stored.ok) return Response.json({ error: stored.error }, { status: stored.status });
+    const publicUrl = stored.publicUrl;
 
     const prompt = readString(clip.prompt) || readString(clip.tags) || job?.tags || "";
     const lyrics = readString(clip.lyrics) || readString(clip.lyric) || job?.lyrics || "";
 
-    if (needsVault) {
-      const inserted = await supabase.from("vaulted_tracks").insert({
-        user_id: owner.userId,
-        title,
-        prompt,
-        lyrics,
-        vocal_id_used: owner.personaId || null,
-        wav_url: publicUrl,
-        mp3_url: publicUrl,
-        task_id: taskId,
-      });
-      if (inserted.error) {
-        console.error("[webhook] vault insert failed");
-        return Response.json({ error: "Internal error" }, { status: 500 });
-      }
-      vaultTitles.add(title);
+    const inserted = await supabase.from("vaulted_tracks").insert({
+      user_id: owner.userId,
+      title,
+      prompt,
+      lyrics,
+      vocal_id_used: owner.personaId || null,
+      wav_url: publicUrl,
+      mp3_url: publicUrl,
+      task_id: taskId,
+    });
+    if (inserted.error) {
+      console.error("[webhook] vault insert failed:", inserted.error);
+      return Response.json({ error: "Internal error" }, { status: 500 });
     }
-
-    if (needsTrack) {
-      const inserted = await supabase.from("tracks").insert({
-        user_id: owner.userId,
-        title,
-        genre_prompt: prompt || null,
-        lyrics: lyrics || null,
-        master_url: publicUrl,
-        task_id: taskId,
-        status: "completed",
-      });
-      if (inserted.error) {
-        console.error("[webhook] track insert failed");
-        return Response.json({ error: "Internal error" }, { status: 500 });
-      }
-      trackTitles.add(title);
-    }
+    vaultTitles.add(title);
   }
 
   return Response.json({ status: "ok", type: "music_ready" });
