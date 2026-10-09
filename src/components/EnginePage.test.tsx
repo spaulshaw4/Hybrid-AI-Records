@@ -40,6 +40,19 @@ function jsonResult(body: unknown, status = 200) {
   };
 }
 
+/** fmt chunk is PCM (format 1) at 16 bits per sample. */
+async function expectPcmWav16(blob: Blob) {
+  expect(blob.type).toBe("audio/wav");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const text = (start: number, end: number) => String.fromCharCode(...bytes.slice(start, end));
+  expect(text(0, 4)).toBe("RIFF");
+  expect(text(8, 12)).toBe("WAVE");
+  expect(text(12, 16)).toBe("fmt ");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  expect(view.getUint16(20, true)).toBe(1);
+  expect(view.getUint16(34, true)).toBe(16);
+}
+
 describe("EnginePage instrumental tab", () => {
   it("formats a docked vocal duration as m:ss", () => {
     expect(formatVocalReferenceClock(29)).toBe("0:29");
@@ -67,6 +80,8 @@ describe("EnginePage instrumental tab", () => {
       data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
     }));
     from.mockReset();
+    FakeAudioContext.instances = [];
+    vi.stubGlobal("AudioContext", FakeAudioContext);
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     getSession.mockResolvedValue({ data: { session: null } });
@@ -776,6 +791,12 @@ describe("EnginePage instrumental tab", () => {
     bytes.set([0x57, 0x41, 0x56, 0x45], 8);
     const file = new File([bytes], "Time Is Not My Friend.wav", { type: "audio/wav" });
     const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    expect(input).toHaveAttribute(
+      "accept",
+      "audio/wav,audio/mp3,audio/mpeg,audio/aac,audio/m4a,.wav,.mp3,.aac,.m4a",
+    );
+    expect(input.getAttribute("accept")).toContain("mpeg");
+    expect(input.getAttribute("accept")).toContain("aac");
     await user.upload(input, file);
     expect(screen.getByText("Selected: Time Is Not My Friend.wav")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
@@ -792,14 +813,40 @@ describe("EnginePage instrumental tab", () => {
     expect(analyzingPill.querySelector(".animate-ping")).toBeTruthy();
     expect(analyzingPill.querySelector(".animate-pulse")).toBeNull();
 
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+    );
+    expect(FakeAudioContext.instances.length).toBeGreaterThan(0);
+    expect(FakeAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalled();
+    expect(upload).toHaveBeenCalled();
+    const [wavPath, wavBody, wavOptions] = upload.mock.calls[0] as [
+      string,
+      Blob,
+      { contentType?: string; upsert?: boolean },
+    ];
+    expect(wavPath).toMatch(/^references\/user-1\/\d+-Time_Is_Not_My_Friend\.wav$/);
+    expect(getPublicUrl).toHaveBeenCalledWith(wavPath);
+    expect(wavOptions).toEqual({ contentType: "audio/wav", upsert: true });
+    expect(wavBody).toBeInstanceOf(Blob);
+    expect(wavBody).not.toBe(file);
+    await expectPcmWav16(wavBody);
     const analyzeCall = fetchMock.mock.calls.find(([url]) =>
       String(url).includes("/api/reference/audio-to-prompt"),
     ) as [string, RequestInit];
     expect(analyzeCall[0]).toBe("/api/reference/audio-to-prompt");
-    expect(analyzeCall[1].headers).toEqual({ Authorization: "Bearer session-token" });
-    expect(analyzeCall[1].body).toBeInstanceOf(FormData);
-    expect((analyzeCall[1].body as FormData).get("userId")).toBeNull();
-    expect(((analyzeCall[1].body as FormData).get("file") as File).name).toBe("Time Is Not My Friend.wav");
+    expect(analyzeCall[1].headers).toEqual({
+      "Content-Type": "application/json",
+      Authorization: "Bearer session-token",
+    });
+    expect(analyzeCall[1].body).not.toBeInstanceOf(FormData);
+    const posted = JSON.parse(String(analyzeCall[1].body)) as { audioUrl?: string; userId?: string };
+    expect(posted).toEqual({
+      audioUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${wavPath}`,
+    });
+    expect(posted.audioUrl).toContain("/storage/v1/object/public/audio-vault/references/user-1/");
+    expect(String(analyzeCall[1].body)).toBe(JSON.stringify({ audioUrl: posted.audioUrl }));
+    expect(String(analyzeCall[1].body)).not.toContain(file.name);
+    expect(String(analyzeCall[1].body)).not.toContain("RIFF");
 
     releaseAnalysis(jsonResult({ success: true, tags, filename: "Time Is Not My Friend.wav" }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags));
@@ -843,6 +890,48 @@ describe("EnginePage instrumental tab", () => {
     await user.click(screen.getByRole("button", { name: "Remove reference" }));
     expect(screen.getByRole("button", { name: "+ Reference" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Style" })).toHaveValue(tags);
+  });
+
+  it("uploads an MP3 reference as audio/mpeg without decoding it", async () => {
+    const user = userEvent.setup();
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/reference/audio-to-prompt")) {
+        return jsonResult({ success: true, tags: "close vocal, dry" });
+      }
+      if (url.includes("/api/user/balance")) return jsonResult({ balance: 2 });
+      return jsonResult({ tracks: [] });
+    });
+
+    render(<EnginePage />);
+    await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+    await user.click(screen.getByRole("button", { name: "+ Reference" }));
+    const mp3 = new File([new Uint8Array([0x49, 0x44, 0x33, 0x03, 0x00])], "clip.mp3", { type: "audio/mpeg" });
+    const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+    await user.upload(input, mp3);
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(upload).toHaveBeenCalled());
+    expect(FakeAudioContext.instances).toHaveLength(0);
+    const [path, body, options] = upload.mock.calls[0] as [string, Blob, { contentType?: string; upsert?: boolean }];
+    expect(path).toMatch(/^references\/user-1\/\d+-clip\.mp3$/);
+    expect(options).toEqual({ contentType: "audio/mpeg", upsert: true });
+    expect(body).toBe(mp3);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+    );
+    const analyzeCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/reference/audio-to-prompt"),
+    ) as [string, RequestInit];
+    expect(analyzeCall[1].body).not.toBeInstanceOf(FormData);
+    const posted = JSON.parse(String(analyzeCall[1].body)) as { audioUrl?: string };
+    expect(posted).toEqual({
+      audioUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}`,
+    });
+    expect(posted.audioUrl).toContain("/storage/v1/object/public/audio-vault/references/user-1/");
   });
 
   it("keeps the reference file when analysis fails", async () => {
@@ -1027,6 +1116,7 @@ describe("EnginePage instrumental tab", () => {
 });
 
 class FakeAudioContext {
+  static instances: FakeAudioContext[] = [];
   state: AudioContextState = "running";
   decodeAudioData = vi.fn(async () => ({
     numberOfChannels: 1,
@@ -1038,6 +1128,10 @@ class FakeAudioContext {
   close = vi.fn(async () => {
     this.state = "closed";
   });
+
+  constructor() {
+    FakeAudioContext.instances.push(this);
+  }
 }
 
 class FakeMediaRecorder {

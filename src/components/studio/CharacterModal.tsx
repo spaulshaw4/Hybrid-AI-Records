@@ -73,8 +73,13 @@ function audioContextCtor(): typeof AudioContext | undefined {
   );
 }
 
-/** 16-bit PCM WAV. Channel samples are interleaved, little-endian. */
-function encodePcmWav(audio: AudioBuffer): Blob {
+/** 16-bit PCM WAV. Channel samples are interleaved, little-endian. fmt + data only. */
+export function encodePcmWav(audio: {
+  numberOfChannels: number;
+  length: number;
+  sampleRate: number;
+  getChannelData(channel: number): Float32Array;
+}): Blob {
   const channelCount = Math.max(1, audio.numberOfChannels);
   const frames = audio.length;
   const channels: Float32Array[] = [];

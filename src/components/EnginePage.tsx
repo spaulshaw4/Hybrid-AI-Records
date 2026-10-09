@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { Lock, Sparkles } from "lucide-react";
 
 import CharacterModal, {
+  encodePcmWav,
   isAudioVaultHttpsUrl,
   type SelectedVocal,
   type VocalCharacter,
@@ -22,6 +23,7 @@ import {
   type VocalStudioReference,
 } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
+import { safeCloseAudioContext } from "@/lib/safe-media";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
@@ -96,24 +98,148 @@ async function uploadReferenceWav(file: File, accessToken: string): Promise<stri
   return payload.url.trim();
 }
 
-function referenceAudioKind(bytes: Uint8Array): "wav" | "mp3" | null {
-  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
-    return null;
+type ReferenceExtension = "wav" | "mp3" | "aac" | "m4a";
+
+const GEMINI_WAV_RATE = 48_000;
+const TEN_MINUTES = 10 * 60;
+/** Only songs longer than 10 minutes are eligible, and only when the float buffer is huge. */
+const REFERENCE_MEMORY_CAP_BYTES = 512 * 1024 * 1024;
+
+function headerText(bytes: Uint8Array, start: number, end: number): string {
+  let text = "";
+  for (let index = start; index < end && index < bytes.length; index += 1) {
+    text += String.fromCharCode(bytes[index] ?? 0);
   }
-  const ascii = (start: number, end: number) => {
-    let text = "";
-    for (let index = start; index < end && index < bytes.length; index += 1) {
-      text += String.fromCharCode(bytes[index] ?? 0);
-    }
-    return text;
-  };
-  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
-  if (bytes.length >= 3 && ascii(0, 3) === "ID3") return "mp3";
-  if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return "mp3";
+  return text;
+}
+
+function isWebmEbml(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+}
+
+function isRiffWav(bytes: Uint8Array): boolean {
+  return bytes.length >= 12 && headerText(bytes, 0, 4) === "RIFF" && headerText(bytes, 8, 12) === "WAVE";
+}
+
+function isMpegAudio(bytes: Uint8Array): boolean {
+  if (bytes.length >= 3 && headerText(bytes, 0, 3) === "ID3") return true;
+  if (bytes.length < 2 || bytes[0] !== 0xff || (bytes[1] & 0xe0) !== 0xe0) return false;
+  return (bytes[1] & 0x06) !== 0;
+}
+
+function isAdtsAac(bytes: Uint8Array): boolean {
+  return bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0;
+}
+
+function isM4aContainer(bytes: Uint8Array): boolean {
+  if (bytes.length < 12 || headerText(bytes, 4, 8) !== "ftyp") return false;
+  const brand = headerText(bytes, 8, 12);
+  return brand === "M4A " || brand === "M4B " || brand === "mp41" || brand === "mp42" || brand === "isom";
+}
+
+function referenceAudioKind(file: File, bytes: Uint8Array): ReferenceExtension | null {
+  if (isWebmEbml(bytes)) return null;
+  if (isRiffWav(bytes)) return "wav";
+  if (isMpegAudio(bytes)) return "mp3";
+  if (isAdtsAac(bytes)) return "aac";
+  if (isM4aContainer(bytes)) return "m4a";
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (name.endsWith(".wav") || type === "audio/wav" || type === "audio/x-wav") return "wav";
+  if (name.endsWith(".mp3") || type === "audio/mpeg" || type === "audio/mp3") return "mp3";
+  if (name.endsWith(".aac") || type === "audio/aac") return "aac";
+  if (name.endsWith(".m4a") || type === "audio/m4a" || type === "audio/mp4" || type === "audio/x-m4a") return "m4a";
   return null;
 }
 
-function safeReferenceName(originalName: string, extension: "wav" | "mp3"): string {
+type PcmView = {
+  numberOfChannels: number;
+  length: number;
+  sampleRate: number;
+  duration: number;
+  getChannelData(channel: number): Float32Array;
+};
+
+function slicePcm(audio: PcmView, frames: number): PcmView {
+  const count = Math.max(1, Math.min(frames, audio.length));
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
+    channels.push(audio.getChannelData(channel).slice(0, count));
+  }
+  return {
+    numberOfChannels: audio.numberOfChannels,
+    length: count,
+    sampleRate: audio.sampleRate,
+    duration: count / audio.sampleRate,
+    getChannelData: (channel) => channels[channel] ?? new Float32Array(),
+  };
+}
+
+/** 48 kHz ceiling. Songs under 10 minutes stay full length. */
+function pcmForGemini(audio: AudioBuffer): PcmView {
+  const floatBytes = audio.length * Math.max(1, audio.numberOfChannels) * 4;
+  const source: PcmView =
+    audio.duration > TEN_MINUTES && floatBytes > REFERENCE_MEMORY_CAP_BYTES
+      ? slicePcm(audio, Math.floor(TEN_MINUTES * audio.sampleRate))
+      : audio;
+  if (source.sampleRate <= GEMINI_WAV_RATE) return source;
+  const channelCount = source.numberOfChannels;
+  const length = Math.max(1, Math.round((source.length * GEMINI_WAV_RATE) / source.sampleRate));
+  const ratio = source.sampleRate / GEMINI_WAV_RATE;
+  const channels: Float32Array[] = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    const input = source.getChannelData(channel);
+    const output = new Float32Array(length);
+    for (let frame = 0; frame < length; frame += 1) {
+      const position = frame * ratio;
+      const index = Math.floor(position);
+      const next = Math.min(index + 1, Math.max(0, input.length - 1));
+      const frac = position - index;
+      const left = input[index] ?? 0;
+      const right = input[next] ?? left;
+      output[frame] = left + (right - left) * frac;
+    }
+    channels.push(output);
+  }
+  return {
+    numberOfChannels: channelCount,
+    length,
+    sampleRate: GEMINI_WAV_RATE,
+    duration: length / GEMINI_WAV_RATE,
+    getChannelData: (channel) => channels[channel] ?? new Float32Array(),
+  };
+}
+
+function audioContextCtor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  );
+}
+
+async function referenceUploadBody(file: File): Promise<{ body: Blob; contentType: string; extension: ReferenceExtension } | null> {
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const kind = referenceAudioKind(file, head);
+  if (!kind) return null;
+  if (kind === "mp3") return { body: file, contentType: "audio/mpeg", extension: "mp3" };
+  if (kind === "aac") return { body: file, contentType: "audio/aac", extension: "aac" };
+  if (kind === "m4a") return { body: file, contentType: "audio/mp4", extension: "m4a" };
+  const Ctor = audioContextCtor();
+  if (!Ctor) return null;
+  const ctx = new Ctor();
+  try {
+    const bytes = await file.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(bytes.slice(0));
+    return { body: encodePcmWav(pcmForGemini(decoded)), contentType: "audio/wav", extension: "wav" };
+  } catch {
+    return null;
+  } finally {
+    void safeCloseAudioContext(ctx);
+  }
+}
+
+function safeReferenceName(originalName: string, extension: ReferenceExtension): string {
   const suffix = `.${extension}`;
   const sanitized = (originalName.trim() || "reference").replace(/[^A-Za-z0-9._-]/g, "_");
   const stem = sanitized.replace(/\.[A-Za-z0-9]+$/i, "").replace(/\.+$/g, "");
@@ -612,17 +738,15 @@ export function EnginePage() {
         fail();
         return;
       }
-      const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
-      const kind = referenceAudioKind(head);
-      if (!kind) {
+      const prepared = await referenceUploadBody(file);
+      if (!prepared) {
         fail();
         return;
       }
-      const contentType = kind === "wav" ? "audio/wav" : "audio/mpeg";
-      const safeName = safeReferenceName(file.name || "reference", kind);
+      const safeName = safeReferenceName(file.name || "reference", prepared.extension);
       const filePath = `references/${userId}/${Date.now()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, file, {
-        contentType,
+      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, prepared.body, {
+        contentType: prepared.contentType,
         upsert: true,
       });
       if (uploadError) {
@@ -1506,7 +1630,7 @@ export function EnginePage() {
               <input
                 id="ref-audio-upload"
                 type="file"
-                accept="audio/*"
+                accept="audio/wav,audio/mp3,audio/mpeg,audio/aac,audio/m4a,.wav,.mp3,.aac,.m4a"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) setDraftReferenceFile(file);
@@ -1531,7 +1655,7 @@ export function EnginePage() {
               >
                 <span aria-hidden="true">🎧</span>
                 <span>{draftReferenceFile ? `Selected: ${draftReferenceFile.name}` : "Click here to add a reference"}</span>
-                <span style={{ color: "#64748b", fontSize: 11 }}>Supports MP3, WAV, FLAC, M4A</span>
+                <span style={{ color: "#64748b", fontSize: 11 }}>Supports MP3, WAV, AAC, FLAC, M4A</span>
               </label>
               <button
                 type="button"
