@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 
+import { PartnerDistribution } from "@/components/PartnerDistribution";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -343,7 +344,14 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     return () => html.removeAttribute("data-page");
   }, [pathname]);
 
-  if (!visible) return <>{children}</>;
+  if (!visible) {
+    return (
+      <>
+        {children}
+        <PartnerDistribution />
+      </>
+    );
+  }
 
   return (
     <>
@@ -352,6 +360,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
         <DesktopLocaleStrip />
         <div className="flex-1">{children}</div>
+        <PartnerDistribution />
       </div>
       <SiteDock />
     </>

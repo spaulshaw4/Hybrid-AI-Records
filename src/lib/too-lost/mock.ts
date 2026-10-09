@@ -62,6 +62,7 @@ export class MockTooLostClient {
       title: payload.title,
       type: payload.type,
       label: payload.label,
+      genre: payload.genre,
       upc: payload.upc,
       status: "draft",
       participants: payload.participants,
@@ -120,6 +121,7 @@ export class MockTooLostClient {
       release.type = metadata.type;
     }
     if (typeof metadata.label === "string") release.label = metadata.label;
+    if (typeof metadata.genre === "string") release.genre = metadata.genre;
     if (typeof metadata.upc === "string") release.upc = metadata.upc;
     if (Array.isArray(metadata.participants)) {
       release.participants = metadata.participants as Release["participants"];
@@ -150,7 +152,7 @@ export class MockTooLostClient {
   async submitRelease(
     releaseId: number,
     _payload: SubmitWrite,
-  ): Promise<{ data: Release; message: string }> {
+  ): Promise<{ data: Release; message: string; status: number }> {
     const release = requireRelease(releaseId);
     if (release.status !== "draft") {
       throw new TooLostError("Only a draft can be submitted.", 409);
@@ -159,6 +161,7 @@ export class MockTooLostClient {
     return {
       data: clone(touch(release)),
       message: "Release submitted for review.",
+      status: 200,
     };
   }
 }

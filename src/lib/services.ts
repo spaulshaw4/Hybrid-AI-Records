@@ -74,7 +74,7 @@ export const SERVICES: ServicePackage[] = [
       audioFormat:
         "16-bit or 24-bit uncompressed WAV or FLAC (44.1 kHz or higher).",
       coverArt:
-        "Exact square, 3000 x 3000 px to 5000 x 5000 px (RGB mode, JPEG/PNG, no social handles or external web URLs).",
+        "Square RGB JPEG or PNG, at least 3000 × 3000. Larger squares are allowed. Under 36 MB. Grayscale and CMYK are not accepted.",
     },
 
     workflow:

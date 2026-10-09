@@ -37,7 +37,9 @@ export interface Release {
   title: string;
   type: ReleaseType;
   label?: string;
+  genre?: string;
   upc?: string;
+  spotifyUri?: string;
   status: ReleaseStatus;
   participants: Participant[];
   coverFileKey?: string;
@@ -58,12 +60,60 @@ export interface UploadTarget {
   headers: Record<string, string>;
 }
 
+/** Enterprise defaults. Callers must send these; the distribution form cannot turn them off. */
+export const ENTERPRISE_RELEASE_FLAGS = {
+  enable_content_id: true,
+  enable_publishing_admin: true,
+  enable_discovery_mode: true,
+  auto_generate_isrc: true,
+  auto_generate_upc: true,
+  territories: "worldwide",
+  stores: "all",
+} as const;
+
+export type CatalogReleaseType = "single" | "ep" | "album";
+
+export interface AdditionalDelivery {
+  youtube_content_id: boolean;
+  meta_rights_manager: boolean;
+  soundcloud_monetization: boolean;
+  soundexchange: boolean;
+  tracklib: boolean;
+  hook: boolean;
+  roblox: boolean;
+  managed_media: boolean;
+  lyricfind: boolean;
+  beatport: boolean;
+  udio_training: false;
+}
+
 export interface DraftReleaseInput {
   title: string;
   type: "Single" | "EP" | "Album";
+  release_type: CatalogReleaseType;
   label?: string;
   upc?: string;
+  genre?: string;
+  primary_genre: string;
   participants: { name: string; role: string[] }[];
+  primary_artist_id: string | number | null;
+  primary_artist_name: string;
+  release_date: string;
+  language: "English";
+  is_instrumental: boolean;
+  c_line: string;
+  p_line: string;
+  licensing_type: "Copyright";
+  itunes_track_price: "1.29";
+  itunes_album_price: "4.99";
+  additional_delivery: AdditionalDelivery;
+  enable_content_id: true;
+  enable_publishing_admin: true;
+  enable_discovery_mode: true;
+  auto_generate_isrc: true;
+  auto_generate_upc: true;
+  territories: "worldwide";
+  stores: "all";
 }
 
 export interface TrackWrite {
@@ -76,6 +126,12 @@ export interface TrackWrite {
   lyrics: { explicit: boolean };
   artists: { name: string; role: string[] }[];
   writers: { name: string; role: string[] }[];
+  composer: string;
+  lyricist: string;
+  p_line: string;
+  c_line: string;
+  recording_type: string;
+  is_explicit: boolean;
 }
 
 export interface DeliveryWrite {

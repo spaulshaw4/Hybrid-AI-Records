@@ -36,7 +36,11 @@ export class TooLostClient {
     private readonly orgId = "",
   ) {}
 
-  private async request<T>(endpoint: string, options: RequestInit = {}, allowRetry = true): Promise<T> {
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    allowRetry = true,
+  ): Promise<{ status: number; body: T }> {
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${this.accessToken}`);
     const orgId = this.orgId.trim() || trimEnv("TOO_LOST_ORG_ID");
@@ -73,7 +77,7 @@ export class TooLostClient {
       throw new TooLostError(message, res.status, res.headers);
     }
 
-    return body as T;
+    return { status: res.status, body: body as T };
   }
 
   async listReleases(status?: string, page = 1, perPage = 20): Promise<ReleaseList> {
@@ -82,22 +86,25 @@ export class TooLostClient {
       perPage: String(perPage),
     });
     if (status) params.set("status", status);
-    return this.request<ReleaseList>(`/releases?${params}`);
+    const { body } = await this.request<ReleaseList>(`/releases?${params}`);
+    return body;
   }
 
   async getRelease(releaseId: number): Promise<{ data: Release }> {
-    return this.request<{ data: Release }>(`/releases/${releaseId}`);
+    const { body } = await this.request<{ data: Release }>(`/releases/${releaseId}`);
+    return body;
   }
 
   async createDraftRelease(payload: DraftReleaseInput): Promise<{ data: Release }> {
-    return this.request<{ data: Release }>("/releases", {
+    const { body } = await this.request<{ data: Release }>("/releases", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    return body;
   }
 
   async validateUpc(upc: string): Promise<void> {
-    const body = await this.request<ValidateBody>("/releases/validate/upc", {
+    const { body } = await this.request<ValidateBody>("/releases/validate/upc", {
       method: "POST",
       body: JSON.stringify({ upc }),
     });
@@ -106,7 +113,7 @@ export class TooLostClient {
   }
 
   async validateIsrc(isrc: string): Promise<void> {
-    const body = await this.request<ValidateBody>("/releases/validate/isrc", {
+    const { body } = await this.request<ValidateBody>("/releases/validate/isrc", {
       method: "POST",
       body: JSON.stringify({ isrc }),
     });
@@ -119,10 +126,11 @@ export class TooLostClient {
     fileName: string,
     contentType: "image/jpeg" | "image/png",
   ): Promise<{ data: UploadTarget }> {
-    return this.request<{ data: UploadTarget }>(`/releases/${releaseId}/artwork/upload-url`, {
+    const { body } = await this.request<{ data: UploadTarget }>(`/releases/${releaseId}/artwork/upload-url`, {
       method: "POST",
       body: JSON.stringify({ fileName, contentType }),
     });
+    return body;
   }
 
   async getTrackUploadUrl(
@@ -131,10 +139,11 @@ export class TooLostClient {
     contentType: string,
     kind: "audio",
   ): Promise<{ data: UploadTarget }> {
-    return this.request<{ data: UploadTarget }>(`/releases/${releaseId}/tracks/upload-url`, {
+    const { body } = await this.request<{ data: UploadTarget }>(`/releases/${releaseId}/tracks/upload-url`, {
       method: "POST",
       body: JSON.stringify({ fileName, contentType, kind }),
     });
+    return body;
   }
 
   async updateMetadata(
@@ -144,34 +153,41 @@ export class TooLostClient {
     if (metadata.coverFileKey && metadata.coverUrl) {
       throw new TooLostError("Send coverFileKey or coverUrl, never both.", 422);
     }
-    return this.request<{ data: Release }>(`/releases/${releaseId}/metadata`, {
+    const { body } = await this.request<{ data: Release }>(`/releases/${releaseId}/metadata`, {
       method: "PATCH",
       body: JSON.stringify(metadata),
     });
+    return body;
   }
 
   async setTracklist(releaseId: number, tracks: TrackWrite[]): Promise<{ data: Release }> {
-    return this.request<{ data: Release }>(`/releases/${releaseId}/tracks`, {
+    const { body } = await this.request<{ data: Release }>(`/releases/${releaseId}/tracks`, {
       method: "PUT",
       body: JSON.stringify({ tracks }),
     });
+    return body;
   }
 
   async updateDelivery(releaseId: number, delivery: DeliveryWrite): Promise<{ data: Release }> {
-    return this.request<{ data: Release }>(`/releases/${releaseId}/delivery`, {
+    const { body } = await this.request<{ data: Release }>(`/releases/${releaseId}/delivery`, {
       method: "PATCH",
       body: JSON.stringify({ delivery }),
     });
+    return body;
   }
 
   async submitRelease(
     releaseId: number,
     payload: SubmitWrite,
-  ): Promise<{ data: Release; message: string }> {
-    return this.request<{ data: Release; message: string }>(`/releases/${releaseId}/submit`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+  ): Promise<{ data: Release; message: string; status: number }> {
+    const { status, body } = await this.request<{ data: Release; message: string }>(
+      `/releases/${releaseId}/submit`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+    return { data: body.data, message: body.message, status };
   }
 }
 
