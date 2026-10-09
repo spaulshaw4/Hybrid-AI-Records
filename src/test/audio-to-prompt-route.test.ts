@@ -25,11 +25,17 @@ const OTHER_USER = "22222222-2222-4222-8222-222222222222";
 const TOKEN = "r8_test_token_do_not_log";
 const SUPABASE_URL = "https://project.supabase.co";
 const CLIENT_ERROR = "Failed to analyze reference audio";
-const ANALYSIS_PROMPT = `Listen to this master audio track closely.
+const ANALYSIS_PROMPT = `Listen to this audio track closely.
 Extract its core acoustic and production DNA.
 Return ONLY valid JSON matching this schema:
 {
-  "tags": "BPM, key musical key, primary instrumentation, rhythmic groove, vocal texture (max 100 characters)"
+  "bpm": 120,
+  "key": "C minor",
+  "genre": "Symphonic Rock / Cinematic",
+  "instruments": ["distorted electric guitar", "live drums", "cello", "sub bass"],
+  "groove": "driving halftime with heavy backbeat",
+  "vocal_style": "gritty baritone, dry plate reverb",
+  "tags": "120 BPM, C minor, driving symphonic rock, heavy drums, gritty baritone"
 }`;
 
 function publicAudioUrl(userId = SESSION_USER, name = "take.wav"): string {
@@ -138,7 +144,19 @@ describe("POST /api/reference/audio-to-prompt", () => {
       new Response(
         JSON.stringify({
           status: "succeeded",
-          output: ["```JSON\n", JSON.stringify({ tags: " driving rock, analog synth " }), "\n```"],
+          output: [
+            "```json\n",
+            JSON.stringify({
+              bpm: 96,
+              key: " D major ",
+              genre: " chamber pop ",
+              instruments: [" upright piano ", " soft brush kit "],
+              groove: " gentle two-step ",
+              vocal_style: " close whispered tenor ",
+              tags: " 96 BPM, D major, chamber pop, soft brush kit ",
+            }),
+            "\n```",
+          ],
         }),
         { status: 201 },
       ),
@@ -146,8 +164,27 @@ describe("POST /api/reference/audio-to-prompt", () => {
 
     const response = await POST(jsonRequest({ audioUrl, userId: OTHER_USER }));
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { success?: boolean; tags?: string; error?: string };
-    expect(body).toEqual({ success: true, tags: "driving rock, analog synth" });
+    const body = (await response.json()) as {
+      success?: boolean;
+      bpm?: number;
+      key?: string;
+      genre?: string;
+      instruments?: string[];
+      groove?: string;
+      vocal_style?: string;
+      tags?: string;
+      error?: string;
+    };
+    expect(body).toEqual({
+      success: true,
+      bpm: 96,
+      key: "D major",
+      genre: "chamber pop",
+      instruments: ["upright piano", "soft brush kit"],
+      groove: "gentle two-step",
+      vocal_style: "close whispered tenor",
+      tags: "96 BPM, D major, chamber pop, soft brush kit",
+    });
     expect(JSON.stringify(body)).not.toContain(TOKEN);
     expect(JSON.stringify(body)).not.toMatch(/replicate|gemini|claude|wavespeed|supabase/i);
     expect(JSON.stringify(body)).not.toContain("data:");
@@ -164,6 +201,8 @@ describe("POST /api/reference/audio-to-prompt", () => {
     };
     expect(sent.userId).toBeUndefined();
     expect(sent.input.prompt).toBe(ANALYSIS_PROMPT);
+    expect(sent.input.prompt).toContain("bpm");
+    expect(sent.input.prompt).toContain("vocal_style");
     expect(sent.input.audio).toBe(audioUrl);
     expect(sent.input.file).toBeUndefined();
     expect(sent.input.files).toBeUndefined();
@@ -199,5 +238,14 @@ describe("POST /api/reference/audio-to-prompt", () => {
     expect(logged).not.toContain(TOKEN);
     expect(logged).not.toContain(audioUrl);
     expect(logged).not.toContain("data:");
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "succeeded", output: JSON.stringify({ tags: "only tags" }) }), {
+        status: 200,
+      }),
+    );
+    const incomplete = await POST(jsonRequest({ audioUrl }));
+    expect(incomplete.status).toBe(500);
+    await expect(incomplete.json()).resolves.toEqual({ error: CLIENT_ERROR });
   });
 });
