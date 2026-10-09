@@ -1028,8 +1028,9 @@ export function EnginePage() {
       ? "\u2726 Format & Polish"
       : "Studio Ghostwriter";
   const lyricsAssistDisabled = isLyricsLoading || lyricsAssistCooling;
+  const vocalGenderCard =
+    activeTab !== "easy" ? <VocalGenderCard vocalsEnabled gender={gender} onChange={setGender} /> : null;
 
-  const vocalGenderEnabled = activeTab !== "easy";
   const vocalLockTitle =
     activeTab === "easy"
       ? "Vocals disabled in Instrumental mode"
@@ -1417,7 +1418,6 @@ export function EnginePage() {
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-              <VocalGenderCard vocalsEnabled={vocalGenderEnabled} gender={gender} onChange={setGender} />
               <div style={cardStyle}>
                 <DurationSlider maxSeconds={360} value={trackLength} onChange={setTrackLength} />
               </div>
@@ -1541,7 +1541,7 @@ export function EnginePage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-              <VocalGenderCard vocalsEnabled={vocalGenderEnabled} gender={gender} onChange={setGender} />
+              {vocalGenderCard}
               <div style={{ ...cardStyle, flex: "1 1 280px" }}>
                 <DurationSlider value={trackLength} onChange={setTrackLength} />
               </div>

@@ -9,7 +9,9 @@ import { MUREKA_TEMPLATES } from "@/data/murekaTemplates";
 const { getSession, onAuthStateChange, upload, getPublicUrl, from } = vi.hoisted(() => ({
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
-  upload: vi.fn(async () => ({ error: null })),
+  upload: vi.fn(async (_path: string, _body: Blob, _options?: { contentType?: string; upsert?: boolean }) => ({
+    error: null,
+  })),
   getPublicUrl: vi.fn((path: string) => ({
     data: { publicUrl: `https://project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
   })),
@@ -501,7 +503,7 @@ describe("EnginePage instrumental tab", () => {
     expect(glass.contains(screen.getByRole("region", { name: "Your Audio Vault" }))).toBe(false);
   });
 
-  it("shows one Hybrid Engine 2.0 badge and keeps vocal gender when vocals are off", async () => {
+  it("shows one Hybrid Engine 2.0 badge and hides vocal gender on Instrumental", async () => {
     const user = userEvent.setup();
     render(<EnginePage />);
 
@@ -511,33 +513,11 @@ describe("EnginePage instrumental tab", () => {
     expect(badge.compareDocumentPosition(instrumentalTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(badge.closest(".mb-2")?.nextElementSibling).toBe(screen.getByRole("tablist", { name: "Studio mode" }));
 
-    const gender = screen.getByRole("group", { name: "Vocal gender" });
-    const card = gender.parentElement;
-    const offBadge = screen.getByText("OFF (INSTRUMENTAL)");
-    expect(offBadge.className).toContain("text-[10px]");
-    expect(offBadge.className).toContain("font-mono");
-    expect(offBadge.className).toContain("tracking-wider");
-    expect(offBadge.className).toContain("whitespace-nowrap");
-    expect(card).toContainElement(offBadge);
-    expect(card?.className).toContain("p-4");
-    expect(card?.className).toContain("rounded-xl");
-    expect(card?.className).toContain("border");
-    expect(card?.className).not.toContain("items-stretch");
-    expect(card?.parentElement?.className).toContain("items-start");
-    expect(card?.textContent).toContain("Female");
-    expect(card?.textContent).toContain("Male");
-    expect(gender.className).toContain("opacity-35");
-    expect(gender.className).toContain("pointer-events-none");
-    expect(screen.getByRole("button", { name: "Female" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Male" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Male" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Female" }).className).not.toContain("bg-red-600");
-    expect(screen.getByRole("button", { name: "Male" }).className).not.toContain("bg-red-600");
-    expect(screen.getByRole("button", { name: "Male" }).className).toContain("bg-zinc-800/80");
-
-    fireEvent.click(screen.getByRole("button", { name: "Female" }));
-    expect(screen.getByRole("button", { name: "Female" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Male" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("group", { name: "Vocal gender" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Female" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Male" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Vocal Gender")).not.toBeInTheDocument();
+    expect(screen.queryByText("OFF (INSTRUMENTAL)")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
     expect(screen.getAllByText("Hybrid Engine 2.0")).toHaveLength(1);
@@ -573,6 +553,12 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.getByRole("button", { name: "Female" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Female" }).className).toContain("bg-red-600");
     expect(screen.getByRole("button", { name: "Male" }).className).not.toContain("bg-red-600");
+
+    await user.click(screen.getByRole("tab", { name: "Instrumental" }));
+    expect(screen.queryByRole("group", { name: "Vocal gender" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Female" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Male" })).not.toBeInTheDocument();
+    expect(screen.queryByText("OFF (INSTRUMENTAL)")).not.toBeInTheDocument();
   });
 
   it("disables polish while the coproducer request is pending and for 2 seconds after", async () => {

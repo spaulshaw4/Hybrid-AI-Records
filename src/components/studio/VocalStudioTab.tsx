@@ -145,11 +145,6 @@ export function VocalGenderCard({
             Vocal Gender
           </span>
         </div>
-        {vocalsEnabled ? null : (
-          <span className="shrink-0 whitespace-nowrap text-[10px] text-zinc-500 font-mono tracking-wider">
-            OFF (INSTRUMENTAL)
-          </span>
-        )}
       </div>
       <div
         role="group"
