@@ -654,6 +654,12 @@ export function DistributionReleasePanel() {
           />
           <span>{SAMPLE_CLEARANCE_LABEL}</span>
         </label>
+        <aside className="rounded-md border border-cyan-400/25 bg-black/40 p-4">
+          <p className="text-sm font-medium text-white">BMG Global Publishing Administration Included</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            Every time your music is played on radio, TV, in venues, or streamed online, royalties are generated. Without a publishing administrator, much of that money goes uncollected. We register your works with 50+ global societies and collect what's yours.
+          </p>
+        </aside>
         <label className="flex items-start gap-2 text-sm text-white/80">
           <input type="checkbox" checked={acceptTerms} onChange={(event) => setAcceptTerms(event.target.checked)} />
           I accept the distribution terms.

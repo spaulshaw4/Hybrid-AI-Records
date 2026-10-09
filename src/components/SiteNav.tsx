@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PartnerDistribution } from "@/components/PartnerDistribution";
+import { Footer } from "@/components/Footer";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -348,7 +348,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     return (
       <>
         {children}
-        <PartnerDistribution />
+        <Footer />
       </>
     );
   }
@@ -360,7 +360,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
         <DesktopLocaleStrip />
         <div className="flex-1">{children}</div>
-        <PartnerDistribution />
+        <Footer />
       </div>
       <SiteDock />
     </>

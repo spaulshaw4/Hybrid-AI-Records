@@ -207,7 +207,7 @@ function DistributionPackagesPage() {
                                 View Delivery Requirements
                               </AccordionTrigger>
                               <AccordionContent>
-                                <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2">
+                                <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-3">
                                   <div className="rounded-md border border-white/5 bg-white/[0.02] p-4">
                                     <p className="text-sm font-medium text-white">Audio Format</p>
                                     <p className="mt-1 text-sm text-muted-foreground">
@@ -218,6 +218,12 @@ function DistributionPackagesPage() {
                                     <p className="text-sm font-medium text-white">Cover Artwork</p>
                                     <p className="mt-1 text-sm text-muted-foreground">
                                       {dist.deliveryRequirements.coverArt}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-md border border-white/5 bg-white/[0.02] p-4">
+                                    <p className="text-sm font-medium text-white">Publishing & Royalties (BMG)</p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                      Every time your music is played on radio, TV, in venues, or streamed online, royalties are generated. Without a publishing administrator, much of that money goes uncollected. We register your works with 50+ global societies and collect what's yours.
                                     </p>
                                   </div>
                                 </div>
