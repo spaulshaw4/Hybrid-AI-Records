@@ -59,7 +59,7 @@ test.describe("SyncBadge tooltip — touch", () => {
     await expect(trigger).toHaveAttribute("data-state", "closed");
   });
 
-  test("tapping outside clears an open tooltip and releases focus", async ({ page }) => {
+  test("tapping outside clears an open tooltip and returns focus to the trigger", async ({ page }) => {
     await openHarness(page);
     const trigger = chip(page, "resolved");
 
@@ -69,7 +69,18 @@ test.describe("SyncBadge tooltip — touch", () => {
 
     await page.touchscreen.tap(5, 5);
     await expect(popper(page)).toHaveCount(0);
-    expect(await activeTestId(page)).toBe("body");
+    await expect(trigger).toBeFocused();
+    const active = await page.evaluate(() => {
+      const el = document.activeElement;
+      return {
+        testid: el instanceof HTMLElement ? el.getAttribute("data-testid") : null,
+        isBody: el === document.body,
+        isRoot: el === document.documentElement,
+      };
+    });
+    expect(active.testid).toBe("radio-sync-status");
+    expect(active.isBody).toBe(false);
+    expect(active.isRoot).toBe(false);
   });
 
   test("Escape dismisses a focus-opened tooltip on touch devices", async ({ page }) => {
@@ -104,6 +115,9 @@ test.describe("SyncBadge tooltip — touch", () => {
   test("a tap anywhere on the badge chip hits the badge, not a neighbour", async ({ page }) => {
     await openHarness(page);
     const trigger = chip(page, "error");
+    // The failed chip sits below the first phone viewport. A coordinate tap
+    // does not scroll, so bring it on screen before reading the box.
+    await trigger.scrollIntoViewIfNeeded();
     const box = (await trigger.boundingBox())!;
 
     // Tap the far left edge of the chip (away from Retry) and confirm the chip

@@ -247,6 +247,24 @@ export function SyncBadge({
     retryRef.current?.focus();
   }, [errored, retrying]);
 
+  // Pointer-down outside the open tip blurs the focused chip or Retry onto
+  // <body>. Keyboard Tab, Shift+Tab, and Escape never take this path.
+  const restoreAfterPointerDownOutside = () => {
+    const active = document.activeElement;
+    const owner =
+      active === retryRef.current ? retryRef.current : active === badgeRef.current ? badgeRef.current : null;
+    if (!owner) return;
+    queueMicrotask(() => {
+      const now = document.activeElement;
+      if (now !== document.body && now !== document.documentElement) return;
+      suppressOpenRef.current = true;
+      focusWithVisibleRing(owner);
+      queueMicrotask(() => {
+        suppressOpenRef.current = false;
+      });
+    });
+  };
+
   const releaseShiftTabSuppress = () => {
     queueMicrotask(() => {
       const chip = badgeRef.current;
@@ -367,8 +385,8 @@ export function SyncBadge({
                 }}
                 className="flex items-center gap-1.5 text-status-accent outline-none"
               >
-                <AlertTriangle size={13} aria-hidden="true" />
-                <span aria-hidden="true" className="whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.18em]">
+                <AlertTriangle size={13} aria-hidden="true" className="pointer-events-none" />
+                <span aria-hidden="true" className="pointer-events-none whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.18em]">
                   Sync Failed
                 </span>
                 <span id={errorReasonId} className="sr-only">
@@ -451,8 +469,12 @@ export function SyncBadge({
           <TooltipContent
             aria-hidden="true"
             data-testid="radio-sync-tooltip"
-            side="bottom"
-            className="max-w-[18rem] text-xs"
+            side="top"
+            align="center"
+            avoidCollisions={true}
+            collisionPadding={16}
+            className="z-50 max-w-[calc(100vw-32px)] sm:max-w-xs break-words text-xs leading-normal"
+            onPointerDownOutside={restoreAfterPointerDownOutside}
           >
             {resolveState.message ?? "Timestamp resolution failed"}
           </TooltipContent>
@@ -551,8 +573,12 @@ export function SyncBadge({
         <TooltipContent
           aria-hidden="true"
           data-testid="radio-sync-tooltip"
-          side="bottom"
-          className="max-w-[20rem] text-xs"
+          side="top"
+          align="center"
+          avoidCollisions={true}
+          collisionPadding={16}
+          className="z-50 max-w-[calc(100vw-32px)] sm:max-w-xs break-words text-xs leading-normal"
+          onPointerDownOutside={restoreAfterPointerDownOutside}
         >
           {syncTooltipText({ accountEmail, resolveState, conflictNotice, lastResolvedAt, nowTick })}
         </TooltipContent>

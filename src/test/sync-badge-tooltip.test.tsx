@@ -67,6 +67,22 @@ describe("SyncBadge tooltip — triggers", () => {
     await closedBubbles();
   });
 
+  it("returns focus to the trigger when a pointer-down outside leaves body", async () => {
+    renderBadge();
+    const trigger = screen.getByTestId("radio-sync-status");
+
+    trigger.focus();
+    fireEvent.focus(trigger);
+    await openBubbles();
+
+    fireEvent.pointerDown(document.body, { pointerType: "mouse" });
+    trigger.blur();
+    await closedBubbles();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBe(document.documentElement);
+  });
+
   it("dismisses with Escape while focus stays on the trigger", async () => {
     renderBadge();
     const trigger = screen.getByTestId("radio-sync-status");
@@ -167,6 +183,24 @@ describe("SyncBadge tooltip — error phase", () => {
     fireEvent.focus(retry);
     await openBubbles();
     expect(document.activeElement).toBe(retry);
+  });
+
+  it("returns focus to Retry when a tap outside dumps it on body", async () => {
+    renderBadge(errored);
+    const retry = screen.getByTestId("radio-sync-retry");
+    const chip = screen.getByTestId("radio-sync-status");
+
+    retry.focus();
+    fireEvent.focus(retry);
+    await openBubbles();
+
+    fireEvent.pointerDown(document.body, { pointerType: "mouse" });
+    retry.blur();
+    await closedBubbles();
+    await waitFor(() => expect(document.activeElement).toBe(retry));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBe(document.documentElement);
+    expect(document.activeElement).not.toBe(chip);
   });
 
   it("Escape from Retry dismisses the tooltip and leaves focus on Retry", async () => {

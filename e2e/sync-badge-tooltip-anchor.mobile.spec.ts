@@ -152,13 +152,15 @@ for (const width of WIDTHS) {
         // Covering it visually is one failure mode; the other is the browser
         // hit-testing the popper instead of the button. Prove the real click
         // target at Retry's centre is still Retry.
-        const hit = await page.evaluate(
-          ([x, y]) => {
-            const el = document.elementFromPoint(x, y) as HTMLElement | null;
-            return el?.closest("[data-testid]")?.getAttribute("data-testid") ?? null;
-          },
-          [retry.x + retry.width / 2, retry.y + retry.height / 2] as const,
-        );
+        // Measure the centre in the page: Playwright's bounding box is relative
+        // to the visual viewport, and elementFromPoint is relative to the layout
+        // viewport. On a phone those differ by visualViewport.offsetTop, which
+        // would otherwise sample the row above the button.
+        const hit = await badge.getByTestId("radio-sync-retry").evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return top?.closest("[data-testid]")?.getAttribute("data-testid") ?? null;
+        });
         expect(hit, "Retry is not the topmost element at its own centre").toBe("radio-sync-retry");
       });
 

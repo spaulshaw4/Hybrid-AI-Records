@@ -3358,3 +3358,12 @@ html.app-bg .btn-primary :is(.text-white, [class*="text-white\/"]) {
   color: var(--primary-foreground);
 }
 
+/* Sync badge tips portal to body. Radix's wrapper is min-width: max-content,
+   which ignores the tip's max-width and spills a 320px viewport. Cap the
+   popper and let taps fall through to Retry — the painted tip is aria-hidden. */
+[data-radix-popper-content-wrapper]:has([data-testid="radio-sync-tooltip"]) {
+  min-width: 0 !important;
+  max-width: calc(100vw - 32px) !important;
+  pointer-events: none !important;
+}
+
