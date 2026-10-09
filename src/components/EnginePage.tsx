@@ -96,6 +96,50 @@ async function uploadReferenceWav(file: File, accessToken: string): Promise<stri
   return payload.url.trim();
 }
 
+function referenceAudioKind(bytes: Uint8Array): "wav" | "mp3" | null {
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
+    return null;
+  }
+  const ascii = (start: number, end: number) => {
+    let text = "";
+    for (let index = start; index < end && index < bytes.length; index += 1) {
+      text += String.fromCharCode(bytes[index] ?? 0);
+    }
+    return text;
+  };
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
+  if (bytes.length >= 3 && ascii(0, 3) === "ID3") return "mp3";
+  if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return "mp3";
+  return null;
+}
+
+function safeReferenceName(originalName: string, extension: "wav" | "mp3"): string {
+  const suffix = `.${extension}`;
+  const sanitized = (originalName.trim() || "reference").replace(/[^A-Za-z0-9._-]/g, "_");
+  const stem = sanitized.replace(/\.[A-Za-z0-9]+$/i, "").replace(/\.+$/g, "");
+  return `${stem || "reference"}${suffix}`;
+}
+
+/** Drop a token query. Signed object URLs are not reference audio. */
+function publicReferenceAudioUrl(raw: string, userId: string): string {
+  if (!raw || !userId) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return "";
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) return "";
+  if (parsed.pathname.includes("/object/sign/")) return "";
+  parsed.searchParams.delete("token");
+  parsed.search = parsed.searchParams.toString();
+  const url = parsed.toString();
+  if (/[?&]token=/i.test(url)) return "";
+  const marker = `/storage/v1/object/public/audio-vault/references/${userId}/`;
+  if (!parsed.pathname.includes(marker)) return "";
+  return url;
+}
+
 const cardStyle: CSSProperties = {
   backgroundColor: "rgba(15, 10, 20, 0.55)",
   backdropFilter: "blur(16px)",
@@ -550,20 +594,54 @@ export function EnginePage() {
     const seq = ++referenceAnalysisSeq.current;
     setIsAnalyzingReference(true);
     setErrorMessage(null);
+    const fail = () => {
+      if (referenceAnalysisSeq.current === seq) setErrorMessage("Could not read that reference.");
+    };
     try {
       let accessToken = "";
+      let userId = "";
       try {
         const { data } = await supabase.auth.getSession();
         accessToken = data.session?.access_token?.trim() ?? "";
+        userId = data.session?.user?.id?.trim() ?? "";
       } catch {
         accessToken = "";
+        userId = "";
       }
-      const body = new FormData();
-      body.append("file", file, file.name || "reference.wav");
+      if (!accessToken || !userId) {
+        fail();
+        return;
+      }
+      const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+      const kind = referenceAudioKind(head);
+      if (!kind) {
+        fail();
+        return;
+      }
+      const contentType = kind === "wav" ? "audio/wav" : "audio/mpeg";
+      const safeName = safeReferenceName(file.name || "reference", kind);
+      const filePath = `references/${userId}/${Date.now()}-${safeName}`;
+      const { error: uploadError } = await supabase.storage.from("audio-vault").upload(filePath, file, {
+        contentType,
+        upsert: true,
+      });
+      if (uploadError) {
+        fail();
+        return;
+      }
+      const { data } = supabase.storage.from("audio-vault").getPublicUrl(filePath);
+      const audioUrl = publicReferenceAudioUrl(typeof data?.publicUrl === "string" ? data.publicUrl : "", userId);
+      if (!audioUrl) {
+        fail();
+        return;
+      }
       const response = await fetch("/api/reference/audio-to-prompt", {
         method: "POST",
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-        body,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ audioUrl }),
       });
       const raw = await response.text();
       let payload: { success?: boolean; tags?: unknown } = {};
