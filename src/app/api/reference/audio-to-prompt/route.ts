@@ -48,6 +48,16 @@ function nonEmptyString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function instrumentList(value: unknown): string[] {
+  const parts = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : [];
+  const instruments: string[] = [];
+  for (const item of parts) {
+    const name = nonEmptyString(item);
+    if (name) instruments.push(name);
+  }
+  return instruments;
+}
+
 function analysisFromOutput(output: unknown): ReferenceAnalysis | null {
   let parsed: unknown;
   try {
@@ -61,17 +71,12 @@ function analysisFromOutput(output: unknown): ReferenceAnalysis | null {
   const key = nonEmptyString(row.key);
   const genre = nonEmptyString(row.genre);
   const groove = nonEmptyString(row.groove);
-  const vocalStyle = nonEmptyString(row.vocal_style);
-  const bpm = row.bpm;
-  if (!tags || !key || !genre || !groove || !vocalStyle) return null;
-  if (typeof bpm !== "number" || !Number.isFinite(bpm)) return null;
-  if (!Array.isArray(row.instruments) || row.instruments.length === 0) return null;
-  const instruments: string[] = [];
-  for (const item of row.instruments) {
-    const name = nonEmptyString(item);
-    if (!name) return null;
-    instruments.push(name);
-  }
+  if (!tags || !key || !genre || !groove) return null;
+  let bpm = typeof row.bpm === "number" ? row.bpm : parseInt(String(row.bpm), 10);
+  if (!Number.isFinite(bpm)) bpm = 120;
+  const vocalStyle = nonEmptyString(row.vocal_style) || "instrumental / none";
+  const instruments = instrumentList(row.instruments);
+  if (instruments.length === 0) return null;
   return {
     bpm,
     key,

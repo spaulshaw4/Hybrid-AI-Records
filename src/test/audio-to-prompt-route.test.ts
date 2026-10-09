@@ -248,4 +248,109 @@ describe("POST /api/reference/audio-to-prompt", () => {
     expect(incomplete.status).toBe(500);
     await expect(incomplete.json()).resolves.toEqual({ error: CLIENT_ERROR });
   });
+
+  it("coerces a string bpm, a missing vocal_style, and comma-separated instruments", async () => {
+    const audioUrl = publicAudioUrl();
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "succeeded",
+          output: JSON.stringify({
+            bpm: "128",
+            key: " C minor ",
+            genre: " Symphonic Rock ",
+            instruments: "guitar, drums",
+            groove: " driving halftime ",
+            tags: " 128 BPM, C minor ",
+          }),
+          error: "upstream model exploded",
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const response = await POST(jsonRequest({ audioUrl }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      success: true,
+      bpm: 128,
+      key: "C minor",
+      genre: "Symphonic Rock",
+      instruments: ["guitar", "drums"],
+      groove: "driving halftime",
+      vocal_style: "instrumental / none",
+      tags: "128 BPM, C minor",
+    });
+    expect(JSON.stringify(body)).not.toContain("upstream model exploded");
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "succeeded",
+          output: JSON.stringify({
+            bpm: "fast",
+            key: "C minor",
+            genre: "Symphonic Rock",
+            instruments: [" guitar ", "", 4, "drums"],
+            groove: "driving halftime",
+            vocal_style: "  ",
+            tags: "128 BPM, C minor",
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+    const fallback = await POST(jsonRequest({ audioUrl }));
+    expect(fallback.status).toBe(200);
+    await expect(fallback.json()).resolves.toMatchObject({
+      success: true,
+      bpm: 120,
+      instruments: ["guitar", "drums"],
+      vocal_style: "instrumental / none",
+    });
+  });
+
+  it("returns 500 when tags, key, genre, groove, or instruments are empty", async () => {
+    const audioUrl = publicAudioUrl();
+    const base = {
+      bpm: "128",
+      key: "C minor",
+      genre: "Symphonic Rock",
+      instruments: ["cello"],
+      groove: "driving halftime",
+      vocal_style: "gritty baritone",
+      tags: "128 BPM, C minor",
+    };
+    const payloads: unknown[] = [
+      ...(["tags", "key", "genre", "groove"] as const).map((field) => {
+        const row: Record<string, unknown> = { ...base };
+        delete row[field];
+        return row;
+      }),
+      { ...base, tags: "  " },
+      { ...base, instruments: [] },
+      { ...base, instruments: " , " },
+      { ...base, instruments: ["  ", 12] },
+    ];
+
+    for (const output of payloads) {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: "succeeded",
+            output: JSON.stringify(output),
+            error: "upstream model exploded",
+          }),
+          { status: 200 },
+        ),
+      );
+      const response = await POST(jsonRequest({ audioUrl }));
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as { error?: string; success?: boolean };
+      expect(body).toEqual({ error: CLIENT_ERROR });
+      expect(body.success).not.toBe(true);
+      expect(JSON.stringify(body)).not.toContain("upstream model exploded");
+    }
+  });
 });
