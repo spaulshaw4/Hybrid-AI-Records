@@ -400,7 +400,46 @@ function canonicalStoragePath(pathname: string): string {
   return path.replace(/\/{2,}/g, "/");
 }
 
-/** Why a public URL was rejected. Never includes the query string. */
+function referenceEnv(name: string): string {
+  try {
+    const fromVite = (import.meta.env as Record<string, unknown>)[name];
+    if (typeof fromVite === "string" && fromVite.trim()) return fromVite.trim();
+  } catch {
+    /* import.meta is unavailable outside the bundler */
+  }
+  if (typeof process !== "undefined" && process.env) {
+    const fromProcess = process.env[name];
+    if (typeof fromProcess === "string" && fromProcess.trim()) return fromProcess.trim();
+  }
+  return "";
+}
+
+/** Same host order as the audio-to-prompt route. Non-HTTP values are skipped. */
+function referenceProjectHost(): string {
+  const names = ["NEXT_PUBLIC_SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_URL"] as const;
+  for (const name of names) {
+    const raw = referenceEnv(name);
+    if (!raw) continue;
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      const host = url.hostname.toLowerCase().replace(/\.$/, "");
+      if (host) return host;
+    } catch {
+      continue;
+    }
+  }
+  return "";
+}
+
+function blockedReferenceHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (!host || host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host === "169.254.169.254") return true;
+  return /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** Why a public URL was rejected. Never includes the URL or query string. */
 function referenceUrlRejection(raw: string, userId: string): string {
   if (!raw) return "empty";
   if (!userId) return "no user id";
@@ -412,23 +451,24 @@ function referenceUrlRejection(raw: string, userId: string): string {
   }
   if (parsed.protocol !== "https:") return "protocol";
   if (parsed.username || parsed.password) return "credentials";
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (blockedReferenceHost(host)) return "blocked host";
+  const expected = referenceProjectHost();
+  if (expected && host !== expected) return "host";
   const path = canonicalStoragePath(parsed.pathname);
   if (path.includes("/object/sign/")) return "signed url";
-  parsed.searchParams.delete("token");
-  parsed.search = parsed.searchParams.toString();
-  if (/[?&]token=/i.test(parsed.toString())) return "token query";
+  for (const key of parsed.searchParams.keys()) {
+    if (key.toLowerCase() === "token") return "token query";
+  }
   const marker = `/storage/v1/object/public/audio-vault/references/${userId}/`;
   if (!path.toLowerCase().includes(marker.toLowerCase())) return "path";
   return "";
 }
 
-/** Drop a token query. Signed object URLs are not reference audio. */
+/** Signed object URLs and token query params are not reference audio. */
 function publicReferenceAudioUrl(raw: string, userId: string): string {
   if (referenceUrlRejection(raw, userId)) return "";
-  const parsed = new URL(raw.trim());
-  parsed.searchParams.delete("token");
-  parsed.search = parsed.searchParams.toString();
-  return parsed.toString();
+  return raw.trim();
 }
 
 /**

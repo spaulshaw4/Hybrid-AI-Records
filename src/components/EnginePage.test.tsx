@@ -105,6 +105,9 @@ describe("EnginePage instrumental tab", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     getSession.mockResolvedValue({ data: { session: null } });
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+    vi.stubEnv("VITE_SUPABASE_URL", "https://project.supabase.co");
+    vi.stubEnv("SUPABASE_URL", "https://project.supabase.co");
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/generate")) {
@@ -121,6 +124,7 @@ describe("EnginePage instrumental tab", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -1229,6 +1233,134 @@ describe("EnginePage instrumental tab", () => {
     expect(logged).not.toContain("fixture");
     expect(logged).not.toContain("token=");
   });
+
+  it("accepts the vite storage host and rejects token, localhost, and metadata URLs", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-1" }, access_token: "session-token" } },
+    });
+
+    const wav = (name: string) => {
+      const bytes = new Uint8Array(44);
+      bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+      bytes.set([0x57, 0x41, 0x56, 0x45], 8);
+      return new File([bytes], name, { type: "audio/wav" });
+    };
+
+    const openAndUse = async (name: string) => {
+      render(<EnginePage />);
+      await user.click(screen.getByRole("tab", { name: "Vocals with AI" }));
+      await user.click(screen.getByRole("button", { name: "+ Reference" }));
+      const input = document.getElementById("ref-audio-upload") as HTMLInputElement;
+      await user.upload(input, wav(name));
+      await confirmReferenceClip(user);
+    };
+
+    const expectRejected = async (reason: string) => {
+      await waitFor(() => {
+        expect(errorSpy).toHaveBeenCalledWith("[AudioRef] gate failed: publicReferenceAudioUrl", reason);
+        expect(screen.getByText("Could not read that reference.")).toBeInTheDocument();
+      });
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(false);
+    };
+
+    const loggedText = () =>
+      [...errorSpy.mock.calls, ...logSpy.mock.calls].map((args) => args.map((part) => String(part)).join(" ")).join("\n");
+
+    getPublicUrl.mockImplementation(() => ({
+      data: {
+        publicUrl:
+          "https://project.supabase.co/storage/v1/object/public/audio-vault/references/user-1/clip.wav?token=fixture",
+      },
+    }));
+    await openAndUse("token.wav");
+    await expectRejected("token query");
+    expect(loggedText()).not.toContain("fixture");
+    expect(loggedText()).not.toContain("token=");
+
+    cleanup();
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    fetchMock.mockClear();
+    getPublicUrl.mockImplementation(() => ({
+      data: {
+        publicUrl: "https://localhost/storage/v1/object/public/audio-vault/references/user-1/clip.wav",
+      },
+    }));
+    await openAndUse("local.wav");
+    await expectRejected("blocked host");
+
+    cleanup();
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    fetchMock.mockClear();
+    getPublicUrl.mockImplementation(() => ({
+      data: {
+        publicUrl: "https://169.254.169.254/storage/v1/object/public/audio-vault/references/user-1/clip.wav",
+      },
+    }));
+    await openAndUse("meta.wav");
+    await expectRejected("blocked host");
+
+    cleanup();
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    fetchMock.mockClear();
+    getPublicUrl.mockImplementation(() => ({
+      data: {
+        publicUrl: "https://evil.example/storage/v1/object/public/audio-vault/references/user-1/clip.wav",
+      },
+    }));
+    await openAndUse("evil.wav");
+    await expectRejected("host");
+
+    cleanup();
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    fetchMock.mockClear();
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("VITE_SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_URL", "");
+    getPublicUrl.mockImplementation((path: string) => ({
+      data: { publicUrl: `https://cdn.example/storage/v1/object/public/audio-vault/${path}` },
+    }));
+    await openAndUse("open.wav");
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+    );
+    const openCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/reference/audio-to-prompt"),
+    ) as [string, RequestInit];
+    const openBody = JSON.parse(String(openCall[1].body)) as { audioUrl?: string };
+    expect(openBody.audioUrl).toMatch(
+      /^https:\/\/cdn\.example\/storage\/v1\/object\/public\/audio-vault\/references\/user-1\/\d+-open\.wav$/,
+    );
+
+    cleanup();
+    errorSpy.mockClear();
+    logSpy.mockClear();
+    fetchMock.mockClear();
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("VITE_SUPABASE_URL", "https://vite-project.supabase.co");
+    vi.stubEnv("SUPABASE_URL", "postgresql://postgres:db-secret@aws-0.pooler.supabase.com:6543/postgres");
+    getPublicUrl.mockImplementation((path: string) => ({
+      data: { publicUrl: `https://vite-project.supabase.co/storage/v1/object/public/audio-vault/${path}` },
+    }));
+    await openAndUse("vite.wav");
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/reference/audio-to-prompt"))).toBe(true),
+    );
+    const viteCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/reference/audio-to-prompt"),
+    ) as [string, RequestInit];
+    const viteBody = JSON.parse(String(viteCall[1].body)) as { audioUrl?: string };
+    expect(viteBody.audioUrl).toContain(
+      "https://vite-project.supabase.co/storage/v1/object/public/audio-vault/references/user-1/",
+    );
+    expect(loggedText()).not.toContain("db-secret");
+  }, 40_000);
 
   it("fills title, lyrics, and style from a visual injection and keeps them after remove", async () => {
     const user = userEvent.setup();
