@@ -4,8 +4,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 type TrackActionsMenuProps = {
   title: string;
-  mp3Url: string | null;
-  wavUrl: string | null;
+  mp3Url: string | null | undefined;
+  wavUrl: string | null | undefined;
   onDelete: () => void;
 };
 
@@ -16,13 +16,14 @@ function cleanTitle(title: string): string {
   return /[A-Za-z0-9]/.test(cleaned) ? cleaned : "Master_Track";
 }
 
-function httpsUrl(value: string | null): string | null {
+function httpsUrl(value: string | null | undefined): string | null {
   const text = value?.trim() ?? "";
   if (!text || !/^https:\/\//i.test(text)) return null;
   return text;
 }
 
-function withDownload(raw: string, filename: string): string {
+function withDownload(raw: string | null | undefined, filename: string): string | null {
+  if (!raw) return null;
   const param = `download=${encodeURIComponent(filename)}`;
   const hashAt = raw.indexOf("#");
   const hash = hashAt >= 0 ? raw.slice(hashAt) : "";
@@ -49,7 +50,9 @@ export function TrackActionsMenu({ title, mp3Url, wavUrl, onDelete }: TrackActio
 
   const downloadMp3 = () => {
     if (!mp3Source) return;
-    openDownload(withDownload(mp3Source, `${fileBase}.mp3`));
+    const href = withDownload(mp3Source, `${fileBase}.mp3`);
+    if (!href) return;
+    openDownload(href);
   };
 
   const downloadWav = () => {
@@ -57,7 +60,9 @@ export function TrackActionsMenu({ title, mp3Url, wavUrl, onDelete }: TrackActio
       window.alert(WAV_UNAVAILABLE);
       return;
     }
-    openDownload(withDownload(distinctWav, `${fileBase}.wav`));
+    const href = withDownload(distinctWav, `${fileBase}.wav`);
+    if (!href) return;
+    openDownload(href);
   };
 
   return (
