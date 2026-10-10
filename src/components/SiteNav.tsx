@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Footer } from "@/components/Footer";
+import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -111,16 +112,17 @@ function MobileLocaleSheet() {
 }
 
 /**
- * Language → currency → settings. Static inline flow only — never fixed/sticky.
- * Token balance lives on /engine and /tokens — not in this chrome.
+ * Plan, spendable tokens, language, currency, settings.
+ * Static inline flow only — never fixed/sticky.
  * Below sm, language and currency move into the settings gear sheet.
  */
 export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn("inline-flex items-center gap-2", className)}
+      className={cn("flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2", className)}
       data-no-translate
     >
+      <HeaderTokenBalance />
       <div className="hidden items-center gap-2 sm:flex">
         <LanguageSwitcher menuAlign="end" />
         <CurrencySwitcher variant="pill" />
@@ -279,7 +281,7 @@ function SiteHeader() {
       >
         <Wordmark size="sm" showText={false} interactive />
       </Link>
-      <LocaleCluster className="ms-auto shrink-0" />
+      <LocaleCluster className="ms-auto min-w-0 shrink flex-nowrap" />
     </header>
   );
 }

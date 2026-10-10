@@ -181,7 +181,7 @@ function distributeRequest(extra?: {
   return new Request("http://localhost/api/distribute/too-lost", {
     method: "POST",
     headers,
-    body,
+    body: body as unknown as BodyInit,
   });
 }
 

@@ -222,7 +222,10 @@ export async function dispatchReleaseToTooLost(input: ReleaseAudio): Promise<Dis
   const created = await client.createDraftRelease(release);
   const draftId = created.data.id;
   const artwork = await client.getArtworkUploadUrl(draftId, input.cover.fileName, input.cover.contentType);
-  const coverBlob = new Blob([input.cover.bytes], { type: input.cover.contentType });
+  const coverBlob = new Blob(
+    [new Uint8Array(input.cover.bytes.buffer as ArrayBuffer, input.cover.bytes.byteOffset, input.cover.bytes.byteLength)],
+    { type: input.cover.contentType },
+  );
   await uploadDirectToS3(artwork.data.uploadUrl, coverBlob, artwork.data.headers, input.cover.contentType);
   await client.updateMetadata(draftId, {
     ...release,
@@ -232,7 +235,10 @@ export async function dispatchReleaseToTooLost(input: ReleaseAudio): Promise<Dis
   const tracks: TrackWrite[] = [];
   for (const [index, clip] of clips.entries()) {
     const upload = await client.getTrackUploadUrl(draftId, clip.fileName, clip.audioContentType, "audio");
-    const audio = new Blob([clip.bytes], { type: clip.audioContentType });
+    const audio = new Blob(
+      [new Uint8Array(clip.bytes.buffer as ArrayBuffer, clip.bytes.byteOffset, clip.bytes.byteLength)],
+      { type: clip.audioContentType },
+    );
     await uploadDirectToS3(upload.data.uploadUrl, audio, upload.data.headers, clip.audioContentType);
     const trackTitle = clips.length === 1 || index === 0 ? title : `${title} ${index + 1}`;
     tracks.push({

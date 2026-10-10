@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { type StripeEnv, createStripeClient, getStripeErrorMessage, logStripeError } from "@/lib/stripe.server";
+import { planName, type SubscriptionPlanName } from "@/lib/subscription-plans";
 import { bundleFor } from "@/lib/tokens";
 import {
   DEFAULT_CURRENCY,
@@ -13,13 +14,50 @@ import { convertFromUsd } from "@/lib/fx";
 
 type CheckoutResult = { clientSecret: string } | { error: string };
 
-type BalanceResult = { balance: number };
+type BalanceResult = { balance: number; dTokens: number; plan: SubscriptionPlanName };
 
 type CreditResult =
   | { ok: true; credited: number; balance: number; alreadyCredited: boolean; paid: boolean }
   | { ok: false; error: string };
 
-/** Current signed-in user's Hybrid Token balance. */
+type ProfileSnapshot = {
+  select: (columns: string) => {
+    eq: (column: string, value: string) => {
+      maybeSingle: () => Promise<{
+        data: {
+          d_tokens?: unknown;
+          subscription_tier?: unknown;
+          subscription_status?: unknown;
+        } | null;
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+};
+
+/**
+ * Spendable balances for the nav.
+ * Hybrid Tokens are token_balances.balance (what spend_hybrid_tokens debits).
+ * D-Tokens are profiles.d_tokens. The plan name follows subscription_tier when status is active.
+ */
+async function subscriptionSnapshot(
+  supabase: { from: (table: string) => unknown },
+  userId: string,
+): Promise<{ dTokens: number; plan: SubscriptionPlanName }> {
+  try {
+    const { data, error } = await (supabase.from("profiles") as ProfileSnapshot)
+      .select("d_tokens, subscription_tier, subscription_status")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error || !data) return { dTokens: 0, plan: "Free" };
+    const dTokens = typeof data.d_tokens === "number" && Number.isFinite(data.d_tokens) ? data.d_tokens : 0;
+    return { dTokens, plan: planName(data.subscription_tier, data.subscription_status) };
+  } catch {
+    return { dTokens: 0, plan: "Free" };
+  }
+}
+
+/** Current signed-in user's spendable Hybrid Tokens, D-Tokens, and plan. */
 export const getTokenBalance = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<BalanceResult> => {
@@ -28,7 +66,11 @@ export const getTokenBalance = createServerFn({ method: "POST" })
       .select("balance")
       .eq("user_id", context.userId)
       .maybeSingle();
-    return { balance: data?.balance ?? 0 };
+    const snapshot = await subscriptionSnapshot(
+      context.supabase as unknown as { from: (table: string) => unknown },
+      context.userId,
+    );
+    return { balance: data?.balance ?? 0, dTokens: snapshot.dTokens, plan: snapshot.plan };
   });
 
 type SpendResult =

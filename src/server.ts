@@ -199,6 +199,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/stripe/create-checkout") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/stripe/create-checkout/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/distribute/too-lost") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {

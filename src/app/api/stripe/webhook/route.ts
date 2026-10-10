@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import {
+  fulfillSubscriptionCheckout,
+  fulfillSubscriptionDeleted,
+  fulfillSubscriptionInvoice,
+} from "@/lib/subscription-billing.server";
 
 const VOCAL_CLONE_URL = "https://api.wavespeed.ai/api/v3/mureka-ai/vocal-clone";
 const STRIPE_API_VERSION = "2026-03-25.dahlia" as const;
@@ -161,6 +166,13 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: `Webhook Error: ${message}` }, { status: 400 });
   }
 
+  if (event.type === "invoice.paid") {
+    return fulfillSubscriptionInvoice(event.data.object as unknown as Record<string, unknown>);
+  }
+  if (event.type === "customer.subscription.deleted") {
+    return fulfillSubscriptionDeleted(event.data.object as unknown as Record<string, unknown>);
+  }
+
   if (
     event.type !== "checkout.session.completed" &&
     event.type !== "checkout.session.async_payment_succeeded"
@@ -169,6 +181,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const session = event.data.object as Stripe.Checkout.Session & EnrollmentSession;
+
+  // Subscription grants are separate from d5/d10/d25 and Hybrid Token packs.
+  // Mode payment keeps the existing one-time fulfillment below.
+  if (session.mode === "subscription") {
+    return fulfillSubscriptionCheckout(session as unknown as Record<string, unknown>);
+  }
+
   const tokenCount = positiveTokenCount(session.metadata?.tokens);
   const sampleAudioUrl = session.metadata?.sampleAudioUrl?.trim() ?? "";
 

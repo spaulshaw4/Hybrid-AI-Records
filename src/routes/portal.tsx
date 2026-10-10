@@ -12,6 +12,7 @@ import {
 
 import { ApplicationModal } from "@/components/ApplicationModal";
 import { DistributionReleasePanel } from "@/components/portal/DistributionReleasePanel";
+import { SubscriptionPlans } from "@/components/portal/SubscriptionPlans";
 import { ContactModal } from "@/components/ContactModal";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
@@ -148,6 +149,7 @@ function DistributionPackagesPage() {
               <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
                 1 D-Token is charged when Too Lost accepts the release.
               </p>
+              <SubscriptionPlans />
               <div className="mt-6">
                 {SERVICES.filter((item) => item.kind === "distribution").map((dist) => (
                   <div

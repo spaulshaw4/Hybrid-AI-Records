@@ -74,9 +74,9 @@ export function PortalBreadcrumb({
 
       <nav
         aria-label="Breadcrumb"
-        className="mb-2 flex w-full flex-nowrap items-center justify-between gap-3"
+        className="mb-2 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2"
       >
-        <ol className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ol className="flex min-w-[min(100%,18rem)] max-w-full flex-1 basis-[22rem] items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <li>
             <Link
               to="/"
@@ -113,7 +113,7 @@ export function PortalBreadcrumb({
             );
           })}
         </ol>
-        {end ? <div className="ms-auto shrink-0">{end}</div> : null}
+        {end ? <div className="ms-auto max-w-full">{end}</div> : null}
       </nav>
     </>
   );
