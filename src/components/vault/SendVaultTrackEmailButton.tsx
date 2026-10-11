@@ -87,7 +87,7 @@ export function SendVaultTrackEmailButton({
       emit();
       toast.success("Sent to your email!");
     } catch {
-      const message = "Could not send that email.";
+      const message = "Email could not be sent.";
       setError(message);
       toast.error(message);
     } finally {

@@ -1,4 +1,4 @@
-export const MERCH_URL = "https://hybrid-ai-recordsl-llc.printful.me/";
+export const MERCH_URL = "https://hybrid-ai-records-llc.printful.me";
 
 export type SiteNavItem = {
   id: "make-track" | "catalog" | "merch" | "radio" | "packages";

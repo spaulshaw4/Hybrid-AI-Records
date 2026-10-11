@@ -54,6 +54,25 @@ function audioVaultObjectPath(storedUrl: string): string | null {
   }
 }
 
+/** Short client copy. Drops links, keys, and storage vendor names. */
+function clientSendError(reason: string): string {
+  const detail = reason
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\bre_[A-Za-z0-9_]+\b/g, "")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\b/g, "")
+    .replace(/supabase/gi, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([.,])/g, "$1")
+    .replace(/\b(see|at|visit)\s*$/i, "")
+    .trim();
+  if (!detail || detail === "send_failed" || /token=|service_role|api[_-]?key/i.test(detail)) {
+    return "Email could not be sent.";
+  }
+  const short = detail.slice(0, 160).replace(/[.\s]+$/g, "");
+  return `Email could not be sent. ${short}.`;
+}
+
 function usableAudioUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
@@ -112,7 +131,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     return await emailVaultTrack(request);
   } catch {
-    return Response.json({ error: "Could not send that email." }, { status: 500 });
+    return Response.json({ error: "Email could not be sent." }, { status: 500 });
   }
 }
 
@@ -190,7 +209,10 @@ async function emailVaultTrack(request: Request): Promise<Response> {
     if (sent.reason === "not_configured") {
       return Response.json({ error: "Email is not configured." }, { status: 503 });
     }
-    return Response.json({ error: "Could not send that email." }, { status: 502 });
+    if (sent.reason === "no_recipient") {
+      return Response.json({ error: "No email is on this account." }, { status: 400 });
+    }
+    return Response.json({ error: clientSendError(sent.reason) }, { status: 502 });
   }
 
   return Response.json({ ok: true });

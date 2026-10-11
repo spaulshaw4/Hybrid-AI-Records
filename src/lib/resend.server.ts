@@ -253,6 +253,49 @@ export async function sendTrackCompletionReceipt(input: {
 
 /** On-demand vault master link. No audio attachment and no PDF. */
 const VAULT_MASTER_EMAIL_FROM = "Hybrid AI Records <support@hybrid-ai-records.com>";
+const VAULT_RESEND_TEST_FROM = "Hybrid AI Records <onboarding@resend.dev>";
+
+function mailboxAddress(value: string): string {
+  return (value.match(/<([^>]+)>/)?.[1] ?? value).trim().toLowerCase();
+}
+
+/**
+ * onboarding@resend.dev only when RESEND_FROM or an existing dev flag already
+ * marks this Resend account as test mode. Production stays on support@.
+ */
+function vaultResendTestFrom(): string | null {
+  const configured = process.env.RESEND_FROM?.trim() ?? "";
+  const address = mailboxAddress(configured);
+  if (address === "onboarding@resend.dev" || address.endsWith("@resend.dev")) {
+    return VAULT_RESEND_TEST_FROM;
+  }
+  const flag = (process.env.RESEND_TEST_MODE ?? "").trim().toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes" || flag === "test" || flag === "onboarding") {
+    return VAULT_RESEND_TEST_FROM;
+  }
+  return null;
+}
+
+function supportSenderRejected(message: string): boolean {
+  const text = message.toLowerCase();
+  if (text.includes("support@hybrid-ai-records.com") || /\bsupport@/.test(text)) return true;
+  const aboutFrom = /\bfrom\b/.test(text) || text.includes("sender");
+  const rejected =
+    text.includes("invalid") ||
+    text.includes("verif") ||
+    text.includes("domain") ||
+    text.includes("not allowed") ||
+    text.includes("validation") ||
+    text.includes("rejected") ||
+    text.includes("denied");
+  return aboutFrom && rejected;
+}
+
+function resendErrorText(error: unknown): string {
+  if (!error || typeof error !== "object") return "";
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? message.trim() : "";
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -318,7 +361,7 @@ export async function sendVaultMasterDownloadEmail(input: {
   trackId: string;
   trackTitle: string;
   downloadUrl: string;
-}): Promise<{ ok: true } | { ok: false; reason: "not_configured" | "no_recipient" | "send_failed" }> {
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     console.error("RESEND_API_KEY is not configured");
@@ -333,20 +376,28 @@ export async function sendVaultMasterDownloadEmail(input: {
 
   const trackTitle = input.trackTitle.replace(/[\r\n\t]+/g, " ").trim().slice(0, 180) || "Untitled";
   const trackId = input.trackId.trim() || "unknown";
+  const html = vaultMasterDownloadHtml({ trackTitle, trackId, downloadUrl });
+  const subject = `Audio Master Download — ${trackTitle} | Hybrid AI Records Vault`;
+  const testFrom = vaultResendTestFrom();
+  const primaryFrom = testFrom ?? VAULT_MASTER_EMAIL_FROM;
 
   try {
     const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
-      from: VAULT_MASTER_EMAIL_FROM,
-      to,
-      subject: `Audio Master Download — ${trackTitle} | Hybrid AI Records Vault`,
-      html: vaultMasterDownloadHtml({ trackTitle, trackId, downloadUrl }),
-    });
-    if (error) {
+    const first = await resend.emails.send({ from: primaryFrom, to, subject, html });
+    if (!first.error) return { ok: true };
+
+    const firstMessage = resendErrorText(first.error);
+    const retryClearance =
+      !testFrom && primaryFrom === VAULT_MASTER_EMAIL_FROM && supportSenderRejected(firstMessage);
+    if (retryClearance) {
+      const second = await resend.emails.send({ from: CLEARANCE_EMAIL_FROM, to, subject, html });
+      if (!second.error) return { ok: true };
       console.error("Vault master email failed");
-      return { ok: false, reason: "send_failed" };
+      return { ok: false, reason: resendErrorText(second.error) || "send_failed" };
     }
-    return { ok: true };
+
+    console.error("Vault master email failed");
+    return { ok: false, reason: firstMessage || "send_failed" };
   } catch {
     console.error("Vault master email failed");
     return { ok: false, reason: "send_failed" };

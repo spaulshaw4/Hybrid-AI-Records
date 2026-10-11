@@ -31,6 +31,7 @@ import { TikTokIcon } from "@/components/TikTokIcon";
 import { ThreadsIcon } from "@/components/ThreadsIcon";
 import { AudiomackIcon } from "@/components/AudiomackIcon";
 import { RadioPlayer } from "@/components/RadioPlayer";
+import { MERCH_URL } from "@/lib/site-nav";
 
 /** Rows for the $25 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
 const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
@@ -818,7 +819,7 @@ function Home() {
                   { icon: TikTokIcon, label: "TikTok", href: "https://www.tiktok.com/@spaulshaw4" },
                   { icon: Instagram, label: "Instagram", href: "https://www.instagram.com/hybridairecords" },
                   { icon: AudiomackIcon, label: "Audiomack", href: "https://audiomack.com/spaulshaw4" },
-                  { icon: ShoppingBag, label: "Merch", href: "https://hybrid-ai-recordsl-llc.printful.me/" },
+                  { icon: ShoppingBag, label: "Merch", href: MERCH_URL },
                 ].map(({ icon: Icon, label, href }) => (
                   <a
                     key={label}

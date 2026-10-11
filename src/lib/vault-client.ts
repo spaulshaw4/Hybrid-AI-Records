@@ -102,6 +102,30 @@ export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
   return (await fetchVaultTracksResult()).tracks;
 }
 
+async function sessionAccessToken(): Promise<string> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  let token = sessionData.session?.access_token?.trim() ?? "";
+  if (!token) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    token = refreshed.session?.access_token?.trim() ?? "";
+  }
+  return token;
+}
+
+function vaultEmailError(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const record = payload as { error?: unknown; message?: unknown };
+  if (typeof record.error === "string" && record.error.trim()) return record.error.trim();
+  if (record.error && typeof record.error === "object") {
+    const nested = (record.error as { message?: unknown }).message;
+    if (typeof nested === "string" && nested.trim()) return nested.trim();
+  }
+  if (typeof record.message === "string" && record.message.trim() && !/supabase/i.test(record.message)) {
+    return record.message.trim();
+  }
+  return "";
+}
+
 /** POST /api/vault/email-track — session bearer only. Never returns a download URL. */
 export async function sendVaultTrackToEmail(
   trackId: string,
@@ -109,6 +133,10 @@ export async function sendVaultTrackToEmail(
   const id = trackId.trim();
   if (!id) return { ok: false, error: "A track id is required." };
   const headers = await vaultAuthHeaders();
+  if (!headers.get("Authorization")) {
+    const token = await sessionAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
   headers.set("content-type", "application/json");
   try {
     const response = await fetch("/api/vault/email-track", {
@@ -118,18 +146,11 @@ export async function sendVaultTrackToEmail(
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      const message =
-        payload &&
-        typeof payload === "object" &&
-        typeof (payload as { error?: unknown }).error === "string" &&
-        (payload as { error: string }).error.trim()
-          ? (payload as { error: string }).error.trim()
-          : "Could not send that email.";
-      return { ok: false, error: message };
+      return { ok: false, error: vaultEmailError(payload) || "Email could not be sent." };
     }
     return { ok: true };
   } catch {
-    return { ok: false, error: "Could not send that email." };
+    return { ok: false, error: "Email could not be sent." };
   }
 }
 

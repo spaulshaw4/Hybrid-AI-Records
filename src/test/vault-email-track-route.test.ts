@@ -64,7 +64,10 @@ const PUBLIC_WAV = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/masters
 const PUBLIC_MP3 = `${SUPABASE_URL}/storage/v1/object/public/audio-vault/masters/night.mp3`;
 const SIGNED = `${SUPABASE_URL}/storage/v1/object/sign/audio-vault/masters/night.wav?token=test-signature`;
 
-function restoreEnv(name: "NEXT_PUBLIC_SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY" | "RESEND_API_KEY", value: string | undefined) {
+function restoreEnv(
+  name: "NEXT_PUBLIC_SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY" | "RESEND_API_KEY" | "RESEND_FROM" | "RESEND_TEST_MODE",
+  value: string | undefined,
+) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
@@ -83,11 +86,15 @@ describe("POST /api/vault/email-track", () => {
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalService = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const originalResend = process.env.RESEND_API_KEY;
+  const originalFrom = process.env.RESEND_FROM;
+  const originalTestMode = process.env.RESEND_TEST_MODE;
 
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
     process.env.RESEND_API_KEY = "re_test_vault_email";
+    delete process.env.RESEND_FROM;
+    delete process.env.RESEND_TEST_MODE;
     maybeSingleMock.mockReset();
     createSignedUrlMock.mockReset();
     sendMock.mockReset();
@@ -112,6 +119,8 @@ describe("POST /api/vault/email-track", () => {
     restoreEnv("NEXT_PUBLIC_SUPABASE_URL", originalUrl);
     restoreEnv("SUPABASE_SERVICE_ROLE_KEY", originalService);
     restoreEnv("RESEND_API_KEY", originalResend);
+    restoreEnv("RESEND_FROM", originalFrom);
+    restoreEnv("RESEND_TEST_MODE", originalTestMode);
   });
 
   it("returns 401 without a session and does not read the vault or email", async () => {
@@ -216,5 +225,82 @@ describe("POST /api/vault/email-track", () => {
     expect(createSignedUrlMock).not.toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
     await expect(res.json()).resolves.toEqual({ error: "This track has no master audio yet." });
+  });
+
+  it("falls back to clearance@ when Resend rejects support@ and still hides the signed URL", async () => {
+    resolveStudioSessionMock.mockResolvedValue({
+      userId: SESSION_USER,
+      email: "artist@example.com",
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        id: TRACK_ID,
+        user_id: SESSION_USER,
+        title: "Night Drive",
+        wav_url: PUBLIC_WAV,
+        mp3_url: null,
+      },
+      error: null,
+    });
+    createSignedUrlMock.mockResolvedValue({
+      data: { signedUrl: SIGNED },
+      error: null,
+    });
+    sendMock
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "Invalid from address. support@hybrid-ai-records.com is not verified." },
+      })
+      .mockResolvedValueOnce({ data: { id: "email_2" }, error: null });
+
+    const res = await POST(post({ trackId: TRACK_ID }, "Bearer a.b.c"));
+    const raw = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(raw)).toEqual({ ok: true });
+    expect(raw).not.toContain(SIGNED);
+    expect(raw).not.toContain("token=");
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    expect((sendMock.mock.calls[0][0] as { from: string }).from).toBe(
+      "Hybrid AI Records <support@hybrid-ai-records.com>",
+    );
+    expect((sendMock.mock.calls[1][0] as { from: string }).from).toBe(
+      "Hybrid AI Records <clearance@hybrid-ai-records.com>",
+    );
+  });
+
+  it("returns the Resend validation reason without a link or key", async () => {
+    resolveStudioSessionMock.mockResolvedValue({
+      userId: SESSION_USER,
+      email: "artist@example.com",
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        id: TRACK_ID,
+        user_id: SESSION_USER,
+        title: "Night Drive",
+        wav_url: PUBLIC_WAV,
+        mp3_url: PUBLIC_MP3,
+      },
+      error: null,
+    });
+    createSignedUrlMock.mockResolvedValue({
+      data: { signedUrl: SIGNED },
+      error: null,
+    });
+    sendMock.mockResolvedValue({
+      data: null,
+      error: { message: `Domain validation failed. See ${SIGNED}` },
+    });
+
+    const res = await POST(post({ trackId: TRACK_ID }, "Bearer a.b.c"));
+    const body = (await res.json()) as { error?: string };
+
+    expect(res.status).toBe(502);
+    expect(body.error).toBe("Email could not be sent. Domain validation failed.");
+    expect(body.error).not.toContain(SIGNED);
+    expect(body.error).not.toContain("token=");
+    expect(body.error?.toLowerCase()).not.toContain("supabase");
+    expect(sendMock).toHaveBeenCalledTimes(1);
   });
 });
