@@ -721,8 +721,8 @@ describe("EnginePage instrumental tab", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Lyrics" }), { target: { value: "keep this verse" } });
     const clear = screen.getByRole("button", { name: "Clear lyrics" });
     expect(clear).toHaveAttribute("title", "Clear lyrics");
-    expect(clear.className).toContain("text-muted-foreground");
-    expect(clear.className).toContain("hover:text-destructive");
+    expect(clear.className).toContain("text-zinc-500");
+    expect(clear.className).toContain("hover:text-red-400");
     await user.click(clear);
     expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("keep this verse");
 
@@ -935,8 +935,8 @@ describe("EnginePage instrumental tab", () => {
     expect(screen.queryByRole("button", { name: "+ Reference" })).not.toBeInTheDocument();
     const analyzingPill = screen.getByText("Analyzing reference...").parentElement as HTMLElement;
     expect(analyzingPill.className).toContain("flex");
-    expect(analyzingPill.className).toContain("bg-red-950/50");
-    expect(analyzingPill.className).toContain("border-red-500/60");
+    expect(analyzingPill.className).toContain("bg-zinc-900");
+    expect(analyzingPill.className).toContain("border-red-500");
     expect(analyzingPill.querySelector(".animate-ping")).toBeTruthy();
     expect(analyzingPill.querySelector(".animate-pulse")).toBeNull();
 
@@ -1475,8 +1475,8 @@ describe("EnginePage instrumental tab", () => {
     expect(reading.className).toContain("font-medium");
     expect(reading.className).toContain("truncate");
     expect(reading.className).toContain("max-w-[130px]");
-    expect(reading.parentElement?.className).toContain("bg-red-950/40");
-    expect(reading.parentElement?.className).toContain("border-red-500/50");
+    expect(reading.parentElement?.className).toContain("bg-zinc-900");
+    expect(reading.parentElement?.className).toContain("border-red-500");
     expect(reading.parentElement?.querySelector(".animate-ping")).toBeTruthy();
     expect(screen.queryByText("cover.png")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove visual reference" })).not.toBeInTheDocument();

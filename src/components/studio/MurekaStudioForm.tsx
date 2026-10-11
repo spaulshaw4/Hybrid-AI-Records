@@ -12,6 +12,7 @@ export type GeneratePayload = {
   isInstrumental: boolean;
   vocalId: string | null;
   referenceId: string | null;
+  lyricsOrigin: "user" | "synthetic";
 };
 
 type EnrolledVoice = { id: string; name: string };
@@ -59,6 +60,7 @@ export function MurekaStudioForm({ onGenerate, isLoading, enrolledVoice = null }
       lyrics: isInstrumental ? "" : lyrics,
       gender,
       isInstrumental,
+      lyricsOrigin: "user",
       vocalId: activeVoice ? activeVoice.id : null,
       referenceId: reference ? reference.id : null,
     });

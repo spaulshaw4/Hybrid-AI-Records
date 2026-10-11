@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { PAIR_TOPUPS, isPairTopup, type PairTopupId } from "@/lib/pair-topups";
 import { resolveStudioSession } from "@/lib/studio-request-auth.server";
 import { allowedOrigin, defaultSiteOrigin } from "@/lib/site-origin.server";
 
@@ -28,6 +29,8 @@ function resolveTier(raw: unknown): TokenTier {
 const SIGN_IN_REQUIRED =
   "Please sign in to your Hybrid AI Records account before purchasing tokens so they can be credited to your vault.";
 
+const PAIR_NOT_CONFIGURED = "Token packs are not configured.";
+
 function isUnauthorized(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const name = (err as { name?: string }).name;
@@ -56,9 +59,46 @@ async function checkoutUserId(req: Request): Promise<string | Response> {
   }
 }
 
+/**
+ * Pair top-ups bill a server-owned Stripe Price. A missing price env returns 503
+ * and does not construct Stripe. d5/d10/d25 stay on the price_data path below.
+ */
+async function pairTopupCheckout(req: Request, tier: PairTopupId): Promise<Response> {
+  const userId = await checkoutUserId(req);
+  if (userId instanceof Response) return userId;
+
+  const pack = PAIR_TOPUPS[tier];
+  const priceId = process.env[pack.priceEnv]?.trim() ?? "";
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  if (!priceId || !secretKey) {
+    return Response.json({ error: PAIR_NOT_CONFIGURED }, { status: 503 });
+  }
+
+  const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
+  const origin = allowedOrigin(req.headers.get("origin")) ?? defaultSiteOrigin();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${origin}/portal?tab=plans&payment=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/portal?tab=plans&payment=cancelled`,
+    metadata: {
+      tokens: String(pack.hybridTokens),
+      dTokens: String(pack.dTokens),
+      userId,
+      pack: tier,
+      kind: "pair_topup",
+    },
+  });
+
+  return Response.json({ url: session.url });
+}
+
 export async function POST(req: Request): Promise<Response> {
   try {
     const body = (await req.json()) as { tier?: unknown; userId?: unknown };
+    if (isPairTopup(body.tier)) {
+      return await pairTopupCheckout(req, body.tier);
+    }
     const pack = TOKEN_PACKS[resolveTier(body.tier)];
     const userId = await checkoutUserId(req);
     if (userId instanceof Response) return userId;

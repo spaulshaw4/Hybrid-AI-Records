@@ -1,3 +1,4 @@
+import { finalizeTrackClearance } from "@/lib/commercial-clearance.server";
 import { audioVaultPublicUrl, vaultAdminClient } from "@/lib/vault-admin.server";
 import { readVocalJob } from "@/lib/vocal-jobs.server";
 
@@ -138,9 +139,10 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ received: true });
     }
 
+    const title = job?.title || "Untitled Vocal";
     const inserted = await supabase.from("vaulted_tracks").insert({
       user_id: userId,
-      title: job?.title || "Untitled Vocal",
+      title,
       prompt: job?.tags ?? "",
       lyrics: job?.lyrics ?? "",
       vocal_id_used: job?.personaId?.trim() || null,
@@ -151,6 +153,22 @@ export async function POST(req: Request): Promise<Response> {
     if (inserted.error) {
       console.error("[vocals] vault insert failed");
       return Response.json({ error: "Failed to store audio" }, { status: 500 });
+    }
+    try {
+      await finalizeTrackClearance({
+        userId,
+        taskId,
+        title,
+        lyrics: job?.lyrics ?? "",
+        instrumental: false,
+        lyricsOrigin: job?.lyricsOrigin ?? null,
+        vocalId: job?.personaId?.trim() || null,
+        humanVocal: job?.humanVocal === true || Boolean(job?.personaId?.trim()),
+        masterId: taskId,
+        trackKey: `${taskId}:${title}`,
+      });
+    } catch {
+      console.error("[clearance] completion notice failed");
     }
   } catch {
     console.error("[vocals] vault store failed");

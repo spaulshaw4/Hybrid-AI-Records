@@ -230,7 +230,8 @@ describe("POST /api/vault/sync-task", () => {
       task_id: TASK_ID,
     });
     for (const call of createClientMock.mock.calls) {
-      expect(call).toEqual([SUPABASE_URL, "service-role-test"]);
+      expect(call[0]).toBe(SUPABASE_URL);
+      expect(call[1]).toBe("service-role-test");
     }
     expect(createClientMock.mock.calls.some((call) => call[1] === "anon-test")).toBe(false);
   });

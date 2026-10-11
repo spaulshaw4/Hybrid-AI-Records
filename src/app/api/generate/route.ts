@@ -8,6 +8,7 @@ import {
   replaceBareConflictingPrompt,
 } from "@/lib/mureka-format";
 import { resolveStudioSession, UnauthorizedSessionError } from "@/lib/studio-request-auth.server";
+import { finalizeTrackClearance, readLyricsOrigin } from "@/lib/commercial-clearance.server";
 import {
   beginDelivery,
   completeTrackJob,
@@ -66,6 +67,7 @@ type GenerateBody = {
   text?: unknown;
   gender?: unknown;
   isInstrumental?: unknown;
+  lyricsOrigin?: unknown;
   vocalId?: unknown;
   referenceId?: unknown;
   userId?: unknown;
@@ -349,6 +351,8 @@ async function commitVaultedTrack(input: {
   wavUrl: string;
   mp3Url: string;
   taskId: string;
+  instrumental?: boolean;
+  lyricsOrigin?: "user" | "synthetic" | null;
 }): Promise<void> {
   // vaulted_tracks.wav_url and mp3_url are NOT NULL. There is no status, master_url, or audio_url column.
   // A processing placeholder would fail, so the only insert is this one, after the master is stored.
@@ -370,6 +374,21 @@ async function commitVaultedTrack(input: {
   });
   if (insertError) throw new Error(insertError.message);
   console.log("[vault] DB row committed for task", input.taskId);
+  try {
+    await finalizeTrackClearance({
+      userId,
+      taskId: input.taskId,
+      title: input.title,
+      lyrics: input.lyrics,
+      instrumental: input.instrumental === true,
+      lyricsOrigin: input.lyricsOrigin ?? null,
+      vocalId: input.instrumental === true ? null : input.vocalId,
+      masterId: input.taskId,
+      trackKey: input.taskId,
+    });
+  } catch {
+    console.error("[clearance] completion notice failed");
+  }
 }
 
 async function insertVaultRow(
@@ -386,6 +405,8 @@ async function insertVaultRow(
     wavUrl,
     mp3Url,
     taskId: job.taskId,
+    instrumental: job.instrumental === true,
+    lyricsOrigin: job.lyricsOrigin ?? null,
   });
 }
 
@@ -483,15 +504,18 @@ export async function storeVaultedMaster(input: {
   outputUrl: string;
 }): Promise<{ wavUrl: string; mp3Url: string }> {
   const urls = await uploadMasterFiles(input.taskId, input.outputUrl);
+  const job = readTrackJob(input.taskId);
   await commitVaultedTrack({
     userId: input.userId,
     title: input.title,
     prompt: input.prompt,
     lyrics: input.lyrics,
-    vocalId: null,
+    vocalId: job?.vocalId ?? null,
     wavUrl: urls.wavUrl,
     mp3Url: urls.mp3Url,
     taskId: input.taskId,
+    instrumental: job?.instrumental === true,
+    lyricsOrigin: job?.lyricsOrigin ?? null,
   });
   return urls;
 }
@@ -800,6 +824,8 @@ export async function POST(req: Request): Promise<Response> {
       userId,
       status: "processing",
       delivering: false,
+      instrumental: isInstrumental,
+      lyricsOrigin: isInstrumental ? null : readLyricsOrigin(body.lyricsOrigin),
     });
     startTrackWatch(taskId);
 

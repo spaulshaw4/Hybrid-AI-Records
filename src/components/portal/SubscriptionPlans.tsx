@@ -10,6 +10,7 @@ type Membership = {
   id: SubscriptionTierId;
   name: string;
   price: string;
+  description: string;
   popular?: boolean;
   perks: string[];
 };
@@ -19,29 +20,46 @@ const MEMBERSHIPS: Membership[] = [
     id: "starter_999",
     name: "Starter Producer",
     price: "$9.99",
-    perks: ["YouTube Content ID", "BMG publishing administration", "ISRC/UPC included"],
+    description: "1 full 10-track album production & distribution.",
+    perks: [
+      "Deploy 1 Full 10-Track Album",
+      "Vocals or Instrumentals Engine",
+      "478+ Digital Storefronts",
+      "BMG Global Publishing Admin",
+    ],
   },
   {
     id: "pro_1999",
     name: "Pro Producer",
     price: "$19.99",
+    description: "1 album + 5 bonus tracks / EP drops.",
     popular: true,
-    perks: ["YouTube Content ID", "BMG publishing administration", "ISRC/UPC included"],
+    perks: [
+      "1 Full Album + 5-Track EP Capacity",
+      "Up to 3 Artist Aliases",
+      "9:16 Canvas & Visualizer Renders",
+      "BMG Global Publishing Admin",
+    ],
   },
   {
     id: "label_2999",
     name: "Label & Studio",
     price: "$29.99",
-    perks: ["YouTube Content ID", "BMG publishing administration", "ISRC/UPC included"],
+    description: "2 full albums per month for active catalogs.",
+    perks: [
+      "Deploy 2 Full 10-Track Albums / mo",
+      "Unlimited Artist Aliases",
+      "Priority BMG Registration Queue",
+      "Phase 3 Video Engine Access",
+    ],
   },
 ];
 
 function featuresFor(membership: Membership): string[] {
   const plan = SUBSCRIPTION_TIERS[membership.id];
   return [
-    `${plan.dTokens} D-Tokens`,
-    `${plan.hybridTokens} Hybrid Studio Tokens`,
-    "Replenished each month",
+    `${plan.dTokens} Too Lost D-Tokens / mo`,
+    `${plan.hybridTokens} Hybrid Studio Tokens / mo`,
     ...membership.perks,
   ];
 }
@@ -112,20 +130,21 @@ export function SubscriptionPlans() {
           return (
             <article
               key={membership.id}
-              className={`relative flex flex-col rounded-2xl border bg-zinc-950 p-6 ${
-                featured ? "border-red-600 shadow-lg shadow-red-600/20" : "border-zinc-800"
+              className={`relative flex flex-col rounded-2xl border bg-zinc-950 px-6 pb-6 ${
+                featured ? "border-red-600 pt-8 shadow-lg shadow-red-600/20" : "border-zinc-800 pt-6"
               }`}
             >
               {featured ? (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">
+                <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full z-10 whitespace-nowrap">
                   Most Popular
                 </span>
               ) : null}
-              <h3 className="text-lg font-semibold text-white">{membership.name}</h3>
+              <h3 className={`text-lg font-semibold text-white ${featured ? "mt-2" : ""}`}>{membership.name}</h3>
               <p className="mt-2 text-4xl font-bold text-white">
                 {membership.price}
                 <span className="text-base font-normal text-zinc-400">/mo</span>
               </p>
+              <p className="mt-2 text-sm text-zinc-400">{membership.description}</p>
               <ul className="mt-6 flex-1 space-y-3">
                 {featuresFor(membership).map((feature) => (
                   <li key={feature} className="flex items-start gap-2 text-sm text-zinc-300">

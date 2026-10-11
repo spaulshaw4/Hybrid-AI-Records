@@ -253,6 +253,7 @@ describe("VocalStudioTab", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       title: "",
       lyrics: "hello line",
+      lyricsOrigin: "user",
       vocalGender: "Male Vocal",
       styleTags: "dry vocal",
       duration: 30,
@@ -300,4 +301,32 @@ describe("VocalStudioTab", () => {
       expect(body).not.toHaveProperty("vocalAudioUrl");
     },
   );
+
+  it("marks untouched Studio Ghostwriter lyrics as synthetic and edited lyrics as user", async () => {
+    const user = userEvent.setup();
+    render(<VocalStudioTab />);
+    fetchMock.mockResolvedValueOnce(
+      textResult({ lyrics: "[Verse]\nghost line", result: "[Verse]\nghost line" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Studio Ghostwriter" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Lyrics" })).toHaveValue("[Verse]\nghost line"));
+
+    fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-synth" }));
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === "/api/vocals/generate")).toBe(true));
+    const syntheticCall = fetchMock.mock.calls.find(([url]) => url === "/api/vocals/generate") as [string, RequestInit];
+    expect(JSON.parse(String(syntheticCall[1].body)).lyricsOrigin).toBe("synthetic");
+
+    await user.type(screen.getByRole("textbox", { name: "Lyrics" }), "!");
+    fetchMock.mockResolvedValueOnce(textResult({ success: true, taskId: "task-user" }));
+    await user.click(screen.getByRole("button", { name: "Render Master Record" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === "/api/vocals/generate")).toHaveLength(2));
+    const editedCall = fetchMock.mock.calls.filter(([url]) => url === "/api/vocals/generate").at(-1) as [
+      string,
+      RequestInit,
+    ];
+    const edited = JSON.parse(String(editedCall[1].body)) as { lyricsOrigin?: string; lyrics?: string };
+    expect(edited.lyricsOrigin).toBe("user");
+    expect(edited.lyrics).toContain("!");
+  });
 });

@@ -15,8 +15,8 @@ import { CatalogTracksView } from "@/components/portal/CatalogTracksView";
 import { CreateTrackView } from "@/components/portal/CreateTrackView";
 import { DistributionReleasePanel } from "@/components/portal/DistributionReleasePanel";
 import { MerchView } from "@/components/portal/MerchView";
+import { PlansTokensView } from "@/components/portal/PlansTokensView";
 import { RadioPlayerView } from "@/components/portal/RadioPlayerView";
-import { SubscriptionPlans } from "@/components/portal/SubscriptionPlans";
 import { ContactModal } from "@/components/ContactModal";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
@@ -31,7 +31,7 @@ import { buildPageJsonLd } from "@/lib/release-schema";
 const portalSearchSchema = z
   .object({
     view: z.enum(["tokens", "studio", "services"]).optional(),
-    tab: z.enum(["create", "catalog", "merch", "radio", "distribution", "video"]).optional(),
+    tab: z.string().optional(),
     package: z.string().optional(),
     resume: z.string().optional(),
     artist: z.string().optional(),
@@ -83,8 +83,8 @@ const ENTITLEMENTS = ["YouTube Content ID Active", "BMG Publishing Active", "ISR
 
 const PORTAL_CRUMB: Record<PortalTab, string> = {
   create: "Create Your Track",
-  catalog: "Catalog & Tracks",
-  merch: "Merch",
+  catalog_merch: "Catalog & Merch",
+  plans: "Plans & Tokens",
   radio: "Hybrid AI Radio",
   distribution: "Distribution & Video Packages",
 };
@@ -119,8 +119,13 @@ function DistributionPackagesPage() {
           />
 
           {tab === "create" ? <CreateTrackView /> : null}
-          {tab === "catalog" ? <CatalogTracksView /> : null}
-          {tab === "merch" ? <MerchView /> : null}
+          {tab === "catalog_merch" ? (
+            <>
+              <CatalogTracksView />
+              <MerchView />
+            </>
+          ) : null}
+          {tab === "plans" ? <PlansTokensView /> : null}
           {tab === "radio" ? <RadioPlayerView /> : null}
 
           {tab === "distribution" ? (
@@ -132,7 +137,6 @@ function DistributionPackagesPage() {
               <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
                 1 D-Token is charged when Too Lost accepts the release.
               </p>
-              <SubscriptionPlans />
               <div className="mt-6">
                 {SERVICES.filter((item) => item.kind === "distribution").map((dist) => (
                   <div

@@ -113,14 +113,14 @@ BEGIN
   END IF;
 
   IF _tier = 'starter_999' THEN
-    expected_d := 5;
-    expected_h := 20;
+    expected_d := 10;
+    expected_h := 10;
   ELSIF _tier = 'pro_1999' THEN
-    expected_d := 12;
-    expected_h := 50;
+    expected_d := 15;
+    expected_h := 15;
   ELSIF _tier = 'label_2999' THEN
-    expected_d := 25;
-    expected_h := 120;
+    expected_d := 20;
+    expected_h := 20;
   ELSE
     RAISE EXCEPTION 'invalid subscription tier';
   END IF;

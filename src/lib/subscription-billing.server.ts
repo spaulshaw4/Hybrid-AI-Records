@@ -113,7 +113,7 @@ async function lookupSubscriber(
 
 /**
  * First subscription checkout replaces the tier buckets.
- * One-time packs (mode payment, including d5/d10/d25) never reach this function.
+ * One-time packs (mode payment, including d5/d10/d25 and pair top-ups) never reach this function.
  */
 export async function fulfillSubscriptionCheckout(session: Record<string, unknown>): Promise<Response> {
   if (session.mode !== "subscription") return received();

@@ -1,22 +1,22 @@
-export type PortalTab = "create" | "catalog" | "merch" | "radio" | "distribution";
+export type PortalTab = "create" | "catalog_merch" | "plans" | "radio" | "distribution";
 
-const PORTAL_TAB_IDS = {
-  "make-track": "create",
-  catalog: "catalog",
-  merch: "merch",
-  radio: "radio",
-  packages: "distribution",
-} as const;
+export const PORTAL_MENU = [
+  { id: "create", label: "CREATE YOUR TRACK", short: "Create", icon: "sparkles" },
+  { id: "catalog_merch", label: "CATALOG & MERCH", short: "Catalog", icon: "disc" },
+  { id: "plans", label: "PLANS & TOKENS", short: "Plans", icon: "card" },
+  { id: "radio", label: "HYBRID AI RADIO", short: "Radio", icon: "radio" },
+  { id: "distribution", label: "DISTRIBUTION & VIDEO PACKAGES", short: "Distro", icon: "film" },
+] as const;
 
-export type PortalNavId = keyof typeof PORTAL_TAB_IDS;
+export type PortalMenuIcon = (typeof PORTAL_MENU)[number]["icon"];
 
-export function portalTabForNavId(id: PortalNavId): PortalTab {
-  return PORTAL_TAB_IDS[id];
-}
-
-/** `?tab=video` stays on Distribution & Video Packages. Missing tab is Create. */
+/**
+ * `?tab=video` opens Distribution. `?tab=catalog` and `?tab=merch` open Catalog & Merch.
+ * Anything else unknown, including a missing tab, opens Create.
+ */
 export function resolvePortalTab(tab: unknown): PortalTab {
   if (tab === "video" || tab === "distribution") return "distribution";
-  if (tab === "create" || tab === "catalog" || tab === "merch" || tab === "radio") return tab;
+  if (tab === "catalog" || tab === "merch" || tab === "catalog_merch") return "catalog_merch";
+  if (tab === "plans" || tab === "create" || tab === "radio") return tab;
   return "create";
 }

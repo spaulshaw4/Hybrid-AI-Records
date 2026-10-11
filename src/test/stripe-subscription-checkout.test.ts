@@ -122,6 +122,36 @@ vi.mock("@supabase/supabase-js", () => ({
         creditCalls.push(args);
         return { data: [{ credited: args._tokens, balance: args._tokens, already_credited: false }], error: null };
       }
+      if (fn === "credit_pair_topup") {
+        creditCalls.push(args);
+        const userId = String(args._user_id);
+        const key = `pair:${String(args._session_id)}`;
+        const profile = profiles.get(userId);
+        if (grants.has(key)) {
+          return {
+            data: [{
+              credited: 0,
+              balance: balances.get(userId) ?? 0,
+              d_tokens: profile?.d_tokens ?? 0,
+              already_credited: true,
+            }],
+            error: null,
+          };
+        }
+        grants.add(key);
+        const nextH = (balances.get(userId) ?? 0) + Number(args._tokens);
+        balances.set(userId, nextH);
+        if (profile) profile.d_tokens += Number(args._d_tokens);
+        return {
+          data: [{
+            credited: Number(args._tokens),
+            balance: nextH,
+            d_tokens: profile?.d_tokens ?? Number(args._d_tokens),
+            already_credited: false,
+          }],
+          error: null,
+        };
+      }
       if (fn !== "apply_subscription_grant") {
         return { data: null, error: { message: `unexpected rpc ${fn}` } };
       }
@@ -413,15 +443,15 @@ describe("POST /api/stripe/webhook subscription grants", () => {
       _tier: "starter_999",
       _kind: "initial",
       _mode: "set",
-      _d_tokens: 5,
-      _hybrid_tokens: 20,
+      _d_tokens: 10,
+      _hybrid_tokens: 10,
       _stripe_customer_id: "cus_test",
       _stripe_subscription_id: "sub_test",
     });
     expect(grantCalls[1]).toMatchObject({ _grant_key: "checkout:cs_sub_1", _mode: "set" });
-    expect(balances.get(LEDGER_USER)).toBe(20);
+    expect(balances.get(LEDGER_USER)).toBe(10);
     expect(profiles.get(LEDGER_USER)).toMatchObject({
-      d_tokens: 5,
+      d_tokens: 10,
       subscription_tier: "starter_999",
       subscription_status: "active",
       stripe_customer_id: "cus_test",
@@ -433,7 +463,7 @@ describe("POST /api/stripe/webhook subscription grants", () => {
 
   it("adds the tier allowance for invoice.paid subscription_cycle and ignores a repeat invoice", async () => {
     ready();
-    seed(20, 5, "starter_999", "active");
+    seed(10, 10, "starter_999", "active");
     const invoice = {
       id: "in_cycle_1",
       billing_reason: "subscription_cycle",
@@ -454,11 +484,11 @@ describe("POST /api/stripe/webhook subscription grants", () => {
       _grant_key: "invoice:in_cycle_1",
       _tier: "pro_1999",
       _kind: "cycle",
-      _d_tokens: 12,
-      _hybrid_tokens: 50,
+      _d_tokens: 15,
+      _hybrid_tokens: 15,
     });
-    expect(balances.get(LEDGER_USER)).toBe(70);
-    expect(profiles.get(LEDGER_USER)?.d_tokens).toBe(17);
+    expect(balances.get(LEDGER_USER)).toBe(25);
+    expect(profiles.get(LEDGER_USER)?.d_tokens).toBe(25);
     expect(profiles.get(LEDGER_USER)?.subscription_tier).toBe("pro_1999");
     expect(grants.size).toBe(1);
   });
@@ -492,7 +522,7 @@ describe("POST /api/stripe/webhook subscription grants", () => {
 
   it("marks the plan canceled and free without zeroing balances", async () => {
     ready();
-    seed(50, 12, "pro_1999", "active");
+    seed(15, 15, "pro_1999", "active");
     constructEventMock.mockReturnValue({
       id: "evt_cancel",
       type: "customer.subscription.deleted",
@@ -519,9 +549,9 @@ describe("POST /api/stripe/webhook subscription grants", () => {
     expect(profiles.get(LEDGER_USER)).toMatchObject({
       subscription_status: "canceled",
       subscription_tier: "free",
-      d_tokens: 12,
+      d_tokens: 15,
     });
-    expect(balances.get(LEDGER_USER)).toBe(50);
+    expect(balances.get(LEDGER_USER)).toBe(15);
     expect(grantCalls).toEqual([]);
   });
 
@@ -561,5 +591,59 @@ describe("POST /api/stripe/webhook subscription grants", () => {
       subscription_tier: "free",
       subscription_status: null,
     });
+  });
+
+  it("credits a pair top-up onto hybrid balance and d_tokens without a subscription grant", async () => {
+    ready();
+    seed(7, 3);
+    constructEventMock.mockReturnValue({
+      id: "evt_pair_5",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_pair_5",
+          mode: "payment",
+          payment_status: "paid",
+          amount_total: 1000,
+          currency: "usd",
+          metadata: {
+            tokens: "999",
+            dTokens: "999",
+            userId: LEDGER_USER,
+            pack: "pair5",
+            kind: "pair_topup",
+            tier: "starter_999",
+          },
+        },
+      },
+    });
+
+    const res = await stripeWebhook(webhookRequest());
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ received: true });
+    expect(grantCalls).toEqual([]);
+    expect(creditCalls).toEqual([
+      expect.objectContaining({
+        _user_id: LEDGER_USER,
+        _session_id: "cs_pair_5",
+        _tokens: 5,
+        _d_tokens: 5,
+        _amount_total: 1000,
+      }),
+    ]);
+    expect(balances.get(LEDGER_USER)).toBe(12);
+    expect(profiles.get(LEDGER_USER)).toMatchObject({
+      d_tokens: 8,
+      subscription_tier: "free",
+      subscription_status: null,
+    });
+
+    creditCalls.length = 0;
+    const replay = await stripeWebhook(webhookRequest());
+    expect(replay.status).toBe(200);
+    expect(creditCalls).toEqual([]);
+    expect(balances.get(LEDGER_USER)).toBe(12);
+    expect(profiles.get(LEDGER_USER)?.d_tokens).toBe(8);
   });
 });

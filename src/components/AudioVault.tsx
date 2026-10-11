@@ -40,6 +40,7 @@ import {
 } from "@/lib/vault-tracks";
 import { deleteGuestVaultTrack, guestTrackToPayload, listGuestVaultTracks } from "@/lib/guest-vault";
 import { deleteVaultTrackApi, isPersistedVaultId } from "@/lib/vault-client";
+import { SendVaultTrackEmailButton } from "@/components/vault/SendVaultTrackEmailButton";
 import {
   DEFAULT_CATALOG_DURATION_SEC,
   fetchWorkerVaultPayloads,
@@ -493,7 +494,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload, onPlayInMonit
                                   Duration
                                 </TableHead>
                                 <TableHead className="text-zinc-400">Status</TableHead>
-                                <TableHead className="w-[8.5rem] text-end text-zinc-400">
+                                <TableHead className="text-end text-zinc-400">
                                   Actions
                                 </TableHead>
                               </TableRow>
@@ -553,8 +554,8 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload, onPlayInMonit
                                         </Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="w-[8.5rem] text-end">
-                                      <div className="inline-flex items-center justify-end gap-0.5">
+                                    <TableCell className="text-end">
+                                      <div className="inline-flex flex-wrap items-center justify-end gap-0.5">
                                         {row.status === "processing" ? (
                                           <Loader2
                                             className="size-3.5 animate-spin text-muted-foreground"
@@ -602,6 +603,7 @@ export function AudioVault({ refreshKey = 0, signedIn, onDownload, onPlayInMonit
                                                 <Download className="size-3.5" aria-hidden />
                                               )}
                                             </Button>
+                                            <SendVaultTrackEmailButton trackId={row.id} />
                                           </>
                                         )}
                                         <Button

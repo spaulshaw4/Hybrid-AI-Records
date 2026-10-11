@@ -18,6 +18,10 @@ export type TrackJob = {
   userId: string;
   status: TrackJobStatus;
   delivering: boolean;
+  /** True only for the instrumental / BGM render. */
+  instrumental?: boolean;
+  /** Set by the studio form. Absent when the client did not send one. */
+  lyricsOrigin?: "user" | "synthetic" | null;
   wavUrl?: string;
   mp3Url?: string;
   error?: string;

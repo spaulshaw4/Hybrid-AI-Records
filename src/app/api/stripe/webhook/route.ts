@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import { isPairTopup, PAIR_TOPUPS } from "@/lib/pair-topups";
 import {
   fulfillSubscriptionCheckout,
   fulfillSubscriptionDeleted,
@@ -108,15 +109,34 @@ async function fulfillTokenPack(
     }
 
     if (creditable) {
-      const { error: creditError } = await supabase.rpc("credit_token_purchase", {
-        _user_id: userId,
-        _session_id: session.id || event.id,
-        _price_id: priceIdForTokens(tokens),
-        _tokens: tokens,
-        _amount_total: amountTotalFor(session, tokens),
-        _currency: session.currency?.trim() || "usd",
-      });
-      if (creditError) throw new Error(creditError.message);
+      const packId = session.metadata?.pack?.trim() ?? "";
+      const pair = isPairTopup(packId) ? PAIR_TOPUPS[packId] : null;
+      if (pair) {
+        const amount =
+          typeof session.amount_total === "number" && Number.isFinite(session.amount_total)
+            ? session.amount_total
+            : pair.amountCents;
+        const { error: creditError } = await supabase.rpc("credit_pair_topup", {
+          _user_id: userId,
+          _session_id: session.id || event.id,
+          _price_id: `pair_${pair.hybridTokens}`,
+          _tokens: pair.hybridTokens,
+          _d_tokens: pair.dTokens,
+          _amount_total: amount,
+          _currency: session.currency?.trim() || "usd",
+        });
+        if (creditError) throw new Error(creditError.message);
+      } else {
+        const { error: creditError } = await supabase.rpc("credit_token_purchase", {
+          _user_id: userId,
+          _session_id: session.id || event.id,
+          _price_id: priceIdForTokens(tokens),
+          _tokens: tokens,
+          _amount_total: amountTotalFor(session, tokens),
+          _currency: session.currency?.trim() || "usd",
+        });
+        if (creditError) throw new Error(creditError.message);
+      }
     }
 
     const { error: claimError } = await supabase

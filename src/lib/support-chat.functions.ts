@@ -53,7 +53,7 @@ export const sendSupportMessage = createServerFn({ method: "POST" })
         "X-Connection-Api-Key": resendKey,
       },
       body: JSON.stringify({
-        from: "Hybrid AI Records <onboarding@resend.dev>",
+        from: "Hybrid AI Records <certification@hybrid-ai-records.com>",
         to: [NOTIFY_TO],
         reply_to: data.email,
         subject: `Support Chat — ${data.topic} — ${data.artist}`,

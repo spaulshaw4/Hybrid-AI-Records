@@ -6,10 +6,11 @@
  */
 
 /**
- * Until a verified sender domain is live this falls back to Resend's shared
- * onboarding address, which only delivers to the label's own inbox.
+ * Verified sender on hybrid-ai-records.com. Session notifications and other
+ * transactional mail inherit this unless a send already names its own
+ * local-part on that domain.
  */
-export const SESSION_EMAIL_FROM = "Hybrid AI Records <onboarding@resend.dev>";
+export const SESSION_EMAIL_FROM = "Hybrid AI Records <certification@hybrid-ai-records.com>";
 
 /** Address artists reach when they reply to a notification. */
 export const SESSION_EMAIL_REPLY_TO = "Hybrid.AI.Records@proton.me";

@@ -102,6 +102,37 @@ export async function fetchVaultTracks(): Promise<VaultTrackPayload[]> {
   return (await fetchVaultTracksResult()).tracks;
 }
 
+/** POST /api/vault/email-track — session bearer only. Never returns a download URL. */
+export async function sendVaultTrackToEmail(
+  trackId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = trackId.trim();
+  if (!id) return { ok: false, error: "A track id is required." };
+  const headers = await vaultAuthHeaders();
+  headers.set("content-type", "application/json");
+  try {
+    const response = await fetch("/api/vault/email-track", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ trackId: id }),
+    });
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message =
+        payload &&
+        typeof payload === "object" &&
+        typeof (payload as { error?: unknown }).error === "string" &&
+        (payload as { error: string }).error.trim()
+          ? (payload as { error: string }).error.trim()
+          : "Could not send that email.";
+      return { ok: false, error: message };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not send that email." };
+  }
+}
+
 /** DELETE /api/studio/vault/tracks/:id — row + storage objects. */
 export async function deleteVaultTrackApi(trackId: string): Promise<void> {
   if (!UUID.test(trackId)) {

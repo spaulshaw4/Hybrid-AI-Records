@@ -4,22 +4,22 @@ export const SUBSCRIPTION_TIERS = {
   starter_999: {
     name: "Starter",
     priceLabel: "$9.99/mo",
-    dTokens: 5,
-    hybridTokens: 20,
+    dTokens: 10,
+    hybridTokens: 10,
     priceEnv: "STRIPE_PRICE_STARTER",
   },
   pro_1999: {
     name: "Pro",
     priceLabel: "$19.99/mo",
-    dTokens: 12,
-    hybridTokens: 50,
+    dTokens: 15,
+    hybridTokens: 15,
     priceEnv: "STRIPE_PRICE_PRO",
   },
   label_2999: {
     name: "Label",
     priceLabel: "$29.99/mo",
-    dTokens: 25,
-    hybridTokens: 120,
+    dTokens: 20,
+    hybridTokens: 20,
     priceEnv: "STRIPE_PRICE_LABEL",
   },
 } as const;

@@ -7,6 +7,7 @@ import { DurationSlider } from "@/components/studio/DurationSlider";
 import { isAudioVaultHttpsUrl } from "@/components/studio/CharacterModal";
 import { supabase } from "@/integrations/supabase/client";
 import type { TrackTemplate } from "@/data/murekaTemplates";
+import { LYRICS_MAX_CHARS } from "@/lib/validation-error";
 
 const PROMPT_RECORDS_KEY = "hybrid_prompt_records";
 const VENDOR_WORD = /wavespeed|aimusic|sonic|mureka|replicate|fable/i;
@@ -46,7 +47,7 @@ export function ClearLyricsButton({ lyrics, onClear }: { lyrics: string; onClear
       type="button"
       aria-label={label}
       title={label}
-      className="p-1 text-muted-foreground hover:text-destructive"
+      className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-400"
       onClick={() => {
         if (!confirming) {
           if (timer.current !== null) window.clearTimeout(timer.current);
@@ -63,7 +64,8 @@ export function ClearLyricsButton({ lyrics, onClear }: { lyrics: string; onClear
         onClear();
       }}
     >
-      <Trash2 className="h-4 w-4" aria-hidden="true" />
+      <Trash2 className="h-3 w-3" aria-hidden="true" />
+      {confirming ? "Confirm clear lyrics" : "Clear"}
     </button>
   );
 }
@@ -81,10 +83,16 @@ export function appendAcousticTags(current: string, newTags: string): string {
 
 const fieldClass =
   "w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500";
-const compactActionClass =
-  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:cursor-not-allowed disabled:opacity-60";
-const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
-const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
+const sectionLabelClass =
+  "text-[11px] font-mono font-bold uppercase tracking-wider text-zinc-400";
+const counterClass = "text-[10px] font-mono text-zinc-500";
+const formCardClass = "rounded-2xl border border-zinc-800 bg-zinc-950/90 p-5";
+const titleCardClass = "rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4";
+const headerActionClass = "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs";
+const ghostwriterClass = `${headerActionClass} border border-red-800/60 bg-red-950/40 text-red-300 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-60`;
+const surpriseClass = `${headerActionClass} border border-red-600 bg-red-600 font-bold text-white hover:border-red-500 hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60`;
+const quietActionClass = `${headerActionClass} border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white`;
+const clearActionClass = "inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-400";
 
 function customerError(message: string): string {
   if (/api[_-]?key|api[_-]?token|authorization/i.test(message)) return "AI request failed.";
@@ -226,6 +234,7 @@ export function VocalStudioTab({
 } = {}) {
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
+  const [lyricsOrigin, setLyricsOrigin] = useState<"user" | "synthetic">("user");
   const [styleText, setStyleText] = useState("");
   const [gender, setGender] = useState<"male" | "female">("male");
   const [trackLength, setTrackLength] = useState(180);
@@ -261,6 +270,7 @@ export function VocalStudioTab({
     }
     setTitle(songDraft.title);
     setLyrics(songDraft.lyrics);
+    setLyricsOrigin("user");
     setStyleText(songDraft.tags);
     draftSeeded.current = true;
   }, [songDraft]);
@@ -318,6 +328,7 @@ export function VocalStudioTab({
         throw new Error(data.error || data.message || "AI request failed");
       }
       setLyrics(nextLyrics);
+      setLyricsOrigin("synthetic");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setError(customerError(message || "AI request failed"));
@@ -385,6 +396,7 @@ export function VocalStudioTab({
         body: JSON.stringify({
           title,
           lyrics,
+          lyricsOrigin,
           vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
           styleTags: styleText.trim(),
           duration: trackLength,
@@ -412,7 +424,11 @@ export function VocalStudioTab({
         className="flex flex-col gap-4"
         aria-label="With Vocals"
       >
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+        <div className={titleCardClass}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className={sectionLabelClass}>Song Title</span>
+            <span className={counterClass}>{title.length}/50</span>
+          </div>
           <input
             aria-label="Song title"
             value={title}
@@ -421,50 +437,63 @@ export function VocalStudioTab({
             maxLength={50}
             className={fieldClass}
           />
-          <span className="text-xs text-zinc-500">{title.length}/50</span>
         </div>
 
         {vocalReference ?? (reference?.label ? <p className="text-xs text-zinc-300">{reference.label}</p> : null)}
 
-        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-bold text-white">Lyrics & Structure</span>
-            <div className="flex items-center gap-2">
+        <div className={formCardClass}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className={sectionLabelClass}>Lyrics & Structure</span>
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 disabled={lyricsAssistBusy}
                 onClick={() => void handleLyricsAssist()}
-                className={badgeActionClass}
+                className={ghostwriterClass}
               >
                 <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                 {lyricsAssistLabel}
               </button>
-              <ClearLyricsButton lyrics={lyrics} onClear={() => setLyrics("")} />
             </div>
           </div>
           <textarea
             aria-label="Lyrics"
             value={lyrics}
-            onChange={(event) => setLyrics(event.target.value)}
+            onChange={(event) => {
+              setLyrics(event.target.value);
+              setLyricsOrigin("user");
+            }}
             placeholder="Enter lyrics..."
             rows={5}
             className={`${fieldClass} resize-y`}
           />
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <ClearLyricsButton
+              lyrics={lyrics}
+              onClear={() => {
+                setLyrics("");
+                setLyricsOrigin("user");
+              }}
+            />
+            <span className={`${counterClass} ml-auto`}>
+              {lyrics.length}/{LYRICS_MAX_CHARS}
+            </span>
+          </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-black/30 p-3.5">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Musical Style</span>
-            <div className="flex flex-wrap items-center gap-2">
+        <div className={formCardClass}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className={sectionLabelClass}>Musical Style</span>
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 disabled={styleAssistBusy}
                 onClick={() => void handleStyleAssist()}
-                className={badgeActionClass}
+                className={surpriseClass}
               >
                 {styleAssistBusy ? "Designing..." : styleAssistLabel}
               </button>
-              <button type="button" onClick={() => setIsTemplatesOpen(true)} className={secondaryActionClass}>
+              <button type="button" onClick={() => setIsTemplatesOpen(true)} className={quietActionClass}>
                 Templates
               </button>
               <button
@@ -473,7 +502,7 @@ export function VocalStudioTab({
                   setPromptRecords(readPromptRecords());
                   setIsMyPromptsOpen(true);
                 }}
-                className={secondaryActionClass}
+                className={quietActionClass}
               >
                 Saved
               </button>
@@ -489,27 +518,23 @@ export function VocalStudioTab({
             rows={4}
             className={`${fieldClass} resize-y`}
           />
-          <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-2 text-xs text-zinc-500">
-            <div className="flex gap-2">
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => setStyleText("")} aria-label="Clear style" className={clearActionClass}>
+                <Trash2 className="h-3 w-3" aria-hidden="true" />
+                Clear
+              </button>
               <button
                 type="button"
                 onClick={handleManualBookmark}
                 title="Bookmark this prompt"
                 aria-label="Bookmark this prompt"
-                className="border-none bg-transparent text-sm text-rose-500"
+                className="border-0 bg-transparent p-0 text-[11px] text-zinc-500 hover:text-red-400"
               >
                 🔖
               </button>
-              <button
-                type="button"
-                onClick={() => setStyleText("")}
-                aria-label="Clear style"
-                className="border-none bg-transparent text-sm text-zinc-500"
-              >
-                🗑️
-              </button>
             </div>
-            <span>{styleText.length}/1000</span>
+            <span className={counterClass}>{styleText.length}/1000</span>
           </div>
         </div>
 

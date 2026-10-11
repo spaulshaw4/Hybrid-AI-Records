@@ -506,6 +506,7 @@ describe("POST /api/vocals/generate", () => {
       lyrics: "[Verse]\nline",
       tags: "",
       personaId: "vocal_stephen_oct5_master",
+      humanVocal: true,
     });
   });
 

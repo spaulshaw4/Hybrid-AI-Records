@@ -1401,6 +1401,7 @@ export function AudioStudio() {
   // client pass disagree with the server HTML, and that hydration mismatch is
   // exactly what paints a white screen on WebKit.
   const [lyrics, setLyrics] = useState("");
+  const [lyricsOrigin, setLyricsOrigin] = useState<"user" | "synthetic">("user");
   const [vocalPrompt, setVocalPrompt] = useState("");
 
   const [lyricWarnings, setLyricWarnings] = useState<string[]>([]);
@@ -1837,6 +1838,7 @@ export function AudioStudio() {
       console.log("[LYRIC_GEN] Received response:", data);
       if (typeof data.lyrics === "string" && data.lyrics.trim()) {
         setLyrics(data.lyrics);
+        setLyricsOrigin("synthetic");
         setLyricWarnings([]);
       } else if (data?.error) {
         toast.error(String(data.error));
@@ -1938,6 +1940,7 @@ export function AudioStudio() {
       setStylePrompt(next);
       if (typeof data.lyrics === "string" && data.lyrics.trim()) {
         setLyrics(data.lyrics);
+        setLyricsOrigin("synthetic");
       }
       const anchorCount = Array.isArray(data.lyricAnchors) ? data.lyricAnchors.length : 0;
       toast.success(
@@ -2781,6 +2784,7 @@ export function AudioStudio() {
                     title: trackTitle,
                     prompt: replaceBareConflictingPrompt(stylePrompt),
                     lyrics: lyricsText,
+                    lyricsOrigin,
                     gender: vocalGender,
                     isInstrumental: false,
                     ...(trimmedVocalId ? { vocalId: trimmedVocalId } : {}),
@@ -3798,6 +3802,7 @@ export function AudioStudio() {
   function newTrack() {
     if (result?.taskId) revokeStemObjectUrls(result.taskId);
     setLyrics("");
+    setLyricsOrigin("user");
     setVocalPrompt("");
     setTitle("");
     setResult(null);
@@ -4044,6 +4049,7 @@ export function AudioStudio() {
               placeholder="Enter your custom lyrics here…"
               onChange={(e) => {
                 setLyrics(e.target.value);
+                setLyricsOrigin("user");
                 if (lyricWarnings.length > 0) setLyricWarnings([]);
               }}
               className="resize-y select-text pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/60 font-mono text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:border-red-500/80 focus-visible:ring-1 focus-visible:ring-red-500/50"

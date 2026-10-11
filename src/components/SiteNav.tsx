@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   AudioLines,
   Clapperboard,
+  CreditCard,
   Disc3,
   Film,
   Library,
@@ -28,7 +29,7 @@ import {
   shouldShowSiteNav,
   type SiteNavItem,
 } from "@/lib/site-nav";
-import { portalTabForNavId, resolvePortalTab, type PortalTab } from "@/lib/portal-tabs";
+import { PORTAL_MENU, resolvePortalTab, type PortalMenuIcon, type PortalTab } from "@/lib/portal-tabs";
 
 const ICONS = {
   audio: AudioLines,
@@ -38,27 +39,19 @@ const ICONS = {
   packages: Clapperboard,
 } as const;
 
-const PORTAL_ICONS = {
-  "make-track": Sparkles,
-  catalog: Disc3,
-  merch: ShoppingBag,
+const PORTAL_ICONS: Record<PortalMenuIcon, typeof Sparkles> = {
+  sparkles: Sparkles,
+  disc: Disc3,
+  card: CreditCard,
   radio: Radio,
-  packages: Film,
-} as const;
-
-const PORTAL_LABELS: Record<SiteNavItem["id"], string> = {
-  "make-track": "CREATE YOUR TRACK",
-  catalog: "CATALOG & TRACKS",
-  merch: "MERCH",
-  radio: "HYBRID AI RADIO",
-  packages: "DISTRIBUTION & VIDEO PACKAGES",
+  film: Film,
 };
 
 const PORTAL_TAB_ACTIVE =
   "border border-white/90 bg-zinc-900/90 text-white font-bold shadow-[0_0_12px_rgba(239,68,68,0.7),0_0_20px_rgba(59,130,246,0.6),inset_0_0_8px_rgba(255,255,255,0.4)] ring-1 ring-red-500/50";
 
 const PORTAL_TAB_IDLE =
-  "border border-transparent text-zinc-300 hover:text-white hover:bg-white/5";
+  "border border-transparent text-zinc-400 hover:text-white hover:bg-white/5";
 
 const GEAR_BUTTON =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none";
@@ -145,18 +138,21 @@ function MobileLocaleSheet() {
 export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn("flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2", className)}
+      className={cn("flex h-16 min-w-0 flex-nowrap items-center justify-end gap-3", className)}
       data-no-translate
     >
       <HeaderTokenBalance />
-      <div className="hidden items-center gap-2 sm:flex">
+      <span className="hidden h-4 w-px shrink-0 bg-zinc-800 sm:block" aria-hidden="true" />
+      <div className="hidden items-center gap-3 sm:flex">
         <LanguageSwitcher menuAlign="end" />
         <CurrencySwitcher variant="pill" />
       </div>
+      <span className="hidden h-4 w-px shrink-0 bg-zinc-800 sm:block" aria-hidden="true" />
       <MobileLocaleSheet />
       <div className="hidden sm:inline-flex">
         <SettingsMenu />
       </div>
+      <span className="h-4 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
       <UserAuthButton />
     </div>
   );
@@ -271,29 +267,32 @@ function usePortalTabSelect() {
 }
 
 function PortalTabButton({
-  itemId,
+  icon,
+  label,
   compactLabel,
   compact,
   active,
   onSelect,
 }: {
-  itemId: SiteNavItem["id"];
+  icon: PortalMenuIcon;
+  label: string;
   compactLabel: string;
   compact?: boolean;
   active: boolean;
   onSelect: () => void;
 }) {
-  const Icon = PORTAL_ICONS[itemId];
-  const label = compact ? compactLabel : PORTAL_LABELS[itemId];
+  const Icon = PORTAL_ICONS[icon];
+  const visible = compact ? compactLabel : label;
 
   return (
     <button
       type="button"
       aria-pressed={active}
       aria-current={active ? "page" : undefined}
+      aria-label={label}
       onClick={onSelect}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs tracking-wider text-left",
+        "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-xs tracking-wider",
         compact && "min-h-12 flex-col justify-center gap-0.5 px-1 py-1.5 text-center text-[10px] leading-none tracking-tight",
         active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE,
       )}
@@ -305,7 +304,7 @@ function PortalTabButton({
         )}
         aria-hidden
       />
-      <span className={cn("min-w-0 leading-snug", !compact && "uppercase")}>{label}</span>
+      <span className="min-w-0 leading-snug">{visible}</span>
     </button>
   );
 }
@@ -316,20 +315,21 @@ function SiteNavEntries({ compact }: { compact?: boolean }) {
   const onPortal = pathname === "/portal";
   const portalTab = onPortal ? resolvePortalTab(search.tab) : null;
 
+  if (portalTab) {
+    return PORTAL_MENU.map((item) => (
+      <PortalTabButton
+        key={item.id}
+        icon={item.icon}
+        label={item.label}
+        compactLabel={item.short}
+        compact={compact}
+        active={portalTab === item.id}
+        onSelect={() => selectPortalTab(item.id)}
+      />
+    ));
+  }
+
   return SITE_NAV.map((item) => {
-    if (portalTab) {
-      const tab = portalTabForNavId(item.id);
-      return (
-        <PortalTabButton
-          key={item.id}
-          itemId={item.id}
-          compactLabel={item.short}
-          compact={compact}
-          active={portalTab === tab}
-          onSelect={() => selectPortalTab(tab)}
-        />
-      );
-    }
     return (
       <NavItem
         key={item.id}
@@ -385,7 +385,7 @@ function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex w-full items-center justify-between gap-2 border-b border-white/[0.08] bg-zinc-900/85 px-3 py-2.5 backdrop-blur-xl lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-16 w-full items-center justify-between gap-3 border-b border-white/[0.08] bg-zinc-900/85 px-3 backdrop-blur-xl lg:hidden"
     >
       <Link
         to="/"
@@ -411,7 +411,7 @@ function DesktopLocaleStrip() {
   return (
     <div
       data-site-nav="desktop-locale"
-      className="hidden justify-end px-6 py-3 lg:flex"
+      className="hidden h-16 items-center justify-end px-6 lg:flex"
     >
       <LocaleCluster />
     </div>

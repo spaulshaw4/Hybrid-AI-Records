@@ -25,6 +25,7 @@ import { buildCatalogJsonLd, buildOrganizationPodcastJsonLd } from "@/lib/releas
 import { JESTER_DIVISION_NAME, JESTER_DIVISION_SHORT_NAME } from "@/lib/division-settings";
 import { ContactModal } from "@/components/ContactModal";
 import { HowItWorksModal } from "@/components/HowItWorksModal";
+import { HeroBanner } from "@/components/portal/HeroBanner";
 import { LocaleCluster } from "@/components/SiteNav";
 import { TikTokIcon } from "@/components/TikTokIcon";
 import { ThreadsIcon } from "@/components/ThreadsIcon";
@@ -503,28 +504,11 @@ function Home() {
         {/* Bounded band instead of a full viewport: the headline now sits near
             the top of the fold rather than under ~1000px of empty space. */}
         <div className="relative z-10 mx-auto flex max-w-7xl flex-col justify-start px-4 pb-24 pt-6 sm:px-6 md:pb-28 md:pt-8">
-          <div className="mb-4 flex w-full flex-wrap items-center justify-between gap-3">
-            {/* Left: metadata — keep on the same row as locale pills */}
-            <p className="hero-kicker eyebrow text-slab-none shrink-0" dir="auto">
-              <span className="hero-kicker-independent">Independent</span>
-              <span className="mx-2 text-zinc-500" aria-hidden>
-                •
-              </span>
-              <span className="text-zinc-300">SBA Veteran-Certified</span>
-              <span className="mx-2 text-zinc-500" aria-hidden>
-                •
-              </span>
-              <span className="hero-kicker-location">Knoxville, TN</span>
-            </p>
-            {/* Right: language → currency → settings (desktop only) */}
-            <LocaleCluster className="hidden min-w-0 max-w-full flex-1 justify-end lg:flex" />
+          <div className="mb-4 hidden h-16 w-full items-center justify-end lg:flex">
+            <LocaleCluster />
           </div>
           <div className="max-w-4xl">
-            <h1 className="font-display text-5xl font-black uppercase leading-[0.95] tracking-tight md:text-7xl">
-              <span className="hero-line-red block">RAW WORDS.</span>
-              <span className="hero-line-white block">REAL MUSIC.</span>
-              <span className="hero-line-blue block">GLOBAL IMPACT.</span>
-            </h1>
+            <HeroBanner />
             <p className="hero-mission mt-5 max-w-2xl text-base leading-[1.7] text-slate-200 sm:mt-6 sm:text-lg md:text-xl">
               Hybrid AI Records is an independent, SBA Veteran-Certified label built for the artists the
               industry forgot to pay. Fixed-cost, release-ready tracks. You write it — you own it.

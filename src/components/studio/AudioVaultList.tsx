@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { isAudioVaultHttpsUrl } from "@/components/studio/CharacterModal";
 import { TrackActionsMenu } from "@/components/studio/TrackActionsMenu";
+import { SendVaultTrackEmailButton } from "@/components/vault/SendVaultTrackEmailButton";
 import { openSiteSignIn } from "@/components/studio/UserAuthButton";
 
 const EMPTY_COPY = "No ready masters yet. Create a track and it will show up here.";
@@ -296,12 +297,15 @@ export function AudioVaultList({ revision, pending = [] }: Props) {
                   {row.createdAt ? ` · ${new Date(row.createdAt).toLocaleDateString()}` : ""}
                 </p>
               </div>
-              <TrackActionsMenu
-                title={row.title}
-                mp3Url={row.mp3Url}
-                wavUrl={row.wavUrl}
-                onDelete={() => void removeRow(row.id)}
-              />
+              <div className="flex shrink-0 items-center gap-2">
+                <SendVaultTrackEmailButton trackId={row.id} />
+                <TrackActionsMenu
+                  title={row.title}
+                  mp3Url={row.mp3Url}
+                  wavUrl={row.wavUrl}
+                  onDelete={() => void removeRow(row.id)}
+                />
+              </div>
             </div>
             <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 32, marginTop: 8 }}>
               {barsFor(row.id).map((height, index) => (

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { finalizeTrackClearance } from "@/lib/commercial-clearance.server";
 import { audioVaultPublicUrl, vaultAdminClient } from "@/lib/vault-admin.server";
 import { readVocalJob } from "@/lib/vocal-jobs.server";
 
@@ -288,6 +289,22 @@ async function storeCompletedSong(payload: Record<string, unknown>): Promise<Res
       return Response.json({ error: "Internal error" }, { status: 500 });
     }
     vaultTitles.add(title);
+    try {
+      await finalizeTrackClearance({
+        userId: owner.userId,
+        taskId,
+        title,
+        lyrics,
+        instrumental: false,
+        lyricsOrigin: job?.lyricsOrigin ?? null,
+        vocalId: owner.personaId || null,
+        humanVocal: Boolean(owner.personaId?.trim()) || job?.humanVocal === true,
+        masterId: taskId,
+        trackKey: `${taskId}:${title}`,
+      });
+    } catch {
+      console.error("[clearance] completion notice failed");
+    }
   }
 
   return Response.json({ status: "ok", type: "music_ready" });

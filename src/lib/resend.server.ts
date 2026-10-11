@@ -13,9 +13,19 @@ import { SESSION_EMAIL_FROM, SESSION_EMAIL_REPLY_TO } from "@/lib/session-email-
 
 export type TokenEmailKind = TokenPurchaseEmailProps["tokenKind"];
 
+/** Track-completion mail that attaches the Certificate of Creation. */
+const CLEARANCE_EMAIL_FROM = "Hybrid AI Records <clearance@hybrid-ai-records.com>";
+
 function fromAddress(): string {
-  const configured = process.env.RESEND_FROM?.trim();
-  return configured || SESSION_EMAIL_FROM;
+  const configured = process.env.RESEND_FROM?.trim() ?? "";
+  const address = (configured.match(/<([^>]+)>/)?.[1] ?? configured).trim();
+  const at = address.lastIndexOf("@");
+  const local = at >= 0 ? address.slice(0, at) : "";
+  const domain = at >= 0 ? address.slice(at + 1).toLowerCase() : "";
+  if (local && !/\s/.test(local) && domain === "hybrid-ai-records.com") {
+    return `Hybrid AI Records <${local}@hybrid-ai-records.com>`;
+  }
+  return SESSION_EMAIL_FROM;
 }
 
 function studioUrlFor(kind: TokenEmailKind): string {
@@ -173,7 +183,7 @@ export async function sendTrackCompletionEmail(input: {
     const resend = new Resend(apiKey);
     const { error } = await resend.emails.send(
       {
-        from: fromAddress(),
+        from: CLEARANCE_EMAIL_FROM,
         to,
         replyTo: SESSION_EMAIL_REPLY_TO,
         subject: `Your Vision Lives — Congratulations on “${trackTitle}”`,
@@ -238,5 +248,107 @@ export async function sendTrackCompletionReceipt(input: {
     });
   } catch (err) {
     console.error("Track completion receipt send failed", err);
+  }
+}
+
+/** On-demand vault master link. No audio attachment and no PDF. */
+const VAULT_MASTER_EMAIL_FROM = "Hybrid AI Records <support@hybrid-ai-records.com>";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function vaultMasterDownloadHtml(input: {
+  trackTitle: string;
+  trackId: string;
+  downloadUrl: string;
+}): string {
+  const title = escapeHtml(input.trackTitle);
+  const trackId = escapeHtml(input.trackId);
+  const href = escapeHtml(input.downloadUrl);
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Audio Master Download</title>
+  </head>
+  <body style="margin:0;padding:0;background:#fafafa;color:#18181b;font-family:Inter,Segoe UI,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e4e4e7;border-radius:12px;">
+            <tr>
+              <td style="padding:28px 28px 8px;">
+                <p style="margin:0;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#71717a;">Hybrid AI Records Vault</p>
+                <h1 style="margin:12px 0 0;font-size:22px;line-height:1.3;color:#18181b;">Your master is ready to download</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 28px 0;">
+                <p style="margin:16px 0 0;font-size:13px;color:#52525b;">Track</p>
+                <p style="margin:4px 0 0;font-size:18px;font-weight:600;color:#18181b;">${title}</p>
+                <p style="margin:16px 0 0;font-size:13px;color:#52525b;">Vault ID</p>
+                <p style="margin:4px 0 0;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#18181b;">${trackId}</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px 8px;">
+                <a href="${href}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">Download Master Audio</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 28px 28px;">
+                <p style="margin:0;font-size:13px;line-height:1.5;color:#52525b;">This link expires in 48 hours.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+export async function sendVaultMasterDownloadEmail(input: {
+  to: string;
+  trackId: string;
+  trackTitle: string;
+  downloadUrl: string;
+}): Promise<{ ok: true } | { ok: false; reason: "not_configured" | "no_recipient" | "send_failed" }> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    console.error("RESEND_API_KEY is not configured");
+    return { ok: false, reason: "not_configured" };
+  }
+
+  const to = input.to.trim();
+  if (!to.includes("@")) return { ok: false, reason: "no_recipient" };
+
+  const downloadUrl = input.downloadUrl.trim();
+  if (!downloadUrl.startsWith("https://")) return { ok: false, reason: "send_failed" };
+
+  const trackTitle = input.trackTitle.replace(/[\r\n\t]+/g, " ").trim().slice(0, 180) || "Untitled";
+  const trackId = input.trackId.trim() || "unknown";
+
+  try {
+    const resend = new Resend(apiKey);
+    const { error } = await resend.emails.send({
+      from: VAULT_MASTER_EMAIL_FROM,
+      to,
+      subject: `Audio Master Download — ${trackTitle} | Hybrid AI Records Vault`,
+      html: vaultMasterDownloadHtml({ trackTitle, trackId, downloadUrl }),
+    });
+    if (error) {
+      console.error("Vault master email failed");
+      return { ok: false, reason: "send_failed" };
+    }
+    return { ok: true };
+  } catch {
+    console.error("Vault master email failed");
+    return { ok: false, reason: "send_failed" };
   }
 }

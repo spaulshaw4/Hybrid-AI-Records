@@ -4,6 +4,8 @@ import type { Database } from "@/integrations/supabase/types";
 export type StudioSession = {
   /** Verified auth.users UUID for this request — never a static/admin fallback. */
   userId: string;
+  /** Account email from auth.getUser(). Null when the account has none. */
+  email: string | null;
   accessToken: string;
   /** Anon-key client scoped to this user's JWT (RLS applies). */
   supabase: SupabaseClient<Database>;
@@ -156,8 +158,10 @@ export async function resolveStudioSession(request: Request): Promise<StudioSess
   const { data, error } = await supabase.auth.getUser(accessToken);
   if (error || !data?.user?.id) throw new UnauthorizedSessionError();
 
+  const email = data.user.email?.trim() ?? "";
   return {
     userId: data.user.id,
+    email: email.includes("@") ? email : null,
     accessToken,
     supabase,
   };

@@ -38,6 +38,7 @@ import {
   useCatalogPlayback,
 } from "@/lib/catalog-player";
 import { CoverImage } from "@/components/CoverImage";
+import { SendVaultTrackEmailButton } from "@/components/vault/SendVaultTrackEmailButton";
 import { CatalogAlbumGrid } from "@/components/catalog/CatalogAlbumCard";
 import {
   Sheet,
@@ -817,6 +818,10 @@ export function ArtistCatalog({
                     {owned ? <Check size={13} aria-hidden /> : <Download size={13} aria-hidden />}
                     {busy ? "Working…" : owned ? "Download" : "1 token"}
                   </button>
+                  <SendVaultTrackEmailButton
+                    trackId={t.id}
+                    className="border-border-strong px-3 py-2 font-mono text-[10px] text-muted-foreground hover:border-primary hover:text-primary"
+                  />
                 </li>
               );
             })}
@@ -965,6 +970,10 @@ export function ArtistCatalog({
                     </>
                   )}
                 </button>
+                <SendVaultTrackEmailButton
+                  trackId={detailTrack.id}
+                  className="h-auto w-full border-border-strong px-4 py-3 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+                />
 
                 <div className="rounded-lg border border-border-strong bg-ink/40 p-4">
                   <div className="flex items-center gap-3">

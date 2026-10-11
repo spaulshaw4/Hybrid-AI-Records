@@ -41,12 +41,22 @@ function checkoutRequest(body: unknown, origin = "http://localhost:5173", author
 describe("POST /api/billing/checkout", () => {
   const originalSecret = process.env.STRIPE_SECRET_KEY;
 
+  const originalPair5 = process.env.STRIPE_PRICE_PAIR_5;
+  const originalPair10 = process.env.STRIPE_PRICE_PAIR_10;
+  const originalPair25 = process.env.STRIPE_PRICE_PAIR_25;
+
   afterEach(() => {
     createMock.mockReset();
     ctorArgs.length = 0;
     resolveStudioSessionMock.mockReset();
     if (originalSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
     else process.env.STRIPE_SECRET_KEY = originalSecret;
+    if (originalPair5 === undefined) delete process.env.STRIPE_PRICE_PAIR_5;
+    else process.env.STRIPE_PRICE_PAIR_5 = originalPair5;
+    if (originalPair10 === undefined) delete process.env.STRIPE_PRICE_PAIR_10;
+    else process.env.STRIPE_PRICE_PAIR_10 = originalPair10;
+    if (originalPair25 === undefined) delete process.env.STRIPE_PRICE_PAIR_25;
+    else process.env.STRIPE_PRICE_PAIR_25 = originalPair25;
   });
 
   function ready() {
@@ -173,6 +183,91 @@ describe("POST /api/billing/checkout", () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "STRIPE_SECRET_KEY is not configured" });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ctorArgs).toEqual([]);
+  });
+
+  it("keeps the D-token refill packs on their existing prices", async () => {
+    ready();
+
+    const res = await POST(checkoutRequest({ tier: "d5", priceId: "price_from_browser" }));
+
+    expect(res.status).toBe(200);
+    const params = createMock.mock.calls[0][0] as {
+      mode: string;
+      metadata: { tokens: string; pack: string; userId: string };
+      line_items: Array<{ price?: string; price_data?: { unit_amount: number; product_data: { name: string } } }>;
+    };
+    expect(params.mode).toBe("payment");
+    expect(params.line_items[0].price).toBeUndefined();
+    expect(params.line_items[0].price_data?.unit_amount).toBe(500);
+    expect(params.line_items[0].price_data?.product_data.name).toBe("5 D-Token");
+    expect(params.metadata).toEqual({ tokens: "5", userId: LEDGER_USER, pack: "d5" });
+    expect(JSON.stringify(params)).not.toContain("price_from_browser");
+  });
+
+  it("bills a pair top-up from the server price env and ignores a client price id", async () => {
+    ready();
+    process.env.STRIPE_PRICE_PAIR_5 = "price_pair_5_test";
+    process.env.STRIPE_PRICE_PAIR_10 = "price_pair_10_test";
+    process.env.STRIPE_PRICE_PAIR_25 = "price_pair_25_test";
+
+    const five = await POST(checkoutRequest({ tier: "pair5", priceId: "price_from_browser", userId: "someone-else" }));
+    const ten = await POST(checkoutRequest({ tier: "pair10" }));
+    const twentyFive = await POST(checkoutRequest({ tier: "pair25" }));
+
+    expect(five.status).toBe(200);
+    expect(ten.status).toBe(200);
+    expect(twentyFive.status).toBe(200);
+
+    const fiveParams = createMock.mock.calls[0][0] as {
+      mode: string;
+      line_items: Array<{ price: string; quantity: number; price_data?: unknown }>;
+      metadata: Record<string, string>;
+      success_url: string;
+    };
+    expect(fiveParams.mode).toBe("payment");
+    expect(fiveParams.line_items).toEqual([{ price: "price_pair_5_test", quantity: 1 }]);
+    expect(fiveParams.metadata).toEqual({
+      tokens: "5",
+      dTokens: "5",
+      userId: LEDGER_USER,
+      pack: "pair5",
+      kind: "pair_topup",
+    });
+    expect(fiveParams.success_url).toContain("/portal?tab=plans&payment=success");
+    expect(JSON.stringify(fiveParams)).not.toContain("price_from_browser");
+    expect(JSON.stringify(fiveParams)).not.toContain("someone-else");
+
+    const tenParams = createMock.mock.calls[1][0] as {
+      line_items: Array<{ price: string }>;
+      metadata: { tokens: string; dTokens: string; pack: string };
+    };
+    expect(tenParams.line_items[0].price).toBe("price_pair_10_test");
+    expect(tenParams.metadata).toMatchObject({ tokens: "10", dTokens: "10", pack: "pair10" });
+
+    const largeParams = createMock.mock.calls[2][0] as {
+      line_items: Array<{ price: string }>;
+      metadata: { tokens: string; dTokens: string; pack: string };
+    };
+    expect(largeParams.line_items[0].price).toBe("price_pair_25_test");
+    expect(largeParams.metadata).toMatchObject({ tokens: "25", dTokens: "25", pack: "pair25" });
+
+    expect(ctorArgs.map((entry) => (entry as [string, { apiVersion: string }])[1])).toEqual([
+      { apiVersion: "2026-03-25.dahlia" },
+      { apiVersion: "2026-03-25.dahlia" },
+      { apiVersion: "2026-03-25.dahlia" },
+    ]);
+  });
+
+  it("returns 503 for a pair top-up when its price env is missing and does not call Stripe", async () => {
+    ready();
+    delete process.env.STRIPE_PRICE_PAIR_5;
+
+    const res = await POST(checkoutRequest({ tier: "pair5", priceId: "price_from_browser" }));
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ error: "Token packs are not configured." });
     expect(createMock).not.toHaveBeenCalled();
     expect(ctorArgs).toEqual([]);
   });

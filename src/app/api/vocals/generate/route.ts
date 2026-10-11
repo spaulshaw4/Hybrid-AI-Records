@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { refundGenerationToken } from "@/lib/generation-tokens.server";
 import { resolveStudioSession, UnauthorizedSessionError } from "@/lib/studio-request-auth.server";
+import { readLyricsOrigin } from "@/lib/commercial-clearance.server";
 import { vaultAdminClient } from "@/lib/vault-admin.server";
 import { rememberVocalJob } from "@/lib/vocal-jobs.server";
 
@@ -222,6 +223,8 @@ export async function POST(req: Request): Promise<Response> {
   }
   const duration = readDuration(record.duration);
   const personaId = readPersonaId(record.personaId) || readPersonaId(record.vocalId);
+  const lyricsOrigin = readLyricsOrigin(record.lyricsOrigin);
+  const humanVocal = Boolean(personaId) || Boolean(reference.url);
 
   const debit = await debitOneHybridToken(userId);
   if (!debit.ok) {
@@ -290,6 +293,8 @@ export async function POST(req: Request): Promise<Response> {
     lyrics,
     tags,
     ...(personaId ? { personaId } : {}),
+    ...(lyricsOrigin ? { lyricsOrigin } : {}),
+    ...(humanVocal ? { humanVocal: true } : {}),
   });
   return Response.json({ success: true, taskId });
 }

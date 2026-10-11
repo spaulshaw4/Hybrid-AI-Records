@@ -10,6 +10,10 @@ export type VocalJob = {
   lyrics: string;
   tags: string;
   personaId?: string;
+  /** Studio form flag. Absent when the client did not send one. */
+  lyricsOrigin?: "user" | "synthetic";
+  /** Human vocal stem or persona was part of this render. */
+  humanVocal?: boolean;
 };
 
 const jobs = new Map<string, VocalJob>();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
-import { Lock, Sparkles } from "lucide-react";
+import { Lock, Sparkles, Trash2 } from "lucide-react";
 
 import CharacterModal, {
   encodePcmWav,
@@ -24,6 +24,7 @@ import {
   type VocalStudioReference,
 } from "@/components/studio/VocalStudioTab";
 import { MUREKA_TEMPLATES, type TrackTemplate } from "@/data/murekaTemplates";
+import { LYRICS_MAX_CHARS } from "@/lib/validation-error";
 import { safeCloseAudioContext } from "@/lib/safe-media";
 import { waitForVaultedTrack } from "@/lib/wavespeed-track-client";
 
@@ -58,7 +59,21 @@ const compactActionClass =
 const badgeActionClass = `${compactActionClass} border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20`;
 const renderButtonClass =
   "flex h-12 w-full items-center justify-center rounded-lg border border-red-500 bg-red-600 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-800";
-const secondaryActionClass = `${compactActionClass} bg-transparent text-zinc-300 hover:bg-white/5 border-white/10`;
+const sectionLabelClass = "text-[11px] font-mono font-bold uppercase tracking-wider text-zinc-400";
+const counterClass = "text-[10px] font-mono text-zinc-500";
+const formCardClass = "rounded-2xl border border-zinc-800 bg-zinc-950/90 p-5";
+const titleCardClass = "rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4";
+const headerActionClass = "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs";
+const ghostwriterClass = `${headerActionClass} border border-red-800/60 bg-red-950/40 text-red-300 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-60`;
+const surpriseClass = `${headerActionClass} border border-red-600 bg-red-600 font-bold text-white hover:border-red-500 hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60`;
+const quietActionClass = `${headerActionClass} border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white`;
+const clearActionClass = "inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-400";
+const topPillClass =
+  "flex h-full w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-2.5 text-center text-xs font-mono font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-zinc-800 disabled:hover:text-zinc-400";
+const topPillActiveClass =
+  "flex h-full w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-red-500 bg-zinc-900 px-3 py-2.5 text-center text-xs font-mono font-bold uppercase tracking-wider text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
+const selectedPillClass =
+  "flex w-full items-center gap-2 whitespace-nowrap rounded-xl border border-red-500 bg-zinc-900 px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
 
 type StudioModal = "reference" | "visual" | null;
 
@@ -532,17 +547,6 @@ const cardStyle: CSSProperties = {
   padding: 14,
 };
 
-const pillStyle: CSSProperties = {
-  backgroundColor: "#121826",
-  border: "1px solid #1e293b",
-  borderRadius: 8,
-  padding: "10px 8px",
-  color: "#cbd5e1",
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
 const fieldStyle: CSSProperties = {
   width: "100%",
   backgroundColor: "transparent",
@@ -664,6 +668,7 @@ function readPromptRecords(): SavedPromptItem[] {
 export function EnginePage() {
   const [activeTab, setActiveTab] = useState<"custom" | "easy" | "vocals">("easy");
   const [lyrics, setLyrics] = useState("");
+  const [lyricsOrigin, setLyricsOrigin] = useState<"user" | "synthetic">("user");
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
@@ -938,6 +943,7 @@ export function EnginePage() {
         throw new Error(data.error || data.message || "AI request failed");
       }
       setLyrics(nextLyrics);
+      setLyricsOrigin("synthetic");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       setErrorMessage(message || "AI request failed");
@@ -1280,6 +1286,7 @@ export function EnginePage() {
       }
       setTitle(nextTitle);
       setLyrics(nextLyrics);
+      setLyricsOrigin("user");
       setPrompt(nextTags);
       setVisualSongDraft({ revision: seq, title: nextTitle, lyrics: nextLyrics, tags: nextTags });
     } catch {
@@ -1355,6 +1362,7 @@ export function EnginePage() {
                 stylePrompt: styleValue,
                 title: songTitle,
                 lyrics: lyricValue,
+                lyricsOrigin,
                 gender,
                 provider: "wavespeed",
                 model: "mureka-9.5",
@@ -1433,6 +1441,7 @@ export function EnginePage() {
         body: JSON.stringify({
           title: songTitle,
           lyrics: lyricValue,
+          lyricsOrigin,
           vocalGender: gender === "female" ? "Female Vocal" : "Male Vocal",
           styleTags: styleValue,
           duration,
@@ -1497,14 +1506,7 @@ export function EnginePage() {
     : selectedCharacter
       ? `✓ ${selectedCharacter.name}`
       : "+ Vocal";
-  const vocalButtonStyle: CSSProperties = selectedVocal || selectedCharacter
-    ? {
-        ...pillStyle,
-        backgroundColor: "rgba(6,182,212,0.15)",
-        border: "1px solid #06b6d4",
-        color: "#06b6d4",
-      }
-    : pillStyle;
+  const vocalSelected = Boolean(selectedVocal || selectedCharacter);
 
   return (
     <main
@@ -1613,12 +1615,13 @@ export function EnginePage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
           {attachedReference ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950/50 border border-red-500/60 text-xs text-red-200">
+            <div className={selectedPillClass}>
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden="true" />
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 ${isAnalyzingReference ? "animate-ping" : "animate-pulse"}`}
                 aria-hidden="true"
               />
-              <span className="font-mono truncate max-w-[140px]">
+              <span className="truncate font-mono font-medium tracking-wide max-w-[140px]">
                 {isAnalyzingReference
                   ? "Analyzing reference..."
                   : attachedReference.kind === "file"
@@ -1634,24 +1637,25 @@ export function EnginePage() {
                     clearStagedReference();
                     setAttachedReference(null);
                   }}
-                  className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
+                  className="ml-auto shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
                 >
                   ✕
                 </button>
               )}
             </div>
           ) : (
-            <button type="button" onClick={() => setOpenModal("reference")} style={pillStyle}>
+            <button type="button" onClick={() => setOpenModal("reference")} className={topPillClass}>
               + Reference
             </button>
           )}
           {visualName ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950/40 border border-red-500/50 text-xs text-red-200">
+            <div className={selectedPillClass}>
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden="true" />
               <span
                 className={`h-2 w-2 shrink-0 rounded-full bg-red-500 ${isInjectingVisual ? "animate-ping" : "animate-pulse"}`}
                 aria-hidden="true"
               />
-              <span className="font-mono tracking-wide font-medium truncate max-w-[130px]">
+              <span className="max-w-[130px] truncate font-mono font-medium tracking-wide">
                 {isInjectingVisual ? "Processing Visual..." : "Visual Injected"}
               </span>
               {isInjectingVisual ? null : (
@@ -1660,7 +1664,7 @@ export function EnginePage() {
                   title="Remove visual reference"
                   aria-label="Remove visual reference"
                   onClick={() => setVisualName(null)}
-                  className="shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
+                  className="ml-auto shrink-0 border-0 bg-transparent p-0 text-xs text-red-200"
                 >
                   ✕
                 </button>
@@ -1673,15 +1677,12 @@ export function EnginePage() {
                 setDraftVisualFile(null);
                 setOpenModal("visual");
               }}
-              style={pillStyle}
+              className={topPillClass}
             >
               + Visual Injection
             </button>
           )}
-          <span
-            title={vocalLockTitle}
-            style={{ display: "flex" }}
-          >
+          <span title={vocalLockTitle} className="flex h-full w-full">
             <button
               type="button"
               disabled={vocalsLocked}
@@ -1691,18 +1692,12 @@ export function EnginePage() {
                 if (vocalsLocked) return;
                 setIsCharacterModalOpen(true);
               }}
-              style={{
-                ...vocalButtonStyle,
-                width: "100%",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                cursor: vocalsLocked ? "not-allowed" : "pointer",
-                opacity: vocalsLocked ? 0.7 : 1,
-              }}
+              className={vocalSelected && !vocalsLocked ? topPillActiveClass : topPillClass}
             >
               {vocalsLocked ? <Lock size={14} aria-hidden="true" /> : null}
+              {!vocalsLocked && vocalSelected ? (
+                <Sparkles className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />
+              ) : null}
               {vocalsLocked ? "+ Vocal" : vocalLabel}
             </button>
           </span>
@@ -1890,7 +1885,11 @@ export function EnginePage() {
           </div>
         ) : (
           <form onSubmit={(event) => void handleGenerate(event)} className="flex flex-col gap-4">
-            <div style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
+            <div className={titleCardClass}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className={sectionLabelClass}>Song Title</span>
+                <span className={counterClass}>{title.length}/50</span>
+              </div>
               <input
                 type="text"
                 aria-label="Song title"
@@ -1898,50 +1897,63 @@ export function EnginePage() {
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Enter song title"
                 maxLength={50}
-                style={{ backgroundColor: "transparent", border: "none", color: "#f8fafc", outline: "none", fontSize: 14, width: "80%" }}
+                className="w-full border-0 bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
               />
-              <span style={{ fontSize: 12, color: "#64748b" }}>{title.length}/50</span>
             </div>
-            <div style={cardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Lyrics & Structure</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className={formCardClass}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <span className={sectionLabelClass}>Lyrics & Structure</span>
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     disabled={lyricsAssistDisabled}
                     aria-label={lyrics.trim() ? "Format and polish lyrics" : undefined}
                     onClick={() => void handleLyricsAssist()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-950/30 text-xs font-medium text-red-200 hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    className={ghostwriterClass}
                   >
                     <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                     {lyricsAssistLabel}
                   </button>
-                  <ClearLyricsButton lyrics={lyrics} onClear={() => setLyrics("")} />
                 </div>
               </div>
               <textarea
                 aria-label="Lyrics"
                 value={lyrics}
-                onChange={(event) => setLyrics(event.target.value)}
+                onChange={(event) => {
+                  setLyrics(event.target.value);
+                  setLyricsOrigin("user");
+                }}
                 placeholder="Enter lyrics..."
                 rows={5}
                 style={fieldStyle}
               />
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <ClearLyricsButton
+                  lyrics={lyrics}
+                  onClear={() => {
+                    setLyrics("");
+                    setLyricsOrigin("user");
+                  }}
+                />
+                <span className={`${counterClass} ml-auto`}>
+                  {lyrics.length}/{LYRICS_MAX_CHARS}
+                </span>
+              </div>
             </div>
 
-            <div style={cardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Musical Style</span>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div className={formCardClass}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <span className={sectionLabelClass}>Musical Style</span>
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     disabled={isAiLoading}
                     onClick={() => void handleEnhanceStyle()}
-                    className={badgeActionClass}
+                    className={surpriseClass}
                   >
                     {isAiLoading ? "Designing..." : styleAssistLabel}
                   </button>
-                  <button type="button" onClick={() => setIsTemplatesOpen(true)} className={secondaryActionClass}>
+                  <button type="button" onClick={() => setIsTemplatesOpen(true)} className={quietActionClass}>
                     Templates
                   </button>
                   <button
@@ -1950,7 +1962,7 @@ export function EnginePage() {
                       setPromptRecords(readPromptRecords());
                       setIsMyPromptsOpen(true);
                     }}
-                    className={secondaryActionClass}
+                    className={quietActionClass}
                   >
                     Saved
                   </button>
@@ -1965,27 +1977,23 @@ export function EnginePage() {
                 rows={4}
                 style={fieldStyle}
               />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 10, fontSize: 12, color: "#64748b" }}>
-                <div style={{ display: "flex", gap: 10 }}>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setPrompt("")} aria-label="Clear style" className={clearActionClass}>
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    Clear
+                  </button>
                   <button
                     type="button"
                     onClick={handleManualBookmark}
                     title="Bookmark this prompt"
                     aria-label="Bookmark this prompt"
-                    style={{ backgroundColor: "transparent", border: "none", color: "#f43f5e", cursor: "pointer", fontSize: 14 }}
+                    className="border-0 bg-transparent p-0 text-[11px] text-zinc-500 hover:text-red-400"
                   >
                     🔖
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPrompt("")}
-                    aria-label="Clear style"
-                    style={{ backgroundColor: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 14 }}
-                  >
-                    🗑️
-                  </button>
                 </div>
-                <span>{prompt.length}/1000</span>
+                <span className={counterClass}>{prompt.length}/1000</span>
               </div>
             </div>
 

@@ -150,7 +150,7 @@ export const emailDraftResumeLink = createServerFn({ method: "POST" })
         "X-Connection-Api-Key": resendKey,
       },
       body: JSON.stringify({
-        from: "Hybrid AI Records <onboarding@resend.dev>",
+        from: "Hybrid AI Records <certification@hybrid-ai-records.com>",
         to: [email],
         subject: "Your saved Hybrid AI Records application",
         html,
