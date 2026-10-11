@@ -1,13 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   AudioLines,
   Clapperboard,
+  Disc3,
+  Film,
   Library,
   Radio,
   Settings,
   ShoppingBag,
+  Sparkles,
   X,
 } from "lucide-react";
 
@@ -25,6 +28,7 @@ import {
   shouldShowSiteNav,
   type SiteNavItem,
 } from "@/lib/site-nav";
+import { portalTabForNavId, resolvePortalTab, type PortalTab } from "@/lib/portal-tabs";
 
 const ICONS = {
   audio: AudioLines,
@@ -33,6 +37,28 @@ const ICONS = {
   radio: Radio,
   packages: Clapperboard,
 } as const;
+
+const PORTAL_ICONS = {
+  "make-track": Sparkles,
+  catalog: Disc3,
+  merch: ShoppingBag,
+  radio: Radio,
+  packages: Film,
+} as const;
+
+const PORTAL_LABELS: Record<SiteNavItem["id"], string> = {
+  "make-track": "CREATE YOUR TRACK",
+  catalog: "CATALOG & TRACKS",
+  merch: "MERCH",
+  radio: "HYBRID AI RADIO",
+  packages: "DISTRIBUTION & VIDEO PACKAGES",
+};
+
+const PORTAL_TAB_ACTIVE =
+  "border border-white/90 bg-zinc-900/90 text-white font-bold shadow-[0_0_12px_rgba(239,68,68,0.7),0_0_20px_rgba(59,130,246,0.6),inset_0_0_8px_rgba(255,255,255,0.4)] ring-1 ring-red-500/50";
+
+const PORTAL_TAB_IDLE =
+  "border border-transparent text-zinc-300 hover:text-white hover:bg-white/5";
 
 const GEAR_BUTTON =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none";
@@ -197,7 +223,12 @@ function NavItem({
 
   if (item.to === "/portal") {
     return (
-      <Link to="/portal" className={className} aria-current={active ? "page" : undefined}>
+      <Link
+        to="/portal"
+        search={{ tab: "distribution" }}
+        className={className}
+        aria-current={active ? "page" : undefined}
+      >
         {label}
       </Link>
     );
@@ -226,6 +257,90 @@ function NavItem({
   );
 }
 
+function usePortalTabSelect() {
+  const navigate = useNavigate();
+  return (tab: PortalTab) => {
+    void navigate({
+      to: "/portal",
+      search: (prev) => ({
+        ...(prev ?? {}),
+        tab,
+      }),
+    });
+  };
+}
+
+function PortalTabButton({
+  itemId,
+  compactLabel,
+  compact,
+  active,
+  onSelect,
+}: {
+  itemId: SiteNavItem["id"];
+  compactLabel: string;
+  compact?: boolean;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const Icon = PORTAL_ICONS[itemId];
+  const label = compact ? compactLabel : PORTAL_LABELS[itemId];
+
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-current={active ? "page" : undefined}
+      onClick={onSelect}
+      className={cn(
+        "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs tracking-wider text-left",
+        compact && "min-h-12 flex-col justify-center gap-0.5 px-1 py-1.5 text-center text-[10px] leading-none tracking-tight",
+        active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE,
+      )}
+    >
+      <Icon
+        className={cn(
+          "size-4 shrink-0",
+          active && "text-red-400 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]",
+        )}
+        aria-hidden
+      />
+      <span className={cn("min-w-0 leading-snug", !compact && "uppercase")}>{label}</span>
+    </button>
+  );
+}
+
+function SiteNavEntries({ compact }: { compact?: boolean }) {
+  const { pathname, search, hash } = useActiveNav();
+  const selectPortalTab = usePortalTabSelect();
+  const onPortal = pathname === "/portal";
+  const portalTab = onPortal ? resolvePortalTab(search.tab) : null;
+
+  return SITE_NAV.map((item) => {
+    if (portalTab) {
+      const tab = portalTabForNavId(item.id);
+      return (
+        <PortalTabButton
+          key={item.id}
+          itemId={item.id}
+          compactLabel={item.short}
+          compact={compact}
+          active={portalTab === tab}
+          onSelect={() => selectPortalTab(tab)}
+        />
+      );
+    }
+    return (
+      <NavItem
+        key={item.id}
+        item={item}
+        compact={compact}
+        active={isSiteNavActive(item, pathname, search, hash)}
+      />
+    );
+  });
+}
+
 function useActiveNav() {
   const location = useRouterState({
     select: (state) => ({
@@ -241,7 +356,8 @@ function useActiveNav() {
 }
 
 function SiteSidebar() {
-  const { pathname, search, hash } = useActiveNav();
+  const { pathname } = useActiveNav();
+  const onPortal = pathname === "/portal";
 
   return (
     <aside
@@ -254,14 +370,11 @@ function SiteSidebar() {
           <Wordmark size="sm" interactive />
         </Link>
       </div>
-      <nav className="flex flex-1 flex-col gap-2 border-t-0 p-3">
-        {SITE_NAV.map((item) => (
-          <NavItem
-            key={item.id}
-            item={item}
-            active={isSiteNavActive(item, pathname, search, hash)}
-          />
-        ))}
+      <nav
+        className="flex flex-1 flex-col gap-2 overflow-y-auto border-t-0 p-3"
+        aria-label={onPortal ? "Portal sections" : undefined}
+      >
+        <SiteNavEntries />
       </nav>
     </aside>
   );
@@ -306,23 +419,16 @@ function DesktopLocaleStrip() {
 }
 
 function SiteDock() {
-  const { pathname, search, hash } = useActiveNav();
+  const { pathname } = useActiveNav();
 
   return (
     <nav
       data-site-nav="dock"
-      aria-label="Primary"
+      aria-label={pathname === "/portal" ? "Portal sections" : "Primary"}
       className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-30 rounded-none border-t border-white/[0.08] bg-zinc-900/70 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden"
     >
       <div className="grid grid-cols-5 items-stretch gap-1">
-        {SITE_NAV.map((item) => (
-          <NavItem
-            key={item.id}
-            item={item}
-            compact
-            active={isSiteNavActive(item, pathname, search, hash)}
-          />
-        ))}
+        <SiteNavEntries compact />
       </div>
     </nav>
   );

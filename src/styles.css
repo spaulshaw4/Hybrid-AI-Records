@@ -3367,3 +3367,23 @@ html.app-bg .btn-primary :is(.text-white, [class*="text-white\/"]) {
   pointer-events: none !important;
 }
 
+@keyframes redGlowPulse {
+  0%, 100% {
+    opacity: 0.60;
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.95)) drop-shadow(0 0 14px rgba(220, 38, 38, 0.7));
+  }
+}
+.animate-glow-red {
+  animation: redGlowPulse 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-glow-red {
+    animation: none;
+  }
+}
+

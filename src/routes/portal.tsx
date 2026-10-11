@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { Check, Film, FileText, MessageCircle, Shield, Sparkles } from "lucide-react";
@@ -11,7 +11,11 @@ import {
 } from "@/components/ui/accordion";
 
 import { ApplicationModal } from "@/components/ApplicationModal";
+import { CatalogTracksView } from "@/components/portal/CatalogTracksView";
+import { CreateTrackView } from "@/components/portal/CreateTrackView";
 import { DistributionReleasePanel } from "@/components/portal/DistributionReleasePanel";
+import { MerchView } from "@/components/portal/MerchView";
+import { RadioPlayerView } from "@/components/portal/RadioPlayerView";
 import { SubscriptionPlans } from "@/components/portal/SubscriptionPlans";
 import { ContactModal } from "@/components/ContactModal";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
@@ -19,6 +23,7 @@ import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
 import { LocaleCluster } from "@/components/SiteNav";
 import { pageHead } from "@/lib/social-meta";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
+import { resolvePortalTab, type PortalTab } from "@/lib/portal-tabs";
 import { SERVICES, VIDEO_SERVICES } from "@/lib/services";
 import { buildPageJsonLd } from "@/lib/release-schema";
 
@@ -26,7 +31,7 @@ import { buildPageJsonLd } from "@/lib/release-schema";
 const portalSearchSchema = z
   .object({
     view: z.enum(["tokens", "studio", "services"]).optional(),
-    tab: z.enum(["distribution", "video"]).optional(),
+    tab: z.enum(["create", "catalog", "merch", "radio", "distribution", "video"]).optional(),
     package: z.string().optional(),
     resume: z.string().optional(),
     artist: z.string().optional(),
@@ -76,15 +81,25 @@ export const Route = createFileRoute("/portal")({
 
 const ENTITLEMENTS = ["YouTube Content ID Active", "BMG Publishing Active", "ISRC/UPC Included"];
 
+const PORTAL_CRUMB: Record<PortalTab, string> = {
+  create: "Create Your Track",
+  catalog: "Catalog & Tracks",
+  merch: "Merch",
+  radio: "Hybrid AI Radio",
+  distribution: "Distribution & Video Packages",
+};
+
 function DistributionPackagesPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const tab = search.tab === "video" ? "video" : "distribution";
+  const tab = resolvePortalTab(search.tab);
   const [applyPackage, setApplyPackage] = useState<string | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
+  const resumeRouted = useRef(false);
 
   useEffect(() => {
-    if (!search.resume) return;
+    if (!search.resume || resumeRouted.current) return;
+    resumeRouted.current = true;
     setApplyPackage("foundation_single");
     if (search.tab !== "video") {
       void navigate({
@@ -94,54 +109,22 @@ function DistributionPackagesPage() {
     }
   }, [navigate, search.resume, search.tab]);
 
-  function openTab(next: "distribution" | "video") {
-    void navigate({
-      search: (prev) => ({
-        ...prev,
-        tab: next === "distribution" ? undefined : "video",
-      }),
-    });
-  }
-
   return (
     <StudioErrorBoundary region="portal">
       <div className="min-h-dvh">
         <main id="main-content" className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 md:pt-12">
           <PortalBreadcrumb
-            trail={[{ label: "Distribution & Video Packages" }]}
+            trail={[{ label: PORTAL_CRUMB[tab] }]}
             end={<LocaleCluster className="hidden lg:inline-flex" />}
           />
 
-          <div role="tablist" aria-label="Portal sections" className="mt-8 flex flex-wrap gap-2">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "distribution"}
-              onClick={() => openTab("distribution")}
-              className={`border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.16em] ${
-                tab === "distribution"
-                  ? "border-[#e11d2e] bg-[#e11d2e]/10 text-white"
-                  : "border-white/15 text-white/70 hover:border-white/40 hover:text-white"
-              }`}
-            >
-              Distribution
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "video"}
-              onClick={() => openTab("video")}
-              className={`border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.16em] ${
-                tab === "video"
-                  ? "border-[#e11d2e] bg-[#e11d2e]/10 text-white"
-                  : "border-white/15 text-white/70 hover:border-white/40 hover:text-white"
-              }`}
-            >
-              Video & Intake
-            </button>
-          </div>
+          {tab === "create" ? <CreateTrackView /> : null}
+          {tab === "catalog" ? <CatalogTracksView /> : null}
+          {tab === "merch" ? <MerchView /> : null}
+          {tab === "radio" ? <RadioPlayerView /> : null}
 
           {tab === "distribution" ? (
+            <>
             <section aria-labelledby="portal-distribution" className="mt-10">
               <h1 id="portal-distribution" className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
                 Distribute a release
@@ -241,7 +224,6 @@ function DistributionPackagesPage() {
                 ))}
               </div>
             </section>
-          ) : (
             <section aria-labelledby="portal-video" className="mt-10">
               <h1 id="portal-video" className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
                 Video production and project intake
@@ -307,14 +289,15 @@ function DistributionPackagesPage() {
                 </div>
               </div>
             </section>
-          )}
+            </>
+          ) : null}
         </main>
 
-        {tab === "video" && applyPackage && (
+        {tab === "distribution" && applyPackage && (
           <ApplicationModal open={true} onClose={() => setApplyPackage(null)} defaultPackage={applyPackage} />
         )}
 
-        {tab === "video" && <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />}
+        {tab === "distribution" && <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />}
       </div>
     </StudioErrorBoundary>
   );

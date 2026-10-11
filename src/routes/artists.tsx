@@ -18,6 +18,7 @@ import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { LocaleCluster } from "@/components/SiteNav";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
 import { TrackWaveform } from "@/components/TrackWaveform";
+import { VaultWaveformBar } from "@/components/vault/VaultWaveformBar";
 import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
 import {
   catalogTrackAudioUrl,
@@ -104,9 +105,34 @@ function formatTime(s: number) {
 
 
 function ArtistTracksPage() {
-  const tokens = useArtistTokens();
-  const navigate = useNavigate({ from: "/artists" });
   const { album: albumParam } = Route.useSearch();
+  const navigate = useNavigate({ from: "/artists" });
+  return (
+    <ArtistCatalog
+      albumParam={albumParam}
+      onOpenAlbum={(albumId) => {
+        void navigate({ search: { album: albumId } });
+      }}
+      onBackToAlbums={() => {
+        void navigate({ search: {}, replace: true });
+      }}
+    />
+  );
+}
+
+export function ArtistCatalog({
+  albumParam,
+  onOpenAlbum,
+  onBackToAlbums,
+  embedded = false,
+}: {
+  albumParam?: string;
+  onOpenAlbum: (albumId: string) => void;
+  onBackToAlbums: () => void;
+  /** Portal tab: keep album selection local and skip this page's own breadcrumb. */
+  embedded?: boolean;
+}) {
+  const tokens = useArtistTokens();
   const playback = useCatalogPlayback();
 
   const [catalog, setCatalog] = useState<CatalogPlayable[]>([]);
@@ -317,14 +343,14 @@ function ArtistTracksPage() {
   };
 
   const openAlbum = (albumId: string) => {
-    void navigate({ search: { album: albumId } });
+    onOpenAlbum(albumId);
     setSortBy("track");
     setPage(1);
     exitBulk();
   };
 
   const backToAlbums = () => {
-    void navigate({ search: {}, replace: true });
+    onBackToAlbums();
     setPage(1);
     exitBulk();
   };
@@ -400,19 +426,23 @@ function ArtistTracksPage() {
 
 
 
+  const Root = embedded ? "div" : "main";
+
   return (
-    <main className="mx-auto w-full max-w-5xl px-5 py-8">
-      <PortalBreadcrumb
-        trail={
-          selectedAlbum
-            ? [
-                { label: "Artist tracks", to: "/artists", search: {} },
-                { label: selectedAlbum.title },
-              ]
-            : [{ label: "Artist tracks" }]
-        }
-        end={<LocaleCluster className="hidden lg:inline-flex" />}
-      />
+    <Root className={embedded ? "w-full" : "mx-auto w-full max-w-5xl px-5 py-8"}>
+      {embedded ? null : (
+        <PortalBreadcrumb
+          trail={
+            selectedAlbum
+              ? [
+                  { label: "Artist tracks", to: "/artists", search: {} },
+                  { label: selectedAlbum.title },
+                ]
+              : [{ label: "Artist tracks" }]
+          }
+          end={<LocaleCluster className="hidden lg:inline-flex" />}
+        />
+      )}
 
       {selectedAlbum ? (
         <button
@@ -762,19 +792,12 @@ function ArtistTracksPage() {
                       {t.artist}
                     </p>
                     {isActive ? (
-                      <div
-                        role="progressbar"
-                        aria-label={`Playback progress for ${t.title}`}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(rowProgress * 100)}
-                        className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10"
-                      >
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${rowProgress * 100}%` }}
-                        />
-                      </div>
+                      <VaultWaveformBar
+                        currentTime={formatTime(currentTime)}
+                        duration={formatTime(duration)}
+                        isPlaying={isPlaying}
+                        progressPercent={rowProgress * 100}
+                      />
                     ) : null}
                   </div>
 
@@ -895,6 +918,17 @@ function ArtistTracksPage() {
                 <DivisionBadge division={detailTrack.division} />
               </div>
 
+              <VaultWaveformBar
+                currentTime={formatTime(activeId === detailTrack.id ? currentTime : 0)}
+                duration={formatTime(activeId === detailTrack.id ? duration : 0)}
+                isPlaying={playingId === detailTrack.id}
+                progressPercent={
+                  activeId === detailTrack.id && duration > 0
+                    ? (currentTime / duration) * 100
+                    : 0
+                }
+              />
+
               {detailTrack.credits ? (
                 <div className="space-y-2">
                   <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -987,7 +1021,7 @@ function ArtistTracksPage() {
       </Sheet>
 
       <ArtistTokenStore tokens={tokens} />
-    </main>
+    </Root>
   );
 }
 
