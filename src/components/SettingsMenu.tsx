@@ -88,7 +88,7 @@ export function SettingsMenu() {
             id="site-settings-description"
             className="text-sm text-muted-foreground"
           >
-            Text glow and division display options. Currency and language stay in the header.
+            Text glow and division display options. Language and currency are in the account menu.
           </DialogDescription>
         </DialogHeader>
 

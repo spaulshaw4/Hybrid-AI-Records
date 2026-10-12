@@ -328,8 +328,8 @@
 
   @media (max-width: 1023.98px) {
     html[data-site-nav="on"] {
-      /* Mobile header wraps the token pill onto two lines. Keep content below it. */
-      --site-header-height: 6.5rem;
+      /* One-row mobile bar: crest, token pill, account menu. */
+      --site-header-height: 4rem;
     }
   }
 
@@ -373,11 +373,66 @@
   background-color: rgb(0 0 0 / 0.6);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom-color: rgb(255 255 255 / 0.1);
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
 }
 
-html[data-page="home"] .site-topbar {
-  border-bottom-color: transparent;
+/* Breadcrumb stays one line. Page titles render in normal flow beneath it. */
+.portal-crumb {
+  position: static;
+  top: auto;
+}
+
+.portal-crumb-trail,
+.portal-crumb-trail :is(li, a, span) {
+  position: static;
+  top: auto;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.portal-page-title {
+  position: static !important;
+  top: auto !important;
+  margin-top: 1rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Token pill stays one line at the readability floor, without the text-xs bump. */
+.header-token-pill {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+@media (max-width: 1023.98px) {
+  .account-menu-name {
+    display: none;
+  }
+
+  /* Phone bar: both balances and the avatar stay on one row. */
+  .site-topbar .header-token-pill {
+    font-size: 13px;
+    padding: 2px 6px;
+    gap: 0.25rem;
+  }
+
+  .site-topbar .header-token-mark {
+    width: 14px;
+    height: 14px;
+  }
+
+  .site-topbar .header-token-plus {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .site-topbar .account-trigger {
+    padding: 2px 4px !important;
+    gap: 0 !important;
+  }
+
+  .site-topbar .account-menu-chevron {
+    display: none;
+  }
 }
 
 /* Engine wizard: Step 1 card sits above decorative overlays and the mobile dock. */
@@ -3388,12 +3443,12 @@ footer .text-muted-foreground {
   background-color: rgb(24 24 27 / 0.85) !important;
   backdrop-filter: blur(var(--glass-blur)) !important;
   -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
   box-shadow: none;
 }
 
-/* Homepage: kill chrome / sidebar hairlines without touching other routes. */
-html[data-page="home"] :is(.site-sidebar, .site-dock, .site-topbar) {
+/* Homepage: keep sidebar and dock edges clear. The top bar keeps its hairline. */
+html[data-page="home"] :is(.site-sidebar, .site-dock) {
   border-color: transparent !important;
 }
 
@@ -3414,10 +3469,6 @@ html[data-page="home"] .site-sidebar > div,
   border-width: 0 !important;
   border-color: transparent !important;
   border-bottom: none !important;
-}
-
-html[data-page="home"] .site-topbar {
-  border-bottom-color: transparent !important;
 }
 
 footer a,

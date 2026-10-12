@@ -9,7 +9,8 @@ const activeInsideDialog = () =>
 test.describe("Settings dialog focus trap", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.locator(GEAR).first().click();
+    await page.locator('[aria-label^="Account menu"]:visible').first().click();
+    await page.locator(`${GEAR}:visible`).first().click();
     await page.waitForSelector(DIALOG);
   });
 

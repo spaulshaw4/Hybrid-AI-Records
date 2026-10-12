@@ -74,14 +74,14 @@ export function PortalBreadcrumb({
 
       <nav
         aria-label="Breadcrumb"
-        className="mb-2 flex h-16 w-full flex-nowrap items-center justify-between gap-3"
+        className="portal-crumb mb-2 flex h-auto min-h-11 w-full flex-nowrap items-center justify-between gap-3"
       >
-        <ol className="flex min-w-[min(100%,18rem)] max-w-full flex-1 basis-[22rem] items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ol className="portal-crumb-trail flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto font-mono text-sm uppercase leading-normal tracking-[0.18em] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <li>
             <Link
               to="/"
               preload="intent"
-              className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-md px-2 leading-normal text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Home size={14} aria-hidden="true" className="shrink-0" />
               <span>Home</span>
@@ -97,14 +97,14 @@ export function PortalBreadcrumb({
                     to={crumb.to}
                     search={crumb.search as never}
                     preload="intent"
-                    className="inline-flex h-9 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex h-9 items-center whitespace-nowrap rounded-md px-2 leading-normal text-muted-foreground transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {crumb.label}
                   </Link>
                 ) : (
                   <span
                     aria-current={isLast ? "page" : undefined}
-                    className="inline-flex h-9 items-center px-2 text-white"
+                    className="inline-flex h-9 items-center whitespace-nowrap px-2 leading-normal text-white"
                   >
                     {crumb.label}
                   </span>

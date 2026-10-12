@@ -214,7 +214,13 @@ test.describe("LivingBackground stacking", () => {
     const sel = "[role='dialog'],[role='menu']";
     await openOverlay(
       page,
-      () => page.getByRole("button", { name: "Site settings" }).first().click({ force: true }),
+      async () => {
+        const gear = page.locator('[aria-label="Site settings"]:visible');
+        if ((await gear.count()) === 0) {
+          await page.locator('[aria-label^="Account menu"]:visible').first().click({ force: true });
+        }
+        await page.locator('[aria-label="Site settings"]:visible').first().click({ force: true });
+      },
       sel,
     );
     await expectOverlayAboveBackground(page, sel, "Settings panel");

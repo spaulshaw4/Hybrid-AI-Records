@@ -7,9 +7,7 @@ import CharacterModal, {
   type SelectedVocal,
   type VocalCharacter,
 } from "@/components/studio/CharacterModal";
-import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { supabase } from "@/integrations/supabase/client";
-import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
 import TemplatesModal from "@/components/studio/TemplatesModal";
 import { AudioVaultList, type VaultTrackReference } from "@/components/studio/AudioVaultList";
@@ -687,7 +685,6 @@ export function EnginePage() {
   const [selectedVocal, setSelectedVocal] = useState<SelectedVocal | null>(null);
   const [isCharacterModalOpen, setIsCharacterModalOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isBuyTokensOpen, setIsBuyTokensOpen] = useState(false);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
@@ -1533,25 +1530,9 @@ export function EnginePage() {
                 Hybrid Engine 2.0
               </span>
             </div>
-            <div className="ms-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-3">
-            <HeaderTokenBalance className="max-w-full" />
-            <button
-              type="button"
-              onClick={() => setIsBuyTokensOpen(true)}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#f43f5e",
-                fontSize: 12,
-                fontWeight: 600,
-                textDecoration: "underline",
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              Buy tokens
-            </button>
-            </div>
+            <p className="ms-auto text-xs font-medium leading-normal text-zinc-400">
+              1 Hybrid Token per run
+            </p>
           </div>
           <div
             className="flex w-full flex-wrap items-center gap-x-6 gap-y-2"
@@ -2011,7 +1992,6 @@ export function EnginePage() {
         </section>
 
         <TemplatesModal isOpen={isTemplatesOpen} onClose={() => setIsTemplatesOpen(false)} onSelectTemplate={handleApplyTemplate} />
-        <BuyTokensModal isOpen={isBuyTokensOpen} onClose={() => setIsBuyTokensOpen(false)} />
 
         {openModal === "reference" ? (
           <div

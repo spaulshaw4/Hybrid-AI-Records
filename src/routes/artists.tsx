@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { JesterLegacySection } from "@/components/JesterLegacySection";
+import { isJesterLegacyAlbum, JesterLegacySection } from "@/components/JesterLegacySection";
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { LocaleCluster } from "@/components/SiteNav";
@@ -262,6 +262,15 @@ export function ArtistCatalog({
     return list;
   }, [albumsSource, query, activeGenre]);
 
+  const rosterAlbums = useMemo(
+    () => albums.filter((album) => !isJesterLegacyAlbum(album)),
+    [albums],
+  );
+  const legacyAlbums = useMemo(
+    () => albums.filter((album) => isJesterLegacyAlbum(album)),
+    [albums],
+  );
+
   const tracks = useMemo(() => {
     let list = tracksSource;
     if (selectedAlbum) {
@@ -458,20 +467,20 @@ export function ArtistCatalog({
         </button>
       ) : null}
 
-      <h1 className="mt-6 font-display text-2xl uppercase tracking-[0.14em] text-foreground">
-        {selectedAlbum ? selectedAlbum.title : "Artist Tracks"}
-      </h1>
+      {embedded && !selectedAlbum ? null : embedded ? (
+        <h2 className="portal-page-title font-display text-2xl font-bold uppercase tracking-[0.14em] text-foreground">
+          {selectedAlbum ? selectedAlbum.title : "Artist Tracks"}
+        </h2>
+      ) : (
+        <h1 className="portal-page-title font-display text-2xl font-bold uppercase tracking-[0.14em] text-foreground">
+          {selectedAlbum ? selectedAlbum.title : "Artist Tracks"}
+        </h1>
+      )}
       <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
         {selectedAlbum
           ? `${selectedAlbum.artist} · ${selectedAlbum.tracks.length} track${selectedAlbum.tracks.length === 1 ? "" : "s"} — preview any song and unlock a permanent download with an Artist Token.`
           : "Browse by album cover, open an album for its tracks, preview any song, and unlock downloads with Artist Tokens. $1 = 1 track, yours forever."}
       </p>
-
-      {!selectedAlbum ? (
-        <div className="mt-8">
-          <JesterLegacySection />
-        </div>
-      ) : null}
 
       {/* Token status bar */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border-strong bg-ink/60 p-5 backdrop-blur">
@@ -603,17 +612,37 @@ export function ArtistCatalog({
 
       {!selectedAlbum ? (
         <>
-          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            {albums.length === 0
-              ? "0 albums"
-              : `${albums.length} album${albums.length === 1 ? "" : "s"}`}
-          </p>
+          <section aria-labelledby="hybrid-roster-releases" className="mt-10">
+            <h2
+              id="hybrid-roster-releases"
+              className="font-display text-2xl font-bold leading-normal text-white"
+            >
+              Hybrid Roster Releases
+            </h2>
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {rosterAlbums.length === 0
+                ? "0 albums"
+                : `${rosterAlbums.length} album${rosterAlbums.length === 1 ? "" : "s"}`}
+            </p>
+            <CatalogAlbumGrid albums={rosterAlbums} onOpen={openAlbum} />
+            {rosterAlbums.length === 0 ? (
+              <p className="mt-6 text-sm text-muted-foreground">No albums match that search.</p>
+            ) : null}
+          </section>
 
-          <CatalogAlbumGrid albums={albums} onOpen={openAlbum} />
-
-          {albums.length === 0 ? (
-            <p className="mt-6 text-sm text-muted-foreground">No albums match that search.</p>
-          ) : null}
+          <section aria-labelledby="legacy-archives" className="mt-10">
+            <h2
+              id="legacy-archives"
+              className="font-display text-2xl font-bold leading-normal text-white"
+            >
+              Legacy Archives & Imprints
+            </h2>
+            <JesterLegacySection asCard>
+              {legacyAlbums.length > 0 ? (
+                <CatalogAlbumGrid albums={legacyAlbums} onOpen={openAlbum} />
+              ) : null}
+            </JesterLegacySection>
+          </section>
         </>
       ) : (
         <>

@@ -113,10 +113,10 @@ function DistributionPackagesPage() {
     <StudioErrorBoundary region="portal">
       <div className="min-h-dvh">
         <main id="main-content" className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 md:pt-12">
-          <PortalBreadcrumb
-            trail={[{ label: PORTAL_CRUMB[tab] }]}
-            end={<LocaleCluster className="hidden lg:inline-flex" />}
-          />
+          <PortalBreadcrumb end={<LocaleCluster className="hidden lg:inline-flex" />} />
+          <h1 id="portal-page-title" className="portal-page-title font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            {PORTAL_CRUMB[tab]}
+          </h1>
 
           {tab === "create" ? <CreateTrackView /> : null}
           {tab === "catalog_merch" ? (
@@ -131,9 +131,9 @@ function DistributionPackagesPage() {
           {tab === "distribution" ? (
             <>
             <section aria-labelledby="portal-distribution" className="mt-10">
-              <h1 id="portal-distribution" className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
+              <h2 id="portal-distribution" className="font-display text-3xl font-bold leading-normal tracking-tight text-white sm:text-4xl">
                 Distribute a release
-              </h1>
+              </h2>
               <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
                 1 D-Token is charged when Too Lost accepts the release.
               </p>
@@ -229,9 +229,9 @@ function DistributionPackagesPage() {
               </div>
             </section>
             <section aria-labelledby="portal-video" className="mt-10">
-              <h1 id="portal-video" className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
+              <h2 id="portal-video" className="font-display text-3xl font-bold leading-normal tracking-tight text-white sm:text-4xl">
                 Video production and project intake
-              </h1>
+              </h2>
               <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
                 {VIDEO_SERVICES.map((pkg) => (
                   <div

@@ -1,5 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   AudioLines,
@@ -9,18 +8,13 @@ import {
   Film,
   Library,
   Radio,
-  Settings,
   ShoppingBag,
   Sparkles,
-  X,
 } from "lucide-react";
 
 import { Footer } from "@/components/Footer";
 import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
-import { CurrencySwitcher } from "@/components/CurrencySwitcher";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { SettingsMenu } from "@/components/SettingsMenu";
 import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
 import {
@@ -53,109 +47,18 @@ const PORTAL_TAB_ACTIVE =
 const PORTAL_TAB_IDLE =
   "border border-transparent text-zinc-400 hover:text-white hover:bg-white/5";
 
-const GEAR_BUTTON =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none";
-
 /**
- * Phone sheet for the same language and currency controls the header shows from sm up.
- * The overlay covers the page so the pickers stay usable under the fixed chrome.
- */
-function MobileLocaleSheet() {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  return (
-    <>
-      <button
-        type="button"
-        className={`${GEAR_BUTTON} sm:hidden`}
-        aria-label="Site settings"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={open ? "mobile-locale-sheet" : undefined}
-        onClick={() => setOpen(true)}
-      >
-        <Settings className="size-3.5" aria-hidden="true" />
-      </button>
-      {open && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              id="mobile-locale-sheet"
-              className="fixed inset-0 z-50 bg-zinc-950/95 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]"
-              role="presentation"
-              onClick={() => setOpen(false)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="mobile-locale-title"
-                className="mx-auto flex w-full max-w-md flex-col gap-6"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <h2 id="mobile-locale-title" className="font-display text-xl font-semibold text-white">
-                    Language and currency
-                  </h2>
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    onClick={() => setOpen(false)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] text-zinc-200"
-                  >
-                    <X className="size-4" aria-hidden="true" />
-                  </button>
-                </div>
-                <div className="flex flex-col items-start gap-3">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">Language</p>
-                  <LanguageSwitcher menuAlign="start" />
-                </div>
-                <div className="flex flex-col items-start gap-3">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">Currency</p>
-                  <CurrencySwitcher variant="pill" />
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
-  );
-}
-
-/**
- * Plan, spendable tokens, language, currency, settings.
- * Static inline flow only — never fixed/sticky.
- * Below sm, language and currency move into the settings gear sheet.
+ * Spendable tokens and the account menu.
+ * Language, currency, and settings live in the account dropdown.
+ * One horizontal row — never a stacked pill column.
  */
 export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn(
-        "flex h-auto min-h-9 min-w-0 max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5",
-        className,
-      )}
+      className={cn("flex flex-row flex-nowrap items-center gap-3", className)}
       data-no-translate
     >
       <HeaderTokenBalance />
-      <span className="hidden h-4 w-px shrink-0 bg-zinc-800 sm:block" aria-hidden="true" />
-      <div className="hidden items-center gap-3 sm:flex">
-        <LanguageSwitcher menuAlign="end" />
-        <CurrencySwitcher variant="pill" />
-      </div>
-      <span className="hidden h-4 w-px shrink-0 bg-zinc-800 sm:block" aria-hidden="true" />
-      <MobileLocaleSheet />
-      <div className="hidden sm:inline-flex">
-        <SettingsMenu />
-      </div>
-      <span className="h-4 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
       <UserAuthButton />
     </div>
   );
@@ -388,7 +291,7 @@ function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-auto min-h-16 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1.5 overflow-visible border-b border-white/[0.08] bg-zinc-900/85 px-3 py-1.5 backdrop-blur-xl lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-auto min-h-16 w-full flex-nowrap items-center justify-between gap-1 overflow-x-auto border-b border-white/10 bg-zinc-900/85 px-1.5 py-1.5 backdrop-blur-xl lg:hidden"
     >
       <Link
         to="/"
@@ -397,7 +300,7 @@ function SiteHeader() {
       >
         <Wordmark size="sm" showText={false} interactive />
       </Link>
-      <LocaleCluster className="ms-auto min-w-0 max-w-full flex-1" />
+      <LocaleCluster className="ms-auto shrink-0 gap-1.5" />
     </header>
   );
 }
@@ -414,7 +317,7 @@ function DesktopLocaleStrip() {
   return (
     <div
       data-site-nav="desktop-locale"
-      className="hidden h-auto min-h-16 items-center justify-end overflow-visible px-6 py-1 lg:flex"
+      className="hidden h-auto min-h-16 w-full items-center justify-end overflow-visible border-b border-white/10 px-6 py-1 lg:flex"
     >
       <LocaleCluster />
     </div>

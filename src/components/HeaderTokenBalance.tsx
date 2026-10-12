@@ -9,7 +9,7 @@ import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
 import { getTokenBalance } from "@/lib/tokens.functions";
 
 const CAPSULE =
-  "inline-flex h-auto min-h-9 w-auto min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 font-mono text-xs font-semibold normal-case leading-snug tracking-wide text-zinc-100 transition-colors hover:border-zinc-600";
+  "header-token-pill inline-flex h-auto min-h-9 w-auto shrink-0 flex-nowrap items-center gap-x-1 whitespace-nowrap rounded-full border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono font-semibold normal-case text-zinc-100 transition-colors hover:border-zinc-600";
 
 /**
  * One capsule: spendable Hybrid Tokens and D-Tokens. Opens the plans tab.
@@ -77,16 +77,16 @@ function HeaderTokenBalanceBase({ className = "" }: { className?: string }) {
       aria-label={`${hybridLabel} Hybrid Tokens, ${dLabel} D-Tokens. Open plans.`}
       className={`${CAPSULE} ${className}`}
     >
-      <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-normal">
-        <HybridTokenIcon className="size-4 shrink-0 text-red-500" />
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+        <HybridTokenIcon className="header-token-mark size-4 shrink-0 text-red-500" />
         <span>{hybridLabel} Hybrid Tokens</span>
       </span>
       <span aria-hidden="true" className="text-zinc-500">
         •
       </span>
-      <span className="whitespace-normal">{dLabel} D-Tokens</span>
+      <span className="whitespace-nowrap">{dLabel} D-Tokens</span>
       <span
-        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-white"
+        className="header-token-plus inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-white"
         aria-hidden="true"
       >
         <Plus className="size-3" strokeWidth={3} />

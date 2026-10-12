@@ -4,9 +4,9 @@ import { MERCH_URL } from "@/lib/site-nav";
 export function MerchView() {
   return (
     <section aria-labelledby="portal-merch" className="mt-10">
-      <h1 id="portal-merch" className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
+      <h2 id="portal-merch" className="portal-page-title font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
         Merch
-      </h1>
+      </h2>
       <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
         The Hybrid AI Records store is hosted on Printful.
       </p>

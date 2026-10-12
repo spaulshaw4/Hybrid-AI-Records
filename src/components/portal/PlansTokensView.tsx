@@ -12,6 +12,7 @@ const PACKS_NOT_CONFIGURED = "Token packs are not configured.";
 const SINGLE_NOT_CONFIGURED = "Token checkout is not configured.";
 const ARTIST_QTY_MIN = 1;
 const ARTIST_QTY_MAX = 100;
+const HYBRID_TOKEN_USD = 2;
 
 type Membership = {
   id: SubscriptionTierId;
@@ -300,12 +301,14 @@ export function PlansTokensView() {
           Individual Tokens & Passes
         </h2>
         <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-          Buy a single studio run, a single distribution pass, or Hybrid Tokens for artist support and track unlocks at $1.00 each.
+          {`Buy a single studio run at $${HYBRID_TOKEN_USD.toFixed(2)}, a single distribution pass at $1.00, or Hybrid Tokens for artist support and track unlocks at $${HYBRID_TOKEN_USD.toFixed(2)} each.`}
         </p>
         <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
           <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Single Hybrid Token (Studio Run) — $1.00</h3>
-            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
+            <h3 className="text-lg font-semibold text-white">
+              {`Single Hybrid Token (Studio Run) — $${HYBRID_TOKEN_USD.toFixed(2)}`}
+            </h3>
+            <p className="mt-2 text-4xl font-bold text-white">{`$${HYBRID_TOKEN_USD.toFixed(2)}`}</p>
             <p className="mt-2 flex-1 text-sm text-zinc-300">1 studio generation run for master track rendering.</p>
             <button
               type="button"
@@ -334,11 +337,12 @@ export function PlansTokensView() {
           </article>
 
           <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Artist Support & Track Unlocks — $1.00</h3>
-            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
+            <h3 className="text-lg font-semibold text-white">
+              {`Artist Support & Track Unlocks — $${HYBRID_TOKEN_USD.toFixed(2)}`}
+            </h3>
+            <p className="mt-2 text-4xl font-bold text-white">{`$${HYBRID_TOKEN_USD.toFixed(2)}`}</p>
             <p className="mt-2 text-sm text-zinc-300">
-              Artist support and catalog track unlocks spend Hybrid Tokens. This buys Hybrid Tokens for that balance at
-              $1.00 each.
+              {`Artist support and catalog track unlocks spend Hybrid Tokens. This buys Hybrid Tokens for that balance at $${HYBRID_TOKEN_USD.toFixed(2)} each.`}
             </p>
             <div
               className="mt-4 inline-flex items-center overflow-hidden rounded-md border border-zinc-700 bg-zinc-900"
@@ -381,12 +385,12 @@ export function PlansTokensView() {
                       : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                   }`}
                 >
-                  ${qty}
+                  {`$${qty * HYBRID_TOKEN_USD}`}
                 </button>
               ))}
             </div>
             <p className="mt-3 text-sm font-semibold text-white" aria-live="polite">
-              {`Total $${artistQty.toFixed(2)}`}
+              {`Total $${(artistQty * HYBRID_TOKEN_USD).toFixed(2)}`}
             </p>
             <button
               type="button"
