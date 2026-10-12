@@ -149,6 +149,37 @@ function fromPurchaseData(raw: Record<string, unknown>, extras?: { stripeSession
   return { event: TOKEN_PURCHASED_EVENT, data };
 }
 
+/**
+ * Catalog support token: $1 credited to the artist id on the session.
+ * transaction_id is the checkout session id so a retry cannot double-credit.
+ */
+function catalogArtistSupportPurchase(
+  session: Record<string, unknown>,
+  metadata: Record<string, unknown> | null,
+): TokenPurchasedPayload | null {
+  const artistId = metaGet(metadata, "artistId", "artist_id");
+  const trackId = metaGet(metadata, "trackId", "track_id");
+  const sessionId = strField(session.id);
+  if (!artistId || !trackId || !sessionId) return null;
+  const buyer =
+    metaGet(metadata, "buyer_email") ||
+    strField(session.customer_email) ||
+    strField(asRecord(session.customer_details)?.email);
+  return {
+    event: TOKEN_PURCHASED_EVENT,
+    data: {
+      token_amount: 1,
+      currency: (strField(session.currency) || "USD").toUpperCase(),
+      song_title: trackId,
+      artist_name: artistId,
+      artist_payout_target: artistId,
+      buyer_email: buyer,
+      transaction_id: sessionId,
+      stripe_session_id: sessionId,
+    },
+  };
+}
+
 function fromCheckoutSession(session: Record<string, unknown>): TokenPurchasedPayload | null {
   const paymentStatus = strField(session.payment_status).toLowerCase();
   if (paymentStatus && paymentStatus !== "paid" && paymentStatus !== "no_payment_required") {
@@ -156,6 +187,11 @@ function fromCheckoutSession(session: Record<string, unknown>): TokenPurchasedPa
   }
   const metadata = asRecord(session.metadata);
   const kind = metaGet(metadata, "kind");
+  const supportType = metaGet(metadata, "type");
+  // Catalog $1 support: metadata.type artist_token credits the artist, not a buyer bundle.
+  if (supportType === "artist_token" && (!kind || isArtistTokenKind(kind))) {
+    return catalogArtistSupportPurchase(session, metadata);
+  }
   if (kind && !isArtistTokenKind(kind)) return null;
 
   const sessionId = strField(session.id);

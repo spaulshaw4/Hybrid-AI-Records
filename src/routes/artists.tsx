@@ -13,10 +13,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { JesterLegacySection } from "@/components/JesterLegacySection";
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { LocaleCluster } from "@/components/SiteNav";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
+import { ArtistSupportTokenButton, catalogArtistId } from "@/components/catalog/ArtistSupportTokenButton";
 import { TrackWaveform } from "@/components/TrackWaveform";
 import { VaultWaveformBar } from "@/components/vault/VaultWaveformBar";
 import { ALBUMS, STREAM_TRACKS, type Album, type StreamTrack } from "@/lib/radio-tracks";
@@ -465,6 +467,12 @@ export function ArtistCatalog({
           : "Browse by album cover, open an album for its tracks, preview any song, and unlock downloads with Artist Tokens. $1 = 1 track, yours forever."}
       </p>
 
+      {!selectedAlbum ? (
+        <div className="mt-8">
+          <JesterLegacySection />
+        </div>
+      ) : null}
+
       {/* Token status bar */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border-strong bg-ink/60 p-5 backdrop-blur">
         <div>
@@ -818,6 +826,13 @@ export function ArtistCatalog({
                     {owned ? <Check size={13} aria-hidden /> : <Download size={13} aria-hidden />}
                     {busy ? "Working…" : owned ? "Download" : "1 token"}
                   </button>
+                  {catalogArtistId(t.artist) ? (
+                    <ArtistSupportTokenButton
+                      artistId={catalogArtistId(t.artist)}
+                      trackId={t.id}
+                      className="shrink-0"
+                    />
+                  ) : null}
                   <SendVaultTrackEmailButton
                     trackId={t.id}
                     className="border-border-strong px-3 py-2 font-mono text-[10px] text-muted-foreground hover:border-primary hover:text-primary"

@@ -20,6 +20,7 @@ import { Route as ReceiptsRouteImport } from './routes/receipts'
 import { Route as PromptsRouteImport } from './routes/prompts'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PortalRouteImport } from './routes/portal'
+import { Route as PlansRouteImport } from './routes/plans'
 import { Route as OrderStatusRouteImport } from './routes/order-status'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LicensingRouteImport } from './routes/licensing'
@@ -136,6 +137,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
 const PortalRoute = PortalRouteImport.update({
   id: '/portal',
   path: '/portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlansRoute = PlansRouteImport.update({
+  id: '/plans',
+  path: '/plans',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrderStatusRoute = OrderStatusRouteImport.update({
@@ -479,6 +485,7 @@ export interface FileRoutesByFullPath {
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
+  '/plans': typeof PlansRoute
   '/portal': typeof PortalRoute
   '/privacy': typeof PrivacyRoute
   '/prompts': typeof PromptsRoute
@@ -553,6 +560,7 @@ export interface FileRoutesByTo {
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
+  '/plans': typeof PlansRoute
   '/portal': typeof PortalRoute
   '/privacy': typeof PrivacyRoute
   '/prompts': typeof PromptsRoute
@@ -629,6 +637,7 @@ export interface FileRoutesById {
   '/licensing': typeof LicensingRoute
   '/mcp': typeof McpRoute
   '/order-status': typeof OrderStatusRoute
+  '/plans': typeof PlansRoute
   '/portal': typeof PortalRoute
   '/privacy': typeof PrivacyRoute
   '/prompts': typeof PromptsRoute
@@ -705,6 +714,7 @@ export interface FileRouteTypes {
     | '/licensing'
     | '/mcp'
     | '/order-status'
+    | '/plans'
     | '/portal'
     | '/privacy'
     | '/prompts'
@@ -779,6 +789,7 @@ export interface FileRouteTypes {
     | '/licensing'
     | '/mcp'
     | '/order-status'
+    | '/plans'
     | '/portal'
     | '/privacy'
     | '/prompts'
@@ -854,6 +865,7 @@ export interface FileRouteTypes {
     | '/licensing'
     | '/mcp'
     | '/order-status'
+    | '/plans'
     | '/portal'
     | '/privacy'
     | '/prompts'
@@ -930,6 +942,7 @@ export interface RootRouteChildren {
   LicensingRoute: typeof LicensingRoute
   McpRoute: typeof McpRoute
   OrderStatusRoute: typeof OrderStatusRoute
+  PlansRoute: typeof PlansRoute
   PortalRoute: typeof PortalRoute
   PrivacyRoute: typeof PrivacyRoute
   PromptsRoute: typeof PromptsRoute
@@ -1048,6 +1061,13 @@ declare module '@tanstack/react-router' {
       path: '/portal'
       fullPath: '/portal'
       preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plans': {
+      id: '/plans'
+      path: '/plans'
+      fullPath: '/plans'
+      preLoaderRoute: typeof PlansRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/order-status': {
@@ -1598,6 +1618,7 @@ const rootRouteChildren: RootRouteChildren = {
   LicensingRoute: LicensingRoute,
   McpRoute: McpRoute,
   OrderStatusRoute: OrderStatusRoute,
+  PlansRoute: PlansRoute,
   PortalRoute: PortalRoute,
   PrivacyRoute: PrivacyRoute,
   PromptsRoute: PromptsRoute,

@@ -44,6 +44,9 @@ describe("POST /api/billing/checkout", () => {
   const originalPair5 = process.env.STRIPE_PRICE_PAIR_5;
   const originalPair10 = process.env.STRIPE_PRICE_PAIR_10;
   const originalPair25 = process.env.STRIPE_PRICE_PAIR_25;
+  const originalH = process.env.STRIPE_PRICE_H_TOKEN;
+  const originalD = process.env.STRIPE_PRICE_D_TOKEN;
+  const originalArtist = process.env.STRIPE_PRICE_ARTIST_TOKEN;
 
   afterEach(() => {
     createMock.mockReset();
@@ -57,6 +60,12 @@ describe("POST /api/billing/checkout", () => {
     else process.env.STRIPE_PRICE_PAIR_10 = originalPair10;
     if (originalPair25 === undefined) delete process.env.STRIPE_PRICE_PAIR_25;
     else process.env.STRIPE_PRICE_PAIR_25 = originalPair25;
+    if (originalH === undefined) delete process.env.STRIPE_PRICE_H_TOKEN;
+    else process.env.STRIPE_PRICE_H_TOKEN = originalH;
+    if (originalD === undefined) delete process.env.STRIPE_PRICE_D_TOKEN;
+    else process.env.STRIPE_PRICE_D_TOKEN = originalD;
+    if (originalArtist === undefined) delete process.env.STRIPE_PRICE_ARTIST_TOKEN;
+    else process.env.STRIPE_PRICE_ARTIST_TOKEN = originalArtist;
   });
 
   function ready() {
@@ -270,6 +279,125 @@ describe("POST /api/billing/checkout", () => {
     await expect(res.json()).resolves.toEqual({ error: "Token packs are not configured." });
     expect(createMock).not.toHaveBeenCalled();
     expect(ctorArgs).toEqual([]);
+  });
+
+  it("returns 401 for a single-token checkout without a session and does not call Stripe", async () => {
+    ready();
+    resolveStudioSessionMock.mockRejectedValue(new Error("Unauthorized session"));
+
+    const res = await POST(checkoutRequest({ tokenType: "h_token", quantity: 1, userId: LEDGER_USER }));
+
+    expect(res.status).toBe(401);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ctorArgs).toEqual([]);
+  });
+
+  it("returns 400 for a bad token type or an artist quantity of 0 or 101", async () => {
+    ready();
+    process.env.STRIPE_PRICE_ARTIST_TOKEN = "price_artist_token_test";
+
+    const badType = await POST(checkoutRequest({ tokenType: "credits", quantity: 1 }));
+    const zero = await POST(checkoutRequest({ tokenType: "artist_token", quantity: 0 }));
+    const tooMany = await POST(checkoutRequest({ tokenType: "artist_token", quantity: 101 }));
+
+    expect(badType.status).toBe(400);
+    expect(zero.status).toBe(400);
+    expect(tooMany.status).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ctorArgs).toEqual([]);
+  });
+
+  it("returns 503 when a single-token price env is missing and does not call Stripe", async () => {
+    ready();
+    delete process.env.STRIPE_PRICE_H_TOKEN;
+    delete process.env.STRIPE_PRICE_D_TOKEN;
+    delete process.env.STRIPE_PRICE_ARTIST_TOKEN;
+
+    const h = await POST(checkoutRequest({ tokenType: "h_token", quantity: 1, priceId: "price_from_browser" }));
+    const d = await POST(checkoutRequest({ tokenType: "d_token", quantity: 1 }));
+    const artist = await POST(checkoutRequest({ tokenType: "artist_token", quantity: 5 }));
+
+    expect(h.status).toBe(503);
+    expect(d.status).toBe(503);
+    expect(artist.status).toBe(503);
+    await expect(h.json()).resolves.toEqual({ error: "Token checkout is not configured." });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ctorArgs).toEqual([]);
+  });
+
+  it("creates a payment session from the server price env and ignores a body userId", async () => {
+    ready();
+    process.env.STRIPE_PRICE_H_TOKEN = "price_h_token_test";
+    process.env.STRIPE_PRICE_D_TOKEN = "price_d_token_test";
+    process.env.STRIPE_PRICE_ARTIST_TOKEN = "price_artist_token_test";
+    resolveStudioSessionMock.mockResolvedValue({
+      userId: LEDGER_USER,
+      email: "artist@example.com",
+    });
+
+    const h = await POST(
+      checkoutRequest({
+        tokenType: "h_token",
+        quantity: 1,
+        userId: "someone-else",
+        priceId: "price_from_browser",
+      }),
+    );
+    const d = await POST(checkoutRequest({ tokenType: "d_token", quantity: 1, userId: "someone-else" }));
+    const artist = await POST(
+      checkoutRequest({ tokenType: "artist_token", quantity: 5, userId: "someone-else" }),
+    );
+
+    expect(h.status).toBe(200);
+    expect(d.status).toBe(200);
+    expect(artist.status).toBe(200);
+
+    const hParams = createMock.mock.calls[0][0] as {
+      mode: string;
+      client_reference_id: string;
+      customer_email?: string;
+      line_items: Array<{ price: string; quantity: number; price_data?: unknown }>;
+      metadata: Record<string, string>;
+      payment_intent_data: { metadata: Record<string, string> };
+      success_url: string;
+      cancel_url: string;
+    };
+    expect(hParams.mode).toBe("payment");
+    expect(hParams.client_reference_id).toBe(LEDGER_USER);
+    expect(hParams.customer_email).toBe("artist@example.com");
+    expect(hParams.line_items).toEqual([{ price: "price_h_token_test", quantity: 1 }]);
+    expect(hParams.metadata).toEqual({ userId: LEDGER_USER, tokenType: "h_token", quantity: "1" });
+    expect(hParams.payment_intent_data.metadata).toEqual(hParams.metadata);
+    expect(hParams.success_url).toContain("/portal?tab=plans");
+    expect(hParams.cancel_url).toContain("/portal?tab=plans");
+    expect(JSON.stringify(hParams)).not.toContain("price_from_browser");
+    expect(JSON.stringify(hParams)).not.toContain("someone-else");
+
+    const dParams = createMock.mock.calls[1][0] as {
+      line_items: Array<{ price: string; quantity: number }>;
+      metadata: Record<string, string>;
+    };
+    expect(dParams.line_items).toEqual([{ price: "price_d_token_test", quantity: 1 }]);
+    expect(dParams.metadata).toMatchObject({ tokenType: "d_token", quantity: "1", userId: LEDGER_USER });
+
+    const artistParams = createMock.mock.calls[2][0] as {
+      line_items: Array<{ price: string; quantity: number }>;
+      metadata: Record<string, string>;
+      client_reference_id: string;
+    };
+    expect(artistParams.line_items).toEqual([{ price: "price_artist_token_test", quantity: 5 }]);
+    expect(artistParams.metadata).toEqual({
+      userId: LEDGER_USER,
+      tokenType: "artist_token",
+      quantity: "5",
+    });
+    expect(artistParams.client_reference_id).toBe(LEDGER_USER);
+
+    expect(ctorArgs.map((entry) => (entry as [string, { apiVersion: string }])[1])).toEqual([
+      { apiVersion: "2026-03-25.dahlia" },
+      { apiVersion: "2026-03-25.dahlia" },
+      { apiVersion: "2026-03-25.dahlia" },
+    ]);
   });
 
   it("returns the Stripe error message without calling the live API", async () => {

@@ -1,3 +1,4 @@
+import { ArtistSupportTokenButton, catalogArtistId } from "@/components/catalog/ArtistSupportTokenButton";
 import { CoverImage } from "@/components/CoverImage";
 import { omitUnplayableAlbums } from "@/lib/artist-catalog";
 import type { Album } from "@/lib/radio-tracks";
@@ -97,11 +98,18 @@ export function CatalogAlbumGrid({
   const visible = omitUnplayableAlbums(albums);
   return (
     <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-      {visible.map((album, index) => (
-        <li key={album.id}>
-          <CatalogAlbumCard album={album} onOpen={onOpen} priority={index < 4} />
-        </li>
-      ))}
+      {visible.map((album, index) => {
+        const leadTrackId = album.tracks[0]?.id?.trim() ?? "";
+        const artistId = catalogArtistId(album.artist);
+        return (
+          <li key={album.id} className="flex flex-col gap-2">
+            <CatalogAlbumCard album={album} onOpen={onOpen} priority={index < 4} />
+            {artistId && leadTrackId ? (
+              <ArtistSupportTokenButton artistId={artistId} trackId={leadTrackId} />
+            ) : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }

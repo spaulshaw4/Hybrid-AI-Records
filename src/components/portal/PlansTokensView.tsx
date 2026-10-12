@@ -3,11 +3,15 @@ import { Check } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { PAIR_TOPUPS, type PairTopupId } from "@/lib/pair-topups";
+import { type SingleTokenType } from "@/lib/single-tokens";
 import { SUBSCRIPTION_TIERS, type SubscriptionTierId } from "@/lib/subscription-plans";
 
 const SIGN_IN_REQUIRED = "Please sign in to subscribe.";
 const PACK_SIGN_IN = "Please sign in to buy tokens.";
 const PACKS_NOT_CONFIGURED = "Token packs are not configured.";
+const SINGLE_NOT_CONFIGURED = "Token checkout is not configured.";
+const ARTIST_QTY_MIN = 1;
+const ARTIST_QTY_MAX = 100;
 
 type Membership = {
   id: SubscriptionTierId;
@@ -70,13 +74,13 @@ async function sessionToken(): Promise<string | null> {
 }
 
 /**
- * Monthly producer memberships and one-time Hybrid + D-Token pairs.
- * Membership posts `{ tier }` to the subscription checkout. Packs post `{ tier }`
- * to the billing checkout. Neither request carries a Stripe price id.
+ * Monthly producer memberships, one-time Hybrid + D-Token pairs, and
+ * unbundled single H, D, and Artist tokens. Requests never carry a Stripe price id.
  */
 export function PlansTokensView() {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [artistQty, setArtistQty] = useState(1);
   const busy = pending !== null;
 
   async function subscribe(tier: SubscriptionTierId) {
@@ -157,6 +161,52 @@ export function PlansTokensView() {
     } finally {
       if (!leaving) setPending(null);
     }
+  }
+
+  async function buySingle(tokenType: SingleTokenType, quantity: number) {
+    setError(null);
+    setPending(tokenType);
+    let leaving = false;
+    try {
+      const accessToken = await sessionToken();
+      if (!accessToken) {
+        setError(PACK_SIGN_IN);
+        return;
+      }
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ tokenType, quantity }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { url?: unknown; error?: unknown };
+      if (res.status === 401) {
+        setError(PACK_SIGN_IN);
+        return;
+      }
+      if (res.status === 503) {
+        setError(
+          typeof payload.error === "string" && payload.error.trim() ? payload.error : SINGLE_NOT_CONFIGURED,
+        );
+        return;
+      }
+      if (typeof payload.url === "string" && payload.url) {
+        leaving = true;
+        window.location.href = payload.url;
+        return;
+      }
+      setError("Could not start checkout.");
+    } catch {
+      setError("Could not start checkout.");
+    } finally {
+      if (!leaving) setPending(null);
+    }
+  }
+
+  function setArtistQuantity(next: number) {
+    setArtistQty(Math.min(ARTIST_QTY_MAX, Math.max(ARTIST_QTY_MIN, next)));
   }
 
   return (
@@ -240,6 +290,111 @@ export function PlansTokensView() {
               </button>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section aria-labelledby="individual-tokens-passes" className="mt-12 border-t border-zinc-800 pt-10">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-zinc-400">Standalone</p>
+        <h2 id="individual-tokens-passes" className="mt-2 font-display text-3xl font-bold tracking-tight text-white">
+          Individual Tokens & Passes
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm text-zinc-400">
+          Buy a single studio run, a single distribution pass, or artist fan tokens at $1.00 each.
+        </p>
+        <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
+          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
+            <h3 className="text-lg font-semibold text-white">Single H-Token (Studio Run)</h3>
+            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
+            <p className="mt-2 flex-1 text-sm text-zinc-300">1 studio generation run for master track rendering.</p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void buySingle("h_token", 1)}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pending === "h_token" ? "Redirecting to Stripe..." : "Buy Single H-Token"}
+            </button>
+          </article>
+
+          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
+            <h3 className="text-lg font-semibold text-white">Single D-Token (Too Lost Distribution)</h3>
+            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
+            <p className="mt-2 flex-1 text-sm text-zinc-300">
+              1 standalone track release pass to global DSPs (Spotify, Apple Music) via Too Lost infrastructure.
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void buySingle("d_token", 1)}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pending === "d_token" ? "Redirecting to Stripe..." : "Buy Single D-Token"}
+            </button>
+          </article>
+
+          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
+            <h3 className="text-lg font-semibold text-white">Artist Tokens ($1.00 Fan Currency)</h3>
+            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
+            <p className="mt-2 text-sm text-zinc-300">
+              Support roster artists and unlock catalog showcase tracks. 100% direct artist payout.
+            </p>
+            <div
+              className="mt-4 inline-flex items-center overflow-hidden rounded-md border border-zinc-700 bg-zinc-900"
+              role="group"
+              aria-label="Artist token quantity"
+            >
+              <button
+                type="button"
+                aria-label="Decrease quantity"
+                disabled={busy || artistQty <= ARTIST_QTY_MIN}
+                onClick={() => setArtistQuantity(artistQty - 1)}
+                className="px-3 py-2 text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                −
+              </button>
+              <span className="min-w-10 border-x border-zinc-700 px-3 py-2 text-center font-mono text-sm text-white">
+                {artistQty}
+              </span>
+              <button
+                type="button"
+                aria-label="Increase quantity"
+                disabled={busy || artistQty >= ARTIST_QTY_MAX}
+                onClick={() => setArtistQuantity(artistQty + 1)}
+                className="px-3 py-2 text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
+            <div className="mt-3 flex gap-2">
+              {([1, 5, 10] as const).map((qty) => (
+                <button
+                  key={qty}
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={artistQty === qty}
+                  onClick={() => setArtistQuantity(qty)}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
+                    artistQty === qty
+                      ? "border-red-600 bg-red-600 text-white"
+                      : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                  }`}
+                >
+                  ${qty}
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-sm font-semibold text-white" aria-live="polite">
+              {`Total $${artistQty.toFixed(2)}`}
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void buySingle("artist_token", artistQty)}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pending === "artist_token" ? "Redirecting to Stripe..." : "Purchase Artist Tokens"}
+            </button>
+          </article>
         </div>
       </section>
 

@@ -7,31 +7,17 @@ import podcastCover from "@/assets/hybrid-podcast-logo-v2.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Play, ArrowUpRight, Youtube, Instagram, Link as LinkIcon, ShoppingBag, Facebook, ShieldCheck, Check, Minus, Search, X } from "lucide-react";
-import { AboutModal } from "@/components/AboutModal";
-import { TermsModal } from "@/components/TermsModal";
+import { Play, ArrowUpRight, Youtube, Check, Search, X } from "lucide-react";
 
 import { DivisionCrest } from "@/components/DivisionCrest";
-import { DivisionFooterBadge } from "@/components/LivingBackground";
-import { WORDMARK_LINK } from "@/components/Wordmark";
-import { BrandEagle } from "@/components/BrandEagle";
-import { VerifiedBadges } from "@/components/VerifiedBadges";
-import { WhatsAppSupportCta } from "@/components/WhatsAppSupportCta";
-import { SupportRequestProvider } from "@/lib/support-request";
+import { JesterLegacySection } from "@/components/JesterLegacySection";
 
-import hybridFooterBlue from "@/assets/hybrid-footer-blue.jpg";
 import { crestPreloadLink, resolveDivision, type Division } from "@/lib/divisions";
 import { buildCatalogJsonLd, buildOrganizationPodcastJsonLd } from "@/lib/release-schema";
 import { JESTER_DIVISION_NAME, JESTER_DIVISION_SHORT_NAME } from "@/lib/division-settings";
-import { ContactModal } from "@/components/ContactModal";
-import { HowItWorksModal } from "@/components/HowItWorksModal";
 import { HeroBanner } from "@/components/portal/HeroBanner";
 import { LocaleCluster } from "@/components/SiteNav";
-import { TikTokIcon } from "@/components/TikTokIcon";
-import { ThreadsIcon } from "@/components/ThreadsIcon";
-import { AudiomackIcon } from "@/components/AudiomackIcon";
 import { RadioPlayer } from "@/components/RadioPlayer";
-import { MERCH_URL } from "@/lib/site-nav";
 
 /** Rows for the $25 / $100 / $150 package comparison table (Foundation, Visual Push, Full Hybrid). */
 const COMPARISON_ROWS: { label: string; values: (boolean | string)[] }[] = [
@@ -347,7 +333,8 @@ const SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist/7hc4GrFq9A9l1e0X
 const ytWatch = (id: string) => `https://www.youtube.com/watch?v=${id}`;
 
 const YOUTUBE_URL = "https://www.youtube.com/@HybridAIRecordsPodcast";
-const YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@HybridAIRecords";
+
+const DISTRIBUTION_WORDMARKS = ["Spotify", "Apple Music", "Amazon Music", "YouTube Music"] as const;
 
 function Home() {
   const { v: videoParam } = Route.useSearch();
@@ -401,27 +388,6 @@ function Home() {
     e.preventDefault();
     openVideo(item);
   };
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const [termsOpen, setTermsOpen] = useState(false);
-  
-  const [contactOpen, setContactOpen] = useState(false);
-  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
-
-  const openContact = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    setContactOpen(true);
-  };
-
-  const openAbout = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    setAboutOpen(true);
-  };
-
-  const openHowItWorks = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    setHowItWorksOpen(true);
-  };
-
   const [highlightCatalog, setHighlightCatalog] = useState(false);
   // Polite live region text so screen readers hear where a smooth scroll landed.
   const [scrollAnnouncement, setScrollAnnouncement] = useState("");
@@ -485,6 +451,24 @@ function Home() {
     window.setTimeout(() => setHighlightCatalog(false), 2600);
   };
 
+  /**
+   * The landing page already mounts RadioPlayer. Focus that console instead of
+   * opening a second player. Other pages fall through to the portal radio tab.
+   */
+  const focusRadio = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const player = document.querySelector<HTMLElement>("[data-radio-console]");
+    if (!player) return;
+    e.preventDefault();
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    player.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+    player.focus({ preventScroll: true });
+    if (window.history.replaceState) {
+      window.history.replaceState(null, "", "#radio");
+    }
+    setScrollAnnouncement("");
+    window.requestAnimationFrame(() => setScrollAnnouncement("Hybrid AI Radio player."));
+  };
+
   return (
     <div className="min-h-dvh text-foreground">
       {/* Wrapped in a landmark so every page node belongs to one (axe `region`). */}
@@ -516,7 +500,46 @@ function Home() {
               Every royalty, every master, forever.
             </p>
 
-            <div className="mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Link
+                to="/plans"
+                className="btn-primary !normal-case tracking-[0.04em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                How It Works / Pricing
+              </Link>
+              <Link
+                to="/portal"
+                search={{ tab: "radio" }}
+                onClick={focusRadio}
+                className="btn-primary !normal-case tracking-[0.04em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Listen 24/7 Radio
+              </Link>
+            </div>
+
+            <div className="mt-6 max-w-3xl">
+              <Link
+                to="/veteran-certification"
+                className="inline-flex items-center rounded-full border border-zinc-400/50 bg-zinc-900/50 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-zinc-100 transition-colors hover:border-zinc-200 hover:text-white"
+              >
+                SBA Veteran-Certified
+              </Link>
+              <p className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-300">
+                Enterprise Global Distribution
+              </p>
+              <ul className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2" aria-label="Streaming platforms">
+                {DISTRIBUTION_WORDMARKS.map((name) => (
+                  <li
+                    key={name}
+                    className="flex h-5 items-center text-sm font-semibold leading-none tracking-tight text-zinc-100"
+                  >
+                    {name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mt-8 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
               <Link
                 to="/engine"
                 className="group flex flex-col gap-2 rounded-xl border border-transparent bg-zinc-800/60 p-6 transition-colors hover:border-amber-500/40"
@@ -545,27 +568,6 @@ function Home() {
                 <span className="mt-2 inline-flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#2563eb]">
                   See packages <ArrowUpRight size={15} aria-hidden />
                 </span>
-              </Link>
-            </div>
-
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                to="/engine"
-                className="btn-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Create Your Track
-              </Link>
-              <Link
-                to="/portal"
-                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Submit Your Music
-              </Link>
-              <Link
-                to="/artists"
-                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Listen & Download
               </Link>
             </div>
 
@@ -650,6 +652,12 @@ function Home() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="relative border-t border-white/10 py-16 md:py-20">
+        <div className="mx-auto max-w-7xl px-6">
+          <JesterLegacySection />
         </div>
       </section>
 
@@ -792,197 +800,8 @@ function Home() {
       </main>
 
 
-      {/* FOOTER */}
-      <footer id="about" className="relative border-t border-transparent bg-transparent pb-36 text-slate-400 lg:pb-16">
-        <div className="mx-auto max-w-7xl px-6 py-16 lg:py-20">
-          {/* Brand + navigation */}
-          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1.5fr_1fr_1fr]">
-            {/* Brand */}
-            <div className="bg-transparent">
-              <a href="#top" aria-label="Hybrid AI Records — back to top" className={WORDMARK_LINK}>
-                <BrandEagle
-                  src={hybridFooterBlue}
-                  className="h-28 w-auto bg-transparent sm:h-36"
-                  decorative
-                  priority
-                />
-              </a>
-              <p className="mt-5 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                Independent, SBA Veteran-Certified label. AI-powered distribution, video, and
-                mastering — you keep every royalty and every master.
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2">
-                {[
-                  { icon: Facebook, label: "Facebook", href: "https://www.facebook.com/people/Hybrid-AI-Records-LLC/61590094667469/" },
-                  { icon: ThreadsIcon, label: "Threads", href: "https://www.threads.com/@hybridairecords" },
-                  { icon: Youtube, label: "YouTube", href: YOUTUBE_CHANNEL_URL },
-                  { icon: TikTokIcon, label: "TikTok", href: "https://www.tiktok.com/@spaulshaw4" },
-                  { icon: Instagram, label: "Instagram", href: "https://www.instagram.com/hybridairecords" },
-                  { icon: AudiomackIcon, label: "Audiomack", href: "https://audiomack.com/spaulshaw4" },
-                  { icon: ShoppingBag, label: "Merch", href: MERCH_URL },
-                ].map(({ icon: Icon, label, href }) => (
-                  <a
-                    key={label}
-                    href={href}
-                    target={href.startsWith("http") ? "_blank" : undefined}
-                    rel={href.startsWith("http") ? "noreferrer" : undefined}
-                    aria-label={label}
-                    className="grid h-10 w-10 place-items-center rounded-full border border-transparent bg-zinc-900/40 text-slate-200 backdrop-blur transition-colors hover:border-blue-500/50 hover:bg-zinc-900/60 hover:text-white"
-                  >
-                    <Icon size={16} />
-                  </a>
-                ))}
-              </div>
-            </div>
-
-            {/* Platform */}
-            <div>
-              <div className="eyebrow">Platform</div>
-              <ul className="mt-5 space-y-3">
-                {[
-                  { label: "Distribution & Video", href: "/portal", isLink: true },
-                  { label: "Create Your Track", href: "/engine", isLink: true },
-                  { label: "Artists", href: "#catalog", isLink: false },
-                  { label: "Hybrid AI Radio", href: "#radio", isLink: false },
-                  { label: "Tokens", href: "/tokens", isLink: true },
-                ].map(({ label, href, isLink }) => {
-                  const className = "text-sm text-slate-400 transition-colors hover:text-white";
-                  return isLink ? (
-                    <li key={label}>
-                      <Link to={href} className={className}>
-                        {label}
-                      </Link>
-                    </li>
-                  ) : (
-                    <li key={label}>
-                      <a href={href} className={className}>
-                        {label}
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            {/* Legal */}
-            <div>
-              <div className="eyebrow">Legal</div>
-              <ul className="mt-5 space-y-3">
-                <li>
-                  <Link to="/privacy" className="text-sm text-slate-400 transition-colors hover:text-white">
-                    Privacy
-                  </Link>
-                </li>
-                <li>
-                  <a
-                    href="#terms"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setTermsOpen(true);
-                    }}
-                    className="text-sm text-slate-400 transition-colors hover:text-white"
-                  >
-                    Terms
-                  </a>
-                </li>
-                <li>
-                  <Link to="/licensing" className="text-sm text-slate-400 transition-colors hover:text-white">
-                    Licensing
-                  </Link>
-                </li>
-                <li>
-                  <a
-                    href="#about"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      openAbout();
-                    }}
-                    className="text-sm text-slate-400 transition-colors hover:text-white"
-                  >
-                    About
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#contact"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      openContact();
-                    }}
-                    className="text-sm text-slate-400 transition-colors hover:text-white"
-                  >
-                    Contact
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <DivisionFooterBadge />
-
-          <VerifiedBadges />
-
-          <div className="mt-8 flex flex-col items-center gap-4 bg-transparent">
-            <BrandEagle
-              src={hybridFooterBlue}
-              className="h-24 w-auto bg-transparent sm:h-28"
-              alt="Hybrid AI Records LLC"
-            />
-            <a
-              href="/veteran-certification"
-              aria-label="Officially Certified Veteran-Owned Small Business (SBA VetCert) — view the affidavit of veteran ownership (view-only page)"
-              className="vetcert-badge inline-flex min-h-11 items-center justify-center gap-2.5 rounded-full bg-zinc-900/40 px-6 py-3 text-center font-mono text-[11px] font-semibold uppercase tracking-wider text-amber-200 backdrop-blur transition-all hover:border-amber-400 hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
-            >
-              <ShieldCheck size={16} strokeWidth={2} aria-hidden className="vetcert-badge-icon shrink-0" />
-              Officially Certified Veteran-Owned Small Business (SBA VetCert)
-              <ArrowUpRight size={14} strokeWidth={2} aria-hidden className="vetcert-badge-icon shrink-0" />
-            </a>
-          </div>
-
-
-          <div className="mt-12 flex flex-col gap-4 border-t border-transparent pt-8 text-xs text-slate-100 md:flex-row md:items-center md:justify-between">
-            <div className="font-mono uppercase tracking-[0.18em]">
-              © 2026 Hybrid AI Records LLC · SBA Veteran-Certified · Knoxville, TN
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-3 font-mono uppercase tracking-[0.18em] md:justify-end">
-              <Link to="/privacy" className="text-slate-100 transition-colors hover:text-white">
-                Privacy
-              </Link>
-              <a
-                href="#terms"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setTermsOpen(true);
-                }}
-                className="text-slate-100 transition-colors hover:text-white"
-              >
-                Terms
-              </a>
-              <Link to="/licensing" className="text-slate-100 transition-colors hover:text-white">
-                Licensing
-              </Link>
-              <Link to="/engine" className="text-slate-100 transition-colors hover:text-white">
-                Legal Notice
-              </Link>
-            </div>
-          </div>
-        </div>
-      </footer>
-
       <VideoModal video={activeVideo} onClose={closeVideo} />
 
-      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <HowItWorksModal
-        open={howItWorksOpen}
-        onClose={() => setHowItWorksOpen(false)}
-        onSubmit={() => {
-          setHowItWorksOpen(false);
-          navigate({ to: "/engine" });
-        }}
-      />
-      <TermsModal open={termsOpen} onClose={() => setTermsOpen(false)} />
-      
-      <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
   );
 }

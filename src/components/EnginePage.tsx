@@ -1524,54 +1524,15 @@ export function EnginePage() {
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
         <PatriotGlassStudio>
-        <div className="mb-[18px] flex flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <div className="min-w-0">
-          <div className="flex items-center justify-between mb-2">
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700/60 shadow-inner">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-[11px] font-mono tracking-wider font-semibold text-zinc-300 uppercase">
+        <div className="mb-[18px] flex w-full flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5">
+          <div className="mb-2 flex w-full flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-700/60 bg-zinc-900 px-2 py-0.5 shadow-inner">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+              <span className="whitespace-nowrap text-[11px] font-mono font-semibold tracking-wider text-zinc-300 uppercase">
                 Hybrid Engine 2.0
               </span>
             </div>
-          </div>
-          <div
-            className="flex flex-row gap-6 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            role="tablist"
-            aria-label="Studio mode"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "easy"}
-              onClick={() => {
-                setActiveTab("easy");
-                setIsCharacterModalOpen(false);
-              }}
-              className="shrink-0 whitespace-nowrap"
-              style={modeTabStyle(activeTab === "easy")}
-            >
-              Instrumental
-            </button>
-            <button
-              type="button"
-              role="tab"
-              value="custom"
-              aria-selected={activeTab === "custom"}
-              onClick={() => {
-                setActiveTab("custom");
-                setIsCharacterModalOpen(false);
-              }}
-              className="shrink-0 whitespace-nowrap"
-              style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
-            >
-              Vocals with AI
-            </button>
-            <button type="button" role="tab" value="vocals" aria-selected={activeTab === "vocals"} onClick={() => setActiveTab("vocals")} className="shrink-0 whitespace-nowrap" style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}>
-              With Vocals
-            </button>
-          </div>
-          </div>
-          <div className="flex w-full items-center gap-3 sm:w-auto">
+            <div className="ms-auto flex shrink-0 items-center gap-3">
             <div
               style={{
                 display: "flex",
@@ -1609,6 +1570,51 @@ export function EnginePage() {
               }}
             >
               Buy tokens
+            </button>
+            </div>
+          </div>
+          <div
+            className="flex w-full flex-wrap items-center gap-x-6 gap-y-2"
+            role="tablist"
+            aria-label="Studio mode"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "easy"}
+              onClick={() => {
+                setActiveTab("easy");
+                setIsCharacterModalOpen(false);
+              }}
+              className="shrink-0 whitespace-nowrap"
+              style={modeTabStyle(activeTab === "easy")}
+            >
+              Instrumental
+            </button>
+            <button
+              type="button"
+              role="tab"
+              value="custom"
+              aria-selected={activeTab === "custom"}
+              onClick={() => {
+                setActiveTab("custom");
+                setIsCharacterModalOpen(false);
+              }}
+              className="shrink-0 whitespace-nowrap"
+              style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
+            >
+              Vocals with AI
+            </button>
+            <button
+              type="button"
+              role="tab"
+              value="vocals"
+              aria-selected={activeTab === "vocals"}
+              onClick={() => setActiveTab("vocals")}
+              className="shrink-0 whitespace-nowrap"
+              style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}
+            >
+              With Vocals
             </button>
           </div>
         </div>

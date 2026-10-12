@@ -1908,10 +1908,12 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
     <>
     <section
       ref={consoleRef}
+      id="hybrid-radio-player"
+      tabIndex={-1}
       data-radio-console
       aria-label="Hybrid AI Radio player"
       onKeyDown={onConsoleKeyDown}
-      className="relative overflow-hidden rounded-xl studio-glass p-5 text-start"
+      className="relative overflow-hidden rounded-xl studio-glass p-5 text-start outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <p className="sr-only">
         Keyboard shortcuts: space or K plays and pauses, left and right arrows seek ten seconds,

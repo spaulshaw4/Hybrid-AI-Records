@@ -188,6 +188,17 @@ export default {
         return POST(request);
       }
 
+      if (pathname === "/api/checkout/artist-token") {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { POST } = await import("./app/api/checkout/artist-token/route");
+        return POST(request);
+      }
+
       if (pathname === "/api/billing/checkout") {
         if (request.method !== "POST") {
           return new Response("Method not allowed", {

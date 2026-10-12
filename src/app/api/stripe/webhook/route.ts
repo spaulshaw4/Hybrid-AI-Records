@@ -1,6 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import { fulfillFanTokenPurchase, parseTokenPurchased } from "@/lib/fan-token-purchase";
 import { isPairTopup, PAIR_TOPUPS } from "@/lib/pair-topups";
+import { recordPendingPayout } from "@/lib/pending-payouts.server";
+import { sendPayoutAlert } from "@/lib/payout-alert.server";
+import {
+  isSingleTokenType,
+  parseSingleTokenQuantity,
+  singleTokenLedgerPriceId,
+  type SingleTokenType,
+} from "@/lib/single-tokens";
 import {
   fulfillSubscriptionCheckout,
   fulfillSubscriptionDeleted,
@@ -43,6 +52,224 @@ function positiveTokenCount(raw: string | undefined): number | null {
 function isLedgerUserId(userId: string): boolean {
   if (!userId || userId === "guest_user" || userId === "unknown") return false;
   return LEDGER_USER_ID.test(userId);
+}
+
+function isLegacyTokenPack(pack: string): boolean {
+  return isPairTopup(pack) || pack === "d5" || pack === "d10" || pack === "d25";
+}
+
+/** client_reference_id and metadata.userId are both set by our checkout route. */
+function plansSingleTokenUserId(session: Stripe.Checkout.Session): string | null {
+  const reference = typeof session.client_reference_id === "string" ? session.client_reference_id.trim() : "";
+  const metaUser = session.metadata?.userId?.trim() ?? "";
+  if (reference && metaUser && reference !== metaUser) return null;
+  const userId = reference || metaUser;
+  return isLedgerUserId(userId) ? userId : null;
+}
+
+function catalogBuyerId(session: Stripe.Checkout.Session): string | null {
+  const reference = typeof session.client_reference_id === "string" ? session.client_reference_id.trim() : "";
+  const metaBuyer = session.metadata?.buyerId?.trim() ?? "";
+  if (reference && metaBuyer && reference !== metaBuyer) return null;
+  const userId = reference || metaBuyer;
+  return isLedgerUserId(userId) ? userId : null;
+}
+
+function singleTokenAmount(session: Stripe.Checkout.Session, quantity: number): number {
+  if (typeof session.amount_total === "number" && Number.isInteger(session.amount_total)) {
+    return session.amount_total;
+  }
+  return quantity * 100;
+}
+
+async function rememberWebhookEvent(
+  supabase: ReturnType<typeof vaultClient>,
+  eventId: string,
+): Promise<void> {
+  const { error } = await supabase.from("stripe_webhook_events").insert({ event_id: eventId });
+  if (error && error.code !== "23505") throw new Error(error.message);
+}
+
+/**
+ * Plans-page unbundled tokens. H credits token_balances.balance.
+ * D credits profiles.d_tokens only. Artist quantity credits the buyer artist ledger.
+ * Idempotent on the checkout session id via stripe_webhook_events.
+ */
+async function fulfillPlansSingleToken(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+  tokenType: SingleTokenType,
+): Promise<Response> {
+  const sessionId = typeof session.id === "string" ? session.id.trim() : "";
+  if (!sessionId) {
+    return Response.json({ error: "Missing checkout session id" }, { status: 500 });
+  }
+
+  let supabase: ReturnType<typeof vaultClient>;
+  try {
+    supabase = vaultClient();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return Response.json({ error: message }, { status: 500 });
+  }
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("stripe_webhook_events")
+    .select("event_id")
+    .eq("event_id", event.id)
+    .maybeSingle();
+  if (lookupError) return Response.json({ error: lookupError.message }, { status: 500 });
+  if (existing?.event_id) return Response.json({ received: true });
+
+  const userId = plansSingleTokenUserId(session);
+  const quantity = parseSingleTokenQuantity(session.metadata?.quantity);
+  if (!userId || quantity == null) {
+    console.log("[Stripe Webhook] Skipping single-token credit; user or quantity is not creditable.");
+    return Response.json({ received: true });
+  }
+
+  const claimId = `plans:${sessionId}`;
+  const { error: claimError } = await supabase.from("stripe_webhook_events").insert({ event_id: claimId });
+  if (claimError?.code === "23505") {
+    try {
+      await rememberWebhookEvent(supabase, event.id);
+    } catch {
+      // The session was already credited.
+    }
+    return Response.json({ received: true });
+  }
+  if (claimError) return Response.json({ error: claimError.message }, { status: 500 });
+
+  try {
+    const amount = singleTokenAmount(session, quantity);
+    const currency = session.currency?.trim() || "usd";
+    if (tokenType === "h_token") {
+      const { error } = await supabase.rpc("credit_token_purchase", {
+        _user_id: userId,
+        _session_id: sessionId,
+        _price_id: singleTokenLedgerPriceId(tokenType),
+        _tokens: quantity,
+        _amount_total: amount,
+        _currency: currency,
+      });
+      if (error) throw new Error(error.message);
+    } else if (tokenType === "d_token") {
+      await creditProfilesDTokens(supabase, userId, quantity);
+    } else {
+      const { error } = await supabase.rpc("credit_artist_token_purchase", {
+        _user_id: userId,
+        _session_id: sessionId,
+        _price_id: singleTokenLedgerPriceId(tokenType),
+        _tokens: quantity,
+        _amount_total: amount,
+        _currency: currency,
+      });
+      if (error) throw new Error(error.message);
+    }
+  } catch (err: unknown) {
+    await supabase.from("stripe_webhook_events").delete().eq("event_id", claimId);
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return Response.json({ error: message }, { status: 500 });
+  }
+
+  try {
+    await rememberWebhookEvent(supabase, event.id);
+  } catch {
+    // Credit already landed. The session claim blocks a second increment.
+  }
+  return Response.json({ received: true });
+}
+
+/** Increments profiles.d_tokens only. The session claim above keeps this idempotent. */
+async function creditProfilesDTokens(
+  supabase: ReturnType<typeof vaultClient>,
+  userId: string,
+  quantity: number,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("d_tokens")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = data as { d_tokens?: number | null } | null;
+  if (!row) {
+    const { error: insertError } = await supabase.from("profiles").insert({
+      user_id: userId,
+      d_tokens: quantity,
+    });
+    if (insertError) throw new Error(insertError.message);
+    return;
+  }
+  const current = typeof row.d_tokens === "number" && Number.isFinite(row.d_tokens) ? row.d_tokens : 0;
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ d_tokens: current + quantity })
+    .eq("user_id", userId);
+  if (updateError) throw new Error(updateError.message);
+}
+
+/**
+ * Catalog Artist Support Token (metadata.type === artist_token).
+ * Credits the artist fan-token ledger by $1. Does not touch H, D, or subscription tier.
+ * Idempotent on the checkout session id inside pending_payouts.
+ */
+async function fulfillCatalogArtistSupport(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+): Promise<Response> {
+  const buyerId = catalogBuyerId(session);
+  const artistId = session.metadata?.artistId?.trim() ?? "";
+  const trackId = session.metadata?.trackId?.trim() ?? "";
+  if (!buyerId || !artistId || !trackId) {
+    return Response.json({ received: true });
+  }
+
+  const purchase = parseTokenPurchased(event);
+  if (!purchase) return Response.json({ received: true });
+
+  let supabase: ReturnType<typeof vaultClient> | null = null;
+  try {
+    supabase = vaultClient();
+  } catch {
+    supabase = null;
+  }
+
+  if (supabase) {
+    const { data: existing, error: lookupError } = await supabase
+      .from("stripe_webhook_events")
+      .select("event_id")
+      .eq("event_id", event.id)
+      .maybeSingle();
+    if (lookupError) return Response.json({ error: lookupError.message }, { status: 500 });
+    if (existing?.event_id) return Response.json({ received: true });
+  }
+
+  try {
+    await fulfillFanTokenPurchase(purchase, {
+      recordPendingPayout,
+      sendAlert: async (payload) => {
+        try {
+          return await sendPayoutAlert(payload);
+        } catch {
+          console.error("Payout alert failed");
+          return { ok: false };
+        }
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return Response.json({ error: message }, { status: 500 });
+  }
+
+  if (supabase) {
+    try {
+      await rememberWebhookEvent(supabase, event.id);
+    } catch {
+      // The payout row is already unique on the checkout session id.
+    }
+  }
+  return Response.json({ received: true });
 }
 
 function priceIdForTokens(tokens: number): string {
@@ -206,6 +433,23 @@ export async function POST(req: Request): Promise<Response> {
   // Mode payment keeps the existing one-time fulfillment below.
   if (session.mode === "subscription") {
     return fulfillSubscriptionCheckout(session as unknown as Record<string, unknown>);
+  }
+
+  // Catalog $1 support is metadata.type. Plans unbundled tokens use metadata.tokenType.
+  if (session.mode === "payment" && session.metadata?.type === "artist_token") {
+    if (event.type === "checkout.session.completed" && session.payment_status === "unpaid") {
+      return Response.json({ received: true });
+    }
+    return fulfillCatalogArtistSupport(event, session);
+  }
+
+  const packId = session.metadata?.pack?.trim() ?? "";
+  const singleType = session.metadata?.tokenType?.trim() ?? "";
+  if (session.mode === "payment" && !isLegacyTokenPack(packId) && isSingleTokenType(singleType)) {
+    if (event.type === "checkout.session.completed" && session.payment_status === "unpaid") {
+      return Response.json({ received: true });
+    }
+    return fulfillPlansSingleToken(event, session, singleType);
   }
 
   const tokenCount = positiveTokenCount(session.metadata?.tokens);

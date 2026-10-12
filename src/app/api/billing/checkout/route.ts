@@ -1,5 +1,11 @@
 import Stripe from "stripe";
 import { PAIR_TOPUPS, isPairTopup, type PairTopupId } from "@/lib/pair-topups";
+import {
+  isSingleTokenType,
+  parseSingleTokenQuantity,
+  SINGLE_TOKEN_PRODUCTS,
+  type SingleTokenType,
+} from "@/lib/single-tokens";
 import { resolveStudioSession } from "@/lib/studio-request-auth.server";
 import { allowedOrigin, defaultSiteOrigin } from "@/lib/site-origin.server";
 
@@ -30,6 +36,7 @@ const SIGN_IN_REQUIRED =
   "Please sign in to your Hybrid AI Records account before purchasing tokens so they can be credited to your vault.";
 
 const PAIR_NOT_CONFIGURED = "Token packs are not configured.";
+const SINGLE_NOT_CONFIGURED = "Token checkout is not configured.";
 
 function isUnauthorized(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -39,24 +46,92 @@ function isUnauthorized(err: unknown): boolean {
   return name === "UnauthorizedSessionError" || status === 401 || message === "Unauthorized session";
 }
 
+type CheckoutIdentity = { userId: string; email: string | null };
+
+function checkoutEmail(email: string | null | undefined): string {
+  if (typeof email !== "string") return "";
+  const value = email.trim();
+  if (!value.includes("@") || value.includes(" ") || value.length > 320) return "";
+  return value;
+}
+
 /**
  * Checkout metadata must be the verified studio user. A body userId is ignored.
  * Signed-out requests are rejected so a payment cannot be stored as guest_user.
  */
-async function checkoutUserId(req: Request): Promise<string | Response> {
+async function checkoutIdentity(req: Request): Promise<CheckoutIdentity | Response> {
   try {
     const session = await resolveStudioSession(req);
-    const verified = session.userId.trim();
+    const verified = session.userId?.trim() ?? "";
     if (!verified || verified === "guest_user") {
       return Response.json({ error: SIGN_IN_REQUIRED }, { status: 401 });
     }
-    return verified;
+    const email = typeof session.email === "string" ? session.email : null;
+    return { userId: verified, email };
   } catch (err) {
     if (isUnauthorized(err)) {
       return Response.json({ error: SIGN_IN_REQUIRED }, { status: 401 });
     }
     throw err;
   }
+}
+
+async function checkoutUserId(req: Request): Promise<string | Response> {
+  const identity = await checkoutIdentity(req);
+  if (identity instanceof Response) return identity;
+  return identity.userId;
+}
+
+function requestsSingleToken(body: { tokenType?: unknown }): boolean {
+  return body.tokenType !== undefined && body.tokenType !== null && body.tokenType !== "";
+}
+
+/**
+ * Unbundled H, D, or Artist tokens. The browser sends tokenType and quantity.
+ * The Stripe Price id comes from env. A body userId or price id is ignored.
+ */
+async function singleTokenCheckout(
+  req: Request,
+  body: { tokenType?: unknown; quantity?: unknown },
+): Promise<Response> {
+  const identity = await checkoutIdentity(req);
+  if (identity instanceof Response) return identity;
+
+  if (!isSingleTokenType(body.tokenType)) {
+    return Response.json({ error: "Invalid token type." }, { status: 400 });
+  }
+  const quantity = parseSingleTokenQuantity(body.quantity);
+  if (quantity == null) {
+    return Response.json({ error: "Invalid quantity." }, { status: 400 });
+  }
+
+  const tokenType: SingleTokenType = body.tokenType;
+  const priceId = process.env[SINGLE_TOKEN_PRODUCTS[tokenType].priceEnv]?.trim() ?? "";
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  if (!priceId || !secretKey) {
+    return Response.json({ error: SINGLE_NOT_CONFIGURED }, { status: 503 });
+  }
+
+  const stripe = new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
+  const origin = allowedOrigin(req.headers.get("origin")) ?? defaultSiteOrigin();
+  const email = checkoutEmail(identity.email);
+  const metadata = {
+    userId: identity.userId,
+    tokenType,
+    quantity: String(quantity),
+  };
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [{ price: priceId, quantity }],
+    success_url: `${origin}/portal?tab=plans&payment=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/portal?tab=plans&payment=cancelled`,
+    client_reference_id: identity.userId,
+    ...(email ? { customer_email: email } : {}),
+    metadata,
+    payment_intent_data: { metadata },
+  });
+
+  return Response.json({ url: session.url });
 }
 
 /**
@@ -95,7 +170,15 @@ async function pairTopupCheckout(req: Request, tier: PairTopupId): Promise<Respo
 
 export async function POST(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { tier?: unknown; userId?: unknown };
+    const body = (await req.json()) as {
+      tier?: unknown;
+      userId?: unknown;
+      tokenType?: unknown;
+      quantity?: unknown;
+    };
+    if (requestsSingleToken(body)) {
+      return await singleTokenCheckout(req, body);
+    }
     if (isPairTopup(body.tier)) {
       return await pairTopupCheckout(req, body.tier);
     }
