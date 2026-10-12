@@ -59,7 +59,7 @@ const PACKS = (Object.keys(PAIR_TOPUPS) as PairTopupId[]).map((id) => ({
 function allowanceLines(membership: Membership): string[] {
   const plan = SUBSCRIPTION_TIERS[membership.id];
   return [
-    `${plan.hybridTokens} H-Tokens (Studio Runs)`,
+    `${plan.hybridTokens} Hybrid Tokens (Studio Runs)`,
     `${plan.dTokens} D-Tokens (Too Lost Stores)`,
     ...membership.perks,
   ];
@@ -75,7 +75,8 @@ async function sessionToken(): Promise<string | null> {
 
 /**
  * Monthly producer memberships, one-time Hybrid + D-Token pairs, and
- * unbundled single H, D, and Artist tokens. Requests never carry a Stripe price id.
+ * unbundled studio and distribution tokens. Artist support on this page
+ * buys Hybrid Tokens (h_token). Requests never carry a Stripe price id.
  */
 export function PlansTokensView() {
   const [pending, setPending] = useState<string | null>(null);
@@ -163,9 +164,9 @@ export function PlansTokensView() {
     }
   }
 
-  async function buySingle(tokenType: SingleTokenType, quantity: number) {
+  async function buySingle(tokenType: SingleTokenType, quantity: number, pendingKey = tokenType) {
     setError(null);
-    setPending(tokenType);
+    setPending(pendingKey);
     let leaving = false;
     try {
       const accessToken = await sessionToken();
@@ -278,7 +279,7 @@ export function PlansTokensView() {
             <article key={pack.id} className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
               <h3 className="text-lg font-semibold text-white">{pack.name}</h3>
               <p className="mt-2 text-sm text-zinc-300">
-                {pack.hybridTokens} H-Tokens + {pack.dTokens} D-Tokens
+                {pack.hybridTokens} Hybrid Tokens + {pack.dTokens} D-Tokens
               </p>
               <button
                 type="button"
@@ -299,11 +300,11 @@ export function PlansTokensView() {
           Individual Tokens & Passes
         </h2>
         <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-          Buy a single studio run, a single distribution pass, or artist fan tokens at $1.00 each.
+          Buy a single studio run, a single distribution pass, or Hybrid Tokens for artist support and track unlocks at $1.00 each.
         </p>
         <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
           <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Single H-Token (Studio Run)</h3>
+            <h3 className="text-lg font-semibold text-white">Single Hybrid Token (Studio Run) — $1.00</h3>
             <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
             <p className="mt-2 flex-1 text-sm text-zinc-300">1 studio generation run for master track rendering.</p>
             <button
@@ -312,12 +313,12 @@ export function PlansTokensView() {
               onClick={() => void buySingle("h_token", 1)}
               className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending === "h_token" ? "Redirecting to Stripe..." : "Buy Single H-Token"}
+              {pending === "h_token" ? "Redirecting to Stripe..." : "Buy Single Hybrid Token"}
             </button>
           </article>
 
           <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Single D-Token (Too Lost Distribution)</h3>
+            <h3 className="text-lg font-semibold text-white">Single D-Token (Too Lost Distribution) — $1.00</h3>
             <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
             <p className="mt-2 flex-1 text-sm text-zinc-300">
               1 standalone track release pass to global DSPs (Spotify, Apple Music) via Too Lost infrastructure.
@@ -333,15 +334,16 @@ export function PlansTokensView() {
           </article>
 
           <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Artist Tokens ($1.00 Fan Currency)</h3>
+            <h3 className="text-lg font-semibold text-white">Artist Support & Track Unlocks — $1.00</h3>
             <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
             <p className="mt-2 text-sm text-zinc-300">
-              Support roster artists and unlock catalog showcase tracks. 100% direct artist payout.
+              Artist support and catalog track unlocks spend Hybrid Tokens. This buys Hybrid Tokens for that balance at
+              $1.00 each.
             </p>
             <div
               className="mt-4 inline-flex items-center overflow-hidden rounded-md border border-zinc-700 bg-zinc-900"
               role="group"
-              aria-label="Artist token quantity"
+              aria-label="Hybrid Token quantity"
             >
               <button
                 type="button"
@@ -389,10 +391,10 @@ export function PlansTokensView() {
             <button
               type="button"
               disabled={busy}
-              onClick={() => void buySingle("artist_token", artistQty)}
+              onClick={() => void buySingle("h_token", artistQty, "hybrid_support")}
               className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending === "artist_token" ? "Redirecting to Stripe..." : "Purchase Artist Tokens"}
+              {pending === "hybrid_support" ? "Redirecting to Stripe..." : "Buy Hybrid Tokens"}
             </button>
           </article>
         </div>

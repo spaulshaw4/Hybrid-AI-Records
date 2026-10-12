@@ -326,6 +326,13 @@
     --site-dock-height: 5.5rem;
   }
 
+  @media (max-width: 1023.98px) {
+    html[data-site-nav="on"] {
+      /* Mobile header wraps the token pill onto two lines. Keep content below it. */
+      --site-header-height: 6.5rem;
+    }
+  }
+
   @media (min-width: 1024px) {
     html[data-site-nav="on"] {
       --site-sidebar-width: 16.75rem;
@@ -1446,10 +1453,10 @@ main button:active {
 }
 
 /* Beat `main h1 { -webkit-text-fill-color }` so each line keeps its flag colour.
-   Red matches Independent; blue matches Knoxville, TN. */
+   REAL MUSIC is neon crimson so it stays readable on the dark mesh. */
 .hero-line-red {
-  color: #e11d48;
-  -webkit-text-fill-color: #e11d48;
+  color: #ff3344;
+  -webkit-text-fill-color: #ff3344;
 }
 
 .hero-line-white {
@@ -2252,7 +2259,120 @@ footer h3 span {
   background-clip: unset !important;
   -webkit-background-clip: unset !important;
   animation: none !important;
+}
+
+.hero-band h1,
+.hero-line-white,
+.hero-line-blue {
   filter: none !important;
+}
+
+.hero-line-white {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+.hero-line-red {
+  color: #ff3344 !important;
+  -webkit-text-fill-color: #ff3344 !important;
+  filter: drop-shadow(0 0 15px rgba(255, 51, 68, 0.8)) !important;
+}
+
+.hero-line-blue {
+  color: #2563eb !important;
+  -webkit-text-fill-color: #2563eb !important;
+}
+
+.hero-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 0.95rem 1.6rem;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-shadow: none;
+  border: 1px solid transparent;
+  transition: background 200ms ease, transform 200ms ease;
+}
+
+.hero-cta:hover {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.hero-cta-pricing {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+.hero-cta-pricing:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.hero-cta-radio {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.hero-cta-radio:hover {
+  background: #1e40af;
+  border-color: #1e40af;
+}
+
+.hero-cta-pulse {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  animation: hero-radio-pulse 1.6s ease-out infinite;
+}
+
+@keyframes hero-radio-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.sba-vet-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid #ef4444;
+  background: #0a1628;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  padding: 0.3rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: none;
+  box-shadow:
+    0 0 10px rgba(239, 68, 68, 0.45),
+    0 0 16px rgba(37, 99, 235, 0.4);
+}
+
+.sba-vet-badge:hover {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #ffffff;
 }
 
 @media (prefers-reduced-motion: reduce) {

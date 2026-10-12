@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 
-const SIGN_IN = "Please sign in to buy an Artist Token.";
+const SIGN_IN = "Please sign in to support this artist.";
 
 /** Stable catalog artist id from the display name. The catalog has no separate artist uuid. */
 export function catalogArtistId(artist: string): string {
@@ -76,12 +76,12 @@ export function ArtistSupportTokenButton({ artistId, trackId, className }: Artis
         type="button"
         disabled={pending}
         aria-busy={pending}
-        aria-label="Artist Token"
+        aria-label="Support artist · $1"
         onClick={(event) => void buy(event)}
         className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-white transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
-        Artist Token
+        Support artist · $1
       </button>
       {error ? (
         <p role="alert" className="mt-1 text-xs text-amber-300">

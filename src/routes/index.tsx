@@ -489,7 +489,7 @@ function Home() {
         {/* Bounded band instead of a full viewport: the headline now sits near
             the top of the fold rather than under ~1000px of empty space. */}
         <div className="relative z-10 mx-auto flex max-w-7xl flex-col justify-start px-4 pb-24 pt-6 sm:px-6 md:pb-28 md:pt-8">
-          <div className="mb-4 hidden h-16 w-full items-center justify-end lg:flex">
+          <div className="mb-4 hidden h-auto min-h-16 w-full items-center justify-end overflow-visible lg:flex">
             <LocaleCluster />
           </div>
           <div className="max-w-4xl">
@@ -503,7 +503,7 @@ function Home() {
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
                 to="/plans"
-                className="btn-primary !normal-case tracking-[0.04em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="hero-cta hero-cta-pricing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 How It Works / Pricing
               </Link>
@@ -511,17 +511,15 @@ function Home() {
                 to="/portal"
                 search={{ tab: "radio" }}
                 onClick={focusRadio}
-                className="btn-primary !normal-case tracking-[0.04em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="hero-cta hero-cta-radio focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
+                <span className="hero-cta-pulse" aria-hidden="true" />
                 Listen 24/7 Radio
               </Link>
             </div>
 
             <div className="mt-6 max-w-3xl">
-              <Link
-                to="/veteran-certification"
-                className="inline-flex items-center rounded-full border border-zinc-400/50 bg-zinc-900/50 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-zinc-100 transition-colors hover:border-zinc-200 hover:text-white"
-              >
+              <Link to="/veteran-certification" className="sba-vet-badge">
                 SBA Veteran-Certified
               </Link>
               <p className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-300">

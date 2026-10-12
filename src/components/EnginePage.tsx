@@ -7,6 +7,7 @@ import CharacterModal, {
   type SelectedVocal,
   type VocalCharacter,
 } from "@/components/studio/CharacterModal";
+import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { supabase } from "@/integrations/supabase/client";
 import BuyTokensModal from "@/components/studio/BuyTokensModal";
 import MyPromptsModal, { type SavedPromptItem } from "@/components/studio/MyPromptsModal";
@@ -1532,29 +1533,8 @@ export function EnginePage() {
                 Hybrid Engine 2.0
               </span>
             </div>
-            <div className="ms-auto flex shrink-0 items-center gap-3">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                backgroundColor: "rgba(225, 29, 72, 0.12)",
-                border: "1px solid rgba(225, 29, 72, 0.45)",
-                borderRadius: 20,
-                padding: "4px 12px",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "#fda4af",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 900 }}>Ⓗ</span>
-              <span>
-                {isLoadingBalance
-                  ? "Syncing..."
-                  : `${tokenBalance ?? 0} Hybrid Token${tokenBalance === 1 ? "" : "s"}`}
-              </span>
-            </div>
+            <div className="ms-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-3">
+            <HeaderTokenBalance className="max-w-full" />
             <button
               type="button"
               onClick={() => setIsBuyTokensOpen(true)}

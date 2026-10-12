@@ -138,7 +138,10 @@ function MobileLocaleSheet() {
 export function LocaleCluster({ className = "" }: { className?: string }) {
   return (
     <div
-      className={cn("flex h-16 min-w-0 flex-nowrap items-center justify-end gap-3", className)}
+      className={cn(
+        "flex h-auto min-h-9 min-w-0 max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5",
+        className,
+      )}
       data-no-translate
     >
       <HeaderTokenBalance />
@@ -385,7 +388,7 @@ function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-16 w-full items-center justify-between gap-3 border-b border-white/[0.08] bg-zinc-900/85 px-3 backdrop-blur-xl lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-auto min-h-16 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1.5 overflow-visible border-b border-white/[0.08] bg-zinc-900/85 px-3 py-1.5 backdrop-blur-xl lg:hidden"
     >
       <Link
         to="/"
@@ -394,7 +397,7 @@ function SiteHeader() {
       >
         <Wordmark size="sm" showText={false} interactive />
       </Link>
-      <LocaleCluster className="ms-auto min-w-0 shrink flex-nowrap" />
+      <LocaleCluster className="ms-auto min-w-0 max-w-full flex-1" />
     </header>
   );
 }
@@ -411,7 +414,7 @@ function DesktopLocaleStrip() {
   return (
     <div
       data-site-nav="desktop-locale"
-      className="hidden h-16 items-center justify-end px-6 lg:flex"
+      className="hidden h-auto min-h-16 items-center justify-end overflow-visible px-6 py-1 lg:flex"
     >
       <LocaleCluster />
     </div>
