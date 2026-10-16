@@ -400,6 +400,43 @@ describe("POST /api/billing/checkout", () => {
     ]);
   });
 
+  it("multiplies h_token and d_token line items by quantity and ignores a client price id", async () => {
+    ready();
+    process.env.STRIPE_PRICE_H_TOKEN = "price_h_token_test";
+    process.env.STRIPE_PRICE_D_TOKEN = "price_d_token_test";
+
+    const h = await POST(
+      checkoutRequest({
+        tokenType: "h_token",
+        quantity: 3,
+        priceId: "price_from_browser",
+        userId: "someone-else",
+      }),
+    );
+    const d = await POST(checkoutRequest({ tokenType: "d_token", quantity: 8, priceId: "price_from_browser" }));
+
+    expect(h.status).toBe(200);
+    expect(d.status).toBe(200);
+
+    const hParams = createMock.mock.calls[0][0] as {
+      line_items: Array<{ price: string; quantity: number; price_data?: unknown }>;
+      metadata: Record<string, string>;
+    };
+    expect(hParams.line_items).toEqual([{ price: "price_h_token_test", quantity: 3 }]);
+    expect(hParams.line_items[0].price_data).toBeUndefined();
+    expect(hParams.metadata).toEqual({ userId: LEDGER_USER, tokenType: "h_token", quantity: "3" });
+    expect(JSON.stringify(hParams)).not.toContain("price_from_browser");
+    expect(JSON.stringify(hParams)).not.toContain("someone-else");
+
+    const dParams = createMock.mock.calls[1][0] as {
+      line_items: Array<{ price: string; quantity: number }>;
+      metadata: Record<string, string>;
+    };
+    expect(dParams.line_items).toEqual([{ price: "price_d_token_test", quantity: 8 }]);
+    expect(dParams.metadata).toEqual({ userId: LEDGER_USER, tokenType: "d_token", quantity: "8" });
+    expect(JSON.stringify(dParams)).not.toContain("price_from_browser");
+  });
+
   it("returns the Stripe error message without calling the live API", async () => {
     ready();
     createMock.mockRejectedValue(new Error("Stripe is mocked"));

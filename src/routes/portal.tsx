@@ -18,6 +18,7 @@ import { MerchView } from "@/components/portal/MerchView";
 import { PlansTokensView } from "@/components/portal/PlansTokensView";
 import { RadioPlayerView } from "@/components/portal/RadioPlayerView";
 import { ContactModal } from "@/components/ContactModal";
+import { OrderIntakeSection } from "@/components/OrderIntakeSection";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
 import { pageHead } from "@/lib/social-meta";
@@ -293,6 +294,12 @@ function DistributionPackagesPage() {
               </div>
             </section>
             </>
+          ) : null}
+
+          {tab === "create" || tab === "distribution" ? (
+            <div className="mt-14">
+              <OrderIntakeSection />
+            </div>
           ) : null}
         </main>
 

@@ -274,6 +274,45 @@ describe("single-token and catalog artist webhook credits", () => {
     expect(payoutCredits.size).toBe(0);
   });
 
+  it("credits h_token and d_token quantities onto their own balances", async () => {
+    ready();
+    constructEventMock.mockReturnValue(
+      paymentSession({
+        id: "cs_h_qty",
+        eventId: "evt_h_qty",
+        metadata: { tokenType: "h_token", quantity: "3", userId: LEDGER_USER },
+      }),
+    );
+    const hybridRes = await POST(webhookRequest());
+
+    expect(hybridRes.status).toBe(200);
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        fn: "credit_token_purchase",
+        args: expect.objectContaining({ _user_id: LEDGER_USER, _session_id: "cs_h_qty", _tokens: 3 }),
+      }),
+    ]);
+    expect(hybrid.get(LEDGER_USER)).toBe(13);
+    expect(profiles.get(LEDGER_USER)?.d_tokens).toBe(4);
+    expect(artistBalances.get(LEDGER_USER)).toBe(7);
+
+    constructEventMock.mockReturnValue(
+      paymentSession({
+        id: "cs_d_qty",
+        eventId: "evt_d_qty",
+        metadata: { tokenType: "d_token", quantity: "6", userId: LEDGER_USER },
+      }),
+    );
+    const distributionRes = await POST(webhookRequest());
+
+    expect(distributionRes.status).toBe(200);
+    expect(profiles.get(LEDGER_USER)?.d_tokens).toBe(10);
+    expect(hybrid.get(LEDGER_USER)).toBe(13);
+    expect(artistBalances.get(LEDGER_USER)).toBe(7);
+    expect(rpcCalls.map((call) => call.fn)).toEqual(["credit_token_purchase"]);
+    expect(profileWrites).toEqual([{ userId: LEDGER_USER, patch: { d_tokens: 10 } }]);
+  });
+
   it("credits a plans artist_token quantity onto the buyer artist ledger only", async () => {
     ready();
     constructEventMock.mockReturnValue(

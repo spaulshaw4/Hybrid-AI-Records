@@ -8,8 +8,8 @@ import { SettingsMenu } from "@/components/SettingsMenu";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
-import { shouldShowSiteNav } from "@/lib/site-nav";
-import { PORTAL_MENU, resolvePortalTab, type PortalMenuIcon, type PortalTab } from "@/lib/portal-tabs";
+import { shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
+import { resolvePortalTab, type PortalMenuIcon } from "@/lib/portal-tabs";
 
 const PORTAL_ICONS: Record<PortalMenuIcon, typeof Sparkles> = {
   sparkles: Sparkles,
@@ -24,6 +24,8 @@ const PORTAL_TAB_ACTIVE =
 
 const PORTAL_TAB_IDLE =
   "border border-transparent text-zinc-400 hover:text-white hover:bg-white/5";
+
+const FOCUS_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500";
 
 /**
  * Spendable tokens and the account menu.
@@ -44,7 +46,7 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
 
 function usePortalTabSelect() {
   const navigate = useNavigate();
-  return (tab: PortalTab) => {
+  return (tab: string) => {
     void navigate({
       to: "/portal",
       search: (prev) => ({
@@ -81,8 +83,9 @@ function PortalTabButton({
       aria-label={label}
       onClick={onSelect}
       className={cn(
+        FOCUS_RING,
         compact
-          ? "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-center text-[10px] font-medium leading-none tracking-tight text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-red-500"
+          ? "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-center text-[10px] font-medium leading-none tracking-tight text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white"
           : "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-xs tracking-wider",
         !compact && (active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE),
         compact && active && "bg-white/10 text-white",
@@ -105,7 +108,7 @@ function SiteNavEntries({ compact }: { compact?: boolean }) {
   const selectPortalTab = usePortalTabSelect();
   const portalTab = pathname === "/portal" ? resolvePortalTab(search.tab) : null;
 
-  return PORTAL_MENU.map((item) => (
+  return SITE_NAV.map((item) => (
     <PortalTabButton
       key={item.id}
       icon={item.icon}
@@ -113,7 +116,7 @@ function SiteNavEntries({ compact }: { compact?: boolean }) {
       compactLabel={item.short}
       compact={compact}
       active={portalTab === item.id}
-      onSelect={() => selectPortalTab(item.id)}
+      onSelect={() => selectPortalTab(item.query)}
     />
   ));
 }

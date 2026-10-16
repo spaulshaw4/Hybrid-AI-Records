@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { PORTAL_MENU } from "@/lib/portal-tabs";
-import { MERCH_URL, shouldShowSiteNav } from "@/lib/site-nav";
+import { MERCH_URL, shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
 
 describe("site nav", () => {
   it("uses the portal menu as the only five destinations", () => {
@@ -26,6 +26,14 @@ describe("site nav", () => {
       "HYBRID AI RADIO",
       "DISTRIBUTION & VIDEO PACKAGES",
     ]);
+    expect(PORTAL_MENU.map((item) => item.query)).toEqual([
+      "create",
+      "catalog",
+      "plans",
+      "radio",
+      "distribution",
+    ]);
+    expect(SITE_NAV).toBe(PORTAL_MENU);
   });
 
   it("keeps merch inside the catalog tab as an external store", () => {

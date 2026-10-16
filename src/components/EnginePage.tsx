@@ -657,7 +657,7 @@ function readPromptRecords(): SavedPromptItem[] {
   }
 }
 
-export function EnginePage() {
+export function EnginePage({ embedded = false }: { embedded?: boolean } = {}) {
   const [activeTab, setActiveTab] = useState<"custom" | "easy" | "vocals">("easy");
   const [lyrics, setLyrics] = useState("");
   const [lyricsOrigin, setLyricsOrigin] = useState<"user" | "synthetic">("user");
@@ -1499,9 +1499,11 @@ export function EnginePage() {
       : "+ Vocal";
   const vocalSelected = Boolean(selectedVocal || selectedCharacter);
 
+  const Root = embedded ? "div" : "main";
+
   return (
-    <main
-      ref={pageRef}
+    <Root
+      ref={pageRef as never}
       className="min-h-screen w-full overflow-y-auto px-4 pb-32 lg:pb-8"
       style={{
         minHeight: "100vh",
@@ -2241,6 +2243,6 @@ export function EnginePage() {
         />
       </div>
       <StudioFooter />
-    </main>
+    </Root>
   );
 }

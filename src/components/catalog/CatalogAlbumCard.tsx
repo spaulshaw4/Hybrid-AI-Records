@@ -20,7 +20,7 @@ export function CatalogAlbumCard({ album, onOpen, priority = false }: CatalogAlb
       type="button"
       onClick={() => onOpen(album.id)}
       aria-label={`Open album ${album.title} by ${artist}`}
-      className="relative group w-full cursor-pointer appearance-none border-0 bg-transparent p-0 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      className="relative group w-full cursor-pointer appearance-none border-0 bg-transparent p-0 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
     >
       <div
         aria-hidden="true"

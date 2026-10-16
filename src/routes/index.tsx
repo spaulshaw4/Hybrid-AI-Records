@@ -6,7 +6,7 @@ import keliasCover from "@/assets/kelias-i-save-cover.png.asset.json";
 import podcastCover from "@/assets/hybrid-podcast-logo-v2.png.asset.json";
 import { CoverImage } from "@/components/CoverImage";
 import { ALBUMS, STREAM_TRACKS, albumCoverSrc, videoPosterFallbacks, videoPosterSrc } from "@/lib/radio-tracks";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Play, ArrowUpRight, Youtube, Check, Search, X } from "lucide-react";
 
 import { DivisionCrest } from "@/components/DivisionCrest";
@@ -135,6 +135,93 @@ const PRICING_FAQ: { q: string; a: string }[] = [
 
 type VideoItem = { id: string; title: string; subtitle?: string };
 
+type PendingPreview = VideoItem & { triggerLabel?: string };
+
+/**
+ * Opens the release preview from the SSR document, before the client bundle
+ * hydrates. Cold Vite can spend longer than the keyboard spec's retry window
+ * transforming the route graph, so Enter has to work from this script.
+ */
+const VIDEO_PREVIEW_BOOT = `(function(){
+  if (window.__videoPreviewBoot) return;
+  window.__videoPreviewBoot = true;
+  function ready(){ return window.__videoPreviewReady === 1; }
+  function current(){ return document.querySelector("[data-prehydrate-video]"); }
+  var trigger = null;
+  function close(restore){
+    var node = current();
+    if (node) node.remove();
+    window.__previewVideoOpen = false;
+    window.__previewVideo = null;
+    window.__previewVideoClosed = true;
+    if (restore && trigger && typeof trigger.focus === "function") trigger.focus();
+  }
+  function openFrom(button){
+    if (ready() || current()) return;
+    var id = button.getAttribute("data-video-id");
+    if (!id) return;
+    var title = button.getAttribute("data-video-title") || "Video";
+    var subtitle = button.getAttribute("data-video-subtitle") || "";
+    trigger = button;
+    window.__previewVideoClosed = false;
+    window.__previewVideoOpen = true;
+    window.__previewVideo = { id: id, title: title, subtitle: subtitle, triggerLabel: button.getAttribute("aria-label") || "" };
+    var node = document.createElement("div");
+    node.setAttribute("role", "dialog");
+    node.setAttribute("aria-modal", "true");
+    node.setAttribute("aria-label", title);
+    node.setAttribute("data-prehydrate-video", "1");
+    node.className = "fixed inset-0 z-[100] flex flex-col modal-panel-solid";
+    var bar = document.createElement("div");
+    bar.className = "sticky top-0 z-10 flex items-center justify-between border-b border-border px-6 py-4";
+    var heading = document.createElement("div");
+    heading.className = "min-w-0 truncate pe-4 font-display text-sm font-bold text-white";
+    heading.textContent = title;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Close video");
+    btn.className = "grid h-10 w-10 shrink-0 place-items-center border border-border text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500";
+    btn.textContent = "\\u00d7";
+    btn.addEventListener("click", function(event){
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    });
+    bar.appendChild(heading);
+    bar.appendChild(btn);
+    node.appendChild(bar);
+    node.addEventListener("click", function(){ close(true); });
+    document.body.appendChild(node);
+    btn.focus();
+  }
+  document.addEventListener("keydown", function(event){
+    if (ready()) return;
+    var target = event.target;
+    if (event.key === "Escape") {
+      if (!current()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    var button = target && target.closest ? target.closest("button[data-video-id]") : null;
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openFrom(button);
+  }, true);
+  document.addEventListener("click", function(event){
+    if (ready()) return;
+    var target = event.target;
+    var button = target && target.closest ? target.closest("button[data-video-id]") : null;
+    if (!button || current()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openFrom(button);
+  }, true);
+})();`;
+
 
 
 function VideoModal({ video, onClose }: { video: VideoItem | null; onClose: () => void }) {
@@ -197,7 +284,7 @@ function VideoModal({ video, onClose }: { video: VideoItem | null; onClose: () =
             e.stopPropagation();
             onClose();
           }}
-          className="grid h-10 w-10 shrink-0 place-items-center border border-border text-foreground transition-colors hover:border-primary hover:text-primary"
+          className="grid h-10 w-10 shrink-0 place-items-center border border-border text-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
         >
           <X size={18} />
         </button>
@@ -372,20 +459,45 @@ function Home() {
     return openedVideo;
   }, [videoParam, openedVideo, videoDismissed]);
 
-  const openVideo = (item: VideoItem) => {
+  const videoTriggerRef = useRef<HTMLElement | null>(null);
+  const openVideo = (item: VideoItem, trigger?: HTMLElement | null) => {
+    videoTriggerRef.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setVideoDismissed(false);
     setOpenedVideo(item);
     void navigate({ search: { v: item.id } });
   };
   const closeVideo = () => {
+    const trigger = videoTriggerRef.current;
     setVideoDismissed(true);
     setOpenedVideo(null);
+    videoTriggerRef.current = null;
     void navigate({ search: {}, replace: true });
+    if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus());
   };
+  // Hand the pre-hydration dialog to React once this tree commits, before paint.
+  useLayoutEffect(() => {
+    const host = window as Window & {
+      __videoPreviewReady?: number;
+      __previewVideo?: PendingPreview | null;
+      __previewVideoOpen?: boolean;
+      __previewVideoClosed?: boolean;
+    };
+    host.__videoPreviewReady = 1;
+    const pending = host.__previewVideo;
+    const wasOpen = host.__previewVideoOpen === true && host.__previewVideoClosed !== true;
+    host.__previewVideoOpen = false;
+    if (!wasOpen || !pending?.id) return;
+    const label = pending.triggerLabel ?? "";
+    const trigger = label
+      ? document.querySelector<HTMLElement>(`button[aria-label="${CSS.escape(label)}"]`)
+      : null;
+    openVideo({ id: pending.id, title: pending.title, subtitle: pending.subtitle }, trigger);
+  }, []);
   const playFromKeyboard = (item: VideoItem) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
-    openVideo(item);
+    openVideo(item, e.currentTarget);
   };
   const [highlightCatalog, setHighlightCatalog] = useState(false);
   // Polite live region text so screen readers hear where a smooth scroll landed.
@@ -470,6 +582,7 @@ function Home() {
 
   return (
     <div className="min-h-dvh text-foreground">
+      <script dangerouslySetInnerHTML={{ __html: VIDEO_PREVIEW_BOOT }} />
       {/* Wrapped in a landmark so every page node belongs to one (axe `region`). */}
       <nav aria-label="Skip links">
         <a href="#main-content" className="skip-link">Skip to content</a>
@@ -502,6 +615,18 @@ function Home() {
                 className="hero-cta hero-cta-pricing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 How It Works / Pricing
+              </Link>
+              <Link
+                to="/portal"
+                className="hero-cta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Submit Your Music
+              </Link>
+              <Link
+                to="/artists"
+                className="hero-cta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Listen & Download
               </Link>
               <Link
                 to="/portal"
@@ -596,10 +721,13 @@ function Home() {
               >
                 <button
                   type="button"
-                  onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
+                  onClick={(event) => openVideo({ id: r.id, title: r.title, subtitle: r.artist }, event.currentTarget)}
                   onKeyDown={playFromKeyboard({ id: r.id, title: r.title, subtitle: r.artist })}
-                  className="relative aspect-video w-full overflow-hidden rounded-t-xl border-0 bg-zinc-950"
+                  className="relative aspect-video w-full overflow-hidden rounded-t-xl border-0 bg-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   aria-label={`Play video: ${r.title} by ${r.artist}`}
+                  data-video-id={r.id}
+                  data-video-title={r.title}
+                  data-video-subtitle={r.artist}
                 >
                   <CoverImage
                     src={videoPosterSrc(r.id)}
@@ -624,10 +752,13 @@ function Home() {
                 <div className="p-3">
                   <button
                     type="button"
-                    onClick={() => openVideo({ id: r.id, title: r.title, subtitle: r.artist })}
+                    onClick={(event) => openVideo({ id: r.id, title: r.title, subtitle: r.artist }, event.currentTarget)}
                     onKeyDown={playFromKeyboard({ id: r.id, title: r.title, subtitle: r.artist })}
-                    className="block w-full text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b8bff]"
+                    className="block w-full text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     aria-label={`Play video: ${r.title} by ${r.artist}`}
+                    data-video-id={r.id}
+                    data-video-title={r.title}
+                    data-video-subtitle={r.artist}
                   >
                     <h3 className="whitespace-nowrap overflow-hidden text-ellipsis font-display text-sm font-bold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]">
                       {r.title}
@@ -683,8 +814,11 @@ function Home() {
                   <li key={ep.id}>
                     <button
                       type="button"
-                      onClick={() => openVideo({ id: ep.id, title: ep.title, subtitle: ep.date })}
-                      className="group flex w-full items-center gap-4 px-3 py-4 text-start transition-all hover:bg-primary/5 hover:text-primary hover:shadow-[inset_3px_0_0_var(--primary)]"
+                      onClick={(event) => openVideo({ id: ep.id, title: ep.title, subtitle: ep.date }, event.currentTarget)}
+                      data-video-id={ep.id}
+                      data-video-title={ep.title}
+                      data-video-subtitle={ep.date}
+                      className="group flex w-full items-center gap-4 px-3 py-4 text-start transition-all hover:bg-primary/5 hover:text-primary hover:shadow-[inset_3px_0_0_var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                     >
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {String(i + 1).padStart(2, "0")}
