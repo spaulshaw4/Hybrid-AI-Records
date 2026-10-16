@@ -13,7 +13,8 @@ import {
 } from "lucide-react";
 
 import { Footer } from "@/components/Footer";
-import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
+import { HeaderTokenBalance, PlanBadge } from "@/components/HeaderTokenBalance";
+import { SettingsMenu } from "@/components/SettingsMenu";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
@@ -77,10 +78,9 @@ function NavItem({
   const Icon = ICONS[item.icon];
   const className = compact
     ? cn(
-        "flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-none border border-white/[0.08] bg-zinc-900/70 px-1 py-1.5 outline-none transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 focus-visible:ring-2 focus-visible:ring-red-500",
-        isCreate && "nav-create-glow border-red-500",
-        active && !isCreate && "border-white/70 bg-zinc-800",
-        active && isCreate && "bg-zinc-800",
+        "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-red-500",
+        isCreate && "text-red-400",
+        active && "bg-white/10 text-white",
       )
     : cn(
         "flex min-h-11 items-center gap-3 rounded-none border border-white/[0.08] bg-zinc-900/70 px-3 py-2 outline-none transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 focus-visible:ring-2 focus-visible:ring-red-500",
@@ -98,10 +98,9 @@ function NavItem({
       />
       <span
         className={cn(
-          "rwb-flame rwb-flame-deep font-mono font-bold uppercase",
           compact
-            ? "whitespace-nowrap text-center text-[10px] leading-none tracking-tight"
-            : "min-w-0 text-start text-[11px] tracking-[0.16em]",
+            ? "max-w-full truncate text-center text-[10px] font-medium normal-case leading-none tracking-tight"
+            : "rwb-flame rwb-flame-deep min-w-0 text-start font-mono text-[11px] font-bold uppercase tracking-[0.16em]",
         )}
       >
         {compact ? item.short : item.label}
@@ -198,9 +197,11 @@ function PortalTabButton({
       aria-label={label}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-xs tracking-wider",
-        compact && "min-h-12 flex-col justify-center gap-0.5 px-1 py-1.5 text-center text-[10px] leading-none tracking-tight",
-        active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE,
+        compact
+          ? "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-center text-[10px] font-medium leading-none tracking-tight text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-red-500"
+          : "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-xs tracking-wider",
+        !compact && (active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE),
+        compact && active && "bg-white/10 text-white",
       )}
     >
       <Icon
@@ -210,7 +211,7 @@ function PortalTabButton({
         )}
         aria-hidden
       />
-      <span className="min-w-0 leading-snug">{visible}</span>
+      <span className={cn("min-w-0 leading-snug", compact && "max-w-full truncate")}>{visible}</span>
     </button>
   );
 }
@@ -286,54 +287,48 @@ function SiteSidebar() {
   );
 }
 
-/** Mobile-only top bar: crest on the left, locale controls on the right. */
+/** Fixed top bar: logo and plan, live token pill, settings and account. */
 function SiteHeader() {
   return (
     <header
       data-site-nav="header"
-      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-auto min-h-16 w-full flex-nowrap items-center justify-between gap-1 overflow-x-auto border-b border-white/10 bg-zinc-900/85 px-1.5 py-1.5 backdrop-blur-xl lg:hidden"
+      className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-white/10 bg-black/80 px-3 backdrop-blur-md"
     >
-      <Link
-        to="/"
-        aria-label="Hybrid AI Records — home"
-        className={`${WORDMARK_LINK} shrink-0`}
-      >
-        <Wordmark size="sm" showText={false} interactive />
-      </Link>
-      <LocaleCluster className="ms-auto shrink-0 gap-1.5" />
+      <div className="flex min-w-0 shrink items-center gap-2">
+        <Link
+          to="/"
+          aria-label="Hybrid AI Records — home"
+          className={`${WORDMARK_LINK} shrink-0`}
+        >
+          <Wordmark size="sm" showText={false} interactive />
+        </Link>
+        <PlanBadge />
+      </div>
+      <div className="flex min-w-0 flex-1 justify-center px-1">
+        <HeaderTokenBalance />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <SettingsMenu variant="header" />
+        <UserAuthButton />
+      </div>
     </header>
   );
 }
 
 /**
- * Desktop (non-home): static in-flow locale row at the top of the main column.
- * Home places the cluster beside the hero kicker instead.
+ * Single bottom bar for every route. Same pill on the landing page, portal
+ * radio/create tabs, and the rest of the site. Desktop keeps the sidebar.
  */
-function DesktopLocaleStrip() {
-  const { pathname } = useActiveNav();
-  // Home, catalog, and packages place LocaleCluster on the page header row instead.
-  if (pathname === "/" || pathname === "/artists" || pathname === "/portal") return null;
-
-  return (
-    <div
-      data-site-nav="desktop-locale"
-      className="hidden h-auto min-h-16 w-full items-center justify-end overflow-visible border-b border-white/10 px-6 py-1 lg:flex"
-    >
-      <LocaleCluster />
-    </div>
-  );
-}
-
-function SiteDock() {
+export function MobileNav() {
   const { pathname } = useActiveNav();
 
   return (
     <nav
       data-site-nav="dock"
       aria-label={pathname === "/portal" ? "Portal sections" : "Primary"}
-      className="site-dock pointer-events-auto fixed inset-x-0 bottom-0 z-30 rounded-none border-t border-white/[0.08] bg-zinc-900/70 px-1 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden"
+      className="site-dock pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >
-      <div className="grid grid-cols-5 items-stretch gap-1">
+      <div className="pointer-events-auto flex w-full max-w-md items-stretch gap-0.5 rounded-full border border-white/10 bg-black/80 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md">
         <SiteNavEntries compact />
       </div>
     </nav>
@@ -372,11 +367,10 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       <SiteSidebar />
       <SiteHeader />
       <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
-        <DesktopLocaleStrip />
         <div className="flex-1">{children}</div>
         <Footer />
       </div>
-      <SiteDock />
+      <MobileNav />
     </>
   );
 }

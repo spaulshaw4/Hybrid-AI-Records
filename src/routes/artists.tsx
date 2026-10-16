@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import { isJesterLegacyAlbum, JesterLegacySection } from "@/components/JesterLegacySection";
 import { pageHead } from "@/lib/social-meta";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
-import { LocaleCluster } from "@/components/SiteNav";
 import { ArtistTokenStore, useArtistTokens } from "@/components/ArtistTokenStore";
 import { ArtistSupportTokenButton, catalogArtistId } from "@/components/catalog/ArtistSupportTokenButton";
 import { TrackWaveform } from "@/components/TrackWaveform";
@@ -452,7 +451,6 @@ export function ArtistCatalog({
                 ]
               : [{ label: "Artist tracks" }]
           }
-          end={<LocaleCluster className="hidden lg:inline-flex" />}
         />
       )}
 

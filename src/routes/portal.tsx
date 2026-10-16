@@ -20,7 +20,6 @@ import { RadioPlayerView } from "@/components/portal/RadioPlayerView";
 import { ContactModal } from "@/components/ContactModal";
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { StudioErrorBoundary } from "@/components/StudioErrorBoundary";
-import { LocaleCluster } from "@/components/SiteNav";
 import { pageHead } from "@/lib/social-meta";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import { resolvePortalTab, type PortalTab } from "@/lib/portal-tabs";
@@ -113,7 +112,7 @@ function DistributionPackagesPage() {
     <StudioErrorBoundary region="portal">
       <div className="min-h-dvh">
         <main id="main-content" className="mx-auto max-w-5xl px-4 pb-24 pt-8 sm:px-6 md:pt-12">
-          <PortalBreadcrumb end={<LocaleCluster className="hidden lg:inline-flex" />} />
+          <PortalBreadcrumb />
           <h1 id="portal-page-title" className="portal-page-title font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
             {PORTAL_CRUMB[tab]}
           </h1>

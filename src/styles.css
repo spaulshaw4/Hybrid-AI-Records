@@ -315,7 +315,7 @@
 
   html {
     min-height: 100%;
-    --site-header-height: 4rem;
+    --site-header-height: 3.5rem;
     --site-sidebar-width: 0px;
     --site-dock-height: 0px;
     scroll-padding-top: var(--site-header-height);
@@ -328,8 +328,8 @@
 
   @media (max-width: 1023.98px) {
     html[data-site-nav="on"] {
-      /* One-row mobile bar: crest, token pill, account menu. */
-      --site-header-height: 4rem;
+      /* Fixed h-14 bar: logo, plan badge, token pill, settings, avatar. */
+      --site-header-height: 3.5rem;
     }
   }
 
@@ -337,8 +337,7 @@
     html[data-site-nav="on"] {
       --site-sidebar-width: 16.75rem;
       --site-dock-height: 0px;
-      /* Keep brand-row height so sidebar logo + desktop locale align. */
-      --site-header-height: 4rem;
+      --site-header-height: 3.5rem;
     }
   }
 
@@ -362,7 +361,7 @@
 
 @media (min-width: 1024px) {
   .site-chrome-content {
-    padding-top: 0;
+    padding-top: var(--site-header-height);
     padding-bottom: 0;
   }
 }
@@ -370,9 +369,9 @@
 .site-topbar {
   inset-inline-start: var(--site-sidebar-width);
   inset-inline-end: 0;
-  background-color: rgb(0 0 0 / 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background-color: rgb(0 0 0 / 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgb(255 255 255 / 0.1);
 }
 
@@ -403,14 +402,22 @@
   line-height: 1.35;
 }
 
-@media (max-width: 1023.98px) {
-  .account-menu-name {
-    display: none;
+@media (max-width: 639.98px) {
+  .account-menu-name,
+  .account-menu-chevron {
+    display: none !important;
   }
 
-  /* Phone bar: both balances and the avatar stay on one row. */
+  .account-trigger {
+    padding: 0 !important;
+    gap: 0 !important;
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* Phone bar: both balances stack inside the pill so the badge cannot cover them. */
   .site-topbar .header-token-pill {
-    font-size: 13px;
+    font-size: 12px;
     padding: 2px 6px;
     gap: 0.25rem;
   }
@@ -1504,24 +1511,7 @@ main button:active {
 }
 
 .hero-band h1 {
-  text-shadow: 0 2px 28px rgba(7, 9, 15, 0.9);
-}
-
-/* Beat `main h1 { -webkit-text-fill-color }` so each line keeps its flag colour.
-   REAL MUSIC is neon crimson so it stays readable on the dark mesh. */
-.hero-line-red {
-  color: #ff3344;
-  -webkit-text-fill-color: #ff3344;
-}
-
-.hero-line-white {
-  color: #ffffff;
-  -webkit-text-fill-color: #ffffff;
-}
-
-.hero-line-blue {
-  color: #2563eb;
-  -webkit-text-fill-color: #2563eb;
+  text-shadow: none;
 }
 
 .flag-red {
@@ -2305,37 +2295,29 @@ footer h3 span {
   text-shadow: none;
 }
 
-/* Hero motto stays solid flag lines — never the moving letter sweep. */
-.hero-band h1,
-.hero-line-red,
-.hero-line-white,
-.hero-line-blue {
+/* Hero motto uses the Tailwind line colors. Kill the old fill, sweep, and glow. */
+.hero-band h1 {
+  display: block;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1;
   background-image: none !important;
   background-clip: unset !important;
   -webkit-background-clip: unset !important;
   animation: none !important;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+  text-shadow: none;
+  filter: none;
 }
 
-.hero-band h1,
-.hero-line-white,
-.hero-line-blue {
-  filter: none !important;
-}
-
-.hero-line-white {
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-}
-
-.hero-line-red {
-  color: #ff3344 !important;
-  -webkit-text-fill-color: #ff3344 !important;
-  filter: drop-shadow(0 0 15px rgba(255, 51, 68, 0.8)) !important;
-}
-
-.hero-line-blue {
-  color: #2563eb !important;
-  -webkit-text-fill-color: #2563eb !important;
+.hero-band h1 > span {
+  -webkit-text-fill-color: currentColor;
+  background-image: none !important;
+  background-clip: unset !important;
+  -webkit-background-clip: unset !important;
+  animation: none !important;
+  text-shadow: none;
 }
 
 .hero-cta {
@@ -2906,6 +2888,13 @@ footer .text-muted-foreground {
   }
 }
 
+/* Header badge and token labels stay at the size the bar was drawn for.
+   The 14px floor would push FREE over the logo and the token pill at 390px. */
+.site-topbar [class*="text-[10px]"] {
+  font-size: 10px !important;
+  line-height: 1.15 !important;
+}
+
 /* ── iOS Safari overlay compositing guard ────────────────────────────────
  * Mobile WebKit collapses to a frozen black screen when too many accelerated
  * layers are live at once (rotating crests + blurred hero washes + a newly
@@ -2977,8 +2966,6 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   .glass-panel,
   .studio-glass,
   .site-sidebar,
-  .site-topbar,
-  .site-dock,
   .living-bg-veil,
   .modal-panel-solid,
   .engine-wizard-card,
@@ -2992,7 +2979,6 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   .bg-card,
   .bg-surface,
   .site-sidebar,
-  .site-dock,
   .modal-panel-solid,
   .engine-wizard-card,
   .engine-result-card,
@@ -3000,11 +2986,16 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
     background-color: rgb(24 24 27 / 0.85) !important;
   }
 
-  .site-topbar,
   .modal-panel-solid {
     background-color: rgb(24 24 27 / 0.98) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+  }
+
+  .site-topbar {
+    background-color: rgb(0 0 0 / 0.8) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
   }
 
   /* Long-lived `will-change` promotions are pure GPU-memory cost once the
@@ -3051,7 +3042,7 @@ html[data-overlay-open="true"] .flowing-patriotic-bg::before {
   main dt,
   main label,
   main figcaption,
-  main span,
+  main span:not([class*="drop-shadow-"]),
   main a,
   main button,
   main summary,
@@ -3397,8 +3388,7 @@ footer .text-muted-foreground {
 .bg-card,
 .bg-surface,
 .bg-background\/95,
-.site-sidebar,
-.site-dock {
+.site-sidebar {
   background-color: var(--glass);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -3440,15 +3430,15 @@ footer .text-muted-foreground {
 }
 
 .site-topbar {
-  background-color: rgb(24 24 27 / 0.85) !important;
-  backdrop-filter: blur(var(--glass-blur)) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+  background-color: rgb(0 0 0 / 0.8) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
   border-bottom: 1px solid rgb(255 255 255 / 0.1);
   box-shadow: none;
 }
 
 /* Homepage: keep sidebar and dock edges clear. The top bar keeps its hairline. */
-html[data-page="home"] :is(.site-sidebar, .site-dock) {
+html[data-page="home"] .site-sidebar {
   border-color: transparent !important;
 }
 

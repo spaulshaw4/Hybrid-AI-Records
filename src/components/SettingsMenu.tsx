@@ -26,7 +26,13 @@ import { resetGlowIntensity } from "@/lib/glow-intensity";
  * ESC and overlay clicks close it, focus returns to the gear on close, and the
  * dialog is announced with its title and description.
  */
-export function SettingsMenu() {
+/** Opens the single site-settings dialog from the header gear or the account menu. */
+export function openSiteSettings() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("hybrid:open-settings"));
+}
+
+export function SettingsMenu({ variant = "menu" }: { variant?: "menu" | "header" }) {
 
   const [open, setOpen] = useState(false);
 
@@ -48,7 +54,12 @@ export function SettingsMenu() {
       setOpen(true);
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    const onOpen = () => setOpen(true);
+    window.addEventListener("hybrid:open-settings", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("hybrid:open-settings", onOpen);
+    };
   }, []);
 
 
@@ -63,9 +74,13 @@ export function SettingsMenu() {
         aria-expanded={open}
         aria-controls={open ? "site-settings-dialog" : undefined}
         title="Site settings — text glow and divisions (shortcut: S)"
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none"
+        className={
+          variant === "header"
+            ? "inline-flex shrink-0 items-center justify-center p-1 text-zinc-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 [&_svg]:pointer-events-none"
+            : "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-zinc-900/70 text-zinc-400 backdrop-blur-xl transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e11d2e] focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:pointer-events-none"
+        }
       >
-        <Settings className="size-3.5" aria-hidden="true" />
+        <Settings className={variant === "header" ? "h-4 w-4" : "size-3.5"} aria-hidden="true" />
       </DialogTrigger>
 
 

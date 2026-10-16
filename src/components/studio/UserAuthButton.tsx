@@ -4,7 +4,8 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { CurrencySwitcher } from "@/components/CurrencySwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { SettingsMenu } from "@/components/SettingsMenu";
+import { User as UserIcon } from "lucide-react";
+import { openSiteSettings } from "@/components/SettingsMenu";
 
 function signInHref(): string {
   const path = window.location.pathname;
@@ -131,19 +132,12 @@ export default function UserAuthButton() {
         }}
       >
         <span
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold"
           style={{
-            width: 18,
-            height: 18,
-            borderRadius: "50%",
-            backgroundColor: user ? "#e11d48" : "rgba(255,255,255,0.18)",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 10,
-            fontWeight: 800,
+            backgroundColor: user ? "#dc2626" : "rgba(255,255,255,0.12)",
           }}
         >
-          {user ? initial : "S"}
+          {user ? initial : <UserIcon className="h-3.5 w-3.5" aria-hidden="true" />}
         </span>
         <span className="account-menu-name" style={{ whiteSpace: "nowrap" }}>
           {user ? shortName : "Sign In"}
@@ -203,7 +197,27 @@ export default function UserAuthButton() {
               <p style={{ margin: "0 0 6px", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#94a3b8" }}>
                 Settings
               </p>
-              <SettingsMenu />
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  openSiteSettings();
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  padding: "8px 10px",
+                  color: "#f8fafc",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  borderRadius: 8,
+                }}
+              >
+                Site settings
+              </button>
             </div>
           </div>
           {user ? (
