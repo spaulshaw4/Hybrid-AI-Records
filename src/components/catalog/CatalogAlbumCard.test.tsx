@@ -90,9 +90,15 @@ describe("catalog album cards", () => {
 
     const card = screen.getByRole("button", { name: /open album gravity left behind/i });
     expect(card).toHaveClass("relative", "group", "w-full", "cursor-pointer");
-    expect(screen.getByText("Gravity Left Behind")).toBeInTheDocument();
+    expect(screen.getByText("Gravity Left Behind")).toHaveClass("group-hover:text-red-400");
     expect(screen.getByText("Stephen P. Shaw")).toBeInTheDocument();
-    expect(screen.getByText(/1 Tracks/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 Tracks · Space Rock/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /support artist/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("list").className).toContain("grid-cols-1");
+    expect(screen.getByRole("list").className).toContain("md:grid-cols-2");
+    expect(screen.getByRole("list").className).toContain("lg:grid-cols-3");
+    expect(screen.getByRole("list").className).toContain("min-w-0");
+    expect(screen.getByRole("list").className).not.toContain("lg:grid-cols-4");
 
     const beam = screen.getByTestId("catalog-album-beam");
     expect(beam).toHaveClass("animate-border-beam", "opacity-40", "pointer-events-none");
@@ -100,6 +106,20 @@ describe("catalog album cards", () => {
 
     await userEvent.click(card);
     expect(onOpen).toHaveBeenCalledWith("gravity-left-behind");
+
+    card.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("omits a blank genre instead of rendering an empty label", () => {
+    const album = groupPlayablesAsAlbums([
+      artistTrackToPlayable({ ...playable, genre: "   " })!,
+    ])[0];
+    render(<CatalogAlbumGrid albums={[album]} onOpen={() => {}} />);
+    expect(screen.getByText("1 Tracks")).toBeInTheDocument();
+    expect(screen.queryByText(/space rock/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
   });
 
   it("drops an album after its only track is marked missing", () => {

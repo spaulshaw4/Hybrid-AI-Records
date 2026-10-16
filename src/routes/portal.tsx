@@ -111,7 +111,7 @@ function DistributionPackagesPage() {
   return (
     <StudioErrorBoundary region="portal">
       <div className="min-h-dvh">
-        <main id="main-content" className="mx-auto max-w-5xl px-4 pb-32 pt-8 sm:px-6 md:pt-12 lg:pb-24">
+        <main id="main-content" className="mx-auto min-w-0 w-full max-w-5xl px-4 pb-32 pt-8 sm:px-6 md:pt-12 lg:pb-24">
           <PortalBreadcrumb />
           <h1 id="portal-page-title" className="portal-page-title font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
             {PORTAL_CRUMB[tab]}

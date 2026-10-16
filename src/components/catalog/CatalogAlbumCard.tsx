@@ -1,4 +1,3 @@
-import { ArtistSupportTokenButton, catalogArtistId } from "@/components/catalog/ArtistSupportTokenButton";
 import { CoverImage } from "@/components/CoverImage";
 import { omitUnplayableAlbums } from "@/lib/artist-catalog";
 import type { Album } from "@/lib/radio-tracks";
@@ -14,6 +13,7 @@ type CatalogAlbumCardProps = {
 export function CatalogAlbumCard({ album, onOpen, priority = false }: CatalogAlbumCardProps) {
   const artist = album.artist.trim() || "Hybrid AI Records";
   const trackCount = album.tracks.length;
+  const genre = album.genre.trim();
 
   return (
     <button
@@ -75,11 +75,13 @@ export function CatalogAlbumCard({ album, onOpen, priority = false }: CatalogAlb
             </span>
           </div>
           <div className="min-w-0">
-            <span className="block truncate font-bold text-white">{album.title}</span>
+            <span className="block truncate font-bold text-white transition-colors group-hover:text-red-400">
+              {album.title}
+            </span>
             <span className="mt-0.5 block truncate text-xs text-neutral-400">{artist}</span>
             <span className="mt-2 block font-mono text-[10px] uppercase tracking-[0.16em] text-neutral-400">
               {trackCount} Tracks
-              {album.genre ? ` · ${album.genre}` : ""}
+              {genre ? ` · ${genre}` : ""}
             </span>
           </div>
         </div>
@@ -97,19 +99,12 @@ export function CatalogAlbumGrid({
 }) {
   const visible = omitUnplayableAlbums(albums);
   return (
-    <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-      {visible.map((album, index) => {
-        const leadTrackId = album.tracks[0]?.id?.trim() ?? "";
-        const artistId = catalogArtistId(album.artist);
-        return (
-          <li key={album.id} className="flex flex-col gap-2">
-            <CatalogAlbumCard album={album} onOpen={onOpen} priority={index < 4} />
-            {artistId && leadTrackId ? (
-              <ArtistSupportTokenButton artistId={artistId} trackId={leadTrackId} />
-            ) : null}
-          </li>
-        );
-      })}
+    <ul className="mt-4 grid min-w-0 w-full grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {visible.map((album, index) => (
+        <li key={album.id} className="min-w-0 w-full">
+          <CatalogAlbumCard album={album} onOpen={onOpen} priority={index < 4} />
+        </li>
+      ))}
     </ul>
   );
 }

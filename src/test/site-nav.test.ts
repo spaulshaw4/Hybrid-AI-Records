@@ -1,37 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { isSiteNavActive, shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
+
+import { PORTAL_MENU } from "@/lib/portal-tabs";
+import { MERCH_URL, shouldShowSiteNav } from "@/lib/site-nav";
 
 describe("site nav", () => {
-  it("keeps the five primary destinations in order", () => {
-    expect(SITE_NAV.map((item) => item.id)).toEqual([
-      "make-track",
-      "catalog",
-      "merch",
+  it("uses the portal menu as the only five destinations", () => {
+    expect(PORTAL_MENU.map((item) => item.id)).toEqual([
+      "create",
+      "catalog_merch",
+      "plans",
       "radio",
-      "packages",
+      "distribution",
+    ]);
+    expect(PORTAL_MENU.map((item) => item.short)).toEqual([
+      "Create",
+      "Catalog",
+      "Plans",
+      "Radio",
+      "Distro",
+    ]);
+    expect(PORTAL_MENU.map((item) => item.label)).toEqual([
+      "CREATE YOUR TRACK",
+      "CATALOG & MERCH",
+      "PLANS & TOKENS",
+      "HYBRID AI RADIO",
+      "DISTRIBUTION & VIDEO PACKAGES",
     ]);
   });
 
-  it("uses short dock labels that fit a phone without clipping", () => {
-    expect(SITE_NAV.map((item) => item.short)).toEqual(["Create", "Catalog", "Merch", "Radio", "Packs"]);
-  });
-
-  it("marks Hybrid AI Radio active on the homepage radio hash", () => {
-    const item = SITE_NAV.find((entry) => entry.id === "radio")!;
-    expect(isSiteNavActive(item, "/", {}, "radio")).toBe(true);
-    expect(isSiteNavActive(item, "/", {}, "podcast")).toBe(false);
-    expect(isSiteNavActive(item, "/artists", {}, "")).toBe(false);
+  it("keeps merch inside the catalog tab as an external store", () => {
+    expect(PORTAL_MENU.some((item) => item.label.includes("MERCH") && item.id !== "catalog_merch")).toBe(
+      false,
+    );
+    expect(MERCH_URL).toBe("https://hybrid-ai-records-llc.printful.me");
   });
 
   it("hides chrome on admin and auth", () => {
     expect(shouldShowSiteNav("/admin/review")).toBe(false);
     expect(shouldShowSiteNav("/auth")).toBe(false);
     expect(shouldShowSiteNav("/engine")).toBe(true);
-  });
-
-  it("marks Create Your Track active on the engine workspace", () => {
-    const item = SITE_NAV.find((entry) => entry.id === "make-track")!;
-    expect(isSiteNavActive(item, "/engine", {}, "")).toBe(true);
-    expect(isSiteNavActive(item, "/", {}, "")).toBe(false);
+    expect(shouldShowSiteNav("/")).toBe(true);
+    expect(shouldShowSiteNav("/portal")).toBe(true);
   });
 });

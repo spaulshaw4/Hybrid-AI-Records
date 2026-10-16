@@ -446,7 +446,7 @@ export function ArtistCatalog({
   const Root = embedded ? "div" : "main";
 
   return (
-    <Root className={embedded ? "w-full" : "mx-auto w-full max-w-5xl px-5 py-8"}>
+    <Root className={embedded ? "min-w-0 w-full" : "mx-auto min-w-0 w-full max-w-5xl px-5 py-8"}>
       {embedded ? null : (
         <PortalBreadcrumb
           trail={

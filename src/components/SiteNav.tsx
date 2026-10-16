@@ -1,16 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import {
-  AudioLines,
-  Clapperboard,
-  CreditCard,
-  Disc3,
-  Film,
-  Library,
-  Radio,
-  ShoppingBag,
-  Sparkles,
-} from "lucide-react";
+import { CreditCard, Disc3, Film, Radio, Sparkles } from "lucide-react";
 
 import { Footer } from "@/components/Footer";
 import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
@@ -18,21 +8,8 @@ import { SettingsMenu } from "@/components/SettingsMenu";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
-import {
-  SITE_NAV,
-  isSiteNavActive,
-  shouldShowSiteNav,
-  type SiteNavItem,
-} from "@/lib/site-nav";
+import { shouldShowSiteNav } from "@/lib/site-nav";
 import { PORTAL_MENU, resolvePortalTab, type PortalMenuIcon, type PortalTab } from "@/lib/portal-tabs";
-
-const ICONS = {
-  audio: AudioLines,
-  catalog: Library,
-  merch: ShoppingBag,
-  radio: Radio,
-  packages: Clapperboard,
-} as const;
 
 const PORTAL_ICONS: Record<PortalMenuIcon, typeof Sparkles> = {
   sparkles: Sparkles,
@@ -62,99 +39,6 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
       <HeaderTokenBalance />
       <UserAuthButton />
     </div>
-  );
-}
-
-function NavItem({
-  item,
-  compact,
-  active,
-}: {
-  item: SiteNavItem;
-  compact?: boolean;
-  active: boolean;
-}) {
-  const isCreate = item.id === "make-track";
-  const Icon = ICONS[item.icon];
-  const className = compact
-    ? cn(
-        "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-red-500",
-        isCreate && "text-red-400",
-        active && "bg-white/10 text-white",
-      )
-    : cn(
-        "flex min-h-11 items-center gap-3 rounded-none border border-white/[0.08] bg-zinc-900/70 px-3 py-2 outline-none transition-all duration-200 hover:border-white/[0.15] hover:bg-zinc-900/80 focus-visible:ring-2 focus-visible:ring-red-500",
-        isCreate && "nav-create-glow border-red-500",
-        active && "bg-zinc-800",
-      );
-  const label = (
-    <>
-      <Icon
-        className={cn(
-          "rwb-nav-icon shrink-0",
-          compact ? "size-4" : "size-[18px]",
-        )}
-        aria-hidden
-      />
-      <span
-        className={cn(
-          compact
-            ? "max-w-full truncate text-center text-[10px] font-medium normal-case leading-none tracking-tight"
-            : "rwb-flame rwb-flame-deep min-w-0 text-start font-mono text-[11px] font-bold uppercase tracking-[0.16em]",
-        )}
-      >
-        {compact ? item.short : item.label}
-      </span>
-    </>
-  );
-
-  if (item.href) {
-    return (
-      <a
-        href={item.href}
-        target="_blank"
-        rel="noreferrer"
-        className={className}
-        aria-current={active ? "page" : undefined}
-      >
-        {label}
-      </a>
-    );
-  }
-
-  if (item.to === "/portal") {
-    return (
-      <Link
-        to="/portal"
-        search={{ tab: "distribution" }}
-        className={className}
-        aria-current={active ? "page" : undefined}
-      >
-        {label}
-      </Link>
-    );
-  }
-
-  if (item.to === "/artists") {
-    return (
-      <Link to="/artists" className={className} aria-current={active ? "page" : undefined}>
-        {label}
-      </Link>
-    );
-  }
-
-  if (item.to === "/" && item.hash === "radio") {
-    return (
-      <Link to="/" hash="radio" className={className} aria-current={active ? "page" : undefined}>
-        {label}
-      </Link>
-    );
-  }
-
-  return (
-    <Link to="/engine" className={className} aria-current={active ? "page" : undefined}>
-      {label}
-    </Link>
   );
 }
 
@@ -217,35 +101,21 @@ function PortalTabButton({
 }
 
 function SiteNavEntries({ compact }: { compact?: boolean }) {
-  const { pathname, search, hash } = useActiveNav();
+  const { pathname, search } = useActiveNav();
   const selectPortalTab = usePortalTabSelect();
-  const onPortal = pathname === "/portal";
-  const portalTab = onPortal ? resolvePortalTab(search.tab) : null;
+  const portalTab = pathname === "/portal" ? resolvePortalTab(search.tab) : null;
 
-  if (portalTab) {
-    return PORTAL_MENU.map((item) => (
-      <PortalTabButton
-        key={item.id}
-        icon={item.icon}
-        label={item.label}
-        compactLabel={item.short}
-        compact={compact}
-        active={portalTab === item.id}
-        onSelect={() => selectPortalTab(item.id)}
-      />
-    ));
-  }
-
-  return SITE_NAV.map((item) => {
-    return (
-      <NavItem
-        key={item.id}
-        item={item}
-        compact={compact}
-        active={isSiteNavActive(item, pathname, search, hash)}
-      />
-    );
-  });
+  return PORTAL_MENU.map((item) => (
+    <PortalTabButton
+      key={item.id}
+      icon={item.icon}
+      label={item.label}
+      compactLabel={item.short}
+      compact={compact}
+      active={portalTab === item.id}
+      onSelect={() => selectPortalTab(item.id)}
+    />
+  ));
 }
 
 function useActiveNav() {
@@ -253,7 +123,6 @@ function useActiveNav() {
     select: (state) => ({
       pathname: state.location.pathname,
       search: state.location.search as Record<string, unknown>,
-      hash: state.location.hash,
     }),
   });
   return {
@@ -263,9 +132,6 @@ function useActiveNav() {
 }
 
 function SiteSidebar() {
-  const { pathname } = useActiveNav();
-  const onPortal = pathname === "/portal";
-
   return (
     <aside
       data-site-nav="sidebar"
@@ -277,10 +143,7 @@ function SiteSidebar() {
           <Wordmark size="sm" interactive />
         </Link>
       </div>
-      <nav
-        className="flex flex-1 flex-col gap-2 overflow-y-auto border-t-0 p-3"
-        aria-label={onPortal ? "Portal sections" : undefined}
-      >
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto border-t-0 p-3" aria-label="Portal sections">
         <SiteNavEntries />
       </nav>
     </aside>
@@ -289,12 +152,14 @@ function SiteSidebar() {
 
 /** Fixed top bar: logo, live token pill, settings and account. */
 function SiteHeader() {
+  const { pathname } = useActiveNav();
+
   return (
     <header
       data-site-nav="header"
       className="site-topbar pointer-events-auto fixed top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-white/10 bg-black/80 px-3 backdrop-blur-md"
     >
-      <div className="flex min-w-0 shrink items-center gap-2">
+      <div className={cn("flex min-w-0 shrink items-center gap-2", pathname === "/" && "lg:hidden")}>
         <Link
           to="/"
           aria-label="Hybrid AI Records — home"
@@ -319,12 +184,10 @@ function SiteHeader() {
  * radio/create tabs, and the rest of the site. Desktop keeps the sidebar.
  */
 export function MobileNav() {
-  const { pathname } = useActiveNav();
-
   return (
     <nav
       data-site-nav="dock"
-      aria-label={pathname === "/portal" ? "Portal sections" : "Primary"}
+      aria-label="Portal sections"
       className="site-dock pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >
       <div className="pointer-events-auto flex w-full max-w-md items-stretch gap-0.5 rounded-full border border-white/10 bg-black/80 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md">
@@ -365,8 +228,8 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     <>
       <SiteSidebar />
       <SiteHeader />
-      <div className="site-chrome-content flex min-h-screen flex-col bg-transparent">
-        <div className="flex-1">{children}</div>
+      <div className="site-chrome-content flex min-h-screen min-w-0 w-full flex-col bg-transparent">
+        <div className="min-w-0 w-full flex-1">{children}</div>
         <Footer />
       </div>
       <MobileNav />
