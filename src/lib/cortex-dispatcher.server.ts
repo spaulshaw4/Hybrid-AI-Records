@@ -272,6 +272,7 @@ async function cortexGate1IdentityAndTokens(input: {
     } else if (input.userId?.trim() && input.supabase) {
       const envelope = UserContextIngate.fromVerifiedUserId(input.userId, {
         userId: input.userId.trim(),
+        email: null,
         accessToken: "",
         supabase: input.supabase,
       });

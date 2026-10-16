@@ -5,16 +5,14 @@ import { memo, useEffect, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { DEV_TEST_TOKEN_BALANCE, isDevAuthBypass } from "@/lib/dev-auth";
-import { planName, type SubscriptionPlanName } from "@/lib/subscription-plans";
 import { getTokenBalance } from "@/lib/tokens.functions";
 import { openSiteSignIn } from "@/components/studio/UserAuthButton";
 
-type BalanceResult = { balance: number; dTokens: number; plan: SubscriptionPlanName };
+type BalanceResult = { balance: number; dTokens: number };
 
 type AccountSnap = {
   balance: number | null;
   dTokens: number | null;
-  plan: SubscriptionPlanName;
   signedIn: boolean;
   ready: boolean;
 };
@@ -22,7 +20,6 @@ type AccountSnap = {
 const INITIAL: AccountSnap = {
   balance: null,
   dTokens: null,
-  plan: "Free",
   signedIn: false,
   ready: false,
 };
@@ -50,7 +47,6 @@ function startAccount(): () => void {
       update({
         balance: result.balance,
         dTokens: result.dTokens,
-        plan: result.plan ?? planName(null, null),
         signedIn: true,
         ready: true,
       });
@@ -60,18 +56,17 @@ function startAccount(): () => void {
         update({
           balance: DEV_TEST_TOKEN_BALANCE,
           dTokens: 0,
-          plan: "Free",
           signedIn: true,
           ready: true,
         });
         return;
       }
-      update({ balance: null, dTokens: null, plan: "Free", signedIn: false, ready: true });
+      update({ balance: null, dTokens: null, signedIn: false, ready: true });
     }
   };
 
   const signedOut = () => {
-    update({ balance: null, dTokens: null, plan: "Free", signedIn: false, ready: true });
+    update({ balance: null, dTokens: null, signedIn: false, ready: true });
   };
 
   void supabase.auth.getSession().then(({ data }) => {
@@ -99,7 +94,7 @@ function startAccount(): () => void {
   };
 }
 
-/** One shared read for the plan badge and the token pill. */
+/** One shared read for the token pill. */
 function useHeaderAccount(): AccountSnap {
   const fetchBalance = useServerFn(getTokenBalance);
   latestFetch = fetchBalance as (args: { data: undefined }) => Promise<BalanceResult>;
@@ -126,19 +121,6 @@ function useHeaderAccount(): AccountSnap {
 
 const PILL =
   "header-token-pill flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white sm:px-2.5";
-
-/**
- * Live plan label. Paid tiers come from profiles.subscription_tier when status is active.
- * Signed-out and unpaid sessions read Free.
- */
-export function PlanBadge() {
-  const { plan } = useHeaderAccount();
-  return (
-    <span className="shrink-0 whitespace-nowrap rounded border border-red-500/30 bg-red-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-400">
-      {plan || "Free"}
-    </span>
-  );
-}
 
 /**
  * Center pill: Hybrid Tokens and D-Tokens, or Sign In when there is no session.

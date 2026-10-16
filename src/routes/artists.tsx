@@ -40,6 +40,7 @@ import {
 } from "@/lib/catalog-player";
 import { CoverImage } from "@/components/CoverImage";
 import { SendVaultTrackEmailButton } from "@/components/vault/SendVaultTrackEmailButton";
+import { isPersistedVaultId } from "@/lib/vault-client";
 import { CatalogAlbumGrid } from "@/components/catalog/CatalogAlbumCard";
 import {
   Sheet,
@@ -187,6 +188,11 @@ export function ArtistCatalog({
     albumsSource.find((a) => a.id === albumParam) ??
     albumsSource.find((a) => a.title === albumParam) ??
     null;
+  const headerArtistName = selectedAlbum ? selectedAlbum.artist.trim() || selectedAlbum.title : "";
+  const headerGenre = selectedAlbum?.genre.trim() ?? "";
+  const headerTrackCount = selectedAlbum?.tracks.length ?? 0;
+  const headerArtistId = selectedAlbum ? catalogArtistId(selectedAlbum.artist) : "";
+  const headerTrackId = selectedAlbum?.tracks.find((track) => track.id.trim())?.id.trim() ?? "";
 
   const playingId = playback.playing ? playback.currentTrack?.id ?? playback.track?.id ?? null : null;
   const activeId = playback.currentTrack?.id ?? playback.track?.id ?? null;
@@ -644,15 +650,15 @@ export function ArtistCatalog({
         </>
       ) : (
         <>
-          <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-end">
+          <div className="mt-6 flex flex-col items-start gap-6 rounded-xl border border-white/10 bg-gradient-to-r from-red-950/40 via-zinc-900/60 to-blue-950/40 p-6 backdrop-blur-md md:flex-row md:items-center">
             {selectedAlbum.cover ? (
               <CoverImage
                 src={selectedAlbum.cover}
-                alt={`${selectedAlbum.title} album cover`}
-                sizes="(min-width: 640px) 11rem, 40vw"
-                width={640}
-                height={640}
-                className="aspect-square w-40 shrink-0 rounded-xl border border-border-strong object-cover shadow-lg sm:w-44"
+                alt={headerArtistName}
+                sizes="8rem"
+                width={256}
+                height={256}
+                className="h-32 w-32 shrink-0 rounded-lg border border-white/10 object-cover shadow-2xl"
                 onError={() => {
                   console.warn("[artists] album header cover failed:", {
                     album: selectedAlbum.title,
@@ -661,24 +667,31 @@ export function ArtistCatalog({
                 }}
               />
             ) : (
-              <span className="flex aspect-square w-40 shrink-0 items-center justify-center rounded-xl border border-border-strong bg-ink font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground sm:w-44">
+              <span className="flex h-32 w-32 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-zinc-900 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-400">
                 No cover
               </span>
             )}
-            <div className="min-w-0 space-y-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                {selectedAlbum.artist}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {selectedAlbum.genre ? (
-                  <span className="rounded-full border border-border-strong bg-ink/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    {selectedAlbum.genre}
+            <div className="min-w-0 flex-1 space-y-3">
+              <h1 className="break-words text-3xl font-black uppercase tracking-wider text-white">
+                {headerArtistName}
+              </h1>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {headerGenre ? (
+                  <span className="shrink-0 rounded-full border border-white/5 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                    {headerGenre}
                   </span>
                 ) : null}
-                <span className="rounded-full border border-border-strong bg-ink/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                  {selectedAlbum.tracks.length} tracks
+                <span className="shrink-0 rounded-full border border-white/5 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                  {headerTrackCount} {headerTrackCount === 1 ? "Track" : "Tracks"}
                 </span>
                 <DivisionBadge division={selectedAlbum.division} />
+                {headerArtistId && headerTrackId ? (
+                  <ArtistSupportTokenButton
+                    variant="header"
+                    artistId={headerArtistId}
+                    trackId={headerTrackId}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
@@ -770,100 +783,96 @@ export function ArtistCatalog({
           ) : null}
 
           <ul className="mt-4 space-y-2">
-            {pageTracks.map((t) => {
+            {pageTracks.map((t, index) => {
               const owned = tokens.unlocked.has(t.id);
               const busy = tokens.busyTrack === t.id;
               const isPlaying = playingId === t.id;
               const isActive = activeId === t.id;
               const rowProgress =
                 isActive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
+              const emailable = isPersistedVaultId(t.id);
 
               return (
                 <li
                   key={t.id}
                   onClick={() => setDetailTrackId(t.id)}
-                  className="flex cursor-pointer items-center gap-3 rounded-xl border border-border-strong bg-ink/50 p-3 backdrop-blur transition hover:border-primary/50"
+                  className="group flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-white/5 bg-zinc-900/40 p-3.5 transition-colors hover:bg-zinc-800/60"
                 >
-                  {bulkMode ? (
-                    <input
-                      type="checkbox"
-                      checked={selected.has(t.id)}
-                      disabled={!owned || bulkBusy}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleSelected(t.id)}
-                      aria-label={`Select ${t.title} for bulk download`}
-                      className="size-4 shrink-0 accent-primary disabled:opacity-40"
-                    />
-                  ) : null}
-
-                  <span className="w-6 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-foreground">
-                    {t.trackNumber ?? "·"}
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      console.log("[artists] play click", {
-                        id: t.id,
-                        title: t.title,
-                        audio_url: t.src,
-                        cover_url: t.cover,
-                      });
-                      preview(t.id, t.src);
-                    }}
-                    aria-label={`${isPlaying ? "Pause" : "Preview"} ${t.title} by ${t.artist}`}
-                    className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-ink/60 text-muted-foreground transition hover:border-primary hover:text-primary"
-                  >
-                    {isPlaying ? (
-                      <Pause size={14} fill="currentColor" />
-                    ) : (
-                      <Play size={14} fill="currentColor" />
-                    )}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-foreground">{t.title}</p>
-                    <p className="truncate font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      {t.artist}
-                    </p>
-                    {isActive ? (
-                      <VaultWaveformBar
-                        currentTime={formatTime(currentTime)}
-                        duration={formatTime(duration)}
-                        isPlaying={isPlaying}
-                        progressPercent={rowProgress * 100}
+                  <div className="flex min-w-0 items-center gap-4">
+                    {bulkMode ? (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(t.id)}
+                        disabled={!owned || bulkBusy}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleSelected(t.id)}
+                        aria-label={`Select ${t.title} for bulk download`}
+                        className="size-4 shrink-0 accent-primary disabled:opacity-40"
                       />
                     ) : null}
+                    <span className="w-4 shrink-0 font-mono text-sm text-zinc-500">
+                      {t.trackNumber ?? pageStart + index + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        console.log("[artists] play click", {
+                          id: t.id,
+                          title: t.title,
+                          audio_url: t.src,
+                          cover_url: t.cover,
+                        });
+                        preview(t.id, t.src);
+                      }}
+                      aria-label={`${isPlaying ? "Pause" : "Preview"} ${t.title} by ${t.artist}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition-all group-hover:bg-red-600"
+                    >
+                      {isPlaying ? (
+                        <Pause className="h-4 w-4 fill-current" />
+                      ) : (
+                        <Play className="ml-0.5 h-4 w-4 fill-current" />
+                      )}
+                    </button>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold tracking-wide text-white">{t.title}</p>
+                      <p className="truncate text-xs uppercase tracking-wider text-zinc-400">{t.artist}</p>
+                      {isActive ? (
+                        <VaultWaveformBar
+                          currentTime={formatTime(currentTime)}
+                          duration={formatTime(duration)}
+                          isPlaying={isPlaying}
+                          progressPercent={rowProgress * 100}
+                        />
+                      ) : null}
+                    </div>
                   </div>
-
-                  <button
-                    type="button"
-                    disabled={busy || bulkBusy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void tokens.download(t.id);
-                    }}
-                    className={`flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] transition disabled:opacity-60 ${
-                      owned
-                        ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
-                        : "border-border-strong text-muted-foreground hover:border-primary hover:text-primary"
-                    }`}
-                  >
-                    {owned ? <Check size={13} aria-hidden /> : <Download size={13} aria-hidden />}
-                    {busy ? "Working…" : owned ? "Download" : "1 token"}
-                  </button>
-                  {catalogArtistId(t.artist) ? (
-                    <ArtistSupportTokenButton
-                      artistId={catalogArtistId(t.artist)}
-                      trackId={t.id}
-                      className="shrink-0"
-                    />
-                  ) : null}
-                  <SendVaultTrackEmailButton
-                    trackId={t.id}
-                    className="border-border-strong px-3 py-2 font-mono text-[10px] text-muted-foreground hover:border-primary hover:text-primary"
-                  />
+                  <div className="flex shrink-0 items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={busy || bulkBusy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void tokens.download(t.id);
+                      }}
+                      className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all hover:bg-white/10 disabled:opacity-60"
+                    >
+                      {owned ? (
+                        <Check className="h-3.5 w-3.5 text-zinc-400" aria-hidden />
+                      ) : (
+                        <Download className="h-3.5 w-3.5 text-zinc-400" aria-hidden />
+                      )}
+                      <span>{busy ? "Working…" : owned ? "Download" : "1 Token"}</span>
+                    </button>
+                    {emailable ? (
+                      <span className="hidden sm:inline-flex">
+                        <SendVaultTrackEmailButton
+                          trackId={t.id}
+                          className="h-auto border-transparent bg-transparent px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 hover:text-white"
+                        />
+                      </span>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}
@@ -1012,10 +1021,12 @@ export function ArtistCatalog({
                     </>
                   )}
                 </button>
-                <SendVaultTrackEmailButton
-                  trackId={detailTrack.id}
-                  className="h-auto w-full border-border-strong px-4 py-3 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
-                />
+                {isPersistedVaultId(detailTrack.id) ? (
+                  <SendVaultTrackEmailButton
+                    trackId={detailTrack.id}
+                    className="h-auto w-full border-border-strong px-4 py-3 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+                  />
+                ) : null}
 
                 <div className="rounded-lg border border-border-strong bg-ink/40 p-4">
                   <div className="flex items-center gap-3">

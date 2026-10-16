@@ -20,6 +20,7 @@ describe("UserContextIngate", () => {
       },
       resolveStudioSession: async () => ({
         userId,
+        email: null,
         accessToken: "aaa.bbb.ccc",
         supabase: {},
       }),
@@ -43,6 +44,7 @@ describe("UserContextIngate", () => {
     expect(() =>
       UserContextIngate.fromVerifiedUserId("11111111-1111-4111-8111-111111111111", {
         userId: "11111111-1111-4111-8111-111111111111",
+        email: null,
         accessToken: "",
         supabase: {} as never,
       }),

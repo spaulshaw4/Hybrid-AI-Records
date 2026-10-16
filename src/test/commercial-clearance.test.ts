@@ -32,7 +32,7 @@ const { send, state, getUserById, renderClearanceCertificatePdf } = vi.hoisted((
     data: {
       user: {
         email: "session@example.com",
-        user_metadata: { display_name: "Nia" },
+        user_metadata: { display_name: "Nia" } as Record<string, unknown>,
       },
     },
     error: null,

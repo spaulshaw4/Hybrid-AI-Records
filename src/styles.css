@@ -328,7 +328,7 @@
 
   @media (max-width: 1023.98px) {
     html[data-site-nav="on"] {
-      /* Fixed h-14 bar: logo, plan badge, token pill, settings, avatar. */
+      /* Fixed h-14 bar: logo, token pill, settings, avatar. */
       --site-header-height: 3.5rem;
     }
   }
@@ -415,7 +415,7 @@
     border: none !important;
   }
 
-  /* Phone bar: both balances stack inside the pill so the badge cannot cover them. */
+  /* Phone bar: both balances stack inside the pill so they stay on the bar. */
   .site-topbar .header-token-pill {
     font-size: 12px;
     padding: 2px 6px;
@@ -2888,11 +2888,23 @@ footer .text-muted-foreground {
   }
 }
 
-/* Header badge and token labels stay at the size the bar was drawn for.
-   The 14px floor would push FREE over the logo and the token pill at 390px. */
+/* Token labels stay at the size the bar was drawn for.
+   The 14px floor would crowd the logo and the token pill at 390px. */
 .site-topbar [class*="text-[10px]"] {
   font-size: 10px !important;
   line-height: 1.15 !important;
+}
+
+/* Horizontal scroller that keeps swipe, without a visible bar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* ── iOS Safari overlay compositing guard ────────────────────────────────

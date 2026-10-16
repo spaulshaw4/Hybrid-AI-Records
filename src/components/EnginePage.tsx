@@ -68,11 +68,11 @@ const surpriseClass = `${headerActionClass} border border-red-600 bg-red-600 fon
 const quietActionClass = `${headerActionClass} border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white`;
 const clearActionClass = "inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-400";
 const topPillClass =
-  "flex h-full w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-2.5 text-center text-xs font-mono font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-zinc-800 disabled:hover:text-zinc-400";
+  "flex h-full w-full min-w-0 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-950/80 px-2 py-3 text-center text-xs font-semibold uppercase leading-tight text-zinc-400 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-zinc-800 disabled:hover:text-zinc-400";
 const topPillActiveClass =
-  "flex h-full w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-red-500 bg-zinc-900 px-3 py-2.5 text-center text-xs font-mono font-bold uppercase tracking-wider text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
+  "flex h-full w-full min-w-0 items-center justify-center gap-1.5 rounded-lg border border-red-500 bg-zinc-900 px-2 py-3 text-center text-xs font-semibold uppercase leading-tight text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
 const selectedPillClass =
-  "flex w-full items-center gap-2 whitespace-nowrap rounded-xl border border-red-500 bg-zinc-900 px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
+  "flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-red-500 bg-zinc-900 px-2 py-3 text-xs font-mono font-bold uppercase tracking-wider text-white shadow-[0_0_15px_rgba(239,68,68,0.35)]";
 
 type StudioModal = "reference" | "visual" | null;
 
@@ -557,17 +557,10 @@ const fieldStyle: CSSProperties = {
   lineHeight: 1.5,
 };
 
-function modeTabStyle(active: boolean): CSSProperties {
-  return {
-    backgroundColor: "transparent",
-    border: "none",
-    color: active ? "#f9a8d4" : "#e9d5ff",
-    fontWeight: 700,
-    fontSize: 15,
-    borderBottom: active ? "2px solid #e11d48" : "2px solid transparent",
-    paddingBottom: 6,
-    cursor: "pointer",
-  };
+function modeTabClass(active: boolean): string {
+  return active
+    ? "shrink-0 whitespace-nowrap border-b-2 border-red-500 bg-transparent px-1 pb-2 text-sm font-bold text-red-400"
+    : "shrink-0 whitespace-nowrap border-b-2 border-transparent bg-transparent px-1 pb-2 text-sm font-medium text-zinc-400";
 }
 
 export function formatVocalReferenceClock(seconds: number): string {
@@ -1509,7 +1502,7 @@ export function EnginePage() {
   return (
     <main
       ref={pageRef}
-      className="min-h-screen overflow-y-auto"
+      className="min-h-screen w-full overflow-y-auto px-4 pb-32 lg:pb-8"
       style={{
         minHeight: "100vh",
         color: "#f8fafc",
@@ -1517,12 +1510,11 @@ export function EnginePage() {
         position: "relative",
         zIndex: 1,
         background: "transparent",
-        padding: "24px 16px 120px",
       }}
     >
-      <div style={{ maxWidth: 720, margin: "0 auto" }}>
+      <div className="mx-auto w-full min-w-0 max-w-[720px]">
         <PatriotGlassStudio>
-        <div className="mb-[18px] flex w-full flex-col gap-3 border-b border-[rgba(244,114,182,0.35)] pb-2.5">
+        <div className="mb-[18px] flex w-full min-w-0 flex-col gap-3">
           <div className="mb-2 flex w-full flex-wrap items-center justify-between gap-3">
             <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-700/60 bg-zinc-900 px-2 py-0.5 shadow-inner">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
@@ -1535,7 +1527,7 @@ export function EnginePage() {
             </p>
           </div>
           <div
-            className="flex w-full flex-wrap items-center gap-x-6 gap-y-2"
+            className="no-scrollbar flex w-full min-w-0 items-center gap-2 overflow-x-auto border-b border-white/10 pb-1"
             role="tablist"
             aria-label="Studio mode"
           >
@@ -1547,8 +1539,7 @@ export function EnginePage() {
                 setActiveTab("easy");
                 setIsCharacterModalOpen(false);
               }}
-              className="shrink-0 whitespace-nowrap"
-              style={modeTabStyle(activeTab === "easy")}
+              className={modeTabClass(activeTab === "easy")}
             >
               Instrumental
             </button>
@@ -1561,8 +1552,7 @@ export function EnginePage() {
                 setActiveTab("custom");
                 setIsCharacterModalOpen(false);
               }}
-              className="shrink-0 whitespace-nowrap"
-              style={{ ...modeTabStyle(activeTab === "custom"), whiteSpace: "nowrap" }}
+              className={modeTabClass(activeTab === "custom")}
             >
               Vocals with AI
             </button>
@@ -1572,15 +1562,15 @@ export function EnginePage() {
               value="vocals"
               aria-selected={activeTab === "vocals"}
               onClick={() => setActiveTab("vocals")}
-              className="shrink-0 whitespace-nowrap"
-              style={{ ...modeTabStyle(activeTab === "vocals"), whiteSpace: "nowrap" }}
+              className={modeTabClass(activeTab === "vocals")}
             >
               With Vocals
             </button>
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+        <div className="mb-4 flex w-full min-w-0 flex-col gap-2.5">
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2.5">
           {attachedReference ? (
             <div className={selectedPillClass}>
               <Sparkles className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden="true" />
@@ -1649,7 +1639,8 @@ export function EnginePage() {
               + Visual Injection
             </button>
           )}
-          <span title={vocalLockTitle} className="flex h-full w-full">
+        </div>
+          <span title={vocalLockTitle} className="flex w-full min-w-0">
             <button
               type="button"
               disabled={vocalsLocked}
@@ -1738,22 +1729,16 @@ export function EnginePage() {
             </div>
             <div
               aria-label="Template carousel"
-              style={{
-                display: "flex",
-                gap: 10,
-                overflowX: "auto",
-                scrollbarWidth: "none",
-                msOverflowStyle: "none",
-              }}
+              className="no-scrollbar flex w-full min-w-0 max-w-full gap-2.5 overflow-x-auto"
             >
               {MUREKA_TEMPLATES.slice(0, 5).map((tmpl) => (
                 <button
                   key={tmpl.id}
                   type="button"
                   onClick={() => handleApplyTemplate(tmpl)}
+                  className="shrink-0"
                   style={{
-                    minWidth: 175,
-                    maxWidth: 175,
+                    width: "min(100%, 11rem)",
                     flex: "0 0 auto",
                     backgroundColor: "rgba(20, 12, 22, 0.6)",
                     backdropFilter: "blur(12px)",
@@ -1770,9 +1755,8 @@ export function EnginePage() {
                     style={{
                       fontSize: 13,
                       fontWeight: 700,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
                     }}
                   >
                     {tmpl.title}

@@ -18,13 +18,20 @@ type ArtistSupportTokenButtonProps = {
   artistId: string;
   trackId: string;
   className?: string;
+  /** Header card uses the gradient chip button. Album cards keep the compact control. */
+  variant?: "compact" | "header";
 };
 
 /**
  * $1 catalog support checkout. Posts artistId and trackId only.
  * The server sets buyerId from the session.
  */
-export function ArtistSupportTokenButton({ artistId, trackId, className }: ArtistSupportTokenButtonProps) {
+export function ArtistSupportTokenButton({
+  artistId,
+  trackId,
+  className,
+  variant = "compact",
+}: ArtistSupportTokenButtonProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,18 +77,31 @@ export function ArtistSupportTokenButton({ artistId, trackId, className }: Artis
     }
   }
 
+  const header = variant === "header";
+
   return (
-    <div className={className}>
+    <div className={header ? `ml-auto max-w-full shrink-0 max-sm:ml-0 max-sm:basis-full ${className ?? ""}` : className}>
       <button
         type="button"
         disabled={pending}
         aria-busy={pending}
-        aria-label="Support artist · $1"
+        aria-label="Support Artist · $1"
         onClick={(event) => void buy(event)}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-white transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+        className={
+          header
+            ? "flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-red-600 to-red-500 px-5 py-2 text-sm font-bold tracking-wide text-white shadow-lg shadow-red-600/30 transition-all hover:from-red-500 hover:to-red-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:justify-start"
+            : "inline-flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-white transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+        }
       >
         {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
-        Support artist · $1
+        {header ? (
+          <>
+            <span>Support Artist</span>
+            <span className="rounded bg-black/30 px-2 py-0.5 text-xs text-red-200">$1</span>
+          </>
+        ) : (
+          "Support artist · $1"
+        )}
       </button>
       {error ? (
         <p role="alert" className="mt-1 text-xs text-amber-300">

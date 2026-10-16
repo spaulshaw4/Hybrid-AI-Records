@@ -146,7 +146,21 @@ describe("EnginePage instrumental tab", () => {
     fireEvent.click(instrumentalVocal);
     expect(screen.queryByRole("heading", { name: "Vocal Studio" })).not.toBeInTheDocument();
 
-    expect(screen.getByRole("tab", { name: "Instrumental", selected: true })).toBeInTheDocument();
+    const modeTabs = screen.getByRole("tablist", { name: "Studio mode" });
+    expect(modeTabs.className).toContain("overflow-x-auto");
+    expect(modeTabs.className).toContain("no-scrollbar");
+    expect(modeTabs.className).not.toContain("flex-wrap");
+    const instrumentalTab = screen.getByRole("tab", { name: "Instrumental", selected: true });
+    expect(instrumentalTab.className).toContain("whitespace-nowrap");
+    expect(instrumentalTab.className).toContain("text-red-400");
+    expect(instrumentalTab.className).not.toContain("text-pink");
+    const reference = screen.getByRole("button", { name: "+ Reference" });
+    const visual = screen.getByRole("button", { name: "+ Visual Injection" });
+    expect(reference.parentElement?.className).toContain("grid-cols-2");
+    expect(visual.parentElement).toBe(reference.parentElement);
+    expect(screen.getByRole("button", { name: "+ Vocal" }).parentElement?.parentElement?.className).not.toContain(
+      "grid-cols-2",
+    );
     expect(screen.queryByRole("tab", { name: "Easy" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /make a beat/i })).not.toBeInTheDocument();
 
@@ -575,7 +589,7 @@ describe("EnginePage instrumental tab", () => {
     render(<EnginePage />);
 
     const glass = screen.getByTestId("patriot-glass-studio");
-    expect(glass).toHaveClass("relative", "group", "max-w-4xl");
+    expect(glass).toHaveClass("relative", "group", "w-full", "max-w-md", "md:max-w-4xl");
     expect(glass).toContainElement(screen.getByRole("tab", { name: "With Vocals" }));
     expect(glass).toContainElement(screen.getByRole("button", { name: "Render Master Record" }));
     expect(glass).toContainElement(screen.getByRole("slider", { name: "Track length slider" }));

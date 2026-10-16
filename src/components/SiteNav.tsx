@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { Footer } from "@/components/Footer";
-import { HeaderTokenBalance, PlanBadge } from "@/components/HeaderTokenBalance";
+import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import UserAuthButton from "@/components/studio/UserAuthButton";
@@ -287,7 +287,7 @@ function SiteSidebar() {
   );
 }
 
-/** Fixed top bar: logo and plan, live token pill, settings and account. */
+/** Fixed top bar: logo, live token pill, settings and account. */
 function SiteHeader() {
   return (
     <header
@@ -302,7 +302,6 @@ function SiteHeader() {
         >
           <Wordmark size="sm" showText={false} interactive />
         </Link>
-        <PlanBadge />
       </div>
       <div className="flex min-w-0 flex-1 justify-center px-1">
         <HeaderTokenBalance />

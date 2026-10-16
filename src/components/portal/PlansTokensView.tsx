@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { PAIR_TOPUPS, type PairTopupId } from "@/lib/pair-topups";
 import { type SingleTokenType } from "@/lib/single-tokens";
 import { SUBSCRIPTION_TIERS, type SubscriptionTierId } from "@/lib/subscription-plans";
+import { cn } from "@/lib/utils";
 
 const SIGN_IN_REQUIRED = "Please sign in to subscribe.";
 const PACK_SIGN_IN = "Please sign in to buy tokens.";
@@ -13,6 +14,11 @@ const SINGLE_NOT_CONFIGURED = "Token checkout is not configured.";
 const ARTIST_QTY_MIN = 1;
 const ARTIST_QTY_MAX = 100;
 const HYBRID_TOKEN_USD = 2;
+const ARTIST_TOKEN_USD = 1;
+const ARTIST_PRESETS = [1, 5, 10, 20] as const;
+
+const GLASS_CARD =
+  "relative flex min-w-0 flex-col rounded-2xl p-6 bg-zinc-900/30 backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] transition-all";
 
 type Membership = {
   id: SubscriptionTierId;
@@ -76,8 +82,9 @@ async function sessionToken(): Promise<string | null> {
 
 /**
  * Monthly producer memberships, one-time Hybrid + D-Token pairs, and
- * unbundled studio and distribution tokens. Artist support on this page
- * buys Hybrid Tokens (h_token). Requests never carry a Stripe price id.
+ * unbundled studio, distribution, and artist-support tokens.
+ * Artist support on this page posts tokenType artist_token and quantity.
+ * It does not buy Hybrid Tokens. Requests never carry a Stripe price id.
  */
 export function PlansTokensView() {
   const [pending, setPending] = useState<string | null>(null);
@@ -165,7 +172,7 @@ export function PlansTokensView() {
     }
   }
 
-  async function buySingle(tokenType: SingleTokenType, quantity: number, pendingKey = tokenType) {
+  async function buySingle(tokenType: SingleTokenType, quantity: number, pendingKey: string = tokenType) {
     setError(null);
     setPending(pendingKey);
     let leaving = false;
@@ -301,106 +308,134 @@ export function PlansTokensView() {
           Individual Tokens & Passes
         </h2>
         <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-          {`Buy a single studio run at $${HYBRID_TOKEN_USD.toFixed(2)}, a single distribution pass at $1.00, or Hybrid Tokens for artist support and track unlocks at $${HYBRID_TOKEN_USD.toFixed(2)} each.`}
+          {`Buy a studio run at $${HYBRID_TOKEN_USD.toFixed(2)} per Hybrid Token, a Too Lost distribution pass at $1.00 per D-Token, or Artist Tokens for direct support at $${ARTIST_TOKEN_USD.toFixed(2)} each.`}
         </p>
-        <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
-          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">
-              {`Single Hybrid Token (Studio Run) — $${HYBRID_TOKEN_USD.toFixed(2)}`}
-            </h3>
-            <p className="mt-2 text-4xl font-bold text-white">{`$${HYBRID_TOKEN_USD.toFixed(2)}`}</p>
-            <p className="mt-2 flex-1 text-sm text-zinc-300">1 studio generation run for master track rendering.</p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void buySingle("h_token", 1)}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pending === "h_token" ? "Redirecting to Stripe..." : "Buy Single Hybrid Token"}
-            </button>
-          </article>
-
-          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">Single D-Token (Too Lost Distribution) — $1.00</h3>
-            <p className="mt-2 text-4xl font-bold text-white">$1.00</p>
-            <p className="mt-2 flex-1 text-sm text-zinc-300">
-              1 standalone track release pass to global DSPs (Spotify, Apple Music) via Too Lost infrastructure.
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void buySingle("d_token", 1)}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pending === "d_token" ? "Redirecting to Stripe..." : "Buy Single D-Token"}
-            </button>
-          </article>
-
-          <article className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-6">
-            <h3 className="text-lg font-semibold text-white">
-              {`Artist Support & Track Unlocks — $${HYBRID_TOKEN_USD.toFixed(2)}`}
-            </h3>
-            <p className="mt-2 text-4xl font-bold text-white">{`$${HYBRID_TOKEN_USD.toFixed(2)}`}</p>
-            <p className="mt-2 text-sm text-zinc-300">
-              {`Artist support and catalog track unlocks spend Hybrid Tokens. This buys Hybrid Tokens for that balance at $${HYBRID_TOKEN_USD.toFixed(2)} each.`}
-            </p>
-            <div
-              className="mt-4 inline-flex items-center overflow-hidden rounded-md border border-zinc-700 bg-zinc-900"
-              role="group"
-              aria-label="Hybrid Token quantity"
-            >
+        {/* Page already pads horizontally; extra px-4 here would double-pad. */}
+        <div className="relative mx-auto mt-8 w-full max-w-6xl overflow-visible py-12">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-1/4 left-10 h-72 w-72 rounded-full bg-red-600/20 blur-[100px]"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute bottom-1/4 right-10 h-80 w-80 rounded-full bg-blue-600/20 blur-[120px]"
+          />
+          <div className="relative z-10 grid grid-cols-1 gap-6 md:grid-cols-3">
+            <article className={cn(GLASS_CARD, "border-white/10 hover:border-white/20")}>
+              <h3 className="min-w-0 text-balance text-lg font-semibold leading-snug text-white">
+                Engine 2.0 (Studio Run)
+              </h3>
+              <p className="mt-2 text-4xl font-bold text-white">
+                {`$${HYBRID_TOKEN_USD.toFixed(2)}`}
+                <span className="text-base font-normal text-zinc-400"> / Hybrid Token</span>
+              </p>
+              <p className="mt-2 flex-1 text-sm text-zinc-300">1 studio generation run for master track rendering.</p>
               <button
                 type="button"
-                aria-label="Decrease quantity"
-                disabled={busy || artistQty <= ARTIST_QTY_MIN}
-                onClick={() => setArtistQuantity(artistQty - 1)}
-                className="px-3 py-2 text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={busy}
+                onClick={() => void buySingle("h_token", 1)}
+                className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                −
+                {pending === "h_token" ? "Redirecting to Stripe..." : "Buy Single Hybrid Token"}
               </button>
-              <span className="min-w-10 border-x border-zinc-700 px-3 py-2 text-center font-mono text-sm text-white">
-                {artistQty}
-              </span>
+            </article>
+
+            <article className={cn(GLASS_CARD, "border-white/10 hover:border-white/20")}>
+              <h3 className="min-w-0 text-balance text-lg font-semibold leading-snug text-white">
+                Too Lost DSP Distribution
+              </h3>
+              <p className="mt-2 text-4xl font-bold text-white">
+                $1.00
+                <span className="text-base font-normal text-zinc-400"> / D-Token</span>
+              </p>
+              <p className="mt-2 flex-1 text-sm text-zinc-300">
+                1 standalone track release pass to global DSPs (Spotify, Apple Music) via Too Lost infrastructure.
+              </p>
               <button
                 type="button"
-                aria-label="Increase quantity"
-                disabled={busy || artistQty >= ARTIST_QTY_MAX}
-                onClick={() => setArtistQuantity(artistQty + 1)}
-                className="px-3 py-2 text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={busy}
+                onClick={() => void buySingle("d_token", 1)}
+                className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                +
+                {pending === "d_token" ? "Redirecting to Stripe..." : "Buy Single D-Token"}
               </button>
-            </div>
-            <div className="mt-3 flex gap-2">
-              {([1, 5, 10] as const).map((qty) => (
+            </article>
+
+            <article className={cn(GLASS_CARD, "overflow-hidden border-blue-500/30 hover:border-white/20")}>
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-blue-500 to-indigo-500"
+              />
+              <h3 className="min-w-0 text-balance text-lg font-semibold leading-snug text-white">
+                Artist Tokens (Direct Support)
+              </h3>
+              <p className="mt-2 text-4xl font-bold text-white">
+                {`$${ARTIST_TOKEN_USD.toFixed(2)}`}
+                <span className="text-base font-normal text-zinc-400"> / token</span>
+              </p>
+              <p className="mt-2 text-sm text-zinc-300">
+                Direct artist patronage. 1 Token unlocks an uncompressed 24-bit broadcast master download and sends
+                $1.00 directly to support the creator.
+              </p>
+              <div
+                className="mt-4 inline-flex items-center overflow-hidden rounded-md border border-white/10 bg-black/20"
+                role="group"
+                aria-label="Artist Token quantity"
+              >
                 <button
-                  key={qty}
                   type="button"
-                  disabled={busy}
-                  aria-pressed={artistQty === qty}
-                  onClick={() => setArtistQuantity(qty)}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
-                    artistQty === qty
-                      ? "border-red-600 bg-red-600 text-white"
-                      : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-                  }`}
+                  aria-label="Decrease quantity"
+                  disabled={busy || artistQty <= ARTIST_QTY_MIN}
+                  onClick={() => setArtistQuantity(artistQty - 1)}
+                  className="px-3 py-2 text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {`$${qty * HYBRID_TOKEN_USD}`}
+                  −
                 </button>
-              ))}
-            </div>
-            <p className="mt-3 text-sm font-semibold text-white" aria-live="polite">
-              {`Total $${(artistQty * HYBRID_TOKEN_USD).toFixed(2)}`}
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void buySingle("h_token", artistQty, "hybrid_support")}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pending === "hybrid_support" ? "Redirecting to Stripe..." : "Buy Hybrid Tokens"}
-            </button>
-          </article>
+                <span className="min-w-10 border-x border-white/10 px-3 py-2 text-center font-mono text-sm text-white">
+                  {artistQty}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Increase quantity"
+                  disabled={busy || artistQty >= ARTIST_QTY_MAX}
+                  onClick={() => setArtistQuantity(artistQty + 1)}
+                  className="px-3 py-2 text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {ARTIST_PRESETS.map((qty) => (
+                  <button
+                    key={qty}
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={artistQty === qty}
+                    onClick={() => setArtistQuantity(qty)}
+                    className={cn(
+                      "rounded-md border px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60",
+                      artistQty === qty
+                        ? "border-blue-500 bg-blue-500/20 text-blue-200 shadow-[0_0_12px_rgba(59,130,246,0.45)]"
+                        : "border-white/10 bg-white/5 text-zinc-300 hover:border-white/20 hover:bg-white/10",
+                    )}
+                  >
+                    {`$${qty * ARTIST_TOKEN_USD}`}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                aria-live="polite"
+                onClick={() => void buySingle("artist_token", artistQty, "artist_support")}
+                className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:from-blue-500 hover:to-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pending === "artist_support"
+                  ? "Redirecting to Stripe..."
+                  : `Support Artist • $${(artistQty * ARTIST_TOKEN_USD).toFixed(2)}`}
+              </button>
+            </article>
+          </div>
         </div>
       </section>
 
