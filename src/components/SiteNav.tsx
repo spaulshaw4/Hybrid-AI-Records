@@ -1,6 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { CreditCard, Disc3, Film, Radio, Sparkles } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
 
 import { Footer } from "@/components/Footer";
 import { HeaderTokenBalance } from "@/components/HeaderTokenBalance";
@@ -8,24 +7,17 @@ import { SettingsMenu } from "@/components/SettingsMenu";
 import { Wordmark, WORDMARK_LINK } from "@/components/Wordmark";
 import UserAuthButton from "@/components/studio/UserAuthButton";
 import { cn } from "@/lib/utils";
-import { shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
-import { resolvePortalTab, type PortalMenuIcon } from "@/lib/portal-tabs";
+import { isSiteNavEntryActive, shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
 
-const PORTAL_ICONS: Record<PortalMenuIcon, typeof Sparkles> = {
-  sparkles: Sparkles,
-  disc: Disc3,
-  card: CreditCard,
-  radio: Radio,
-  film: Film,
-};
+export { SITE_NAV };
 
-const PORTAL_TAB_ACTIVE =
-  "border border-white/90 bg-zinc-900/90 text-white font-bold shadow-[0_0_12px_rgba(239,68,68,0.7),0_0_20px_rgba(59,130,246,0.6),inset_0_0_8px_rgba(255,255,255,0.4)] ring-1 ring-red-500/50";
+const NAV_FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500";
 
-const PORTAL_TAB_IDLE =
-  "border border-transparent text-zinc-400 hover:text-white hover:bg-white/5";
+const NAV_ACTIVE =
+  "rounded-full border border-red-500/40 bg-red-950/30 font-bold text-white shadow-[0_0_15px_rgba(239,68,68,0.35)] ring-1 ring-red-500/50";
 
-const FOCUS_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500";
+const NAV_IDLE =
+  "rounded-full border border-transparent text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100";
 
 /**
  * Spendable tokens and the account menu.
@@ -44,81 +36,41 @@ export function LocaleCluster({ className = "" }: { className?: string }) {
   );
 }
 
-function usePortalTabSelect() {
-  const navigate = useNavigate();
-  return (tab: string) => {
-    void navigate({
-      to: "/portal",
-      search: (prev) => ({
-        ...(prev ?? {}),
-        tab,
-      }),
-    });
-  };
-}
-
-function PortalTabButton({
-  icon,
-  label,
-  compactLabel,
-  compact,
-  active,
-  onSelect,
-}: {
-  icon: PortalMenuIcon;
-  label: string;
-  compactLabel: string;
-  compact?: boolean;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  const Icon = PORTAL_ICONS[icon];
-  const visible = compact ? compactLabel : label;
-
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      aria-current={active ? "page" : undefined}
-      aria-label={label}
-      onClick={onSelect}
-      className={cn(
-        FOCUS_RING,
-        compact
-          ? "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-center text-[10px] font-medium leading-none tracking-tight text-zinc-400 outline-none transition-colors hover:bg-white/5 hover:text-white"
-          : "flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-xs tracking-wider",
-        !compact && (active ? PORTAL_TAB_ACTIVE : PORTAL_TAB_IDLE),
-        compact && active && "bg-white/10 text-white",
-      )}
-    >
-      <Icon
-        className={cn(
-          "size-4 shrink-0",
-          active && "text-red-400 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]",
-        )}
-        aria-hidden
-      />
-      <span className={cn("min-w-0 leading-snug", compact && "max-w-full truncate")}>{visible}</span>
-    </button>
-  );
-}
-
 function SiteNavEntries({ compact }: { compact?: boolean }) {
   const { pathname, search } = useActiveNav();
-  const selectPortalTab = usePortalTabSelect();
-  const portalTab = pathname === "/portal" ? resolvePortalTab(search.tab) : null;
+  const onPortal = pathname === "/portal";
 
-  return SITE_NAV.map((item) => (
-    <PortalTabButton
-      key={item.id}
-      icon={item.icon}
-      label={item.label}
-      compactLabel={item.short}
-      compact={compact}
-      active={portalTab === item.id}
-      onSelect={() => selectPortalTab(item.query)}
-    />
-  ));
+  return SITE_NAV.map((item) => {
+    const Icon = item.icon;
+    const active = isSiteNavEntryActive(item, search.tab, onPortal);
+
+    return (
+      <Link
+        key={item.href}
+        to="/portal"
+        search={{ tab: item.tab }}
+        aria-current={active ? "page" : undefined}
+        aria-label={item.label}
+        activeOptions={{ exact: true }}
+        className={cn(
+          NAV_FOCUS,
+          compact
+            ? "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-center text-[10px] font-medium leading-none tracking-tight outline-none transition-colors"
+            : "flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-xs tracking-wider transition-colors",
+          active ? NAV_ACTIVE : NAV_IDLE,
+        )}
+      >
+        <Icon
+          className={cn(
+            "size-4 shrink-0",
+            active && "text-red-400 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]",
+          )}
+          aria-hidden
+        />
+        <span className={cn("min-w-0 leading-snug", compact && "max-w-full truncate")}>{item.label}</span>
+      </Link>
+    );
+  });
 }
 
 function useActiveNav() {
@@ -146,7 +98,7 @@ function SiteSidebar() {
           <Wordmark size="sm" interactive />
         </Link>
       </div>
-      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto border-t-0 p-3" aria-label="Portal sections">
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto border-t-0 p-3" aria-label="Main Navigation">
         <SiteNavEntries />
       </nav>
     </aside>
@@ -190,7 +142,7 @@ export function MobileNav() {
   return (
     <nav
       data-site-nav="dock"
-      aria-label="Portal sections"
+      aria-label="Main Navigation"
       className="site-dock pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >
       <div className="pointer-events-auto flex w-full max-w-md items-stretch gap-0.5 rounded-full border border-white/10 bg-black/80 px-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-md">

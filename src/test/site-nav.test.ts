@@ -1,45 +1,64 @@
+import { CreditCard, Disc, Film, Radio, Sparkles } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { PORTAL_MENU } from "@/lib/portal-tabs";
-import { MERCH_URL, shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
+import { resolvePortalTab } from "@/lib/portal-tabs";
+import { isSiteNavEntryActive, MERCH_URL, shouldShowSiteNav, SITE_NAV } from "@/lib/site-nav";
 
 describe("site nav", () => {
-  it("uses the portal menu as the only five destinations", () => {
-    expect(PORTAL_MENU.map((item) => item.id)).toEqual([
-      "create",
-      "catalog_merch",
-      "plans",
-      "radio",
-      "distribution",
+  it("exports one canonical SITE_NAV with icons and five destinations", () => {
+    expect(SITE_NAV.map((item) => item.label)).toEqual([
+      "Create Your Track",
+      "Catalog & Merch",
+      "Plans & Tokens",
+      "Hybrid AI Radio",
+      "Distribution & Video Packages",
     ]);
-    expect(PORTAL_MENU.map((item) => item.short)).toEqual([
-      "Create",
-      "Catalog",
-      "Plans",
-      "Radio",
-      "Distro",
+    expect(SITE_NAV.map((item) => item.href)).toEqual([
+      "/portal?tab=create",
+      "/portal?tab=catalog",
+      "/portal?tab=plans",
+      "/portal?tab=radio",
+      "/portal?tab=distribution",
     ]);
-    expect(PORTAL_MENU.map((item) => item.label)).toEqual([
-      "CREATE YOUR TRACK",
-      "CATALOG & MERCH",
-      "PLANS & TOKENS",
-      "HYBRID AI RADIO",
-      "DISTRIBUTION & VIDEO PACKAGES",
-    ]);
-    expect(PORTAL_MENU.map((item) => item.query)).toEqual([
+    expect(SITE_NAV.map((item) => item.tab)).toEqual([
       "create",
       "catalog",
       "plans",
       "radio",
       "distribution",
     ]);
-    expect(SITE_NAV).toBe(PORTAL_MENU);
+    expect(SITE_NAV.map((item) => item.icon)).toEqual([Sparkles, Disc, CreditCard, Radio, Film]);
+    expect(SITE_NAV.map((item) => resolvePortalTab(item.tab))).toEqual([
+      "create",
+      "catalog_merch",
+      "plans",
+      "radio",
+      "distribution",
+    ]);
+  });
+
+  it("lights catalog for catalog_merch and distribution for the video alias", () => {
+    const catalog = SITE_NAV.find((item) => item.tab === "catalog");
+    const distribution = SITE_NAV.find((item) => item.tab === "distribution");
+    const plans = SITE_NAV.find((item) => item.tab === "plans");
+    expect(catalog).toBeDefined();
+    expect(distribution).toBeDefined();
+    expect(plans).toBeDefined();
+    if (!catalog || !distribution || !plans) return;
+
+    expect(isSiteNavEntryActive(catalog, "catalog_merch", true)).toBe(true);
+    expect(isSiteNavEntryActive(catalog, "merch", true)).toBe(true);
+    expect(isSiteNavEntryActive(catalog, "catalog", true)).toBe(true);
+    expect(isSiteNavEntryActive(distribution, "video", true)).toBe(true);
+    expect(isSiteNavEntryActive(distribution, "distribution", true)).toBe(true);
+    expect(isSiteNavEntryActive(plans, "tokens", true)).toBe(false);
+    expect(isSiteNavEntryActive(catalog, "catalog_merch", false)).toBe(false);
   });
 
   it("keeps merch inside the catalog tab as an external store", () => {
-    expect(PORTAL_MENU.some((item) => item.label.includes("MERCH") && item.id !== "catalog_merch")).toBe(
-      false,
-    );
+    expect(SITE_NAV.some((item) => item.label.includes("Merch") && item.tab !== "catalog")).toBe(false);
+    expect(SITE_NAV.find((item) => item.tab === "plans")?.href).toBe("/portal?tab=plans");
+    expect(SITE_NAV.find((item) => item.tab === "distribution")?.href).toBe("/portal?tab=distribution");
     expect(MERCH_URL).toBe("https://hybrid-ai-records-llc.printful.me");
   });
 
