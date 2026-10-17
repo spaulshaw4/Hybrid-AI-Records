@@ -65,6 +65,7 @@ import { Route as ApiPublicAudioProxyRouteImport } from './routes/api/public/aud
 import { Route as ApiPipelineMasterRouteImport } from './routes/api/pipeline/master'
 import { Route as ApiLocalVaultFileNameRouteImport } from './routes/api/local-vault.$fileName'
 import { Route as ApiGenerateStatusRouteImport } from './routes/api/generate/status'
+import { Route as ApiFeedMrssDotxmlRouteImport } from './routes/api/feed/mrss[.]xml'
 import { Route as AuthenticatedAdminUploadsRouteImport } from './routes/_authenticated/admin.uploads'
 import { Route as AuthenticatedAdminTranslationsRouteImport } from './routes/_authenticated/admin.translations'
 import { Route as AuthenticatedAdminTokensRouteImport } from './routes/_authenticated/admin.tokens'
@@ -366,6 +367,11 @@ const ApiGenerateStatusRoute = ApiGenerateStatusRouteImport.update({
   path: '/api/generate/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFeedMrssDotxmlRoute = ApiFeedMrssDotxmlRouteImport.update({
+  id: '/api/feed/mrss.xml',
+  path: '/api/feed/mrss.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedAdminUploadsRoute =
   AuthenticatedAdminUploadsRouteImport.update({
     id: '/admin/uploads',
@@ -527,6 +533,7 @@ export interface FileRoutesByFullPath {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/feed/mrss.xml': typeof ApiFeedMrssDotxmlRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/pipeline/master': typeof ApiPipelineMasterRoute
@@ -602,6 +609,7 @@ export interface FileRoutesByTo {
   '/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/feed/mrss.xml': typeof ApiFeedMrssDotxmlRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/pipeline/master': typeof ApiPipelineMasterRoute
@@ -679,6 +687,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/tokens': typeof AuthenticatedAdminTokensRoute
   '/_authenticated/admin/translations': typeof AuthenticatedAdminTranslationsRoute
   '/_authenticated/admin/uploads': typeof AuthenticatedAdminUploadsRoute
+  '/api/feed/mrss.xml': typeof ApiFeedMrssDotxmlRoute
   '/api/generate/status': typeof ApiGenerateStatusRoute
   '/api/local-vault/$fileName': typeof ApiLocalVaultFileNameRoute
   '/api/pipeline/master': typeof ApiPipelineMasterRoute
@@ -756,6 +765,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/feed/mrss.xml'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/pipeline/master'
@@ -831,6 +841,7 @@ export interface FileRouteTypes {
     | '/admin/tokens'
     | '/admin/translations'
     | '/admin/uploads'
+    | '/api/feed/mrss.xml'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/pipeline/master'
@@ -907,6 +918,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/tokens'
     | '/_authenticated/admin/translations'
     | '/_authenticated/admin/uploads'
+    | '/api/feed/mrss.xml'
     | '/api/generate/status'
     | '/api/local-vault/$fileName'
     | '/api/pipeline/master'
@@ -965,6 +977,7 @@ export interface RootRouteChildren {
   StartIndexRoute: typeof StartIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
+  ApiFeedMrssDotxmlRoute: typeof ApiFeedMrssDotxmlRoute
   ApiGenerateStatusRoute: typeof ApiGenerateStatusRoute
   ApiLocalVaultFileNameRoute: typeof ApiLocalVaultFileNameRoute
   ApiPipelineMasterRoute: typeof ApiPipelineMasterRoute
@@ -1378,6 +1391,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiGenerateStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/feed/mrss.xml': {
+      id: '/api/feed/mrss.xml'
+      path: '/api/feed/mrss.xml'
+      fullPath: '/api/feed/mrss.xml'
+      preLoaderRoute: typeof ApiFeedMrssDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/admin/uploads': {
       id: '/_authenticated/admin/uploads'
       path: '/admin/uploads'
@@ -1643,6 +1663,7 @@ const rootRouteChildren: RootRouteChildren = {
   StartIndexRoute: StartIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
+  ApiFeedMrssDotxmlRoute: ApiFeedMrssDotxmlRoute,
   ApiGenerateStatusRoute: ApiGenerateStatusRoute,
   ApiLocalVaultFileNameRoute: ApiLocalVaultFileNameRoute,
   ApiPipelineMasterRoute: ApiPipelineMasterRoute,
