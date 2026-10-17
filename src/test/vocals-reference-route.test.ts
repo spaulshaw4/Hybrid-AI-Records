@@ -111,7 +111,9 @@ describe("POST /api/vocals/reference", () => {
     });
     expect(payload.url).not.toContain("token=");
     expect(JSON.stringify(payload)).not.toContain("signed-token");
-    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test");
+    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test", {
+      auth: { persistSession: false },
+    });
     expect(fromMock).toHaveBeenCalledWith("audio-vault");
     const [path, body, options] = uploadMock.mock.calls[0] as unknown as [
       string,

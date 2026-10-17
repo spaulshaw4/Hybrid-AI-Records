@@ -172,7 +172,9 @@ describe("POST /api/vocals/upload", () => {
       fileName,
       taskId: VOICE_TASK,
     });
-    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test");
+    expect(createClientMock).toHaveBeenCalledWith(SUPABASE_URL, "service-role-test", {
+      auth: { persistSession: false },
+    });
     expect(fromMock).toHaveBeenCalledWith("audio-vault");
     expect(fromMock.mock.calls.every((call) => call[0] === "audio-vault")).toBe(true);
     expect(uploadMock).toHaveBeenCalledTimes(1);

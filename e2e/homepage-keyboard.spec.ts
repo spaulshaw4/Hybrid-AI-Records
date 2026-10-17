@@ -205,10 +205,17 @@ test.describe("Homepage keyboard navigation", () => {
     }
     expect(listen, "Listen & Download CTA should be reachable by Tab").not.toBeNull();
 
+    // Submit Your Music is the create-tab control. It must not be a package
+    // deep link (distribution-release is the order form's default, not this CTA).
+    await expect(submitLink).toHaveAttribute("href", /^(?:https?:\/\/[^/]+)?\/portal\?tab=create$/);
     // Client-side routing updates the URL without a document load event.
+    // `**/portal` is anchored at the path and does not match `?tab=create`.
     await submitLink.focus();
     await page.keyboard.press("Enter");
-    await page.waitForURL("**/portal", { waitUntil: "commit", timeout: 10_000 });
+    await page.waitForURL(
+      (url) => url.pathname === "/portal" && url.searchParams.get("tab") === "create",
+      { waitUntil: "commit", timeout: 10_000 },
+    );
     await expect(page.locator("#order")).toBeVisible();
     await expect(page.locator("#quick-order-form")).toBeVisible();
   });
