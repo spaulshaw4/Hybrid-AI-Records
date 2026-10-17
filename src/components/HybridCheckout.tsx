@@ -2,51 +2,23 @@
 'use client';
 
 import React, { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import HybridProgressTracker from './HybridProgressTracker';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-export default function HybridCheckout({ userId }: { userId: string }) {
+export default function HybridCheckout({ userId: _userId }: { userId: string }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId] = useState<string | null>(null);
 
   // Example local parameters
   const genreLock = "Heavy Alternative Rock";
-  const stylePrompt = "Driving bassline with aggressive drum fills";
 
-  const handleTwoDollarCheckout = async () => {
+  const handleTwoDollarCheckout = () => {
     setIsProcessing(true);
     setError(null);
-
-    // Generate a unique session ID for the local Windows vault
-    const sessionId = `hyb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const metadata = { style_prompt: stylePrompt, timestamp: new Date().toISOString() };
-
-    try {
-      // Execute atomic $2.00 token deduction and vault registration
-      const { data, error: rpcError } = await supabase.rpc('spend_hybrid_token_and_create_session', {
-        p_user_id: userId,
-        p_session_id: sessionId,
-        p_genre_lock: genreLock,
-        p_metadata: metadata
-      });
-
-      if (rpcError || !data) {
-        throw new Error("Insufficient token balance. Please load a $2.00 token to continue.");
-      }
-
-      // Hand off to the Progress Tracker to monitor local Windows daemon
-      setActiveSessionId(sessionId);
-    } catch (err: any) {
-      setError(err.message || "Failed to process the $2.00 token transaction.");
-    } finally {
-      setIsProcessing(false);
-    }
+    // Spend stays on the server (dispatchInHouseJob / spend_hybrid_tokens).
+    // This screen must not debit token_balances, profiles.d_tokens, or hybrid_tokens.
+    setError("Token spend runs on the server. Use the studio generate path.");
+    setIsProcessing(false);
   };
 
   if (activeSessionId) {

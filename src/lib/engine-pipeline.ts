@@ -2,8 +2,7 @@
  * Hybrid Engine on-screen pipeline. The studio shows these four stages
  * while a generate is in flight — never Cancel / Delete mid-render.
  *
- * Storage for the Complete step is `engine-pipeline.server.ts`, which
- * createClient()s with NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+ * Storage for the Complete step is `engine-pipeline.server.ts` (server-only).
  *
  * Style descriptors for MiniMax / Fish Audio are serialized here from the
  * artist's exact request fields — never a hardcoded genre lock.

@@ -609,34 +609,44 @@ function Home() {
               Every royalty, every master, forever.
             </p>
 
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                to="/plans"
-                className="hero-cta hero-cta-pricing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                How It Works / Pricing
-              </Link>
-              <Link
-                to="/portal"
-                className="hero-cta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Submit Your Music
-              </Link>
-              <Link
-                to="/artists"
-                className="hero-cta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                Listen & Download
-              </Link>
-              <Link
-                to="/portal"
-                search={{ tab: "radio" }}
-                onClick={focusRadio}
-                className="hero-cta hero-cta-radio focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                <span className="hero-cta-pulse" aria-hidden="true" />
-                Listen 24/7 Radio
-              </Link>
+            <div className="mx-auto mt-8 w-full max-w-sm space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-2.5">
+                <Link
+                  to="/portal"
+                  search={{ tab: "plans" }}
+                  className="flex min-w-0 items-center justify-center whitespace-normal px-3 py-3 text-center text-xs font-bold uppercase tracking-wider text-white rounded-xl border border-red-500/40 bg-red-950/30 shadow-[0_0_15px_rgba(239,68,68,0.2)] transition-all hover:bg-red-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 active:scale-95"
+                >
+                  How It Works / Pricing
+                </Link>
+                <Link
+                  to="/portal"
+                  search={{ tab: "radio" }}
+                  onClick={focusRadio}
+                  className="flex min-w-0 items-center justify-center gap-2 whitespace-normal px-3 py-3 text-center text-xs font-bold uppercase tracking-wider text-white rounded-xl border border-blue-500/40 bg-blue-950/30 shadow-[0_0_15px_rgba(59,130,246,0.2)] transition-all hover:bg-blue-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 active:scale-95"
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(96,165,250,0.8)]"
+                    aria-hidden="true"
+                  />
+                  <span>24/7 Radio</span>
+                </Link>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <Link
+                  to="/portal"
+                  search={{ tab: "create" }}
+                  className="min-w-0 whitespace-normal rounded-xl border border-white/10 bg-zinc-900/40 px-3 py-2.5 text-center text-xs font-medium tracking-wide text-zinc-300 transition-all hover:bg-zinc-800/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                >
+                  Submit Your Music
+                </Link>
+                <Link
+                  to="/portal"
+                  search={{ tab: "catalog" }}
+                  className="min-w-0 whitespace-normal rounded-xl border border-white/10 bg-zinc-900/40 px-3 py-2.5 text-center text-xs font-medium tracking-wide text-zinc-300 transition-all hover:bg-zinc-800/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                >
+                  Listen & Download
+                </Link>
+              </div>
             </div>
 
             <div className="mt-6 max-w-3xl">

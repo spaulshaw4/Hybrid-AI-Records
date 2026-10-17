@@ -22,6 +22,7 @@ export type SitemapEntry = {
 export const SITEMAP_ENTRIES: SitemapEntry[] = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
   { path: "/portal", changefreq: "weekly", priority: "0.9" },
+  { path: "/plans", changefreq: "weekly", priority: "0.8" },
   { path: "/engine", changefreq: "weekly", priority: "0.9" },
   { path: "/studio", changefreq: "weekly", priority: "0.8" },
   { path: "/simple-studio", changefreq: "weekly", priority: "0.8" },
