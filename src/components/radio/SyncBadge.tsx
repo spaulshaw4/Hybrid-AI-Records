@@ -162,6 +162,12 @@ export function SyncBadge({
   const suppressOpenRef = useRef(false);
   const shiftTabToChipRef = useRef(false);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
+  /**
+   * Chip or Retry that last held focus. A touch tap blurs it onto <body>
+   * before Radix reports pointerdown-outside, so the dismiss handler can no
+   * longer see which control to restore.
+   */
+  const focusedOwnerRef = useRef<HTMLElement | null>(null);
   // Both branches are controlled so close can be debounced. Retry sits beside
   // the chip inside the error trigger, so Radix would close on chip → Retry
   // without the focus guard below. Keys remount the Tooltip on phase flip.
@@ -204,6 +210,8 @@ export function SyncBadge({
       setOpen(false);
     }, 80);
   };
+  const setTooltipOpenRef = useRef(setTooltipOpen);
+  setTooltipOpenRef.current = setTooltipOpen;
   const handleOpenChange = (next: boolean) => {
     setTooltipOpen(next);
   };
@@ -247,16 +255,21 @@ export function SyncBadge({
     retryRef.current?.focus();
   }, [errored, retrying]);
 
-  // Pointer-down outside the open tip blurs the focused chip or Retry onto
-  // <body>. Keyboard Tab, Shift+Tab, and Escape never take this path.
+  const ownerFromNode = (node: EventTarget | null) =>
+    node === retryRef.current || node === badgeRef.current ? (node as HTMLElement) : null;
+  const focusDumped = (node: Element | null) =>
+    !node || node === document.body || node === document.documentElement;
+  // Touch taps blur the chip onto <body> before this runs, so fall back to the
+  // control that held focus when the tip opened. Keyboard Tab never lands here.
   const restoreAfterPointerDownOutside = () => {
     const active = document.activeElement;
-    const owner =
-      active === retryRef.current ? retryRef.current : active === badgeRef.current ? badgeRef.current : null;
+    const live = ownerFromNode(active);
+    const owner = live ?? (focusDumped(active instanceof Element ? active : null) ? focusedOwnerRef.current : null);
     if (!owner) return;
     queueMicrotask(() => {
       const now = document.activeElement;
-      if (now !== document.body && now !== document.documentElement) return;
+      if (now === owner) return;
+      if (!focusDumped(now instanceof Element ? now : null)) return;
       suppressOpenRef.current = true;
       focusWithVisibleRing(owner);
       queueMicrotask(() => {
@@ -264,6 +277,54 @@ export function SyncBadge({
       });
     });
   };
+  // Radix waits for `click` before pointerdown-outside on touch, and the tip
+  // unmounts on blur first — so that callback never runs. Snapshot the owner
+  // on pointerdown (still focused) and put focus back if it landed on <body>.
+  useEffect(() => {
+    const insideCluster = (target: EventTarget | null) =>
+      target instanceof Node &&
+      Boolean(
+        clusterRef.current?.contains(target) ||
+          badgeRef.current?.contains(target) ||
+          retryRef.current?.contains(target),
+      );
+    const restore = (owner: HTMLElement) => {
+      if (!owner.isConnected) return;
+      const now = document.activeElement;
+      if (now === owner) return;
+      if (!focusDumped(now instanceof Element ? now : null)) return;
+      suppressOpenRef.current = true;
+      focusWithVisibleRing(owner);
+      queueMicrotask(() => {
+        suppressOpenRef.current = false;
+      });
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      const owner = ownerFromNode(event.target);
+      if (owner) {
+        focusedOwnerRef.current = owner;
+        return;
+      }
+      if (!focusDumped(event.target instanceof Element ? event.target : null)) focusedOwnerRef.current = null;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const active = document.activeElement;
+      const live = ownerFromNode(active);
+      const owner = live ?? (focusDumped(active instanceof Element ? active : null) ? focusedOwnerRef.current : null);
+      if (!owner || insideCluster(event.target)) return;
+      setTooltipOpenRef.current(false, true);
+      queueMicrotask(() => restore(owner));
+      const later = () => restore(owner);
+      document.addEventListener("pointerup", later, { capture: true, once: true });
+      document.addEventListener("click", later, { capture: true, once: true });
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, []);
 
   const releaseShiftTabSuppress = () => {
     queueMicrotask(() => {
