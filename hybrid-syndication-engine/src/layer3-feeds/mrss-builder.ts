@@ -1,11 +1,12 @@
 import { TrackPayload } from "../types";
+import { buildReleaseUrls, portalBaseUrl } from "../urls";
 
 export function buildMRSSFeed(tracks: TrackPayload[]): string {
-  const portalUrl = process.env.PORTAL_BASE_URL || "https://hybrid-ai-records.com";
+  const portalUrl = portalBaseUrl();
   const buildDate = new Date().toUTCString();
 
   const itemsXml = tracks.map((track) => {
-    const trackPage = `${portalUrl}/portal?tab=catalog&track=${encodeURIComponent(track.id)}`;
+    const trackPage = buildReleaseUrls(track).track;
     
     return `
     <item>

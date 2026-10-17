@@ -12,4 +12,6 @@ export interface TrackPayload {
   coverArtUrl: string;    // Square 512x512 or 3000x3000
   explicit: boolean;
   tokenPriceUsd: number;
+  lyrics?: string;
+  stemUrls?: { name: string; url: string }[];
 }

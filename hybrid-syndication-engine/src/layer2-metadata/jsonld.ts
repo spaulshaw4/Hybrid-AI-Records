@@ -41,3 +41,66 @@ export function generateTrackJsonLd(track: TrackPayload, canonicalUrl: string) {
     },
   };
 }
+
+export function generateAlbumJsonLd(track: TrackPayload, albumUrl: string, trackUrl: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "MusicAlbum",
+    "name": track.albumName,
+    "url": albumUrl,
+    "byArtist": {
+      "@type": "MusicGroup",
+      "name": track.artistName,
+    },
+    "track": {
+      "@type": "MusicRecording",
+      "name": track.title,
+      "url": trackUrl,
+    },
+  };
+}
+
+export function generateLyricsJsonLd(track: TrackPayload, lyricsUrl: string) {
+  const lyricText = track.lyrics?.trim();
+  return {
+    "@context": "https://schema.org",
+    "@type": "MusicRecording",
+    "name": track.title,
+    "url": lyricsUrl,
+    "byArtist": {
+      "@type": "MusicGroup",
+      "name": track.artistName,
+    },
+    ...(lyricText
+      ? {
+          lyrics: {
+            "@type": "CreativeWork",
+            "text": lyricText,
+          },
+        }
+      : {}),
+  };
+}
+
+export function generateStemsJsonLd(track: TrackPayload, stemsUrl: string) {
+  const stems = (track.stemUrls ?? []).filter((stem) => stem.name.trim() && stem.url.trim());
+  return {
+    "@context": "https://schema.org",
+    "@type": "MusicRecording",
+    "name": track.title,
+    "url": stemsUrl,
+    "byArtist": {
+      "@type": "MusicGroup",
+      "name": track.artistName,
+    },
+    ...(stems.length > 0
+      ? {
+          hasPart: stems.map((stem) => ({
+            "@type": "AudioObject",
+            "name": stem.name,
+            "contentUrl": stem.url,
+          })),
+        }
+      : {}),
+  };
+}
