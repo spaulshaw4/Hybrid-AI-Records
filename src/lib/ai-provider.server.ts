@@ -20,6 +20,9 @@
  *     REPLICATE_API_TOKEN      hybrid1 token for Demucs / CWALO (alias: REPLICATE_API_KEY)
  *     LYRIC_ENGINE_API_KEY     Gemini 2.5 Flash / Co-Producer only
  *
+ *   Cinematic stills, motion, and lip-sync (WaveSpeed, called directly)
+ *     WAVESPEED_API_KEY        Bearer token. Never send REPLICATE_API_TOKEN.
+ *
  *   Instant vocal clone (Fish Audio TTS)
  *     FISH_API_KEY             official Fish Audio key (alias: FISH_AUDIO_API_KEY)
 
@@ -298,6 +301,32 @@ export function replicateHeaders(label?: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${replicateApiKey(label)}`,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Cinematic video (WaveSpeed, direct)                                 */
+/* ------------------------------------------------------------------ */
+
+export const WAVESPEED_API_ROOT = "https://api.wavespeed.ai/api/v3";
+
+/** True when the cinematic video key is present. Does not read Replicate tokens. */
+export function hasWaveSpeedKey(): boolean {
+  return Boolean(env("WAVESPEED_API_KEY"));
+}
+
+export function wavespeedApiKey(label = "The visual engine"): string {
+  const key = env("WAVESPEED_API_KEY");
+  if (!key) {
+    throw new Error(`${label} is not configured: set WAVESPEED_API_KEY.`);
+  }
+  return key;
+}
+
+export function wavespeedHeaders(label?: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${wavespeedApiKey(label)}`,
   };
 }
 

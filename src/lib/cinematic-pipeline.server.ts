@@ -4,8 +4,9 @@
  * Orchestration mirrors the three-stage brief:
  *   1. Script parsing — the script is structured into sequential scene blocks.
  *   2. Audio direction — a soundtrack brief is derived for the Hybrid audio engine.
- *   3. Visual render — a render job is created on the primary visual engine,
- *      with automatic failover to the backup engine when the primary spikes.
+ *   3. Visual render — a render job is created on WaveSpeed. Hailuo 2.3 covers
+ *      6s and 10s blocks; every other block length, including 5s, stays on
+ *      Seedance 2.5. There is no Replicate or Wan failover.
  *
  * Vendor names never leave this module: the client only ever sees the
  * white-labelled engine labels from `V_ENGINES`.
@@ -59,8 +60,8 @@ import { assertRenderable } from "@/lib/pipeline-guard.server";
 
 
 /**
- * White-labelled motion engines, in failover order. The actual vendor routing
- * (motion engine + silent fail-safe) lives in `visual-engines.server`.
+ * White-labelled motion engines, in failover order. Vendor routing lives in
+ * `visual-engines.server` (WaveSpeed Hailuo and Seedance only).
  */
 export const V_ENGINES = [
   { id: "primary", label: "V Engine Prime" },
@@ -566,9 +567,9 @@ export async function createVisualRender(
   referenceImage?: string | undefined,
   genreId?: string | null,
   /**
-   * Unified multimodal context for the omni-modal node: extra character/style
-   * anchor images and the master audio for this shot, all conditioned in the
-   * same generation pass.
+   * Character/style anchors and the master-audio slice. WaveSpeed flux-dev
+   * stills are text-to-image, and Hailuo / Seedance have no audio input, so
+   * these stay out of the provider body. The studio muxes the track locally.
    */
   context?: { styleReferences?: string[] | undefined; audioReference?: string | undefined },
 ): Promise<VideoJob> {
@@ -599,17 +600,15 @@ export async function createVisualRender(
     ...(context?.audioReference ? { audioReference: context.audioReference } : {}),
   });
 
-  // Stage 1 — scene keyframe. The character reference sheet is used ONLY as a
-  // face-identity reference here; it is never handed to the video model as a
-  // start frame (that is what produced triptych/turnaround "slides").
+  // Stage 1 — flux-dev keyframe. Character sheets are not sent: the confirmed
+  // still schema is text-to-image, and a sheet must not become the start frame.
   const identityReferences = [referenceImage, ...(context?.styleReferences ?? [])].filter(
     (value): value is string => Boolean(value),
   );
-  const sceneKeyframe =
-    (await createFoundationFrame(anchoredPrompt, identityReferences)) ?? undefined;
 
-  // Stage 2 — motion render from that single 16:9 keyframe.
+  // Stage 2 — image-to-video from that single 16:9 keyframe.
   try {
+    const sceneKeyframe = await createFoundationFrame(anchoredPrompt, identityReferences);
     const job = await createMotionBlock({
       prompt: anchoredPrompt,
       seconds,
