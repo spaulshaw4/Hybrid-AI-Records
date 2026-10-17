@@ -2,7 +2,7 @@
  * Selective lip-sync stage (server only).
  *
  * Shots the planner tagged `vocalSync` are re-rendered through WaveSpeed
- * `sync/lipsync-3` (confirmed docs path) with the audio slice under that shot.
+ * VEED Lipsync V2 (`veed/lipsync-v2`) with the audio slice under that shot.
  * There is no Replicate fallback and no second model id.
  */
 
@@ -20,8 +20,8 @@ import {
   waveSpeedStatus,
 } from "@/lib/wavespeed-prediction.server";
 
-/** Confirmed WaveSpeed lip-sync model. https://wavespeed.ai/docs/docs-api/sync/sync-lipsync-3 */
-export const LIPSYNC_MODEL = "sync/lipsync-3";
+/** Confirmed WaveSpeed lip-sync model. https://wavespeed.ai/docs/docs-api/veed/veed-lipsync-v2 */
+export const LIPSYNC_MODEL = "veed/lipsync-v2";
 
 const UPLOAD_URL = `${WAVESPEED_API_ROOT}/media/uploads`;
 
@@ -122,7 +122,7 @@ async function uploadAudioSlice(bytes: Uint8Array, filename: string): Promise<st
 }
 
 /**
- * Runs `sync/lipsync-3` on one shot and returns the synced clip URL.
+ * Runs VEED Lipsync V2 on one shot and returns the synced clip URL.
  * `audioWav` is the slice of the master track covering exactly this shot.
  */
 export async function lipsyncShot(input: {
@@ -145,7 +145,6 @@ export async function lipsyncShot(input: {
         body: JSON.stringify({
           video: input.videoUrl,
           audio: audioUrl,
-          sync_mode: "cut_off",
         }),
       },
       {

@@ -364,7 +364,7 @@ describe("WaveSpeed stills and motion", () => {
 });
 
 describe("WaveSpeed lip-sync", () => {
-  it("uploads the wav, posts sync/lipsync-3, and returns data.outputs[0]", async () => {
+  it("uploads the wav, posts veed/lipsync-v2, and returns data.outputs[0]", async () => {
     const audio = new Uint8Array([1, 2, 3, 4]);
     vi.stubGlobal(
       "fetch",
@@ -418,8 +418,9 @@ describe("WaveSpeed lip-sync", () => {
     expect(jsonBody(submit.init)).toEqual({
       video: CLIP_URL,
       audio: "https://cdn.example/shot-audio.wav",
-      sync_mode: "cut_off",
     });
+    expect(jsonBody(submit.init)).not.toHaveProperty("sync_mode");
+    expect(submit.url).toBe("https://api.wavespeed.ai/api/v3/veed/lipsync-v2");
     expect(calls[3]?.url).toBe("https://api.wavespeed.ai/api/v3/predictions/pred_lip_01/result");
     expect(
       calls.every(
