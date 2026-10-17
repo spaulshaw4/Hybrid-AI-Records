@@ -18,6 +18,7 @@
     "social:watch": "python3 scripts/social_pipeline.py --watch",
     "upload:vault": "tsx scripts/batch-upload-vault.ts",
     "sync:catalog": "tsx scripts/sync-artist-catalog.ts",
+    "syndicate:all": "tsx src/scripts/batch-syndicate-all.ts",
     "worker:generation-jobs": "tsx scripts/generation-jobs-worker.ts",
     "worker:generation": "tsx scripts/generation-jobs-worker.ts",
     "sentinel:daemon": "tsx scripts/run-sentinel.ts",
