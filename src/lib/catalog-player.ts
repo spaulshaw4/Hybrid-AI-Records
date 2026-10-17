@@ -4,6 +4,16 @@ import {
   isPlayableCatalogUrl,
   type CatalogPlayable,
 } from "@/lib/artist-catalog";
+import {
+  applyCatalogMediaSession,
+  clearCatalogMediaSessionHandlers,
+  getMediaSession,
+  installCatalogMediaSessionHandlers,
+  readSeekTime,
+  setCatalogMediaPlaybackState,
+  type CatalogSessionSeekDetails,
+  type MediaSessionActionName,
+} from "@/lib/catalog-media-session";
 import { safePlay, safeReleaseMediaElement } from "@/lib/safe-media";
 
 /**
@@ -35,6 +45,20 @@ let state: CatalogPlaybackState = {
 const listeners = new Set<Listener>();
 const missingListeners = new Set<(trackId: string) => void>();
 let listenersBound = false;
+
+type CatalogSessionTransport = {
+  play: () => void;
+  pause: () => void;
+  seekTo: (time: number) => void;
+  next: () => void;
+  previous: () => void;
+};
+
+let transportOverride: CatalogSessionTransport | null = null;
+let sessionDismissed = false;
+let handlersInstalled = false;
+let appliedIdentity = "";
+let appliedPlaying: boolean | null = null;
 
 /** Drop a track from catalog surfaces after playback finds no audio object. */
 export function reportCatalogAudioMissing(trackId: string) {
@@ -135,10 +159,13 @@ export async function omitTracksMissingFromStorage(
 }
 
 function emit() {
+  syncMediaSession();
   for (const listener of listeners) listener();
 }
 
 function setState(patch: Partial<CatalogPlaybackState>) {
+  const previousId = state.currentTrack?.id ?? null;
+  const previousPlaying = state.playing;
   const next = { ...state, ...patch };
   if ("track" in patch && !("currentTrack" in patch)) {
     next.currentTrack = patch.track ?? null;
@@ -147,6 +174,10 @@ function setState(patch: Partial<CatalogPlaybackState>) {
     next.track = patch.currentTrack ?? null;
   }
   state = next;
+  const nextId = state.currentTrack?.id ?? null;
+  if ((state.playing && !previousPlaying) || (Boolean(nextId) && nextId !== previousId)) {
+    sessionDismissed = false;
+  }
   emit();
 }
 
@@ -209,6 +240,7 @@ function bindElementListeners(el: HTMLAudioElement) {
     setState({ playing: false });
   });
   el.addEventListener("ended", () => {
+    sessionDismissed = true;
     setState({ playing: false, currentTime: 0 });
   });
   el.addEventListener("error", () => {
@@ -239,6 +271,8 @@ export function bindCatalogAudioElement(el: HTMLAudioElement) {
   // HTMLVideoElement only, though iOS Safari honours it on audio too.
   el.setAttribute("playsinline", "");
   bindElementListeners(el);
+  ensureMediaSessionHandlers();
+  syncMediaSession();
 }
 
 function ensureAudio(): HTMLAudioElement | null {
@@ -365,6 +399,158 @@ export function seekCatalogPlayback(time: number) {
   } catch {
     /* ignore */
   }
+}
+
+function defaultSessionTransport(): CatalogSessionTransport {
+  return {
+    play() {
+      const el = ensureAudio();
+      if (!el) return;
+      sessionDismissed = false;
+      void safePlay(el);
+    },
+    pause() {
+      pauseCatalogPlayback();
+    },
+    seekTo(time: number) {
+      seekCatalogPlayback(time);
+    },
+    next() {},
+    previous() {},
+  };
+}
+
+function handleMediaSessionAction(
+  action: MediaSessionActionName,
+  details?: CatalogSessionSeekDetails,
+) {
+  const controls = transportOverride ?? defaultSessionTransport();
+  if (action === "play") {
+    sessionDismissed = false;
+    controls.play();
+    syncMediaSession();
+    return;
+  }
+  if (action === "pause") {
+    controls.pause();
+    return;
+  }
+  if (action === "nexttrack") {
+    controls.next();
+    return;
+  }
+  if (action === "previoustrack") {
+    controls.previous();
+    return;
+  }
+  if (action === "seekto") {
+    const seekTime = readSeekTime(details);
+    if (seekTime == null) return;
+    controls.seekTo(seekTime);
+  }
+}
+
+function ensureMediaSessionHandlers() {
+  if (handlersInstalled || typeof navigator === "undefined") return;
+  if (!getMediaSession()) return;
+  installCatalogMediaSessionHandlers(handleMediaSessionAction);
+  handlersInstalled = true;
+}
+
+function resetMediaSessionSignature() {
+  appliedIdentity = "";
+  appliedPlaying = null;
+}
+
+function syncMediaSession() {
+  if (typeof navigator === "undefined") return;
+  ensureMediaSessionHandlers();
+  const session = getMediaSession();
+  if (!session) return;
+  const track = state.currentTrack;
+  if (sessionDismissed || !track?.title) {
+    if (appliedIdentity !== "" || appliedPlaying !== null) {
+      resetMediaSessionSignature();
+      applyCatalogMediaSession(null, false);
+    }
+    return;
+  }
+  const identity = [track.id, track.title, track.artist ?? "", track.album ?? "", track.cover ?? ""].join(
+    "\u0000",
+  );
+  if (identity === appliedIdentity && appliedPlaying === state.playing) return;
+  if (identity === appliedIdentity) {
+    appliedPlaying = state.playing;
+    setCatalogMediaPlaybackState(state.playing);
+    return;
+  }
+  appliedIdentity = identity;
+  appliedPlaying = state.playing;
+  applyCatalogMediaSession(track, state.playing);
+}
+
+export type CatalogSessionTrack = {
+  id: string;
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  cover?: string | null;
+  src?: string | null;
+  audio_url?: string | null;
+};
+
+/**
+ * Radio (and any other owner of the shared element) publishes the song that
+ * is actually loaded. Metadata is derived here so there is only one session.
+ */
+export function publishCatalogNowPlaying(
+  track: CatalogSessionTrack,
+  owner: CatalogPlaybackState["owner"] = null,
+) {
+  if (!track?.id || !track.title) return;
+  const src = (track.audio_url || track.src || "").trim();
+  const playable: CatalogPlayable = {
+    id: track.id,
+    title: track.title,
+    artist: track.artist?.trim() || "",
+    src,
+    audio_url: src,
+    cover: track.cover?.trim() || undefined,
+    album: track.album?.trim() || undefined,
+  };
+  sessionDismissed = false;
+  setState({
+    track: playable,
+    currentTrack: playable,
+    owner: owner ?? state.owner,
+  });
+}
+
+/** Drop the lock-screen card when playback stops, without forgetting the UI track. */
+export function dismissCatalogMediaSession() {
+  sessionDismissed = true;
+  syncMediaSession();
+}
+
+/**
+ * Register play/pause/seek/next/previous while a surface with its own queue
+ * (the radio) is mounted. Catalog playback keeps the element controls and
+ * no-ops next/previous when nothing is registered.
+ */
+export function bindCatalogSessionTransport(next: CatalogSessionTransport): () => void {
+  const previous = transportOverride;
+  transportOverride = next;
+  ensureMediaSessionHandlers();
+  return () => {
+    if (transportOverride === next) transportOverride = previous;
+  };
+}
+
+/** Remove handlers when the root audio host unmounts. Safe if unsupported. */
+export function releaseCatalogMediaSession() {
+  handlersInstalled = false;
+  resetMediaSessionSignature();
+  clearCatalogMediaSessionHandlers();
 }
 
 export function useCatalogPlayback(): CatalogPlaybackState {

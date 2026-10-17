@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { bindCatalogAudioElement } from "@/lib/catalog-player";
+import { bindCatalogAudioElement, releaseCatalogMediaSession } from "@/lib/catalog-player";
 
 /**
  * Persistent root <audio> so catalog / artist / radio playback shares one
@@ -13,6 +13,9 @@ export function CatalogAudioHost() {
     if (!el) return;
     bindCatalogAudioElement(el);
     console.log("[catalog-player] root <audio> bound", { id: el.id });
+    return () => {
+      releaseCatalogMediaSession();
+    };
   }, []);
 
   return (

@@ -9,8 +9,11 @@ import type { Division } from "@/lib/divisions";
 import { resolvePositions, shouldSeek, shouldWritePosition, type DeviceWin, type ResolvedPosition } from "@/lib/radio-positions";
 import { toast } from "sonner";
 import {
+  bindCatalogSessionTransport,
   claimCatalogPlayback,
+  dismissCatalogMediaSession,
   getCatalogAudioElement,
+  publishCatalogNowPlaying,
 } from "@/lib/catalog-player";
 import { fetchRadioReadyTracks } from "@/lib/fetch-artist-catalog";
 import { playableToRadioTrack } from "@/lib/artist-catalog";
@@ -884,6 +887,23 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
     };
   }, []);
 
+  const sessionApiRef = useRef({
+    play: () => {},
+    pause: () => {},
+    seekTo: (_time: number) => {},
+    next: () => {},
+    previous: () => {},
+  });
+  useEffect(() => {
+    return bindCatalogSessionTransport({
+      play: () => sessionApiRef.current.play(),
+      pause: () => sessionApiRef.current.pause(),
+      seekTo: (time) => sessionApiRef.current.seekTo(time),
+      next: () => sessionApiRef.current.next(),
+      previous: () => sessionApiRef.current.previous(),
+    });
+  }, []);
+
   adoptRemote.current = (remote) => {
     if (!remote) return;
     // Mark as a remote apply so the persist effect doesn't stamp it as a new
@@ -1209,6 +1229,8 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
   playingRef.current = playing;
   /** True once the listener has pressed play — gates any automatic playback. */
   const userStartedRef = useRef(false);
+  /** True while this console owns the lock-screen card. Cleared on stop, not pause. */
+  const radioSessionRef = useRef(false);
 
   const ytCreatedRef = useRef(false);
   useEffect(() => {
@@ -1314,6 +1336,26 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
     } catch {}
   }, [idx, ready, tracks, resumeNonce]);
 
+  useEffect(() => {
+    if (playing && track) radioSessionRef.current = true;
+  }, [playing, track]);
+
+  useEffect(() => {
+    if (!radioSessionRef.current || !track?.title) return;
+    publishCatalogNowPlaying(
+      {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        cover: track.cover,
+        src: track.src,
+        audio_url: track.src,
+      },
+      "radio",
+    );
+  }, [track, playing]);
+
   // Progress ticker — only while playing and the tab is visible. A paused
   // player does not need a 2 Hz React clock on a 3k-line tree.
   useEffect(() => {
@@ -1386,14 +1428,34 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
     toggle();
   };
 
+  const publishRadioNow = () => {
+    const current = trackRef.current;
+    if (!current?.title) return;
+    publishCatalogNowPlaying(
+      {
+        id: current.id,
+        title: current.title,
+        artist: current.artist,
+        album: current.album,
+        cover: current.cover,
+        src: current.src,
+        audio_url: current.src,
+      },
+      "radio",
+    );
+  };
+
   const toggle = () => {
     setConfirmed(true);
     userStartedRef.current = true;
+    radioSessionRef.current = true;
     if (isAudio) {
       const audio = audioRef.current;
       if (!audio) return;
-      if (audio.paused) audio.play().catch(() => setPlaying(false));
-      else audio.pause();
+      if (audio.paused) {
+        publishRadioNow();
+        audio.play().catch(() => setPlaying(false));
+      } else audio.pause();
       return;
     }
     const p = playerRef.current;
@@ -1683,6 +1745,8 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
 
   // Stops playback and returns every mix control to its factory defaults.
   const stopPlayback = () => {
+    radioSessionRef.current = false;
+    dismissCatalogMediaSession();
     try {
       audioRef.current?.pause();
       playerRef.current?.pauseVideo?.();
@@ -1881,6 +1945,60 @@ export function RadioPlayer({ tracks: incomingTracks }: { tracks: RadioTrack[] }
   // Keyboard shortcuts inside the console: space/k play-pause, arrows seek or
   // change track, s shuffle. Ignored while typing in a field or on a control
   // that already handles the key (buttons, sliders).
+  const armRadioSession = () => {
+    radioSessionRef.current = true;
+    userStartedRef.current = true;
+    setConfirmed(true);
+  };
+  sessionApiRef.current = {
+    play: () => {
+      armRadioSession();
+      const current = trackRef.current;
+      const audio = audioRef.current;
+      if (current?.src && audio) {
+        if (audio.paused) {
+          publishRadioNow();
+          void audio.play().catch(() => {});
+        }
+        return;
+      }
+      publishRadioNow();
+      try {
+        playerRef.current?.playVideo?.();
+      } catch {
+        /* ignore */
+      }
+    },
+    pause: () => {
+      const current = trackRef.current;
+      const audio = audioRef.current;
+      if (current?.src && audio) {
+        try {
+          audio.pause();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      try {
+        playerRef.current?.pauseVideo?.();
+      } catch {
+        /* ignore */
+      }
+    },
+    seekTo: (time) => {
+      commitSeek(time);
+    },
+    next: () => {
+      armRadioSession();
+      next();
+    },
+    previous: () => {
+      armRadioSession();
+      prev();
+    },
+  };
+
   const onConsoleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement | null;
     const tag = el?.tagName.toLowerCase();
