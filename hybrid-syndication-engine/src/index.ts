@@ -1,5 +1,6 @@
 import * as dotenv from "dotenv";
 import { TrackPayload } from "./types";
+import { submitToIndexNow } from "./layer1-indexing/indexnow";
 import { syndicateRelease } from "./syndicate";
 
 dotenv.config();
@@ -25,7 +26,7 @@ const testRelease: TrackPayload = {
   masterAudioUrl: "https://hybrid-ai-records.com/audio/masters/the-world-we-live-in-24bit.wav",
   coverArtUrl: "https://hybrid-ai-records.com/brand/lockup-usa-512.png",
   explicit: false,
-  tokenPriceUsd: 1.00,
+  tokenPriceUsd: 2.00,
   lyrics: "The world we live in is the one we keep.",
   stemUrls: [
     {
@@ -34,6 +35,21 @@ const testRelease: TrackPayload = {
     },
   ],
 };
+
+const livePortalUrls = [
+  "https://hybrid-ai-records.com/",
+  "https://hybrid-ai-records.com/portal?tab=create",
+  "https://hybrid-ai-records.com/portal?tab=catalog",
+  "https://hybrid-ai-records.com/portal?tab=plans",
+  "https://hybrid-ai-records.com/portal?tab=radio",
+  "https://hybrid-ai-records.com/portal?tab=distro",
+  "https://hybrid-ai-records.com/api/feed/mrss.xml",
+];
+
+function isUnshippedSlugUrl(url: string): boolean {
+  const path = new URL(url).pathname;
+  return path.startsWith("/catalog/") || path.startsWith("/track/");
+}
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -86,7 +102,7 @@ async function runSyndicationAudit() {
     `track JSON-LD duration ${result.jsonLd.track.duration}`,
   );
   assert(
-    result.jsonLd.track.offers.price === "1.00",
+    result.jsonLd.track.offers.price === "2.00",
     `track JSON-LD price ${result.jsonLd.track.offers.price}`,
   );
   assert(
@@ -98,9 +114,26 @@ async function runSyndicationAudit() {
     result.clip.durationSeconds >= 15 && result.clip.durationSeconds <= 30,
     `clip duration ${result.clip.durationSeconds}`,
   );
+  assert(
+    livePortalUrls.length === 7 && livePortalUrls.every((url) => !isUnshippedSlugUrl(url)),
+    "IndexNow list is live portal URLs only",
+  );
+
+  console.log("\n▶ [LAYER 1] IndexNow live portal URLs");
+  const indexNow = await submitToIndexNow(livePortalUrls);
+  if (indexNow.status === null) {
+    console.error("[IndexNow] No HTTP response. This run did not succeed.");
+  } else if (!indexNow.ok) {
+    console.error(`[IndexNow] Not successful. HTTP ${indexNow.status}`);
+  }
 
   console.log("\n==================================================");
-  console.log("   SYNDICATION TEST COMPLETE: ALL LAYERS VALIDATED");
+  if (indexNow.ok) {
+    console.log("   SYNDICATION TEST COMPLETE: ALL LAYERS VALIDATED");
+  } else {
+    console.log("   LOCAL ASSERTS PASSED");
+    console.log(`   INDEXNOW NOT ACCEPTED: HTTP ${indexNow.status ?? "none"}`);
+  }
   console.log("==================================================");
 }
 

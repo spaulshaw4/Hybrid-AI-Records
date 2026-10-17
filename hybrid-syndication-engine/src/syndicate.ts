@@ -1,5 +1,4 @@
 import { TrackPayload } from "./types";
-import { submitToIndexNow } from "./layer1-indexing/indexnow";
 import { notifyWebSubHub } from "./layer1-indexing/websub";
 import {
   generateAlbumJsonLd,
@@ -25,7 +24,6 @@ export interface SyndicationResult {
   mrss: string;
   radio: RadioDirectoryDescriptor;
   clip: ShortformClipRequest;
-  indexNow: boolean;
   webSub: boolean;
 }
 
@@ -42,13 +40,12 @@ export async function syndicateRelease(track: TrackPayload): Promise<Syndication
   const radio = buildRadioDirectoryDescriptor(track);
   const clip = buildShortformClipRequest(track, urls.track);
 
-  console.log("[Syndicate] Indexed URL family:");
+  console.log("[Syndicate] Local URL family:");
   console.log(urls.album);
   console.log(urls.track);
   console.log(urls.lyrics);
   console.log(urls.stems);
 
-  const indexNow = await submitToIndexNow([urls.album, urls.track, urls.lyrics, urls.stems]);
   const webSub = await notifyWebSubHub(radio.feedUrl);
 
   return {
@@ -58,7 +55,6 @@ export async function syndicateRelease(track: TrackPayload): Promise<Syndication
     mrss,
     radio,
     clip,
-    indexNow,
     webSub,
   };
 }
