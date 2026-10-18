@@ -67,7 +67,7 @@ export const GENRE_LAWS: GenreLaw[] = [
     id: "roots",
     label: "Roots / Acoustic / Folk",
     match:
-      /\b(folk|roots|acoustic|singer[- ]?songwriter|appalachian|gospel|blues|delta blues|soul revival|hymn)\b/i,
+      /\b(folk|roots|acoustic|singer[- ]?songwriter|appalachian|gospel|blues|delta blues|soul revival|hymn|reggae|roots reggae|one-drop|ska)\b/i,
     environments:
       "intimate rustic venues, wooden church halls, living rooms and porches, forest clearings and riverbanks, " +
       "campfires, old touring vans, back-alley loading docks",

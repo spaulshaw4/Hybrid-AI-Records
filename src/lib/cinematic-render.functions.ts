@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { checkRateLimit, limitBy, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { sanitizeCharacterProfile } from "@/lib/character-profile";
+import { clampCinematicSeconds } from "@/lib/cinematic-seconds";
+import { genreLawById } from "@/lib/cinematic-genre";
 import { isLocalMock, isMockJobId, mockJobId, mockPlan, MOCK_VIDEO_URL } from "@/lib/local-mock";
 
 export type CinematicStartResult =
@@ -21,6 +23,7 @@ export type CinematicStartResult =
         index: number;
         title: string;
         shot: string;
+        stillPrompt?: string;
         seconds: number;
         vocalSync?: boolean;
       }[];
@@ -46,15 +49,7 @@ function sanitizeReferenceImages(input: unknown): string[] {
 }
 
 /** Normalises the browser-derived musical timing map for story mode. */
-const SECTION_LABELS = [
-  "intro",
-  "build",
-  "verse",
-  "chorus",
-  "drop",
-  "breakdown",
-  "outro",
-] as const;
+const SECTION_LABELS = ["intro", "build", "verse", "chorus", "drop", "breakdown", "outro"] as const;
 
 function sanitizeAudioTiming(input: unknown) {
   const t = input as
@@ -79,9 +74,10 @@ function sanitizeAudioTiming(input: unknown) {
         .slice(0, 120)
         .map((e) => Math.max(0, Math.min(1, e)))
     : [];
-  const duration = typeof t.durationSeconds === "number" && Number.isFinite(t.durationSeconds)
-    ? Math.max(1, Math.min(3600, t.durationSeconds))
-    : cuts[cuts.length - 1]!;
+  const duration =
+    typeof t.durationSeconds === "number" && Number.isFinite(t.durationSeconds)
+      ? Math.max(1, Math.min(3600, t.durationSeconds))
+      : cuts[cuts.length - 1]!;
   const bpm = typeof t.bpm === "number" && Number.isFinite(t.bpm) ? Math.round(t.bpm) : null;
   const sections = Array.isArray(t.sections)
     ? (t.sections as Array<Record<string, unknown>>)
@@ -90,14 +86,14 @@ function sanitizeAudioTiming(input: unknown) {
           start: Math.max(0, Number(s["start"]) || 0),
           end: Math.max(0, Number(s["end"]) || 0),
           label:
-            SECTION_LABELS.find((l) => l === s["label"]) ?? ("verse" as (typeof SECTION_LABELS)[number]),
+            SECTION_LABELS.find((l) => l === s["label"]) ??
+            ("verse" as (typeof SECTION_LABELS)[number]),
           energy: Math.max(0, Math.min(1, Number(s["energy"]) || 0)),
         }))
         .filter((s) => s.end > s.start)
     : [];
   return { durationSeconds: duration, bpm, cuts, energy, sections };
 }
-
 
 /**
  * Starts a V Engine cinematic render: charges V Tokens server-side from the
@@ -131,7 +127,11 @@ export const startCinematicRender = createServerFn({ method: "POST" })
         energy: number[];
         sections?: { start: number; end: number; label: string; energy: number }[];
       };
-
+      lyrics?: string;
+      styleDirection?: string;
+      characterDescription?: string;
+      lipsync?: boolean;
+      markers?: { label?: string; start?: number; end?: number }[];
     }) => {
       if (typeof data?.script !== "string" || data.script.trim().length < 40) {
         throw new Error("Add a longer script before rendering.");
@@ -154,6 +154,31 @@ export const startCinematicRender = createServerFn({ method: "POST" })
         moodOverride:
           typeof data.moodOverride === "string" ? data.moodOverride.trim().slice(0, 120) : "",
         audioTiming: sanitizeAudioTiming(data.audioTiming),
+        lyrics: typeof data.lyrics === "string" ? data.lyrics.slice(0, 8000) : "",
+        styleDirection:
+          typeof data.styleDirection === "string" ? data.styleDirection.trim().slice(0, 800) : "",
+        characterDescription:
+          typeof data.characterDescription === "string"
+            ? data.characterDescription.trim().slice(0, 400)
+            : "",
+        lipsync: data.lipsync === true,
+        markers: Array.isArray(data.markers)
+          ? data.markers
+              .slice(0, 24)
+              .map((marker) => {
+                const label = String(marker?.label ?? "verse").toLowerCase();
+                const safeLabel =
+                  label === "chorus" || label === "bridge" || label === "drop" || label === "verse"
+                    ? label
+                    : "verse";
+                return {
+                  label: safeLabel as "verse" | "chorus" | "bridge" | "drop",
+                  start: Number(marker?.start) || 0,
+                  end: Number(marker?.end) || 0,
+                };
+              })
+              .filter((marker) => marker.end > marker.start)
+          : [],
         moodBoard: {
           grade: typeof mood.grade === "string" ? mood.grade.slice(0, 40) : undefined,
           references: Array.isArray(mood.references)
@@ -167,7 +192,6 @@ export const startCinematicRender = createServerFn({ method: "POST" })
       };
     },
   )
-
 
   .handler(async ({ data, context }): Promise<CinematicStartResult> => {
     limitBy("startCinematicRender", context.userId, RATE_LIMITS.generation, "render starts");
@@ -190,6 +214,37 @@ export const startCinematicRender = createServerFn({ method: "POST" })
         engine: "primary",
       };
     }
+    const scenery = data.subjectMode === "scenery";
+    const anchorImage = scenery
+      ? undefined
+      : (data.character?.referenceImage ?? data.characterPhotos[0]);
+    if (!scenery && !anchorImage) {
+      return { ok: false, error: "Add a character image before generating." };
+    }
+
+    const { evenTimelineMarkers } = await import("@/lib/video-studio");
+    const { directVideoShotList } = await import("@/lib/cinematic-script-director.server");
+    const { shotsToScenes } = await import("@/lib/cinematic-script-director");
+    const law = genreLawById(data.genreOverride);
+    let scenes;
+    try {
+      const shots = await directVideoShotList({
+        lyrics: data.lyrics,
+        genre: data.moodOverride || law?.label || "Custom",
+        styleDirection: data.styleDirection || data.moodOverride,
+        markers: data.markers.length ? data.markers : evenTimelineMarkers(data.durationSeconds),
+        characterDescription: scenery ? "" : data.characterDescription,
+      });
+      scenes = shotsToScenes(shots, data.lipsync);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "The shot list was not a JSON list.",
+      };
+    }
+    const opening = scenes[0];
+    if (!opening) return { ok: false, error: "The shot list was empty." };
+
     const { chargeVRender } = await import("@/lib/v-render-charge.server");
     const quote = await chargeVRender(context.userId, data.durationSeconds);
 
@@ -203,40 +258,15 @@ export const startCinematicRender = createServerFn({ method: "POST" })
 
     const balance = quote.balance;
 
-
     try {
-      const { planCinematicScript, createVisualRender } = await import(
-        "@/lib/cinematic-pipeline.server"
-      );
-      const plan = await planCinematicScript({
-        script: data.script,
-        subjectMode: data.subjectMode,
-        styleMode: data.styleMode,
-        durationSeconds: quote.seconds,
-        audioTiming: data.audioTiming,
-        moodBoard: data.moodBoard,
-        genreOverride: data.genreOverride,
-        moodOverride: data.moodOverride,
-        character: data.character,
-      });
-
-
-      // The Character Builder avatar is the primary visual conditioning image.
-      const anchorImage = data.character?.referenceImage ?? data.characterPhotos[0];
-      const opening = plan.scenes[0]!;
-      const openingSeconds = (opening.seconds >= 8 ? 8 : opening.seconds >= 6 ? 6 : 4) as 4 | 6 | 8;
+      const { createVisualRender } = await import("@/lib/cinematic-pipeline.server");
       const job = await createVisualRender(
         opening.shot,
-        openingSeconds,
-        anchorImage ?? undefined,
-        plan.genreId,
-        // Unified multimodal context: every character/style anchor travels with
-        // the shot so the omni-modal node locks identity in one pass.
-        { styleReferences: data.characterPhotos.slice(0, 4) },
+        opening.seconds,
+        anchorImage,
+        law?.id ?? data.genreOverride,
+        { stillPrompt: opening.stillPrompt },
       );
-
-
-
 
       return {
         ok: true,
@@ -245,15 +275,14 @@ export const startCinematicRender = createServerFn({ method: "POST" })
         granted: quote.granted,
         seconds: quote.seconds,
         balance,
-        logline: plan.logline,
-        soundtrack: plan.soundtrack,
-        scenes: plan.scenes,
-        genreId: plan.genreId,
-        genreLabel: plan.genreLabel,
+        logline: opening.title,
+        soundtrack: "",
+        scenes,
+        genreId: law?.id ?? data.genreOverride,
+        genreLabel: data.moodOverride || law?.label || null,
         jobId: job.id,
         engine: job.engine,
       };
-
     } catch (err) {
       console.error("Cinematic render failed:", err);
       return {
@@ -273,34 +302,41 @@ export const startCinematicRender = createServerFn({ method: "POST" })
  */
 export const renderCinematicScene = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: {
-    shot: string;
-    seconds: number;
-    referenceImage?: string;
-    genreId?: string | null;
-    styleReferences?: string[];
-    /** `data:audio/...;base64,...` slice of the master track under this shot. */
-    audioReference?: string;
-  }) => {
-    if (typeof data?.shot !== "string" || data.shot.trim().length < 10) {
-      throw new Error("Invalid scene prompt");
-    }
-    const seconds = Math.max(4, Math.min(8, Math.round(Number(data.seconds) || 8)));
-    const [referenceImage] = sanitizeReferenceImages([data.referenceImage]);
-    return {
-      shot: data.shot.slice(0, 1500),
-      seconds: (seconds >= 8 ? 8 : seconds >= 6 ? 6 : 4) as 4 | 6 | 8,
-      referenceImage,
-      genreId: typeof data.genreId === "string" ? data.genreId.slice(0, 40) : null,
-      styleReferences: sanitizeReferenceImages(
-        Array.isArray(data.styleReferences) ? data.styleReferences.slice(0, 4) : [],
-      ),
-      audioReference:
-        typeof data.audioReference === "string" && /^data:audio\//i.test(data.audioReference)
-          ? data.audioReference
-          : undefined,
-    };
-  })
+  .validator(
+    (data: {
+      shot: string;
+      stillPrompt?: string;
+      seconds: number;
+      referenceImage?: string;
+      genreId?: string | null;
+      styleReferences?: string[];
+      /** `data:audio/...;base64,...` slice of the master track under this shot. */
+      audioReference?: string;
+    }) => {
+      if (typeof data?.shot !== "string" || data.shot.trim().length < 10) {
+        throw new Error("Invalid scene prompt");
+      }
+      const seconds = clampCinematicSeconds(Number(data.seconds) || 8);
+      const [referenceImage] = sanitizeReferenceImages([data.referenceImage]);
+      return {
+        shot: data.shot.slice(0, 1500),
+        stillPrompt:
+          typeof data.stillPrompt === "string" && data.stillPrompt.trim().length >= 8
+            ? data.stillPrompt.trim().slice(0, 1500)
+            : undefined,
+        seconds,
+        referenceImage,
+        genreId: typeof data.genreId === "string" ? data.genreId.slice(0, 40) : null,
+        styleReferences: sanitizeReferenceImages(
+          Array.isArray(data.styleReferences) ? data.styleReferences.slice(0, 4) : [],
+        ),
+        audioReference:
+          typeof data.audioReference === "string" && /^data:audio\//i.test(data.audioReference)
+            ? data.audioReference
+            : undefined,
+      };
+    },
+  )
   .handler(async ({ data, context }) => {
     if (isLocalMock()) {
       return { ok: true as const, jobId: mockJobId(), engine: "primary" as const };
@@ -332,6 +368,7 @@ export const renderCinematicScene = createServerFn({ method: "POST" })
         data.genreId,
         {
           styleReferences: data.styleReferences,
+          ...(data.stillPrompt ? { stillPrompt: data.stillPrompt } : {}),
           ...(data.audioReference ? { audioReference: data.audioReference } : {}),
         },
       );
@@ -359,7 +396,6 @@ export const renderCinematicScene = createServerFn({ method: "POST" })
       };
     }
   });
-
 
 /** Live poll payload handed to the studio UI. */
 export type CinematicPollResult = {

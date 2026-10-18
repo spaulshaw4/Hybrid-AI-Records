@@ -1,4 +1,5 @@
-import { wavespeedHeaders } from "@/lib/ai-provider.server";
+import { WAVESPEED_API_ROOT, wavespeedHeaders } from "@/lib/ai-provider.server";
+import { clampCinematicSeconds } from "@/lib/cinematic-seconds";
 /**
  * Visual engine stack (server only) — WaveSpeed.
  *
@@ -46,6 +47,13 @@ export const FLUX_DEV_MODEL = "wavespeed-ai/flux-dev";
 
 /** 16:9 size confirmed for flux-dev (`width*height`, each side 256–1536). */
 export const FLUX_DEV_SIZE_16_9 = "1024*576";
+
+/**
+ * Image-to-image strength on the same flux-dev model.
+ * WaveSpeed documents 0.3–0.5 when the source should survive the edit.
+ * https://wavespeed.ai/docs/docs-api/wavespeed-ai/flux-dev
+ */
+export const FLUX_IDENTITY_STRENGTH = 0.4;
 
 /** Confirmed motion models. */
 export const HAILUO_I2V_MODEL = "minimax/hailuo-2.3/i2v-standard";
@@ -335,27 +343,132 @@ function promptWithNegatives(prompt: string, limit: number): string {
   return combined.slice(0, limit);
 }
 
+function dataImagePayload(
+  dataUrl: string,
+): { bytes: Uint8Array; contentType: string; filename: string } | null {
+  const match = /^data:(image\/(?:png|jpeg|jpg));base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl.trim());
+  if (!match) return null;
+  const contentType =
+    match[1]!.toLowerCase() === "image/jpg" ? "image/jpeg" : match[1]!.toLowerCase();
+  const binary = atob(match[2]!.replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return {
+    bytes,
+    contentType,
+    filename: contentType === "image/png" ? "character.png" : "character.jpg",
+  };
+}
+
+/**
+ * Uploads a character still through the WaveSpeed media ticket so flux-dev
+ * receives a URL. The storage PUT never carries the API key.
+ */
+async function uploadFluxReference(dataUrl: string): Promise<string> {
+  const image = dataImagePayload(dataUrl);
+  if (!image) {
+    throw new VisualEngineError("The character image must be a PNG or JPG.", 400, "image");
+  }
+  let ticketResponse: Response;
+  try {
+    ticketResponse = await resilientFetch(
+      `${WAVESPEED_API_ROOT}/media/uploads`,
+      {
+        method: "POST",
+        headers: credentials(),
+        body: JSON.stringify({
+          filename: image.filename,
+          size: image.bytes.byteLength,
+          content_type: image.contentType,
+        }),
+      },
+      { label: "character image upload", timeoutMs: 120_000, retries: 0, useBreaker: false },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new VisualEngineError(`Character image upload failed — ${reason}`, null, reason);
+  }
+  const parsed = await responseDetail(ticketResponse);
+  if (!ticketResponse.ok) {
+    throw rejected(ticketResponse.status, waveSpeedErrorText(parsed.json) ?? "", parsed.text);
+  }
+  const data = waveSpeedData(parsed.json);
+  const upload =
+    data.upload && typeof data.upload === "object" && !Array.isArray(data.upload)
+      ? (data.upload as Record<string, unknown>)
+      : null;
+  const downloadUrl = typeof data.download_url === "string" ? data.download_url : "";
+  const uploadUrl = typeof upload?.url === "string" ? upload.url : "";
+  const method = typeof upload?.method === "string" ? upload.method : "";
+  const rawHeaders =
+    upload?.headers && typeof upload.headers === "object" && !Array.isArray(upload.headers)
+      ? (upload.headers as Record<string, unknown>)
+      : null;
+  const headers: Record<string, string> = {};
+  if (rawHeaders) {
+    for (const [key, value] of Object.entries(rawHeaders)) {
+      if (typeof value !== "string" || key.toLowerCase() === "authorization") continue;
+      headers[key] = value;
+    }
+  }
+  if (!downloadUrl || !uploadUrl || !method || Object.keys(headers).length === 0) {
+    throw new VisualEngineError("The character image upload returned no URL.", null, "");
+  }
+  const payload = new ArrayBuffer(image.bytes.byteLength);
+  new Uint8Array(payload).set(image.bytes);
+  let put: Response;
+  try {
+    put = await resilientFetch(
+      uploadUrl,
+      { method, headers, body: payload },
+      { label: "character image put", timeoutMs: 120_000, retries: 0, useBreaker: false },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new VisualEngineError(`Character image upload failed — ${reason}`, null, reason);
+  }
+  if (!put.ok) {
+    const body = await put.text().catch(() => "");
+    throw new VisualEngineError(
+      `Character image upload failed [${put.status}].`,
+      put.status,
+      redactSecrets(body).slice(0, 400),
+    );
+  }
+  return downloadUrl;
+}
+
+async function fluxImageReference(source: string): Promise<string> {
+  if (/^https?:\/\//i.test(source)) return source;
+  if (source.startsWith("data:image/")) return uploadFluxReference(source);
+  throw new VisualEngineError("The character image must be a PNG or JPG.", 400, "image");
+}
+
 /**
  * Stage 1 — scene keyframe on flux-dev.
  *
- * The confirmed schema is text-to-image (`prompt`, `size`, `output_format`,
- * `num_inference_steps`). Character sheets are not posted: flux-dev's `image`
- * field is an img2img source, and this pipeline must not redraw the sheet.
+ * Text-to-image when no character photo is supplied. Character mode posts the
+ * photo on the documented `image` field of the same model (image-to-image),
+ * with strength in the documented preserve range. flux-pro is not called.
  */
 export async function createFoundationFrame(
   prompt: string,
-  _identityReferences?: string[] | undefined,
+  identityReferences?: string[] | undefined,
 ): Promise<string> {
-  const started = await submitModel(
-    FLUX_DEV_MODEL,
-    {
-      prompt: promptWithNegatives(prompt, 1800),
-      size: FLUX_DEV_SIZE_16_9,
-      output_format: "png",
-      num_inference_steps: 28,
-    },
-    `keyframe dispatch (${FLUX_DEV_MODEL})`,
+  const source = identityReferences?.find((value) =>
+    /^(https?:|data:image\/)/i.test(value?.trim() ?? ""),
   );
+  const body: Record<string, unknown> = {
+    prompt: promptWithNegatives(prompt, 1800),
+    size: FLUX_DEV_SIZE_16_9,
+    output_format: "png",
+    num_inference_steps: 28,
+  };
+  if (source) {
+    body.image = await fluxImageReference(source.trim());
+    body.strength = FLUX_IDENTITY_STRENGTH;
+  }
+  const started = await submitModel(FLUX_DEV_MODEL, body, `keyframe dispatch (${FLUX_DEV_MODEL})`);
   return waitForOutput(started.id, 180_000, "keyframe engine");
 }
 
@@ -411,7 +524,7 @@ export async function createMotionBlock(input: {
 }): Promise<MotionJob> {
   const prompt = promptWithNegatives(input.prompt, 4000);
   const image = assertStartImage(input.referenceImage);
-  const chain = resolveCinematicMotion(input.seconds);
+  const chain = resolveCinematicMotion(clampCinematicSeconds(input.seconds));
   let lastError: VisualEngineError | null = null;
 
   const health = chain.map((engine) => ({ engine, skip: breakerOpen(engine.model) }));

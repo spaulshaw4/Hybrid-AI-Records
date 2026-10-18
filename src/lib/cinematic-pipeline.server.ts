@@ -38,26 +38,13 @@ import {
   predictionProgress,
   readPrediction,
 } from "@/lib/visual-engines.server";
+import { clampCinematicSeconds } from "@/lib/cinematic-seconds";
 
 import { clampResolutionLanguage } from "@/lib/render-resolution";
-import {
-  barSeconds,
-  clampTimeline,
-  nearestBeatSeconds,
-  renderableBlock,
-} from "@/lib/beat-grid";
-import {
-  buildEditTimeline,
-  heroCameraMove,
-  planHeroBlocks,
-  type EditCut,
-} from "@/lib/hero-shots";
-
+import { barSeconds, clampTimeline, nearestBeatSeconds, renderableBlock } from "@/lib/beat-grid";
+import { buildEditTimeline, heroCameraMove, planHeroBlocks, type EditCut } from "@/lib/hero-shots";
 
 import { assertRenderable } from "@/lib/pipeline-guard.server";
-
-
-
 
 /**
  * White-labelled motion engines, in failover order. Vendor routing lives in
@@ -78,6 +65,8 @@ export type ScenePlan = {
   seconds: number;
   /** True when a performer visibly sings the lead vocal — triggers lip-sync. */
   vocalSync?: boolean;
+  /** Flux still prompt. `shot` remains the motion prompt. */
+  stillPrompt?: string;
 };
 
 export type RenderPlan = {
@@ -92,19 +81,17 @@ export type RenderPlan = {
   editTimeline?: EditCut[];
   /** Exact master runtime (audio duration) the export is clamped to. */
   masterSeconds?: number;
-
 };
 
 export type StyleMode = "photorealistic" | "cartoon" | "claymation";
-
 
 function styleDirection(styleMode: string): string {
   return styleDirectionFor(styleMode);
 }
 
-
 function subjectDirection(subjectMode: string): string {
-  if (subjectMode === "places") return "location-led storytelling, environments as the lead subject";
+  if (subjectMode === "places")
+    return "location-led storytelling, environments as the lead subject";
   if (subjectMode === "objects") return "macro product-grade object storytelling";
   if (subjectMode === "scenery") return "pure cinematic scenery, no people on screen";
   if (subjectMode === "story")
@@ -135,12 +122,10 @@ function vocalAt(timing: AudioTiming, seconds: number): boolean {
   return (timing.stems?.vocalWindows ?? []).some((w) => seconds >= w.start && seconds < w.end);
 }
 
-
 /** Names the song section a scene block starts inside. */
 function sectionAt(timing: AudioTiming, seconds: number): string | undefined {
   return timing.sections?.find((s) => seconds >= s.start && seconds < s.end)?.label;
 }
-
 
 /** Snaps a musical segment length onto a renderable block length. */
 function blockSeconds(seconds: number): 4 | 6 | 8 {
@@ -182,7 +167,6 @@ function musicalSegments(timing: AudioTiming, target: number): number[] {
   return clampTimeline(trimmed, ceiling, bpm);
 }
 
-
 /**
  * Robust JSON extraction: strips markdown fences and any conversational
  * wrapper before parsing. Returns null when nothing parses.
@@ -195,7 +179,10 @@ function extractScriptPlanJson(rawResponse: string): {
   let text = (rawResponse ?? "").trim();
   if (!text) return null;
 
-  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  text = text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
 
   const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (jsonMatch) text = jsonMatch[0];
@@ -215,14 +202,17 @@ function extractScriptPlanJson(rawResponse: string): {
 }
 
 /** Deterministic fallback plan so the workflow never hard-fails on malformed model output. */
-function fallbackPlan(input: {
-  script: string;
-  styleMode: string;
-  subjectMode: string;
-  durationSeconds: number;
-  audioTiming?: AudioTiming | undefined;
-  character?: CharacterProfile | null | undefined;
-}, genre: GenreLaw | null): { logline: string; soundtrack: string; scenes: ScenePlan[] } {
+function fallbackPlan(
+  input: {
+    script: string;
+    styleMode: string;
+    subjectMode: string;
+    durationSeconds: number;
+    audioTiming?: AudioTiming | undefined;
+    character?: CharacterProfile | null | undefined;
+  },
+  genre: GenreLaw | null,
+): { logline: string; soundtrack: string; scenes: ScenePlan[] } {
   const target = Math.max(8, Math.round(input.durationSeconds));
   const segments =
     input.audioTiming && input.audioTiming.cuts.length > 1
@@ -290,12 +280,7 @@ export async function planCinematicScript(input: {
     : detectedMood;
   // The uploaded song's own genre decides the visual world — a country or roots
   // track must never be planned as a neon club video.
-  const genre =
-    genreLawById(input.genreOverride) ?? detectGenreLaw(input.script, input.styleMode);
-
-
-
-
+  const genre = genreLawById(input.genreOverride) ?? detectGenreLaw(input.script, input.styleMode);
 
   const response = await aiChatFetch({
     body: JSON.stringify({
@@ -311,11 +296,10 @@ export async function planCinematicScript(input: {
             "For country, roots, acoustic or rock tracks, futuristic and cyberpunk imagery (neon cityscapes, holographic " +
             "overlays, cyber suits, laser dance stages) is forbidden — use authentic real-world locations and natural or " +
             "practical light instead. Storyboard the events, characters and places described in the lyrics. " +
-
             "Never plan title cards, credits, logo stings, split-screen panels, character sheets, photo montages or any " +
             "static frame — every block is live-action motion with a moving camera and moving subjects. " +
             "Respond with strict, valid JSON only. Do NOT include markdown code blocks, backticks, or any conversational preamble/postscript. Start your response immediately with { or [. " +
-            "Reply in this shape: {\"logline\":string,\"soundtrack\":string,\"scenes\":[{\"title\":string,\"shot\":string,\"seconds\":number,\"vocal_sync\":boolean}]}. " +
+            'Reply in this shape: {"logline":string,"soundtrack":string,"scenes":[{"title":string,"shot":string,"seconds":number,"vocal_sync":boolean}]}. ' +
             "Set `vocal_sync` true ONLY for tight close-up or medium hero performance shots where the character sings " +
             "directly to camera with the mouth clearly visible in frame. " +
             "Set `vocal_sync` false for every wide shot, dance routine, atmospheric cutaway, action scene, b-roll, " +
@@ -366,7 +350,9 @@ export async function planCinematicScript(input: {
                             ? `Lead vocal is present at: ${input.audioTiming.stems.vocalWindows
                                 .slice(0, 12)
                                 .map((w) => `${Math.round(w.start)}–${Math.round(w.end)}s`)
-                                .join(", ")}. Set \`vocal_sync\` true for blocks inside those windows and keep instrumental windows on performance-free coverage.`
+                                .join(
+                                  ", ",
+                                )}. Set \`vocal_sync\` true for blocks inside those windows and keep instrumental windows on performance-free coverage.`
                             : ""),
                       ]
                     : []),
@@ -374,10 +360,7 @@ export async function planCinematicScript(input: {
                   ...((input.audioTiming.sections ?? []).length
                     ? [
                         `Song structure (start → end seconds): ${(input.audioTiming.sections ?? [])
-                          .map(
-                            (s) =>
-                              `${s.label} ${Math.round(s.start)}-${Math.round(s.end)}s`,
-                          )
+                          .map((s) => `${s.label} ${Math.round(s.start)}-${Math.round(s.end)}s`)
                           .join(", ")}. ` +
                           "Build the story arc onto that structure: intros establish the world, verses carry the narrative, " +
                           "choruses and drops deliver the hero imagery and widest coverage, breakdowns go intimate, outros resolve.",
@@ -390,14 +373,15 @@ export async function planCinematicScript(input: {
             input.script.slice(0, 15000),
           ].join("\n"),
         },
-
       ],
     }),
   });
 
   if (!response.ok) await throwGatewayError(response, "Script orchestration");
 
-  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
   const raw = payload.choices?.[0]?.message?.content?.trim() ?? "";
 
   const parsed = extractScriptPlanJson(raw);
@@ -445,8 +429,7 @@ export async function planCinematicScript(input: {
       const energy = timing.energy[i] ?? 0.5;
       const section = sectionAt(timing, at);
       const source = resolvedScenes[i % resolvedScenes.length]!;
-      const singing =
-        source.vocalSync === true || own.some((c) => vocalAt(timing, c.start));
+      const singing = source.vocalSync === true || own.some((c) => vocalAt(timing, c.start));
       const pacing =
         energy > 0.66
           ? "High-energy passage: fast, kinetic camera travel that never stops moving."
@@ -500,10 +483,7 @@ export async function planCinematicScript(input: {
     editTimeline: buildEditTimeline(heroes.length, target, null),
     masterSeconds: target,
   };
-
 }
-
-
 
 export type VideoJob = { id: string; status: string; progress: number; engine: VEngineId };
 
@@ -563,62 +543,56 @@ function classifyShot(
 
 export async function createVisualRender(
   prompt: string,
-  seconds: 4 | 6 | 8 = 8,
+  seconds: number = 8,
   referenceImage?: string | undefined,
   genreId?: string | null,
   /**
-   * Character/style anchors and the master-audio slice. WaveSpeed flux-dev
-   * stills are text-to-image, and Hailuo / Seedance have no audio input, so
-   * these stay out of the provider body. The studio muxes the track locally.
+   * The character photo is the flux-dev image reference. Audio is not a
+   * WaveSpeed motion field; the studio muxes the track locally.
    */
-  context?: { styleReferences?: string[] | undefined; audioReference?: string | undefined },
+  context?: {
+    styleReferences?: string[] | undefined;
+    audioReference?: string | undefined;
+    /** Flux still prompt. Motion uses `prompt` when this is omitted. */
+    stillPrompt?: string | undefined;
+  },
 ): Promise<VideoJob> {
-  // With a character reference the frame is an image-to-video anchor, not a
-  // slide: the person in the photo must ACT inside the scene, so the model is
-  // told explicitly to animate them and never hold the still frame.
-  // Genre Visual Laws travel with every shot: the banned tropes for the track's
-  // genre are appended as an explicit negative-prompt block on each render call.
+  const blockSeconds = clampCinematicSeconds(seconds);
   const law = genreLawById(genreId);
-  const safePrompt = clampResolutionLanguage(stripAudioPayload(prompt));
-  const lawedPrompt = law ? `${safePrompt} ${genreNegativePrompt(law)}` : safePrompt;
+  const motionSource = clampResolutionLanguage(stripAudioPayload(prompt));
+  const stillSource = clampResolutionLanguage(
+    stripAudioPayload(context?.stillPrompt?.trim() || prompt),
+  );
+  const withLaw = (text: string) => (law ? `${text} ${genreNegativePrompt(law)}` : text);
+  const identity = referenceImage
+    ? " The person in the reference image is the lead. Keep their face, skin tone, hair, and styling identical while they move inside the scene. Do not show the reference photo as a still card."
+    : "";
+  const stillPrompt = `${withLaw(stillSource)}${identity}`;
+  const motionPrompt = `${withLaw(motionSource)}${identity}`;
 
-  const anchoredPrompt = referenceImage
-    ? `${lawedPrompt} The person in the reference image is the lead character of this shot: keep their face, hair and wardrobe identical, ` +
-      "and have them move and perform naturally inside the scene with a continuously moving camera. " +
-      "Do not show the reference photo itself, a portrait card, a split-screen panel or any static image — this is live motion from the first frame."
-    : lawedPrompt;
+  const shotClass = classifyShot(motionSource, referenceImage);
 
-  const shotClass = classifyShot(safePrompt, referenceImage);
-
-  // Pre-flight shield: reject malformed / unauthenticated jobs before a single
-  // paid call goes out (no foundation frame, no motion dispatch, no credits).
   assertRenderable({
-    shotId: `${genreId ?? "shot"}:${anchoredPrompt.slice(0, 24)}`,
-    prompt: anchoredPrompt,
+    shotId: `${genreId ?? "shot"}:${motionPrompt.slice(0, 24)}`,
+    prompt: motionPrompt,
     shotClass,
     ...(referenceImage ? { referenceImage } : {}),
     ...(context?.audioReference ? { audioReference: context.audioReference } : {}),
   });
 
-  // Stage 1 — flux-dev keyframe. Character sheets are not sent: the confirmed
-  // still schema is text-to-image, and a sheet must not become the start frame.
-  const identityReferences = [referenceImage, ...(context?.styleReferences ?? [])].filter(
-    (value): value is string => Boolean(value),
-  );
-
-  // Stage 2 — image-to-video from that single 16:9 keyframe.
   try {
-    const sceneKeyframe = await createFoundationFrame(anchoredPrompt, identityReferences);
+    const sceneKeyframe = await createFoundationFrame(
+      stillPrompt,
+      referenceImage ? [referenceImage] : [],
+    );
     const job = await createMotionBlock({
-      prompt: anchoredPrompt,
-      seconds,
+      prompt: motionPrompt,
+      seconds: blockSeconds,
       referenceImage: sceneKeyframe,
-      shotClass: classifyShot(safePrompt, referenceImage),
+      shotClass,
       ...(context?.audioReference ? { audioReference: context.audioReference } : {}),
     });
     return { id: job.id, status: job.status, progress: job.progress, engine: job.engine };
-
-
   } catch (error) {
     const failure = error as { message?: string; status?: number | null; detail?: string };
     throw new VisualRenderError(
@@ -628,8 +602,6 @@ export async function createVisualRender(
     );
   }
 }
-
-
 
 /** Raw provider lifecycle, surfaced verbatim so the UI can show a stage. */
 export type RenderStage = "starting" | "processing" | "succeeded" | "failed";
@@ -701,7 +673,5 @@ export async function pollVisualRender(jobId: string, userId: string): Promise<R
   };
 }
 
-
 // Renders are no longer re-uploaded through the backend — the player streams
 // directly from the provider CDN.
-

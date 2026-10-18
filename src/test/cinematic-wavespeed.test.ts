@@ -12,12 +12,14 @@ import {
   firstOutputUrl,
   FLUX_DEV_MODEL,
   FLUX_DEV_SIZE_16_9,
+  FLUX_IDENTITY_STRENGTH,
   HAILUO_I2V_MODEL,
   readPrediction,
   resolveCinematicMotion,
   SEEDANCE_I2V_MODEL,
   VisualEngineError,
 } from "@/lib/visual-engines.server";
+import { clampCinematicSeconds } from "@/lib/cinematic-seconds";
 
 const WAVESPEED_KEY = "ws_test_cinematic_key";
 const REPLICATE_TOKEN = "r8_must_not_reach_wavespeed";
@@ -132,6 +134,9 @@ describe("cinematic motion duration contract", () => {
     expect(() => assertHailuoDuration(8)).toThrow(/Refusing to send 8/);
     expect(assertHailuoDuration(6)).toBe(6);
     expect(assertHailuoDuration(10)).toBe(10);
+    expect(clampCinematicSeconds(5)).toBe(5);
+    expect(clampCinematicSeconds(10)).toBe(10);
+    expect(clampCinematicSeconds(3)).toBe(4);
   });
 });
 
@@ -158,7 +163,7 @@ describe("WaveSpeed stills and motion", () => {
       }),
     );
 
-    const url = await createFoundationFrame(PROMPT, ["data:image/png;base64,aaaa"]);
+    const url = await createFoundationFrame(PROMPT);
     expect(url).toBe(STILL_URL);
     const post = calls[0]!;
     expect(post.url).toBe(`https://api.wavespeed.ai/api/v3/${FLUX_DEV_MODEL}`);
@@ -177,6 +182,36 @@ describe("WaveSpeed stills and motion", () => {
         (call) => !call.url.includes("/tasks") && !call.url.includes("api.replicate.com"),
       ),
     ).toBe(true);
+  });
+
+  it("posts the character photo on flux-dev image-to-image", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({ url, init });
+        if (url.endsWith(`/api/v3/${FLUX_DEV_MODEL}`) && init?.method === "POST") {
+          return jsonResponse({ data: { id: "pred_flux_face", status: "created" } });
+        }
+        if (url.endsWith("/predictions/pred_flux_face/result")) {
+          return jsonResponse({
+            data: { id: "pred_flux_face", status: "completed", outputs: [STILL_URL] },
+          });
+        }
+        return jsonResponse({ message: `unexpected ${url}` }, 500);
+      }),
+    );
+
+    const url = await createFoundationFrame(PROMPT, ["https://cdn.example/face.jpg"]);
+    expect(url).toBe(STILL_URL);
+    expect(jsonBody(calls[0]?.init)).toMatchObject({
+      image: "https://cdn.example/face.jpg",
+      strength: FLUX_IDENTITY_STRENGTH,
+      size: FLUX_DEV_SIZE_16_9,
+      output_format: "png",
+    });
+    expect(jsonBody(calls[0]?.init)).not.toHaveProperty("input");
+    expect(calls.some((call) => call.url.includes("api.replicate.com"))).toBe(false);
   });
 
   it("sends a 5 second block to Seedance and never to Hailuo", async () => {
