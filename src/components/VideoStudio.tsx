@@ -1,11 +1,18 @@
 import { useState, type ChangeEvent, type DragEvent } from "react";
-import { videoStudioGate } from "@/lib/video-studio";
+import {
+  formatSlotTime,
+  videoStudioGate,
+  type ScriptMode,
+  type ScriptSlot,
+} from "@/lib/video-studio";
 
 type VideoStudioProps = {
   audioName: string | null;
   characterPreview: string | null;
   vision: string;
-  autoWrite: boolean;
+  scriptMode: ScriptMode;
+  slots: ScriptSlot[];
+  shotNotes: string[];
   busy: boolean;
   status: string | null;
   exportUrl: string | null;
@@ -13,7 +20,8 @@ type VideoStudioProps = {
   onMasterFile: (file: File | null) => void;
   onCharacterImage: (file: File | null) => void;
   onVision: (value: string) => void;
-  onAutoWrite: (value: boolean) => void;
+  onScriptMode: (mode: ScriptMode) => void;
+  onShotNote: (index: number, value: string) => void;
   onGenerate: () => void;
 };
 
@@ -83,7 +91,9 @@ export function VideoStudio({
   audioName,
   characterPreview,
   vision,
-  autoWrite,
+  scriptMode,
+  slots,
+  shotNotes,
   busy,
   status,
   exportUrl,
@@ -91,10 +101,16 @@ export function VideoStudio({
   onMasterFile,
   onCharacterImage,
   onVision,
-  onAutoWrite,
+  onScriptMode,
+  onShotNote,
   onGenerate,
 }: VideoStudioProps) {
-  const gate = videoStudioGate({ hasAudio: Boolean(audioName), vision });
+  const gate = videoStudioGate({
+    hasAudio: Boolean(audioName),
+    mode: scriptMode,
+    vision,
+    shots: shotNotes,
+  });
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col px-6 py-8 text-zinc-100">
@@ -121,34 +137,75 @@ export function VideoStudio({
       </div>
 
       <section className="mt-5 rounded-2xl border border-white/10 bg-zinc-950/70 p-5">
-        <h2 className="text-xs font-semibold tracking-[0.18em] text-zinc-300">
-          3. The Script / Vision
-        </h2>
-        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
-          <label className="block text-sm text-zinc-200" htmlFor="script-vision">
-            The Script & Vision
-          </label>
-          <textarea
-            id="script-vision"
-            value={vision}
-            onChange={(event) => onVision(event.target.value)}
-            rows={6}
-            placeholder="Describe what happens in the video (or type your concept, and Claude will build the scene script for you)..."
-            className="mt-3 w-full resize-y bg-transparent text-base leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-          <button
-            type="button"
-            aria-pressed={autoWrite}
-            onClick={() => onAutoWrite(!autoWrite)}
-            className={`mt-3 rounded-full border px-4 py-2 text-sm ${
-              autoWrite
-                ? "border-rose-300/50 bg-rose-400/15 text-rose-100"
-                : "border-white/15 text-zinc-300"
-            }`}
-          >
-            Auto-Write with Claude
-          </button>
-        </div>
+        <h2 className="text-xs font-semibold tracking-[0.18em] text-zinc-300">3. The Script</h2>
+        <fieldset className="mt-4">
+          <legend className="text-sm text-zinc-400">Script mode</legend>
+          <div className="mt-3 flex flex-wrap gap-6">
+            <label className="flex items-center gap-2 text-sm text-zinc-100">
+              <input
+                type="radio"
+                name="script-mode"
+                checked={scriptMode === "auto"}
+                onChange={() => onScriptMode("auto")}
+              />
+              Auto-Direct (Claude)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-100">
+              <input
+                type="radio"
+                name="script-mode"
+                checked={scriptMode === "manual"}
+                onChange={() => onScriptMode("manual")}
+              />
+              Manual Scene-by-Scene
+            </label>
+          </div>
+        </fieldset>
+
+        {scriptMode === "auto" ? (
+          <div className="mt-5">
+            <label className="block text-sm text-zinc-200" htmlFor="video-concept">
+              Describe your video concept
+            </label>
+            <input
+              id="video-concept"
+              value={vision}
+              onChange={(event) => onVision(event.target.value)}
+              placeholder="Moody neon city night drive, heavy rain, dramatic performance"
+              className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-base text-zinc-100 outline-none placeholder:text-zinc-500"
+            />
+            <p className="mt-3 text-sm text-zinc-400">
+              Claude listens to the track and breaks down every shot automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-5 space-y-3">
+            {slots.length === 0 ? (
+              <p className="text-sm text-zinc-400">
+                Drop a track and each section of the song shows up here.
+              </p>
+            ) : (
+              slots.map((slot, index) => (
+                <label key={`${slot.label}-${slot.start}`} className="block">
+                  <span className="text-sm text-zinc-400">
+                    Scene {index + 1} · {formatSlotTime(slot.start)}–{formatSlotTime(slot.end)} ·{" "}
+                    {slot.label}
+                  </span>
+                  <input
+                    value={shotNotes[index] ?? ""}
+                    aria-label={`Scene ${index + 1} ${slot.label}`}
+                    onChange={(event) => onShotNote(index, event.target.value)}
+                    placeholder="What this section looks like"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-base text-zinc-100 outline-none placeholder:text-zinc-500"
+                  />
+                </label>
+              ))
+            )}
+            <p className="text-sm text-zinc-400">
+              You dictate exactly what happens in each section.
+            </p>
+          </div>
+        )}
       </section>
 
       <div className="mt-8 flex justify-center">

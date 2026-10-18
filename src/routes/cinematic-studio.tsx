@@ -118,7 +118,13 @@ import { SITE_URL } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import { VideoStudio } from "@/components/VideoStudio";
 import { startStemWorker, type StemState } from "@/lib/stem-worker";
-import { STAR_DESCRIPTION, timelineMarkersFromSections, visionScript } from "@/lib/video-studio";
+import {
+  STAR_DESCRIPTION,
+  scriptSlotsFromSections,
+  timelineMarkersFromSections,
+  visionScript,
+  type ScriptMode,
+} from "@/lib/video-studio";
 
 const TITLE = "Video Engine — Hybrid AI Records";
 const DESCRIPTION = "Drop a track, a character, and a script, then generate one music video.";
@@ -176,7 +182,15 @@ function CinematicStudioPage() {
   // mux the original, untouched track onto the finished picture.
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [vision, setVision] = useState("");
-  const [autoWrite, setAutoWrite] = useState(true);
+  const [scriptMode, setScriptMode] = useState<ScriptMode>("auto");
+  const [shotNotes, setShotNotes] = useState<string[]>([]);
+  const slots = useMemo(
+    () => scriptSlotsFromSections(audioTiming?.sections ?? [], audioTiming?.durationSeconds ?? 0),
+    [audioTiming],
+  );
+  useEffect(() => {
+    setShotNotes(slots.map(() => ""));
+  }, [slots]);
   const [characterImage, setCharacterImage] = useState<string | null>(null);
   const [studioNote, setStudioNote] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
@@ -931,7 +945,11 @@ function CinematicStudioPage() {
 
   const handleGenerate = async (
     scriptOverride?: string,
-    options?: { autoWrite?: boolean; vision?: string },
+    options?: {
+      autoWrite?: boolean;
+      vision?: string;
+      manualShots?: { label: string; start: number; end: number; description: string }[];
+    },
   ) => {
     const scriptText = (scriptOverride ?? script).trim();
     if (scriptText.length < 40) {
@@ -1007,6 +1025,7 @@ function CinematicStudioPage() {
           characterDescription: hasStar ? STAR_DESCRIPTION : "",
           lipsync: Boolean(vocalBufferRef.current),
           autoWrite: options?.autoWrite !== false,
+          ...(options?.manualShots?.length ? { manualShots: options.manualShots } : {}),
           markers,
           ...(audioTiming ? { audioTiming } : {}),
         },
@@ -1355,8 +1374,15 @@ function CinematicStudioPage() {
       setStudioNote("Drop your audio track first.");
       return;
     }
-    if (vision.trim().length < 8) {
-      setStudioNote("Describe what happens in the video.");
+    if (scriptMode === "manual") {
+      if (slots.length === 0 || shotNotes.some((note) => note.trim().length < 3)) {
+        setStudioNote(
+          slots.length === 0 ? "Drop a track to see the sections." : "Describe each section.",
+        );
+        return;
+      }
+    } else if (vision.trim().length < 8) {
+      setStudioNote("Describe your video concept.");
       return;
     }
     setExportUrl((prev) => {
@@ -1371,7 +1397,21 @@ function CinematicStudioPage() {
       console.error("[video-studio] vocal isolation failed", err);
       vocalBufferRef.current = null;
     }
-    await handleGenerate(visionScript(vision), { autoWrite, vision });
+    const manualShots = slots.map((slot, index) => ({
+      label: slot.label,
+      start: slot.start,
+      end: slot.end,
+      description: shotNotes[index]?.trim() ?? "",
+    }));
+    const manualText = manualShots.map((shot) => `${shot.label}: ${shot.description}`).join("\n");
+    await handleGenerate(
+      scriptMode === "manual" ? visionScript(manualText) : visionScript(vision),
+      {
+        autoWrite: scriptMode === "auto",
+        vision: scriptMode === "manual" ? manualText : vision,
+        ...(scriptMode === "manual" ? { manualShots } : {}),
+      },
+    );
   };
 
   const onMasterFile = async (file: File | null) => {
@@ -1432,7 +1472,9 @@ function CinematicStudioPage() {
         audioName={audioName}
         characterPreview={characterImage}
         vision={vision}
-        autoWrite={autoWrite}
+        scriptMode={scriptMode}
+        slots={slots}
+        shotNotes={shotNotes}
         busy={isGenerating}
         status={studioNote}
         exportUrl={exportUrl}
@@ -1440,7 +1482,14 @@ function CinematicStudioPage() {
         onMasterFile={(file) => void onMasterFile(file)}
         onCharacterImage={onCharacterImage}
         onVision={setVision}
-        onAutoWrite={setAutoWrite}
+        onScriptMode={setScriptMode}
+        onShotNote={(index, value) =>
+          setShotNotes((prev) => {
+            const next = slots.map((_, slotIndex) => prev[slotIndex] ?? "");
+            next[index] = value;
+            return next;
+          })
+        }
         onGenerate={() => void beginGenerate()}
       />
     </div>

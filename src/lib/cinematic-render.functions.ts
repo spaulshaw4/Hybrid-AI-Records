@@ -132,6 +132,7 @@ export const startCinematicRender = createServerFn({ method: "POST" })
       characterDescription?: string;
       lipsync?: boolean;
       autoWrite?: boolean;
+      manualShots?: { label?: string; start?: number; end?: number; description?: string }[];
       markers?: { label?: string; start?: number; end?: number }[];
     }) => {
       if (typeof data?.script !== "string" || data.script.trim().length < 40) {
@@ -164,6 +165,30 @@ export const startCinematicRender = createServerFn({ method: "POST" })
             : "",
         lipsync: data.lipsync === true,
         autoWrite: data.autoWrite !== false,
+        manualShots: Array.isArray(data.manualShots)
+          ? data.manualShots.slice(0, 16).flatMap((shot) => {
+              const description =
+                typeof shot?.description === "string" ? shot.description.trim().slice(0, 400) : "";
+              const start = Number(shot?.start);
+              const end = Number(shot?.end);
+              if (
+                !description ||
+                !Number.isFinite(start) ||
+                !Number.isFinite(end) ||
+                end <= start
+              ) {
+                return [];
+              }
+              return [
+                {
+                  label: String(shot?.label ?? "Scene").slice(0, 40),
+                  start,
+                  end,
+                  description,
+                },
+              ];
+            })
+          : [],
         markers: Array.isArray(data.markers)
           ? data.markers
               .slice(0, 24)
@@ -226,12 +251,15 @@ export const startCinematicRender = createServerFn({ method: "POST" })
 
     const { evenTimelineMarkers } = await import("@/lib/video-studio");
     const { directVideoShotList } = await import("@/lib/cinematic-script-director.server");
-    const { scenesFromVision, shotsToScenes } = await import("@/lib/cinematic-script-director");
+    const { scenesFromManualShots, scenesFromVision, shotsToScenes } =
+      await import("@/lib/cinematic-script-director");
     const law = genreLawById(data.genreOverride);
     let scenes;
     try {
       if (!data.autoWrite) {
-        scenes = scenesFromVision(data.script, data.durationSeconds, data.lipsync);
+        scenes = data.manualShots.length
+          ? scenesFromManualShots(data.manualShots, data.lipsync)
+          : scenesFromVision(data.script, data.durationSeconds, data.lipsync);
       } else {
         const shots = await directVideoShotList({
           lyrics: data.lyrics || data.script,

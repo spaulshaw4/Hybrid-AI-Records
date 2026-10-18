@@ -77,6 +77,26 @@ export function parseDirectedShotList(raw: string): DirectedShot[] {
   });
 }
 
+/** One line the user typed for a detected song section. Claude is not called. */
+export function scenesFromManualShots(
+  shots: { label: string; start: number; end: number; description: string }[],
+  lipsync: boolean,
+): StudioScene[] {
+  return shots
+    .filter((shot) => shot.description.trim().length > 0 && shot.end > shot.start)
+    .map((shot, index) => {
+      const text = shot.description.trim();
+      return {
+        index,
+        title: shot.label.slice(0, 120),
+        shot: text,
+        stillPrompt: text,
+        seconds: clampCinematicSeconds(shot.end - shot.start),
+        vocalSync: lipsync && SINGING_SCENE.test(`${shot.label} ${text}`),
+      };
+    });
+}
+
 /**
  * Uses a pasted script as the scenes. Claude is not called.
  * Each paragraph or sentence becomes one shot across the track.
