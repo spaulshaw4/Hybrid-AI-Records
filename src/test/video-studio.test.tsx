@@ -1,125 +1,143 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { VideoStudio } from "@/components/VideoStudio";
-import { hiddenStyleDirection } from "@/lib/video-studio";
+import { scenesFromVision } from "@/lib/cinematic-script-director";
+import { videoStudioGate } from "@/lib/video-studio";
 
-const noop = () => undefined;
-
-function studio(overrides: Partial<Parameters<typeof VideoStudio>[0]> = {}) {
+function renderStudio(
+  overrides: Partial<{
+    audioName: string | null;
+    characterPreview: string | null;
+    vision: string;
+    autoWrite: boolean;
+    onGenerate: () => void;
+    onAutoWrite: (value: boolean) => void;
+    onMasterFile: (file: File | null) => void;
+    onCharacterImage: (file: File | null) => void;
+  }> = {},
+) {
   return render(
     <VideoStudio
-      audioName={null}
-      vocalName={null}
-      mode="auto"
-      personaId={null}
-      styleId={null}
-      customText=""
-      lyrics=""
-      characterImageName={null}
+      audioName={overrides.audioName ?? null}
+      characterPreview={overrides.characterPreview ?? null}
+      vision={overrides.vision ?? ""}
+      autoWrite={overrides.autoWrite ?? true}
       busy={false}
       status={null}
       exportUrl={null}
       exportName="hybrid-music-video.mp4"
-      onMasterFile={noop}
-      onVocalFile={noop}
-      onMode={noop}
-      onPersona={noop}
-      onStyle={noop}
-      onCustomText={noop}
-      onLyrics={noop}
-      onCharacterImage={noop}
-      onGenerate={noop}
-      {...overrides}
+      onMasterFile={overrides.onMasterFile ?? vi.fn()}
+      onCharacterImage={overrides.onCharacterImage ?? vi.fn()}
+      onVision={vi.fn()}
+      onAutoWrite={overrides.onAutoWrite ?? vi.fn()}
+      onGenerate={overrides.onGenerate ?? vi.fn()}
     />,
   );
 }
 
-describe("video studio flow", () => {
-  afterEach(() => cleanup());
-
-  it("starts empty, with generate disabled and no character image", () => {
-    studio();
+describe("video studio canvas", () => {
+  it("shows the track, the star, and the script on one screen", () => {
+    renderStudio();
     expect(
-      screen.getByRole("heading", { name: "HYBRID AI RECORDS: VIDEO STUDIO" }),
+      screen.getByRole("heading", { name: /HYBRID AI RECORDS\s+│\s+VIDEO ENGINE/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate Music Video" })).toBeDisabled();
-    expect(screen.queryByLabelText("Character image")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Song lyrics")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Custom visual style")).not.toBeInTheDocument();
-    expect(screen.queryByText(/flux|hailuo|seedance|replicate|wavespeed/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /1\. The Track/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /2\. The Star/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /3\. The Script \/ Vision/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/The Script & Vision/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto-Write with Claude/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.queryByText(/Nightcrooner|Roots Voice|Frontperson|Amapiano/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/vocal stem/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Generate Music Video/i })).toBeDisabled();
   });
 
-  it("keeps generate disabled without audio", () => {
-    studio({ styleId: "amapiano", mode: "auto" });
-    expect(screen.getByRole("button", { name: "Generate Music Video" })).toBeDisabled();
-    expect(screen.getByText("Add a master track first.")).toBeInTheDocument();
-  });
-
-  it("does not ask for a character image in auto mode", () => {
-    studio({ audioName: "song.wav", styleId: "bedroom-pop", mode: "auto" });
-    expect(screen.queryByLabelText("Character image")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate Music Video" })).toBeEnabled();
-  });
-
-  it("blocks generate in character mode until a character image is added", () => {
-    studio({
-      audioName: "song.mp3",
-      mode: "character",
-      personaId: "frontperson",
-      styleId: "symphonic-rock",
-      characterImageName: null,
-    });
-    expect(screen.getByLabelText("Character image")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate Music Video" })).toBeDisabled();
-    expect(screen.getByText("Add a character image.")).toBeInTheDocument();
-  });
-
-  it("enables generate once character mode has a persona and an image", () => {
+  it("opens Generate once a track and a vision are present", () => {
     const onGenerate = vi.fn();
-    studio({
-      audioName: "song.mp3",
-      mode: "character",
-      personaId: "frontperson",
-      styleId: "roots-reggae",
-      characterImageName: "face.png",
+    renderStudio({
+      audioName: "night-drive.mp3",
+      vision: "Cyberpunk street race at night with heavy neon lighting",
       onGenerate,
     });
-    const button = screen.getByRole("button", { name: "Generate Music Video" });
+    const button = screen.getByRole("button", { name: /Generate Music Video/i });
     expect(button).toBeEnabled();
-    button.click();
+    fireEvent.click(button);
     expect(onGenerate).toHaveBeenCalledOnce();
   });
 
-  it("shows one custom field and hides preset direction", () => {
-    const { rerender } = studio({ styleId: "custom", audioName: "song.wav" });
-    expect(screen.getByLabelText("Custom visual style")).toBeInTheDocument();
-    expect(screen.queryByText(hiddenStyleDirection("amapiano", ""))).not.toBeInTheDocument();
-    rerender(
+  it("shows a large preview after a character photo is dropped", () => {
+    const onCharacterImage = vi.fn();
+    const { rerender } = render(
       <VideoStudio
-        audioName="song.wav"
-        vocalName={null}
-        mode="auto"
-        personaId={null}
-        styleId="amapiano"
-        customText=""
-        lyrics=""
-        characterImageName={null}
+        audioName={null}
+        characterPreview={null}
+        vision=""
+        autoWrite
         busy={false}
         status={null}
         exportUrl={null}
         exportName="hybrid-music-video.mp4"
-        onMasterFile={noop}
-        onVocalFile={noop}
-        onMode={noop}
-        onPersona={noop}
-        onStyle={noop}
-        onCustomText={noop}
-        onLyrics={noop}
-        onCharacterImage={noop}
-        onGenerate={noop}
+        onMasterFile={vi.fn()}
+        onCharacterImage={onCharacterImage}
+        onVision={vi.fn()}
+        onAutoWrite={vi.fn()}
+        onGenerate={vi.fn()}
       />,
     );
-    expect(screen.queryByLabelText("Custom visual style")).not.toBeInTheDocument();
-    expect(screen.queryByText(/log-drum/i)).not.toBeInTheDocument();
+    const photo = new File(["face"], "star.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText(/Drop character photo here/i), {
+      target: { files: [photo] },
+    });
+    expect(onCharacterImage).toHaveBeenCalledWith(photo);
+    rerender(
+      <VideoStudio
+        audioName={null}
+        characterPreview="data:image/png;base64,iVBORw0KGgo="
+        vision=""
+        autoWrite
+        busy={false}
+        status={null}
+        exportUrl={null}
+        exportName="hybrid-music-video.mp4"
+        onMasterFile={vi.fn()}
+        onCharacterImage={onCharacterImage}
+        onVision={vi.fn()}
+        onAutoWrite={vi.fn()}
+        onGenerate={vi.fn()}
+      />,
+    );
+    const preview = screen.getByRole("img", { name: /Character preview/i });
+    expect(preview).toHaveAttribute("src", "data:image/png;base64,iVBORw0KGgo=");
+    expect(preview.className).toContain("object-contain");
+  });
+
+  it("lets Auto-Write with Claude be turned off", () => {
+    const onAutoWrite = vi.fn();
+    renderStudio({ onAutoWrite });
+    fireEvent.click(screen.getByRole("button", { name: /Auto-Write with Claude/i }));
+    expect(onAutoWrite).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("vision gate", () => {
+  it("asks for a track and a description, and never a persona", () => {
+    expect(videoStudioGate({ hasAudio: false, vision: "a night drive" }).ok).toBe(false);
+    expect(videoStudioGate({ hasAudio: true, vision: "short" }).ok).toBe(false);
+    expect(videoStudioGate({ hasAudio: true, vision: "a night drive through neon" }).ok).toBe(true);
+  });
+
+  it("turns a pasted script into scenes without calling Claude", () => {
+    const scenes = scenesFromVision(
+      "They sing in a red room. The camera stays wide on the street.",
+      12,
+      true,
+    );
+    expect(scenes.length).toBeGreaterThan(0);
+    expect(scenes.some((scene) => scene.vocalSync)).toBe(true);
+    expect(scenes.every((scene) => scene.stillPrompt.length > 0)).toBe(true);
   });
 });

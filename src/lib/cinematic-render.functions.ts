@@ -131,6 +131,7 @@ export const startCinematicRender = createServerFn({ method: "POST" })
       styleDirection?: string;
       characterDescription?: string;
       lipsync?: boolean;
+      autoWrite?: boolean;
       markers?: { label?: string; start?: number; end?: number }[];
     }) => {
       if (typeof data?.script !== "string" || data.script.trim().length < 40) {
@@ -162,6 +163,7 @@ export const startCinematicRender = createServerFn({ method: "POST" })
             ? data.characterDescription.trim().slice(0, 400)
             : "",
         lipsync: data.lipsync === true,
+        autoWrite: data.autoWrite !== false,
         markers: Array.isArray(data.markers)
           ? data.markers
               .slice(0, 24)
@@ -224,18 +226,22 @@ export const startCinematicRender = createServerFn({ method: "POST" })
 
     const { evenTimelineMarkers } = await import("@/lib/video-studio");
     const { directVideoShotList } = await import("@/lib/cinematic-script-director.server");
-    const { shotsToScenes } = await import("@/lib/cinematic-script-director");
+    const { scenesFromVision, shotsToScenes } = await import("@/lib/cinematic-script-director");
     const law = genreLawById(data.genreOverride);
     let scenes;
     try {
-      const shots = await directVideoShotList({
-        lyrics: data.lyrics,
-        genre: data.moodOverride || law?.label || "Custom",
-        styleDirection: data.styleDirection || data.moodOverride,
-        markers: data.markers.length ? data.markers : evenTimelineMarkers(data.durationSeconds),
-        characterDescription: scenery ? "" : data.characterDescription,
-      });
-      scenes = shotsToScenes(shots, data.lipsync);
+      if (!data.autoWrite) {
+        scenes = scenesFromVision(data.script, data.durationSeconds, data.lipsync);
+      } else {
+        const shots = await directVideoShotList({
+          lyrics: data.lyrics || data.script,
+          genre: data.moodOverride || law?.label || "Music video",
+          styleDirection: data.styleDirection || data.moodOverride,
+          markers: data.markers.length ? data.markers : evenTimelineMarkers(data.durationSeconds),
+          characterDescription: scenery ? "" : data.characterDescription,
+        });
+        scenes = shotsToScenes(shots, data.lipsync);
+      }
     } catch (err) {
       return {
         ok: false,

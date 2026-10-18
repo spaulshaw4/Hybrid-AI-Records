@@ -117,19 +117,11 @@ import { toast } from "sonner";
 import { SITE_URL } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
 import { VideoStudio } from "@/components/VideoStudio";
-import {
-  characterDescriptionFor,
-  hiddenStyleDirection,
-  personaById,
-  presetById,
-  scriptSeed,
-  timelineMarkersFromSections,
-  type ProductionMode,
-  type VideoStyleId,
-} from "@/lib/video-studio";
+import { startStemWorker, type StemState } from "@/lib/stem-worker";
+import { STAR_DESCRIPTION, timelineMarkersFromSections, visionScript } from "@/lib/video-studio";
 
-const TITLE = "Video Studio — Hybrid AI Records";
-const DESCRIPTION = "Drop a track, choose a mode and a style, and generate one music video.";
+const TITLE = "Video Engine — Hybrid AI Records";
+const DESCRIPTION = "Drop a track, a character, and a script, then generate one music video.";
 
 export const Route = createFileRoute("/cinematic-studio")({
   errorComponent: RouteErrorFallback,
@@ -183,19 +175,14 @@ function CinematicStudioPage() {
   // The master audio File is held for the whole render so the assembly step can
   // mux the original, untouched track onto the finished picture.
   const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [productionMode, setProductionMode] = useState<ProductionMode>("auto");
-  const [personaId, setPersonaId] = useState<string | null>(null);
-  const [styleId, setStyleId] = useState<VideoStyleId | null>(null);
-  const [customText, setCustomText] = useState("");
-  const [lyrics, setLyrics] = useState("");
+  const [vision, setVision] = useState("");
+  const [autoWrite, setAutoWrite] = useState(true);
   const [characterImage, setCharacterImage] = useState<string | null>(null);
-  const [characterImageName, setCharacterImageName] = useState<string | null>(null);
-  const [vocalName, setVocalName] = useState<string | null>(null);
   const [studioNote, setStudioNote] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
   const [exportExt, setExportExt] = useState("mp4");
   const vocalBufferRef = useRef<AudioBuffer | null>(null);
-  const vocalFileRef = useRef<File | null>(null);
+  const stemJobRef = useRef<Promise<StemState> | null>(null);
   const stitchedKey = useRef<string | null>(null);
 
   const [duration, setDuration] = useState(V_TOKEN_SECONDS);
@@ -942,7 +929,10 @@ function CinematicStudioPage() {
     }
   };
 
-  const handleGenerate = async (scriptOverride?: string) => {
+  const handleGenerate = async (
+    scriptOverride?: string,
+    options?: { autoWrite?: boolean; vision?: string },
+  ) => {
     const scriptText = (scriptOverride ?? script).trim();
     if (scriptText.length < 40) {
       toast.error("Add a longer script before rendering.");
@@ -985,11 +975,18 @@ function CinematicStudioPage() {
     });
     setStudioNote("Generating your music video…");
     try {
-      const preset = presetById(styleId);
-      const persona = productionMode === "character" ? personaById(personaId) : null;
-      const profile = persona ? { ...persona.profile, referenceImage: characterImage } : null;
+      const hasStar = Boolean(characterImage);
+      const profile = hasStar
+        ? {
+            name: "",
+            archetype: "",
+            appearance: STAR_DESCRIPTION,
+            wardrobe: "",
+            referenceImage: characterImage,
+          }
+        : null;
       const refPhotos = profile?.referenceImage ? [profile.referenceImage] : [];
-      const modeSubject = productionMode === "auto" ? "scenery" : "people";
+      const concept = (options?.vision ?? vision).trim();
       const markers = audioTiming
         ? timelineMarkersFromSections(audioTiming.sections ?? [], audioTiming.durationSeconds)
         : [];
@@ -997,18 +994,19 @@ function CinematicStudioPage() {
       const started = await startRender({
         data: {
           script: scriptText,
-          subjectMode: modeSubject,
-          styleMode: preset?.styleMode ?? "photorealistic",
+          subjectMode: hasStar ? "people" : "scenery",
+          styleMode: "photorealistic",
           durationSeconds: duration,
           characterPhotos: refPhotos,
           ...(profile ? { character: profile } : {}),
           moodBoard: { references: [], notes: "" },
-          genreOverride: preset?.genreId ?? null,
-          moodOverride: (preset?.label ?? "Custom").slice(0, 120),
-          styleDirection: hiddenStyleDirection(styleId, customText),
-          lyrics,
-          characterDescription: characterDescriptionFor(productionMode, personaId),
+          genreOverride: null,
+          moodOverride: "Music video",
+          styleDirection: concept,
+          lyrics: concept,
+          characterDescription: hasStar ? STAR_DESCRIPTION : "",
           lipsync: Boolean(vocalBufferRef.current),
+          autoWrite: options?.autoWrite !== false,
           markers,
           ...(audioTiming ? { audioTiming } : {}),
         },
@@ -1354,32 +1352,32 @@ function CinematicStudioPage() {
 
   const beginGenerate = async () => {
     if (!audioFileRef.current) {
-      setStudioNote("Add a master track first.");
+      setStudioNote("Drop your audio track first.");
       return;
     }
-    if (vocalFileRef.current) {
-      try {
-        const { decodeMaster } = await import("@/lib/audio-slice");
-        const decoded = await decodeMaster(vocalFileRef.current);
-        vocalBufferRef.current = decoded.buffer;
-      } catch (err) {
-        console.error("[video-studio] vocal stem decode failed", err);
-        vocalBufferRef.current = null;
-        setStudioNote("The vocal stem could not be read, so lip-sync will be skipped.");
-      }
-    } else {
-      vocalBufferRef.current = null;
+    if (vision.trim().length < 8) {
+      setStudioNote("Describe what happens in the video.");
+      return;
     }
     setExportUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
     setStudioNote("Generating your music video…");
-    await handleGenerate(scriptSeed(styleId, customText, lyrics));
+    try {
+      const stems = stemJobRef.current ? await stemJobRef.current : null;
+      vocalBufferRef.current = stems?.vocalBuffer ?? null;
+    } catch (err) {
+      console.error("[video-studio] vocal isolation failed", err);
+      vocalBufferRef.current = null;
+    }
+    await handleGenerate(visionScript(vision), { autoWrite, vision });
   };
 
   const onMasterFile = async (file: File | null) => {
     if (!file) {
+      stemJobRef.current = null;
+      vocalBufferRef.current = null;
       handleTiming(null, null, null);
       return;
     }
@@ -1392,34 +1390,16 @@ function CinematicStudioPage() {
       const { analyzeAudioTiming } = await import("@/lib/audio-timing");
       const map = await analyzeAudioTiming(file);
       handleTiming(map, file.name, file);
+      stemJobRef.current = startStemWorker(file);
       setStudioNote(null);
     } catch (err) {
       setStudioNote(err instanceof Error ? err.message : "Couldn't read that track.");
     }
   };
 
-  const onVocalFile = (file: File | null) => {
-    vocalFileRef.current = file;
-    vocalBufferRef.current = null;
-    if (!file) {
-      setVocalName(null);
-      return;
-    }
-    const name = file.name.toLowerCase();
-    if (!name.endsWith(".mp3") && !name.endsWith(".wav")) {
-      vocalFileRef.current = null;
-      setVocalName(null);
-      setStudioNote("Upload a vocal stem as MP3 or WAV.");
-      return;
-    }
-    setVocalName(file.name);
-    setStudioNote(null);
-  };
-
   const onCharacterImage = (file: File | null) => {
     if (!file) {
       setCharacterImage(null);
-      setCharacterImageName(null);
       return;
     }
     const name = file.name.toLowerCase();
@@ -1441,7 +1421,6 @@ function CinematicStudioPage() {
         return;
       }
       setCharacterImage(url);
-      setCharacterImageName(file.name);
       setStudioNote(null);
     };
     reader.readAsDataURL(file);
@@ -1451,25 +1430,17 @@ function CinematicStudioPage() {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <VideoStudio
         audioName={audioName}
-        vocalName={vocalName}
-        mode={productionMode}
-        personaId={personaId}
-        styleId={styleId}
-        customText={customText}
-        lyrics={lyrics}
-        characterImageName={characterImageName}
+        characterPreview={characterImage}
+        vision={vision}
+        autoWrite={autoWrite}
         busy={isGenerating}
         status={studioNote}
         exportUrl={exportUrl}
         exportName={`hybrid-music-video.${exportExt}`}
         onMasterFile={(file) => void onMasterFile(file)}
-        onVocalFile={onVocalFile}
-        onMode={setProductionMode}
-        onPersona={setPersonaId}
-        onStyle={setStyleId}
-        onCustomText={setCustomText}
-        onLyrics={setLyrics}
         onCharacterImage={onCharacterImage}
+        onVision={setVision}
+        onAutoWrite={setAutoWrite}
         onGenerate={() => void beginGenerate()}
       />
     </div>

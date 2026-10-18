@@ -53,7 +53,7 @@ export async function directVideoShotList(input: {
     `Character: ${character}`,
     "Timeline markers (label, start, end in seconds):",
     markerLines(input.markers),
-    "Lyrics:",
+    "Video concept or script:",
     lyrics.slice(0, 8000),
   ].join("\n");
 

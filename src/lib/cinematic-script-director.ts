@@ -77,7 +77,33 @@ export function parseDirectedShotList(raw: string): DirectedShot[] {
   });
 }
 
-/** Turns a valid shot list into render blocks. Lip-sync is marked only when a vocal stem was uploaded. */
+/**
+ * Uses a pasted script as the scenes. Claude is not called.
+ * Each paragraph or sentence becomes one shot across the track.
+ */
+export function scenesFromVision(
+  vision: string,
+  durationSeconds: number,
+  lipsync: boolean,
+): StudioScene[] {
+  const chunks = vision
+    .split(/\n{2,}|(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 8)
+    .slice(0, 8);
+  const parts = chunks.length > 0 ? chunks : [vision.trim() || "A continuous music-video image."];
+  const slice = Math.max(4, durationSeconds) / parts.length;
+  return parts.map((text, index) => ({
+    index,
+    title: `Scene ${index + 1}`,
+    shot: text,
+    stillPrompt: text,
+    seconds: clampCinematicSeconds(slice),
+    vocalSync: lipsync && SINGING_SCENE.test(text),
+  }));
+}
+
+/** Turns a valid shot list into render blocks. Lip-sync is marked only when vocals were isolated. */
 export function shotsToScenes(shots: DirectedShot[], lipsync: boolean): StudioScene[] {
   return shots.map((shot, index) => ({
     index,
