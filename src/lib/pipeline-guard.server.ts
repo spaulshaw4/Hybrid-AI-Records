@@ -1,4 +1,4 @@
-import { hasPaidAiKey, hasReplicateKey } from "@/lib/ai-provider.server";
+import { hasPaidAiKey, hasWaveSpeedKey } from "@/lib/ai-provider.server";
 /**
  * Pre-flight validation shield for the cinematic pipeline (server only).
  *
@@ -6,8 +6,9 @@ import { hasPaidAiKey, hasReplicateKey } from "@/lib/ai-provider.server";
  * enhancement) so malformed or unauthenticated jobs are rejected locally
  * instead of burning provider credits on a guaranteed 400 / 401 / 404.
  *
- * The fallback cascade and circuit breaker for 429 / 503 / 402 live in
+ * The motion cascade and circuit breaker for 429 / 503 / 402 live in
  * `visual-engines.server.ts` — this module only guards the entry point.
+ * Cinematic video authenticates with WAVESPEED_API_KEY, not Replicate.
  */
 
 export type GenerationTask = {
@@ -48,9 +49,9 @@ export function validatePayload(task: GenerationTask): PreflightResult {
       return { isValid: false, code: 400, message: `Bad request: the ${label} for this shot is not a valid source.` };
     }
   }
-  // Paid render path: the paid Google credential and the Replicate token must
-  // both be present. The free Hybrid key is never accepted here.
-  if (!hasPaidAiKey() || !hasReplicateKey()) {
+  // Paid render path: the paid Google credential and the WaveSpeed key must
+  // both be present. The Replicate token is not a cinematic video credential.
+  if (!hasPaidAiKey() || !hasWaveSpeedKey()) {
     return {
       isValid: false,
       code: 401,

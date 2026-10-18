@@ -5,6 +5,7 @@ import { isLocalMock } from "@/lib/local-mock";
 /**
  * Lip-syncs one rendered shot against its sliced audio segment.
  * Only shots tagged `vocalSync` ever reach this function.
+ * The server calls WaveSpeed VEED Lipsync V2 and returns that error as-is.
  */
 export const lipsyncCinematicShot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

@@ -28,16 +28,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-
-
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
@@ -55,8 +47,6 @@ import {
 import { PortalBreadcrumb } from "@/components/PortalBreadcrumb";
 import { HybridTokenIcon } from "@/components/HybridTokenIcon";
 import { ScriptComposer } from "@/components/ScriptComposer";
-import { getStemState, resetStems, startStemWorker } from "@/lib/stem-worker";
-import { snapDurationsToDownbeats } from "@/lib/downbeats";
 import { setMasterAudio } from "@/lib/audio-store";
 import { SyncAccuracyReport } from "@/components/SyncAccuracyReport";
 import { preflightAudio, type AudioPreflightReport } from "@/lib/audio-preflight";
@@ -94,10 +84,7 @@ import {
   type SceneProgress,
 } from "@/components/CinematicRenderProgress";
 import { lipsyncCinematicShot } from "@/lib/lipsync.functions";
-import {
-  CinematicMasterPlayer,
-  type MasterClip,
-} from "@/components/CinematicMasterPlayer";
+import { CinematicMasterPlayer, type MasterClip } from "@/components/CinematicMasterPlayer";
 import type { ConceptPreviewValue } from "@/components/ConceptPreview";
 import { buildCinematicConcept } from "@/lib/concept-preview.functions";
 import { CharacterBuilder } from "@/components/CharacterBuilder";
@@ -112,10 +99,6 @@ import { generateCinematicScript } from "@/lib/cinematic-script.functions";
 import { generateTrackPromptSet } from "@/lib/prompt-set.functions";
 import type { PromptSet } from "@/lib/prompt-set.server";
 import { TrackPromptSet } from "@/components/TrackPromptSet";
-
-
-
-
 
 import {
   V_DURATION_STEP,
@@ -133,10 +116,18 @@ if (typeof window !== "undefined" && LOCAL_MOCK_MODE) console.log("[cinematic]",
 import { toast } from "sonner";
 import { SITE_URL } from "@/lib/release-schema";
 import { RouteErrorFallback } from "@/components/RouteErrorFallback";
+import { VideoStudio } from "@/components/VideoStudio";
+import { startStemWorker, type StemState } from "@/lib/stem-worker";
+import {
+  STAR_DESCRIPTION,
+  scriptSlotsFromSections,
+  timelineMarkersFromSections,
+  visionScript,
+  type ScriptMode,
+} from "@/lib/video-studio";
 
-const TITLE = "Visual Engine — Hybrid AI Records";
-const DESCRIPTION =
-  "Zero-editing automated video pipeline: drop a script or song breakdown and the Hybrid stack orchestrates the full cinematic master.";
+const TITLE = "Video Engine — Hybrid AI Records";
+const DESCRIPTION = "Drop a track, a character, and a script, then generate one music video.";
 
 export const Route = createFileRoute("/cinematic-studio")({
   errorComponent: RouteErrorFallback,
@@ -190,7 +181,23 @@ function CinematicStudioPage() {
   // The master audio File is held for the whole render so the assembly step can
   // mux the original, untouched track onto the finished picture.
   const [audioFile, setAudioFile] = useState<File | null>(null);
-
+  const [vision, setVision] = useState("");
+  const [scriptMode, setScriptMode] = useState<ScriptMode>("auto");
+  const [shotNotes, setShotNotes] = useState<string[]>([]);
+  const slots = useMemo(
+    () => scriptSlotsFromSections(audioTiming?.sections ?? [], audioTiming?.durationSeconds ?? 0),
+    [audioTiming],
+  );
+  useEffect(() => {
+    setShotNotes(slots.map(() => ""));
+  }, [slots]);
+  const [characterImage, setCharacterImage] = useState<string | null>(null);
+  const [studioNote, setStudioNote] = useState<string | null>(null);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [exportExt, setExportExt] = useState("mp4");
+  const vocalBufferRef = useRef<AudioBuffer | null>(null);
+  const stemJobRef = useRef<Promise<StemState> | null>(null);
+  const stitchedKey = useRef<string | null>(null);
 
   const [duration, setDuration] = useState(V_TOKEN_SECONDS);
   const render = useRenderMachine();
@@ -224,7 +231,14 @@ function CinematicStudioPage() {
   const [signedIn, setSignedIn] = useState(false);
   const [logline, setLogline] = useState("");
   const [scenes, setScenes] = useState<
-    { index: number; title: string; shot: string; seconds: number; vocalSync?: boolean }[]
+    {
+      index: number;
+      title: string;
+      shot: string;
+      stillPrompt?: string;
+      seconds: number;
+      vocalSync?: boolean;
+    }[]
   >([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [clips, setClips] = useState<MasterClip[]>([]);
@@ -233,7 +247,7 @@ function CinematicStudioPage() {
   /** Blocks that actually completed the lip-sync stage, for the sync report. */
   const [lipSyncedIndexes, setLipSyncedIndexes] = useState<number[]>([]);
   const [progress, setProgress] = useState<CinematicProgress | null>(null);
-  
+
   const [concept, setConcept] = useState<ConceptPreviewValue | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   /** Exact upstream AI error, shown on screen instead of any demo fallback. */
@@ -241,9 +255,6 @@ function CinematicStudioPage() {
   /** Style-locked prompt set generated from the uploaded track. */
   const [promptSet, setPromptSet] = useState<PromptSet | null>(null);
   const [buildingPrompts, setBuildingPrompts] = useState(false);
-
-
-
 
   // The concept board is bound to one exact set of inputs. Change the script,
   // style, genre law or mood and the previous board no longer describes this
@@ -256,14 +267,16 @@ function CinematicStudioPage() {
     setConcept(null);
   }, [conceptKey]);
 
-
-
-
-
-
   /** Live plan for the current render so failed blocks can resume in place. */
   const runCtxRef = useRef<{
-    scenes: { index: number; title: string; shot: string; seconds: number; vocalSync?: boolean }[];
+    scenes: {
+      index: number;
+      title: string;
+      shot: string;
+      stillPrompt?: string;
+      seconds: number;
+      vocalSync?: boolean;
+    }[];
     refPhotos: string[];
     /** Genre Visual Law governing this render. */
     genreId: string | null;
@@ -272,7 +285,6 @@ function CinematicStudioPage() {
     states: SceneProgress["state"][];
     clips: MasterClip[];
   } | null>(null);
-
 
   const startRender = useServerFn(startCinematicRender);
   const tuneStyle = useServerFn(tuneStylePrompt);
@@ -328,25 +340,16 @@ function CinematicStudioPage() {
    */
   const syncShotToVocals = useCallback(
     async (clipUrl: string, startSeconds: number, seconds: number, shotIndex: number) => {
-      const file = audioFileRef.current;
-      if (!file) return clipUrl;
+      const source = vocalBufferRef.current;
+      if (!source) return clipUrl;
       try {
-        const { decodeMaster, sliceToWav, toBase64 } = await import("@/lib/audio-slice");
-        // Prefer the isolated vocal stem — Wav2Lip/SadTalker track the mouth far
-        // more accurately without drums and instruments in the signal.
-        const stems = getStemState();
-        let source = stems.vocalBuffer;
-        if (!source) {
-          if (!decodedMasterRef.current) decodedMasterRef.current = await decodeMaster(file);
-          source = decodedMasterRef.current.buffer;
-        }
+        const { sliceToWav, toBase64 } = await import("@/lib/audio-slice");
         const wav = sliceToWav(source, startSeconds, seconds);
         const result = await lipsyncShot({
           data: { videoUrl: clipUrl, audioWavBase64: toBase64(wav), shotIndex },
         });
         if (result.ok) return result.videoUrl;
         console.error(`[cinematic] lip-sync failed on block ${shotIndex + 1}`, result.error);
-        toast.message(`Lip-sync skipped on block ${shotIndex + 1} — ${result.error}`);
       } catch (err) {
         console.error(`[cinematic] lip-sync error on block ${shotIndex + 1}`, err);
       }
@@ -354,7 +357,6 @@ function CinematicStudioPage() {
     },
     [lipsyncShot],
   );
-
 
   /** Mood board is producer-level: it persists between sessions. */
   useEffect(() => {
@@ -391,27 +393,17 @@ function CinematicStudioPage() {
       setScenes([]);
       decodedMasterRef.current?.close();
       decodedMasterRef.current = null;
-
-      // Background stem worker: isolates the vocal stem (lip-sync source) and
-      // the rhythmic stem (downbeat source) while the producer keeps working.
-      if (file) {
-        void startStemWorker(file).then((stems) => {
-          if (stems.status === "ready" && stems.grid) {
-            toast.message(
-              `Stems isolated — ${stems.grid.downbeats.length} downbeats detected at ~${stems.grid.bpm} BPM.`,
-            );
-          }
-        });
-      } else {
-        resetStems();
-      }
+      stitchedKey.current = null;
+      setExportUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
 
       setAudioUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return file ? URL.createObjectURL(file) : null;
       });
       if (map) {
-        setSubjectMode("story");
         setDuration(
           Math.max(MIN_DURATION, Math.min(MAX_DURATION, Math.round(map.durationSeconds))),
         );
@@ -426,14 +418,8 @@ function CinematicStudioPage() {
     setConcept(null);
   }, []);
 
-
-
-
   // The elapsed-time clock now lives inside the memoised progress panel, so a
   // running render no longer re-renders this whole route once a second.
-
-
-
 
   const vTokens = quoteVRender(duration).tokens;
   const totalCost = (vTokens * V_TOKEN_PRICE).toFixed(2);
@@ -532,7 +518,6 @@ function CinematicStudioPage() {
         });
       };
 
-
       let failure: string | null = null;
       let failedCount = 0;
       // A hard stop only happens when the render provider itself refuses to
@@ -563,6 +548,7 @@ function CinematicStudioPage() {
           const dispatched = await renderScene({
             data: {
               shot: scene.shot,
+              ...(scene.stillPrompt ? { stillPrompt: scene.stillPrompt } : {}),
               seconds: scene.seconds,
               ...(refPhotos[0] ? { referenceImage: refPhotos[0] } : {}),
               ...(genreId ? { genreId } : {}),
@@ -574,14 +560,16 @@ function CinematicStudioPage() {
           if (!dispatched.ok) {
             const detail = "detail" in dispatched ? (dispatched.detail ?? "") : "";
             const status = "status" in dispatched ? dispatched.status : null;
-            console.error(
-              `[cinematic] block ${i + 1}/${totalScenes} dispatch failed`,
-              { status, error: dispatched.error, detail },
-            );
+            console.error(`[cinematic] block ${i + 1}/${totalScenes} dispatch failed`, {
+              status,
+              error: dispatched.error,
+              detail,
+            });
             recordReconnect("render-dispatch", `block ${i + 1}: ${dispatched.error}`);
-            blockError = detail && !dispatched.error.includes(detail)
-              ? `${dispatched.error} — ${detail}`
-              : dispatched.error;
+            blockError =
+              detail && !dispatched.error.includes(detail)
+                ? `${dispatched.error} — ${detail}`
+                : dispatched.error;
             if (status === 402) {
               hardStop = true;
               blockError = `Render provider billing stop (402) — this is an external render-credit limit, not your V Token wallet. ${detail || dispatched.error}`;
@@ -611,7 +599,7 @@ function CinematicStudioPage() {
               break;
             }
             recordBackoff("render-poll", delay);
-            
+
             const polledAt = Date.now();
             let next: Awaited<ReturnType<typeof pollRender>>;
             try {
@@ -639,7 +627,6 @@ function CinematicStudioPage() {
             paintProgress(i, next.progress || 0, engine, next.stage ?? "processing");
           }
 
-
           activeJobRef.current = null;
 
           if (!blockError && !clipUrl) {
@@ -649,11 +636,8 @@ function CinematicStudioPage() {
           if (clipUrl && !blockError) {
             sceneStates[i] = "done";
             let finalUrl = clipUrl;
-            if (scene.vocalSync && audioFileRef.current) {
-              renderRef.current.progress(`Lip-syncing block ${i + 1} of ${totalScenes}…`);
-              const startSeconds = sceneShots
-                .slice(0, i)
-                .reduce((sum, s) => sum + s.seconds, 0);
+            if (scene.vocalSync && vocalBufferRef.current) {
+              const startSeconds = sceneShots.slice(0, i).reduce((sum, s) => sum + s.seconds, 0);
               finalUrl = await syncShotToVocals(clipUrl, startSeconds, scene.seconds, i);
               if (finalUrl !== clipUrl) {
                 setLipSyncedIndexes((prev) =>
@@ -728,7 +712,6 @@ function CinematicStudioPage() {
                 scenes: sceneList.map((s, i) => ({ ...s, state: sceneStates[i] ?? "pending" })),
               }
             : prev,
-
         );
         return;
       }
@@ -772,7 +755,6 @@ function CinematicStudioPage() {
     }
   };
 
-
   /**
    * Style-locked prompt set: the detected audio profile (tempo, length, song
    * structure) plus the lyric sheet drive one shared visual world. Free —
@@ -796,7 +778,10 @@ function CinematicStudioPage() {
           genreId: genreOverride === "auto" ? null : genreOverride,
           moodOverride: moodOverride.trim(),
           // Cost cap: 6–8 extended hero angles per project, never one prompt per bar.
-          count: Math.max(6, Math.min(8, Math.round((audioTiming?.durationSeconds ?? duration) / 24))),
+          count: Math.max(
+            6,
+            Math.min(8, Math.round((audioTiming?.durationSeconds ?? duration) / 24)),
+          ),
 
           track: {
             ...(audioName ? { name: audioName } : {}),
@@ -847,14 +832,9 @@ function CinematicStudioPage() {
   const promptSetFnRef = useRef(handlePromptSet);
   promptSetFnRef.current = handlePromptSet;
   const hasLyrics = script.trim().length >= 40;
-  const autoPromptKey = audioTiming
-    ? `${audioName ?? ""}|${audioTiming.durationSeconds}`
-    : null;
+  const autoPromptKey = audioTiming ? `${audioName ?? ""}|${audioTiming.durationSeconds}` : null;
   useEffect(() => {
     if (!autoPromptKey || !hasLyrics) return;
-    if (autoPromptRef.current === autoPromptKey) return;
-    autoPromptRef.current = autoPromptKey;
-    void promptSetFnRef.current();
   }, [autoPromptKey, hasLyrics]);
 
   /** Free script pass: character profile + genre laws, no V Tokens charged. */
@@ -907,7 +887,6 @@ function CinematicStudioPage() {
     }
   };
 
-
   /**
    * Free concept step: builds the Video Moodboard (character close-ups,
    * environmental framing, style tags and the narrative block) before any
@@ -938,9 +917,7 @@ function CinematicStudioPage() {
                 `${s.label} ${Math.round(s.start)}-${Math.round(s.end)}s (energy ${s.energy.toFixed(2)})`,
             ),
           },
-          ...(subjectMode !== "scenery" && hasCharacterProfile(character)
-            ? { character }
-            : {}),
+          ...(subjectMode !== "scenery" && hasCharacterProfile(character) ? { character } : {}),
           moodBoard: {
             ...(moodBoard.grade ? { grade: moodBoard.grade } : {}),
             references: moodBoard.references ?? [],
@@ -958,18 +935,22 @@ function CinematicStudioPage() {
       setConcept(preview);
       toast.success("Concept preview ready — review it, then start generation.");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Sign in to preview your concept.";
+      const message = err instanceof Error ? err.message : "Sign in to preview your concept.";
       setAiError(message);
       showAiError(message);
     } finally {
       setIsPreviewing(false);
     }
-
   };
 
-
-  const handleGenerate = async (scriptOverride?: string) => {
+  const handleGenerate = async (
+    scriptOverride?: string,
+    options?: {
+      autoWrite?: boolean;
+      vision?: string;
+      manualShots?: { label: string; start: number; end: number; description: string }[];
+    },
+  ) => {
     const scriptText = (scriptOverride ?? script).trim();
     if (scriptText.length < 40) {
       toast.error("Add a longer script before rendering.");
@@ -978,9 +959,10 @@ function CinematicStudioPage() {
     // Pre-flight gate: a corrupt, silent or truncated master is caught here,
     // before a single paid render or lip-sync call is dispatched.
     if (audioFile) {
-      const check = audioCheck?.fileName === audioFile.name && audioCheck.bytes === audioFile.size
-        ? audioCheck
-        : await preflightAudio(audioFile);
+      const check =
+        audioCheck?.fileName === audioFile.name && audioCheck.bytes === audioFile.size
+          ? audioCheck
+          : await preflightAudio(audioFile);
       setAudioCheck(check);
       if (!check.ok) {
         toast.error(check.blocking[0] ?? "The master track failed pre-flight.");
@@ -1009,38 +991,49 @@ function CinematicStudioPage() {
       startedAt,
       etaSeconds: estimatedTotal,
     });
+    setStudioNote("Generating your music video…");
     try {
-      // The server recomputes the token cost from the duration — the browser
-      // never gets to say how many V Tokens this render costs.
-      const refPhotos =
-        subjectMode !== "scenery" && characterPhoto ? [characterPhoto] : [];
+      const hasStar = Boolean(characterImage);
+      const profile = hasStar
+        ? {
+            name: "",
+            archetype: "",
+            appearance: STAR_DESCRIPTION,
+            wardrobe: "",
+            referenceImage: characterImage,
+          }
+        : null;
+      const refPhotos = profile?.referenceImage ? [profile.referenceImage] : [];
+      const concept = (options?.vision ?? vision).trim();
+      const markers = audioTiming
+        ? timelineMarkersFromSections(audioTiming.sections ?? [], audioTiming.durationSeconds)
+        : [];
 
       const started = await startRender({
         data: {
           script: scriptText,
-          subjectMode,
-          styleMode,
+          subjectMode: hasStar ? "people" : "scenery",
+          styleMode: "photorealistic",
           durationSeconds: duration,
           characterPhotos: refPhotos,
-          ...(subjectMode !== "scenery" && hasCharacterProfile(character)
-            ? { character }
-            : {}),
-          moodBoard: {
-            ...(moodBoard.grade ? { grade: moodBoard.grade } : {}),
-            references: moodBoard.references ?? [],
-            notes: (moodBoard.notes ?? "").trim(),
-          },
-          genreOverride: genreOverride === "auto" ? null : genreOverride,
-          moodOverride,
-          // The uploaded track always drives the scene plan, whatever the
-          // subject mode — genre, tempo and structure come from the song.
+          ...(profile ? { character: profile } : {}),
+          moodBoard: { references: [], notes: "" },
+          genreOverride: null,
+          moodOverride: "Music video",
+          styleDirection: concept,
+          lyrics: concept,
+          characterDescription: hasStar ? STAR_DESCRIPTION : "",
+          lipsync: Boolean(vocalBufferRef.current),
+          autoWrite: options?.autoWrite !== false,
+          ...(options?.manualShots?.length ? { manualShots: options.manualShots } : {}),
+          markers,
           ...(audioTiming ? { audioTiming } : {}),
         },
       });
 
       if (!started.ok) {
         render.fail(started.error);
-        toast.error(started.error);
+        setStudioNote(started.error);
         if (typeof started.balance === "number") setVBalance(started.balance);
         setProgress((prev) =>
           prev ? { ...prev, phaseState: "failed", note: started.error } : prev,
@@ -1050,39 +1043,10 @@ function CinematicStudioPage() {
       render.connected("Rendering scene blocks…");
       setVBalance(started.balance);
       window.dispatchEvent(new Event("hybrid:v-tokens-changed"));
-      // Snap the planned cut points onto the downbeats detected in the
-      // rhythmic stem so picture cuts land on the track's real bar grid.
-      const grid = getStemState().grid;
-      const masterSeconds = audioTiming?.durationSeconds ?? started.seconds;
-      const snapped = grid
-        ? snapDurationsToDownbeats(
-            started.scenes.map((scene) => scene.seconds),
-            grid,
-            masterSeconds,
-          )
-        : null;
-      const plannedScenes =
-        snapped && snapped.length === started.scenes.length
-          ? started.scenes.map((scene, i) => ({ ...scene, seconds: snapped[i] ?? scene.seconds }))
-          : started.scenes;
+      const plannedScenes = started.scenes;
       setScenes(plannedScenes);
       setLogline(started.logline);
-      toast.success(
-        started.granted
-          ? `Beta test render started — ${formatDuration(started.seconds)}, no V Tokens charged.`
-          : `Charged ${started.charged} V Token${started.charged === 1 ? "" : "s"} for ${formatDuration(started.seconds)} of render.`,
-      );
 
-
-      if (started.genreLabel) {
-        toast.message(`Genre visual laws locked: ${started.genreLabel}.`);
-      }
-
-      if (started.engine === "backup") {
-        toast.message("Switched to V Engine Backup to keep this render moving.");
-      }
-
-      // The plan is kept so a failed block can be retried without paying again.
       runCtxRef.current = {
         scenes: plannedScenes,
         refPhotos,
@@ -1095,8 +1059,8 @@ function CinematicStudioPage() {
 
       await runBlocks({ jobId: started.jobId, engine: started.engine });
     } catch {
-      render.fail("Sign in to render with V Tokens.");
-      toast.error("Sign in to render with V Tokens.");
+      render.fail("Sign in to generate this video.");
+      setStudioNote("Sign in to generate this video.");
       setProgress(null);
     } finally {
       render.settle();
@@ -1204,7 +1168,11 @@ function CinematicStudioPage() {
       subjectMode,
       genre: genreOverride,
       durationSeconds: cursor,
-      track: { name: audioName, durationSeconds: audioTiming?.durationSeconds ?? null, bpm: audioTiming?.bpm ?? null },
+      track: {
+        name: audioName,
+        durationSeconds: audioTiming?.durationSeconds ?? null,
+        bpm: audioTiming?.bpm ?? null,
+      },
       master: clips[0]?.url ?? videoUrl ?? null,
       shots,
     };
@@ -1342,625 +1310,188 @@ function CinematicStudioPage() {
     Boolean(audioTiming && audioFile) &&
     (subjectMode === "scenery" || hasCharacterProfile(character));
 
+  useEffect(() => {
+    if (isGenerating || clips.length === 0 || !audioFile) return;
+    const key = clips.map((clip) => clip.url).join("|");
+    if (stitchedKey.current === key) return;
+    stitchedKey.current = key;
+    let cancelled = false;
+    setStudioNote("Stitching your music video…");
+    void (async () => {
+      try {
+        const { remuxMaster, canRemuxMaster } = await import("@/lib/ffmpeg-master");
+        if (canRemuxMaster()) {
+          const result = await remuxMaster(
+            clips.map((clip) => clip.url),
+            audioFile,
+            undefined,
+            "native",
+            audioTiming?.durationSeconds,
+          );
+          if (cancelled) return;
+          setExportExt(result.extension);
+          setExportUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return URL.createObjectURL(result.blob);
+          });
+          setStudioNote("Your music video is ready.");
+          return;
+        }
+        const { stitchMaster, canStitchMaster } = await import("@/lib/stitch-master");
+        if (!audioUrl || !canStitchMaster()) {
+          if (!cancelled)
+            setStudioNote(
+              "The shots are ready, but this browser couldn't stitch them into one file.",
+            );
+          return;
+        }
+        const welded = await stitchMaster(
+          clips.map((clip) => clip.url),
+          undefined,
+          audioUrl,
+        );
+        if (cancelled) return;
+        setExportExt(welded.extension);
+        setExportUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(welded.blob);
+        });
+        setStudioNote("Your music video is ready.");
+      } catch (err) {
+        console.error("[video-studio] stitch failed", err);
+        if (!cancelled) {
+          setStudioNote("The shots rendered, but this browser couldn't stitch them into one file.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [audioFile, audioTiming, audioUrl, clips, isGenerating]);
 
-  const buildConcept = useCallback(() => void previewConceptRef.current(), []);
-  const startRenderRun = useCallback(() => void generateRef.current(), []);
-  const generatePromptSet = useCallback(() => void promptSetFnRef.current(), []);
-  const editConcept = useCallback(() => {
-    setConcept(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const beginGenerate = async () => {
+    if (!audioFileRef.current) {
+      setStudioNote("Drop your audio track first.");
+      return;
+    }
+    if (scriptMode === "manual") {
+      if (slots.length === 0 || shotNotes.some((note) => note.trim().length < 3)) {
+        setStudioNote(
+          slots.length === 0 ? "Drop a track to see the sections." : "Describe each section.",
+        );
+        return;
+      }
+    } else if (vision.trim().length < 8) {
+      setStudioNote("Describe your video concept.");
+      return;
+    }
+    setExportUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setStudioNote("Generating your music video…");
+    try {
+      const stems = stemJobRef.current ? await stemJobRef.current : null;
+      vocalBufferRef.current = stems?.vocalBuffer ?? null;
+    } catch (err) {
+      console.error("[video-studio] vocal isolation failed", err);
+      vocalBufferRef.current = null;
+    }
+    const manualShots = slots.map((slot, index) => ({
+      label: slot.label,
+      start: slot.start,
+      end: slot.end,
+      description: shotNotes[index]?.trim() ?? "",
+    }));
+    const manualText = manualShots.map((shot) => `${shot.label}: ${shot.description}`).join("\n");
+    await handleGenerate(
+      scriptMode === "manual" ? visionScript(manualText) : visionScript(vision),
+      {
+        autoWrite: scriptMode === "auto",
+        vision: scriptMode === "manual" ? manualText : vision,
+        ...(scriptMode === "manual" ? { manualShots } : {}),
+      },
+    );
+  };
 
+  const onMasterFile = async (file: File | null) => {
+    if (!file) {
+      stemJobRef.current = null;
+      vocalBufferRef.current = null;
+      handleTiming(null, null, null);
+      return;
+    }
+    const name = file.name.toLowerCase();
+    if (!name.endsWith(".mp3") && !name.endsWith(".wav")) {
+      setStudioNote("Upload a master MP3 or WAV.");
+      return;
+    }
+    try {
+      const { analyzeAudioTiming } = await import("@/lib/audio-timing");
+      const map = await analyzeAudioTiming(file);
+      handleTiming(map, file.name, file);
+      stemJobRef.current = startStemWorker(file);
+      setStudioNote(null);
+    } catch (err) {
+      setStudioNote(err instanceof Error ? err.message : "Couldn't read that track.");
+    }
+  };
 
+  const onCharacterImage = (file: File | null) => {
+    if (!file) {
+      setCharacterImage(null);
+      return;
+    }
+    const name = file.name.toLowerCase();
+    const png = file.type === "image/png" || name.endsWith(".png");
+    const jpg = file.type === "image/jpeg" || name.endsWith(".jpg") || name.endsWith(".jpeg");
+    if (!png && !jpg) {
+      setStudioNote("Use a PNG or JPG character image.");
+      return;
+    }
+    if (file.size > 3_000_000) {
+      setStudioNote("That character image is too large.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = typeof reader.result === "string" ? reader.result : "";
+      if (!/^data:image\/(png|jpeg);base64,/i.test(url)) {
+        setStudioNote("Use a PNG or JPG character image.");
+        return;
+      }
+      setCharacterImage(url);
+      setStudioNote(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
-      <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 pb-[calc(2rem+env(safe-area-inset-bottom))]">
-        <PortalBreadcrumb trail={[{ label: "Visual Engine" }]} />
-        <StudioStageNav />
-
-        {/* Header with publish toggle */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-                <Film className="size-6 text-primary" aria-hidden />
-                Visual Engine
-              </h1>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
-                  isPublished
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-muted text-muted-foreground"
-                }`}
-              >
-                {isPublished ? (
-                  <Globe className="size-3.5" aria-hidden />
-                ) : (
-                  <Lock className="size-3.5" aria-hidden />
-                )}
-                {isPublished ? "Live & Published" : "Locked in Development"}
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              V Engine pipeline • $12.50 per V Token (1 min) • zero manual editing
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-sm font-semibold"
-              aria-live="polite"
-            >
-              <HybridTokenIcon className="size-4 text-primary" aria-hidden />
-              {signedIn ? (vBalance ?? "—") : 0} V Tokens
-            </span>
-            <Button asChild variant="outline">
-              <Link to="/v-tokens">Buy V Tokens</Link>
-            </Button>
-            <Button
-              type="button"
-              variant={isPublished ? "default" : "secondary"}
-              onClick={() => setIsPublished((v) => !v)}
-            >
-              {isPublished ? "Unpublish Page" : "Publish to Production"}
-            </Button>
-          </div>
-        </div>
-
-        {/* Development lock notice */}
-        {!isPublished && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-4">
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Lock className="size-4 shrink-0" aria-hidden />
-              Development mode active: this page is locked from public visibility. Test your
-              pipeline below before publishing live.
-            </p>
-            <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-              Internal only
-            </span>
-          </div>
-        )}
-
-        {/* Stage 1 — audio ingest. Storage only; no API calls fire here. */}
-        {autoPhase !== "done" && (
-          <Card id="stage-audio" className="scroll-mt-24">
-            <CardHeader>
-              <CardTitle className="text-lg">Stage 1 — Drop my track</CardTitle>
-              <CardDescription>
-                Drop your song. It is validated and held in memory for the render — generation
-                only starts when you press Generate Master Video.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {autoPhase === "running" && autoStage ? (
-                <AutoPipelineBar stage={autoStage} />
-              ) : (
-                <OneClickIngest
-                  timing={audioTiming}
-                  fileName={audioName}
-                  onTiming={handleTiming}
-                  disabled={isGenerating}
-                />
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-
-
-        {/* Finished film: full-width playback, download and manifest. */}
-        {autoPhase === "done" && clips.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">{audioName ?? "Your film"}</CardTitle>
-              <CardDescription>Ready for instant playback and download.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <CinematicMasterPlayer clips={clips} audioUrl={audioUrl} audioFile={audioFile} masterSeconds={audioTiming?.durationSeconds ?? null} />
-              <ShotAudioTimeline
-                blocks={scenes.map((scene) => ({
-                  index: scene.index,
-                  title: scene.title,
-                  seconds: scene.seconds,
-                  url: clips.find((c) => c.index === scene.index)?.url ?? null,
-                }))}
-                timing={audioTiming}
-                trackName={audioName}
-              />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Button type="button" variant="outline" onClick={handleExportManifest}>
-                  <span className="flex items-center gap-2">
-                    <Download className="size-4" aria-hidden /> Export run manifest
-                  </span>
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => setAutoPhase("idle")}>
-                  Start a new film
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Left: inputs */}
-          <div className="space-y-6 lg:col-span-2">
-            <Card id="stage-character" className="scroll-mt-24">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <UserPlus className="size-5 text-primary" aria-hidden />
-                  Stage 2 — Character Builder
-                </CardTitle>
-                <CardDescription>
-                  Required. Define the performer once — the name, look and photo are injected into
-                  every shot as the visual anchor.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-medium">Scene subject</p>
-                  <Select value={subjectMode} onValueChange={setSubjectMode}>
-                    <SelectTrigger className="w-[190px]" aria-label="Scene subject mode">
-                      <SelectValue placeholder="Select mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="people">People</SelectItem>
-                      <SelectItem value="scenery">Scenery only</SelectItem>
-                      <SelectItem value="story">Story (cut to a song)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {subjectMode !== "scenery" && (
-                  <CharacterAnchorFrame character={hasCharacterProfile(character) ? character : null} />
-                )}
-
-                {subjectMode !== "scenery" && (
-                  <CharacterBuilder
-                    trackTitle={audioName ?? ""}
-                    genre={genreOverride === "auto" ? "" : genreOverride}
-                    styleMode={styleMode}
-                    notes={script.slice(0, 800)}
-                    value={character}
-                    onChange={handleCharacterChange}
-                    disabled={isGenerating}
-                  />
-                )}
-              </CardContent>
-            </Card>
-
-            <Card id="stage-script" className="scroll-mt-24">
-              <CardHeader>
-                <CardTitle className="text-lg">Stage 3 — Scene direction</CardTitle>
-                <CardDescription>
-                  The visual narrative prompt. The AI reads the track's tempo, structure and beats,
-                  then writes the shot script synced to every cut.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <ScriptComposer
-                  script={script}
-                  onScript={setScript}
-                  timing={audioTiming}
-                  audioName={audioName}
-                  styleMode={styleMode}
-                  subjectMode={subjectMode}
-                  maxScript={MAX_SCRIPT}
-                  disabled={isGenerating}
-                  onTiming={handleTiming}
-                />
-              </CardContent>
-
-            </Card>
-
-            <BeatBlockBuilder
-              styleMode={styleMode}
-              subjectMode={subjectMode}
-              genreId={genreOverride === "auto" ? null : genreOverride}
-              referenceImage={character.referenceImage ?? undefined}
-              bpm={audioTiming?.bpm ?? null}
-              sliceAudio={sliceAudioForShot}
-              disabled={isGenerating}
-            />
-
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Style-locked prompt set</CardTitle>
-                <CardDescription>
-                  Built automatically from the uploaded track — its detected tempo, structure and
-                  lyrics — with one locked world, wardrobe and grade across every shot.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <TrackPromptSet
-                  set={promptSet}
-                  loading={buildingPrompts}
-                  disabled={isGenerating}
-                  trackName={audioName}
-                  onGenerate={generatePromptSet}
-                />
-              </CardContent>
-            </Card>
-
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Palette className="size-5 text-primary" aria-hidden />
-                  Visual style
-                </CardTitle>
-                <CardDescription>
-                  Pick the look, then let the AI tune the exact grade, lighting and lens language.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Select value={styleMode} onValueChange={setStyleMode}>
-                  <SelectTrigger id="cine-style" className="w-full" aria-label="Visual style">
-                    <SelectValue placeholder="Select style" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-80">
-                    {STYLE_GROUPS.map((group) => (
-                      <SelectGroup key={group.id}>
-                        <SelectLabel>{group.label}</SelectLabel>
-                        {group.styles.map((style) => (
-                          <SelectItem key={style.id} value={style.id}>
-                            {style.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={isGenerating || isTuningStyle}
-                  onClick={() => void handleTuneStyle()}
-                >
-                  {isTuningStyle ? (
-                    <Wand2 className="size-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Sparkles className="size-4" aria-hidden />
-                  )}
-                  {isTuningStyle ? "Tuning the look…" : "Style Prompt Tuning"}
-                </Button>
-
-                <div className="space-y-2 rounded-lg border border-border bg-muted/10 p-3">
-                  <Label htmlFor="cine-genre" className="text-xs uppercase tracking-wide">
-                    Genre visual laws
-                  </Label>
-                  <Select value={genreOverride} onValueChange={setGenreOverride}>
-                    <SelectTrigger
-                      id="cine-genre"
-                      className="w-full"
-                      aria-label="Genre used for storyboard prompts"
-                    >
-                      <SelectValue placeholder="Auto-detect from the song" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-80">
-                      <SelectItem value="auto">Auto-detect from the song</SelectItem>
-                      {GENRE_LAWS.map((law) => (
-                        <SelectItem key={law.id} value={law.id}>
-                          {law.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Label htmlFor="cine-mood" className="text-xs uppercase tracking-wide">
-                    Mood override
-                  </Label>
-                  <Input
-                    id="cine-mood"
-                    value={moodOverride}
-                    onChange={(e) => setMoodOverride(e.target.value)}
-                    maxLength={120}
-                    placeholder="e.g. defiant, sunburnt, melancholy"
-                    aria-label="Mood used for storyboard prompts"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Leave on auto to let the detected genre and mood drive the 33-shot storyboard.
-                  </p>
-                </div>
-
-                {(moodBoard.notes ?? "").trim() && (
-                  <p className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    {moodBoard.notes}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <VideoMoodboard
-              disabled={isGenerating}
-              busy={isGenerating}
-              building={isPreviewing}
-              concept={concept}
-              character={subjectMode !== "scenery" ? character : null}
-              costLabel={`${vTokens} V-Token${vTokens > 1 ? "s" : ""} ($${totalCost})`}
-              onBuild={buildConcept}
-              onEdit={editConcept}
-              onStart={startRenderRun}
-            />
-
-
-
-          </div>
-
-          {/* Right: settings + execution */}
-          <div id="stage-render" className="scroll-mt-24 space-y-6">
-            <AiErrorNotice error={aiError} />
-
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Sparkles className="size-5 text-primary" aria-hidden />
-                  Test script
-                </CardTitle>
-                <CardDescription>
-                  Free preview — runs the AI script pass with your character profile and Genre
-                  Visual Laws. No V Tokens are used.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={testingScript || isGenerating}
-                  onClick={() => void handleTestScript()}
-                >
-                  {testingScript ? (
-                    <Wand2 className="size-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Sparkles className="size-4" aria-hidden />
-                  )}
-                  {testingScript ? "Writing the test script…" : "Run Test Script"}
-                </Button>
-                {testScript ? (
-                  <div className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/20 p-3 text-xs leading-relaxed">
-                    {testScript}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Drop a song or type an idea, set your character, then run a free test pass.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Sliders className="size-5 text-primary" aria-hidden />
-                  Video length &amp; render
-                </CardTitle>
-                <CardDescription>Set the runtime, then preview your concept.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-
-
-                <div className="space-y-3 border-t border-border pt-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium" htmlFor="cine-duration">
-                      Video length
-                    </label>
-                    <span className="text-sm font-bold text-primary">
-                      {formatDuration(duration)}
-                    </span>
-                  </div>
-                  <Slider
-                    id="cine-duration"
-                    aria-label="Video length"
-                    min={MIN_DURATION}
-                    max={MAX_DURATION}
-                    step={DURATION_STEP}
-                    value={[duration]}
-                    onValueChange={(vals: number[]) => setDuration(vals[0])}
-                  />
-                  <div className="flex justify-between text-[11px] text-muted-foreground">
-                    <span>0:30</span>
-                    <span>1:00 = 1 V Token</span>
-                    <span>14:00</span>
-                  </div>
-                  {duration > V_TOKEN_SECONDS && (
-                    <p className="rounded-lg border border-primary/40 bg-primary/10 p-3 text-xs text-primary">
-                      Billed per minute, rounded up — this {formatDuration(duration)} render uses{" "}
-                      {vTokens} V Tokens.
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between border-t border-border pt-4">
-                  <div>
-                    <p className="text-sm font-medium">V Token cost</p>
-                    <p className="text-xs font-bold text-primary">
-                      {vTokens} V Token{vTokens > 1 ? "s" : ""} • ${totalCost}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      $12.50 per V Token (1 min of V Engine render, rounded up)
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Compute cost</p>
-                    <p className="text-xs text-muted-foreground">{"<"} $1.00</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 p-3 text-xs">
-                  <span className="text-muted-foreground">Your balance</span>
-                  <span className="font-semibold">
-                    {signedIn ? `${vBalance ?? "—"} V Token${vBalance === 1 ? "" : "s"}` : "Sign in"}
-                  </span>
-                </div>
-
-                {signedIn && shortBy > 0 ? (
-                  <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
-                    <p className="text-xs text-muted-foreground">
-                      This render costs {vTokens} V Token{vTokens > 1 ? "s" : ""} and you have{" "}
-                      {vBalance ?? 0}.{" "}
-                      {V_RENDER_BETA
-                        ? "Beta test renders still run — you won't be charged for the shortfall."
-                        : `Top up ${shortBy} more to continue.`}
-                    </p>
-                    <Button asChild size="sm" variant="outline" className="w-full">
-                      <Link to="/v-tokens">Buy V Tokens</Link>
-                    </Button>
-                  </div>
-                ) : !signedIn ? (
-                  <p className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    <Link to="/auth" className="font-semibold text-primary underline">
-                      Sign in
-                    </Link>{" "}
-                    to see your V Token balance and buy more.
-                  </p>
-                ) : V_RENDER_BETA ? (
-                  <p className="rounded-lg border border-border bg-muted/20 p-3 text-[11px] text-muted-foreground">
-                    {V_BETA_NOTICE}
-                  </p>
-                ) : null}
-
-                <Button
-                  type="button"
-                  onClick={() => (concept ? void handleGenerate() : void handlePreviewConcept())}
-                  disabled={isGenerating || isPreviewing || (!V_RENDER_BETA && shortBy > 0)}
-                  className="w-full py-6 font-semibold"
-                >
-
-                  {isGenerating ? (
-                    <span className="flex items-center gap-2">
-                      <Wand2 className="size-5 animate-spin" aria-hidden />{" "}
-                      {stage ?? "Orchestrating pipeline…"}
-                    </span>
-                  ) : isPreviewing ? (
-                    <span className="flex items-center gap-2">
-                      <Wand2 className="size-5 animate-spin" aria-hidden /> Building your Video
-                      Moodboard…
-                    </span>
-                  ) : concept ? (
-                    <span className="flex items-center gap-2">
-                      <Sparkles className="size-5" aria-hidden /> Start Generation —{" "}
-                      {formatDuration(duration)} master, {vTokens} V Token{vTokens > 1 ? "s" : ""}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <ImageIcon className="size-5" aria-hidden /> Preview concept — free
-                    </span>
-                  )}
-
-                </Button>
-
-                {!concept && !isGenerating && (
-                  <p className="text-center text-[11px] text-muted-foreground">
-                    Concept preview is free — V Tokens are only charged when you hit Start
-                    Generation.
-                  </p>
-                )}
-
-
-
-                {progress && (
-                  <CinematicRenderProgress
-                    progress={progress}
-                    retrying={isGenerating}
-                    onRetry={retryHandler}
-                    onResume={resumeHandler}
-                  />
-                )}
-
-                {scenes.length > 0 && (
-                  <ShotAudioTimeline
-                    blocks={scenes.map((scene) => ({
-                      index: scene.index,
-                      title: scene.title,
-                      seconds: scene.seconds,
-                      url: clips.find((c) => c.index === scene.index)?.url ?? null,
-                    }))}
-                    timing={audioTiming}
-                    trackName={audioName}
-                  />
-                )}
-
-
-                {clips.length > 0 && <CinematicMasterPlayer clips={clips} audioUrl={audioUrl} audioFile={audioFile} masterSeconds={audioTiming?.durationSeconds ?? null} />}
-
-                {clips.length > 0 && (
-                  <Button type="button" variant="outline" className="w-full" onClick={handleExportManifest}>
-                    <span className="flex items-center gap-2">
-                      <Download className="size-4" aria-hidden /> Export run manifest (JSON)
-                    </span>
-                  </Button>
-                )}
-
-                {clips.length > 0 && (
-                  <SyncAccuracyReport
-                    blocks={scenes.map((scene) => ({
-                      index: scene.index,
-                      title: scene.title,
-                      seconds: scene.seconds,
-                      ...(scene.vocalSync ? { vocalSync: true } : {}),
-                    }))}
-                    timing={audioTiming}
-                    lipSyncedIndexes={lipSyncedIndexes}
-                    trackName={audioName}
-                  />
-                )}
-
-
-                {scenes.length > 0 && (
-                  <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-                    {logline && <p className="text-xs text-muted-foreground">{logline}</p>}
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Scene blocks ({scenes.length})
-                    </p>
-                    <ol className="space-y-1 text-xs text-muted-foreground">
-                      {scenes.slice(0, 12).map((scene) => (
-                        <li key={scene.index}>
-                          <span className="font-semibold text-foreground">{scene.title}</span> —{" "}
-                          {scene.shot.slice(0, 140)}
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-
-                <p className="flex items-center justify-center gap-2 pt-1 text-[11px] text-muted-foreground">
-                  <ShieldCheck className="size-4 text-primary" aria-hidden />
-                  Zero manual editing required • glitch-free guarantee
-                </p>
-
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Master execution — the only entry point into the render pipeline. */}
-        {autoPhase !== "running" && (
-          <Card className="border-primary/40">
-            <CardContent className="space-y-3 p-5">
-              <Button
-                type="button"
-                className="w-full py-7 text-base font-bold"
-                disabled={!masterReady || isGenerating}
-                onClick={() => launchAutoPipeline("analyze", script)}
-              >
-                <span className="flex items-center gap-2">
-                  <Sparkles className="size-5" aria-hidden /> Generate Master Video
-                </span>
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                {masterReady
-                  ? "Renders the performance on Replicate, muxes your master audio locally, then opens the player with a Download MP4 button."
-                  : "Load a track in Stage 1 and fill in the performer details in Stage 2 to unlock the render."}
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-      </div>
-      {showRenderStats && <RenderDebugOverlay defaultOpen={debugOpen} />}
+      <VideoStudio
+        audioName={audioName}
+        characterPreview={characterImage}
+        vision={vision}
+        scriptMode={scriptMode}
+        slots={slots}
+        shotNotes={shotNotes}
+        busy={isGenerating}
+        status={studioNote}
+        exportUrl={exportUrl}
+        exportName={`hybrid-music-video.${exportExt}`}
+        onMasterFile={(file) => void onMasterFile(file)}
+        onCharacterImage={onCharacterImage}
+        onVision={setVision}
+        onScriptMode={setScriptMode}
+        onShotNote={(index, value) =>
+          setShotNotes((prev) => {
+            const next = slots.map((_, slotIndex) => prev[slotIndex] ?? "");
+            next[index] = value;
+            return next;
+          })
+        }
+        onGenerate={() => void beginGenerate()}
+      />
     </div>
   );
 }

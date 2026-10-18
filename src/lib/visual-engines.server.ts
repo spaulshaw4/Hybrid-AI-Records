@@ -1,16 +1,20 @@
-import { replicateBaseUrl, replicateHeaders } from "@/lib/ai-provider.server";
+import { WAVESPEED_API_ROOT, wavespeedHeaders } from "@/lib/ai-provider.server";
+import { clampCinematicSeconds } from "@/lib/cinematic-seconds";
 /**
- * Visual engine stack (server only).
+ * Visual engine stack (server only) — WaveSpeed.
  *
- * The routing is fixed and vendor names never leave this module:
- *   - Visual foundation & cross-shot identity: Seedream 5.0, with Flux 3 as the
- *     photographic-texture stand-in when Seedream is unavailable.
- *   - Cinematic motion: Seedance 2.0 — the single default workhorse, driving
- *     the scene under the active Genre Visual Laws.
- *   - Fail-safe: Wan 2.2, a silent redundancy node. It receives the exact same
- *     genre-locked prompt and never rewrites or relaxes it.
+ * Vendor names never leave this module:
+ *   - Stills: `wavespeed-ai/flux-dev`. flux-pro has no confirmed path and is
+ *     not called.
+ *   - Motion: Hailuo 2.3 i2v-standard and Seedance 2.5 image-to-video.
+ *     There is no Replicate, Wan, or other fallback.
  *
- * Every call is capped to the native 1080p target from `render-resolution`.
+ * Duration selection lives only in `resolveCinematicMotion`. Hailuo accepts
+ * 6 and 10. Seedance accepts 4–30, including 5. Five seconds is never sent
+ * to Hailuo.
+ *
+ * Submit: POST /api/v3/{model-path}. Poll: GET /api/v3/predictions/{id}/result.
+ * The media URL is data.outputs[0]. Auth is WAVESPEED_API_KEY as Bearer.
  */
 
 import {
@@ -20,65 +24,51 @@ import {
 } from "@/lib/render-resolution";
 import { resilientFetch } from "@/lib/resilient-fetch.server";
 import { GLOBAL_NEGATIVE_PROMPT } from "@/lib/global-negative-prompt";
-import { describeDispatchIssues, validateDispatchPayload } from "@/lib/dispatch-schema";
+import {
+  isWaveSpeedFailure,
+  isWaveSpeedSuccess,
+  redactSecrets,
+  waveSpeedData,
+  waveSpeedErrorText,
+  waveSpeedId,
+  waveSpeedModelUrl,
+  waveSpeedOutputUrl,
+  waveSpeedResultUrl,
+  waveSpeedStatus,
+} from "@/lib/wavespeed-prediction.server";
+import {
+  recordFailure,
+  recordSuccess,
+  shouldSkip as breakerOpen,
+} from "@/lib/circuit-breaker.server";
 
+/** Confirmed still model. */
+export const FLUX_DEV_MODEL = "wavespeed-ai/flux-dev";
 
-
-/** Still-frame engines: foundation first, photographic fallback second. */
-const FOUNDATION_MODELS = [
-  process.env["SEEDREAM_MODEL"] || "bytedance/seedream-4",
-  process.env["FLUX_MODEL"] || "black-forest-labs/flux-1.1-pro",
-] as const;
+/** 16:9 size confirmed for flux-dev (`width*height`, each side 256–1536). */
+export const FLUX_DEV_SIZE_16_9 = "1024*576";
 
 /**
- * Motion matrix — lean profile.
- *
- * Seedance 2.0 is the single default workhorse for ALL cinematic motion and
- * character-consistent generation. The parallel high-cost nodes (omni-modal
- * MiniMax H3, Runway Gen-4 Turbo, Kling Motion, Wan 2.5 wide) are out of the
- * standard path so a normal render never fans out across several billed
- * vendors. Only one redundancy node remains: Wan 2.2, which secures the queue
- * on a 429 / 503 so a rate limit can never break a job.
+ * Image-to-image strength on the same flux-dev model.
+ * WaveSpeed documents 0.3–0.5 when the source should survive the edit.
+ * https://wavespeed.ai/docs/docs-api/wavespeed-ai/flux-dev
  */
-const MOTION_NODES = {
-  /** Default workhorse — character performance, action and environment alike. */
-  performance: { id: "primary" as const, model: process.env["SEEDANCE_MODEL"] || "bytedance/seedance-1-pro" },
-  /** Sole redundancy fallback — secures the queue on rate limits / outages. */
-  fallbackTwo: { id: "reserve" as const, model: process.env["WAN_MODEL"] || "wan-video/wan-2.2-i2v-fast" },
-};
+export const FLUX_IDENTITY_STRENGTH = 0.4;
 
-type MotionNode = { id: MotionEngineId; model: string; omni?: true };
+/** Confirmed motion models. */
+export const HAILUO_I2V_MODEL = "minimax/hailuo-2.3/i2v-standard";
+export const SEEDANCE_I2V_MODEL = "bytedance/seedance-2.5/image-to-video";
 
-/** Which motion class a shot belongs to. */
+/** Which motion class a shot belongs to. Routing itself is by duration. */
 export type ShotClass = "performance" | "action" | "environment";
 
 export type MotionEngineId = "primary" | "backup" | "reserve";
 
-/**
- * Dispatch order. Every shot class runs the same lean chain: Seedance 2.0,
- * then Wan 2.2 as the single fallback.
- */
-function motionChain(_shotClass: ShotClass): MotionNode[] {
-  return [MOTION_NODES.performance, MOTION_NODES.fallbackTwo];
-}
-
-
-/**
- * Circuit breaker around the paid endpoints (Seedance 2.0 and the single Wan
- * 2.2 redundancy node). Shared implementation: 3 consecutive failures (or an
- * immediate 429 / 503) trips the node open for 60s so the very next shot
- * skips straight to the fallback cascade, then a single half-open probe
- * recovers it once the upstream stabilises.
- */
-import {
-  shouldSkip as breakerOpen,
-  recordFailure,
-  recordSuccess,
-} from "@/lib/circuit-breaker.server";
-
-
-
-
+export type ResolvedMotion = {
+  id: MotionEngineId;
+  model: string;
+  duration: number;
+};
 
 export class VisualEngineError extends Error {
   status: number | null;
@@ -93,7 +83,7 @@ export class VisualEngineError extends Error {
 
 function credentials(): Record<string, string> {
   try {
-    return replicateHeaders("The visual engine");
+    return wavespeedHeaders("The visual engine");
   } catch (err) {
     throw new VisualEngineError(
       err instanceof Error ? err.message : "The visual engine is not configured yet.",
@@ -101,6 +91,44 @@ function credentials(): Record<string, string> {
       "",
     );
   }
+}
+
+/**
+ * Hailuo 2.3 i2v-standard accepts only 6 and 10. Any other length, including
+ * 5, throws here — it is not rewritten to 6 or 10.
+ */
+export function assertHailuoDuration(duration: number): 6 | 10 {
+  if (duration === 6 || duration === 10) return duration;
+  throw new VisualEngineError(
+    `Hailuo 2.3 accepts only 6 or 10 seconds. Refusing to send ${duration}.`,
+    400,
+    "duration",
+  );
+}
+
+/**
+ * The only duration map for cinematic motion.
+ *
+ * Requested seconds are clamped to 4–10, then left unchanged:
+ *   - 6 and 10 → Hailuo, then Seedance at the same duration if Hailuo fails
+ *   - 4, 5, 7, 8, and 9 → Seedance only
+ *
+ * Seedance 2.5 image-to-video accepts 4–30 (default 5). A 5-second request
+ * stays on Seedance. It is not sent to Hailuo.
+ */
+export function resolveCinematicMotion(seconds: number): ResolvedMotion[] {
+  const duration = Math.max(4, Math.min(MAX_BLOCK_SECONDS, Math.round(seconds)));
+  if (!Number.isFinite(duration)) {
+    throw new VisualEngineError("Block duration must be a number of seconds.", 400, "duration");
+  }
+  if (duration === 6 || duration === 10) {
+    const hailuoDuration = assertHailuoDuration(duration);
+    return [
+      { id: "primary", model: HAILUO_I2V_MODEL, duration: hailuoDuration },
+      { id: "reserve", model: SEEDANCE_I2V_MODEL, duration: hailuoDuration },
+    ];
+  }
+  return [{ id: "primary", model: SEEDANCE_I2V_MODEL, duration }];
 }
 
 export type Prediction = {
@@ -114,6 +142,14 @@ export type Prediction = {
   started_at?: string | null;
   completed_at?: string | null;
 };
+
+function providerStatus(raw: string): Prediction["status"] {
+  if (isWaveSpeedSuccess(raw) || raw === "succeeded") return "succeeded";
+  if (raw === "cancelled" || raw === "canceled") return "canceled";
+  if (isWaveSpeedFailure(raw)) return "failed";
+  if (raw === "processing") return "processing";
+  return "starting";
+}
 
 /**
  * Best-effort completion percentage for a running prediction.
@@ -150,141 +186,333 @@ export function predictionProgress(prediction: Prediction): number {
   return Math.max(10, Math.min(90, Math.round(90 * (1 - Math.exp(-elapsed / 60)))));
 }
 
+function toPrediction(id: string, payload: unknown): Prediction {
+  const data = waveSpeedData(payload);
+  const status = providerStatus(waveSpeedStatus(payload));
+  const createdAt = typeof data.created_at === "string" ? data.created_at : null;
+  const errorText = waveSpeedErrorText(payload);
+  const error = errorText ? redactSecrets(errorText) : null;
+  return {
+    id: waveSpeedId(payload) ?? id,
+    status,
+    output: data.outputs,
+    error,
+    logs: typeof data.logs === "string" ? data.logs : null,
+    created_at: createdAt,
+    started_at: typeof data.started_at === "string" ? data.started_at : createdAt,
+    completed_at: typeof data.completed_at === "string" ? data.completed_at : null,
+  };
+}
 
-async function startPrediction(model: string, input: Record<string, unknown>): Promise<Prediction> {
+async function responseDetail(response: Response): Promise<{ text: string; json: unknown | null }> {
+  const text = await response.text().catch(() => "");
+  try {
+    return { text, json: JSON.parse(text) as unknown };
+  } catch {
+    return { text, json: null };
+  }
+}
+
+function rejected(status: number, message: string, body: string): VisualEngineError {
+  const detail = redactSecrets(message || body).slice(0, 600);
+  return new VisualEngineError(
+    status === 402
+      ? `The render provider refused the job: payment required / out of credits [402]${
+          detail ? ` — ${detail}` : ""
+        }`
+      : `Render rejected [${status}]${detail ? ` — ${detail}` : ""}`,
+    status,
+    detail,
+  );
+}
+
+async function submitModel(
+  model: string,
+  body: Record<string, unknown>,
+  label = `motion dispatch (${model})`,
+): Promise<Prediction> {
+  if (model === HAILUO_I2V_MODEL) {
+    assertHailuoDuration(Number(body.duration));
+  }
+  const url = waveSpeedModelUrl(model);
   let response: Response;
   try {
-    // Breaker bookkeeping happens in createMotionBlock, so this layer only
-    // supplies timeout + network retry.
     response = await resilientFetch(
-      `${replicateBaseUrl()}/models/${model}/predictions`,
-      { method: "POST", headers: credentials(), body: JSON.stringify({ input }) },
-      { label: `motion dispatch (${model})`, timeoutMs: 180_000, retries: 0, useBreaker: false },
+      url,
+      { method: "POST", headers: credentials(), body: JSON.stringify(body) },
+      { label, timeoutMs: 180_000, retries: 0, useBreaker: false },
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new VisualEngineError(`Render dispatch could not reach the engine — ${reason}`, null, reason);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    let message = "";
-    try {
-      const parsed = JSON.parse(body) as { detail?: string; title?: string };
-      message = parsed.detail || parsed.title || "";
-    } catch {
-      message = "";
-    }
     throw new VisualEngineError(
-      response.status === 402
-        ? `The render provider refused the job: payment required / out of credits [402]${
-            message ? ` — ${message}` : ""
-          }`
-        : `Render rejected [${response.status}]${message ? ` — ${message}` : ""}`,
-      response.status,
-      (message || body).slice(0, 600),
+      `Render dispatch could not reach the engine — ${reason}`,
+      null,
+      reason,
     );
   }
-  return (await response.json()) as Prediction;
+  const parsed = await responseDetail(response);
+  if (!response.ok) {
+    throw rejected(response.status, waveSpeedErrorText(parsed.json) ?? "", parsed.text);
+  }
+  const code =
+    parsed.json && typeof parsed.json === "object" && !Array.isArray(parsed.json)
+      ? (parsed.json as Record<string, unknown>).code
+      : undefined;
+  if (typeof code === "number" && code !== 200) {
+    throw rejected(code, waveSpeedErrorText(parsed.json) ?? "", parsed.text);
+  }
+  const id = waveSpeedId(parsed.json);
+  if (!id) {
+    throw new VisualEngineError(
+      "The visual engine returned no job id.",
+      response.status,
+      redactSecrets(parsed.text).slice(0, 600),
+    );
+  }
+  return toPrediction(id, parsed.json);
 }
 
 export async function readPrediction(id: string): Promise<Prediction> {
   let response: Response;
   try {
     response = await resilientFetch(
-      `${replicateBaseUrl()}/predictions/${id}`,
+      waveSpeedResultUrl(id),
       { headers: credentials() },
-      { label: `render poll (${id})`, timeoutMs: 45_000, retries: 0, baseDelayMs: 1000, useBreaker: false },
+      {
+        label: `render poll (${id})`,
+        timeoutMs: 45_000,
+        retries: 0,
+        baseDelayMs: 1000,
+        useBreaker: false,
+      },
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new VisualEngineError(`Render job could not be read — ${reason}`, null, reason);
   }
+  const parsed = await responseDetail(response);
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
     throw new VisualEngineError(
       `Render job could not be read [${response.status}].`,
       response.status,
-      body.slice(0, 400),
+      redactSecrets(parsed.text).slice(0, 400),
     );
   }
-  return (await response.json()) as Prediction;
+  return toPrediction(id, parsed.json);
 }
 
-
-/** Replicate returns either a URL string or an array of them. */
+/** WaveSpeed returns the media URL on `data.outputs[0]`. */
 export function firstOutputUrl(output: unknown): string | null {
-  if (typeof output === "string") return output;
+  if (typeof output === "string" && output.trim()) return output;
   if (Array.isArray(output)) {
-    const hit = output.find((entry) => typeof entry === "string");
+    const hit = output.find((entry) => typeof entry === "string" && entry.trim());
     return typeof hit === "string" ? hit : null;
   }
   return null;
 }
 
-async function waitFor(id: string, timeoutMs: number): Promise<Prediction> {
+async function waitForOutput(id: string, timeoutMs: number, label: string): Promise<string> {
   const started = Date.now();
   for (;;) {
     const prediction = await readPrediction(id);
-    if (prediction.status === "succeeded") return prediction;
+    if (prediction.status === "succeeded") {
+      const url =
+        waveSpeedOutputUrl({ outputs: prediction.output }) ?? firstOutputUrl(prediction.output);
+      if (!url) {
+        throw new VisualEngineError(`The ${label} finished without data.outputs[0].`, null, "");
+      }
+      return url;
+    }
     if (prediction.status === "failed" || prediction.status === "canceled") {
       throw new VisualEngineError(
-        prediction.error || "The visual engine failed on this frame.",
+        prediction.error || `The ${label} failed.`,
         null,
         prediction.error ?? "",
       );
     }
     if (Date.now() - started > timeoutMs) {
-      throw new VisualEngineError("The visual engine timed out on this frame.", null, "");
+      throw new VisualEngineError(`The ${label} timed out.`, null, "");
     }
     await new Promise((resolve) => setTimeout(resolve, 2500));
   }
 }
 
+function promptWithNegatives(prompt: string, limit: number): string {
+  const safe = clampResolutionLanguage(prompt).trim();
+  const combined = safe.includes("triptych") ? safe : `${safe} Avoid: ${GLOBAL_NEGATIVE_PROMPT}.`;
+  return combined.slice(0, limit);
+}
+
+function dataImagePayload(
+  dataUrl: string,
+): { bytes: Uint8Array; contentType: string; filename: string } | null {
+  const match = /^data:(image\/(?:png|jpeg|jpg));base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl.trim());
+  if (!match) return null;
+  const contentType =
+    match[1]!.toLowerCase() === "image/jpg" ? "image/jpeg" : match[1]!.toLowerCase();
+  const binary = atob(match[2]!.replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return {
+    bytes,
+    contentType,
+    filename: contentType === "image/png" ? "character.png" : "character.jpg",
+  };
+}
+
 /**
- * Stage 1 — scene keyframe.
+ * Uploads a character still through the WaveSpeed media ticket so flux-dev
+ * receives a URL. The storage PUT never carries the API key.
+ */
+async function uploadFluxReference(dataUrl: string): Promise<string> {
+  const image = dataImagePayload(dataUrl);
+  if (!image) {
+    throw new VisualEngineError("The character image must be a PNG or JPG.", 400, "image");
+  }
+  let ticketResponse: Response;
+  try {
+    ticketResponse = await resilientFetch(
+      `${WAVESPEED_API_ROOT}/media/uploads`,
+      {
+        method: "POST",
+        headers: credentials(),
+        body: JSON.stringify({
+          filename: image.filename,
+          size: image.bytes.byteLength,
+          content_type: image.contentType,
+        }),
+      },
+      { label: "character image upload", timeoutMs: 120_000, retries: 0, useBreaker: false },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new VisualEngineError(`Character image upload failed — ${reason}`, null, reason);
+  }
+  const parsed = await responseDetail(ticketResponse);
+  if (!ticketResponse.ok) {
+    throw rejected(ticketResponse.status, waveSpeedErrorText(parsed.json) ?? "", parsed.text);
+  }
+  const data = waveSpeedData(parsed.json);
+  const upload =
+    data.upload && typeof data.upload === "object" && !Array.isArray(data.upload)
+      ? (data.upload as Record<string, unknown>)
+      : null;
+  const downloadUrl = typeof data.download_url === "string" ? data.download_url : "";
+  const uploadUrl = typeof upload?.url === "string" ? upload.url : "";
+  const method = typeof upload?.method === "string" ? upload.method : "";
+  const rawHeaders =
+    upload?.headers && typeof upload.headers === "object" && !Array.isArray(upload.headers)
+      ? (upload.headers as Record<string, unknown>)
+      : null;
+  const headers: Record<string, string> = {};
+  if (rawHeaders) {
+    for (const [key, value] of Object.entries(rawHeaders)) {
+      if (typeof value !== "string" || key.toLowerCase() === "authorization") continue;
+      headers[key] = value;
+    }
+  }
+  if (!downloadUrl || !uploadUrl || !method || Object.keys(headers).length === 0) {
+    throw new VisualEngineError("The character image upload returned no URL.", null, "");
+  }
+  const payload = new ArrayBuffer(image.bytes.byteLength);
+  new Uint8Array(payload).set(image.bytes);
+  let put: Response;
+  try {
+    put = await resilientFetch(
+      uploadUrl,
+      { method, headers, body: payload },
+      { label: "character image put", timeoutMs: 120_000, retries: 0, useBreaker: false },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new VisualEngineError(`Character image upload failed — ${reason}`, null, reason);
+  }
+  if (!put.ok) {
+    const body = await put.text().catch(() => "");
+    throw new VisualEngineError(
+      `Character image upload failed [${put.status}].`,
+      put.status,
+      redactSecrets(body).slice(0, 400),
+    );
+  }
+  return downloadUrl;
+}
+
+async function fluxImageReference(source: string): Promise<string> {
+  if (/^https?:\/\//i.test(source)) return source;
+  if (source.startsWith("data:image/")) return uploadFluxReference(source);
+  throw new VisualEngineError("The character image must be a PNG or JPG.", 400, "image");
+}
+
+/**
+ * Stage 1 — scene keyframe on flux-dev.
  *
- * Builds a single 16:9 cinematic frame for the shot. Character reference
- * sheets (triptych / turnaround) are passed here ONLY as face-identity
- * references (IP-Adapter style conditioning) — never as a video start frame.
- * Returns null rather than throwing: motion can still run text-to-video.
+ * Text-to-image when no character photo is supplied. Character mode posts the
+ * photo on the documented `image` field of the same model (image-to-image),
+ * with strength in the documented preserve range. flux-pro is not called.
  */
 export async function createFoundationFrame(
   prompt: string,
   identityReferences?: string[] | undefined,
-): Promise<string | null> {
-  const safePrompt = clampResolutionLanguage(prompt).slice(0, 1800);
-  const refs = (identityReferences ?? []).filter(Boolean).slice(0, 4);
-  for (const model of FOUNDATION_MODELS) {
-    try {
-      const started = await startPrediction(model, {
-        prompt: safePrompt,
-        negative_prompt: GLOBAL_NEGATIVE_PROMPT,
-        aspect_ratio: "16:9",
-        output_format: "jpg",
-        // Identity conditioning only — the sheet informs the face, it is not
-        // reproduced as the frame itself.
-        ...(refs.length ? { image_input: refs, reference_images: refs } : {}),
-      });
-      const done = await waitFor(started.id, 180_000);
-      const url = firstOutputUrl(done.output);
-      if (url) return url;
-    } catch (error) {
-      console.error("[visual] scene keyframe failed:", error);
-    }
+): Promise<string> {
+  const source = identityReferences?.find((value) =>
+    /^(https?:|data:image\/)/i.test(value?.trim() ?? ""),
+  );
+  const body: Record<string, unknown> = {
+    prompt: promptWithNegatives(prompt, 1800),
+    size: FLUX_DEV_SIZE_16_9,
+    output_format: "png",
+    num_inference_steps: 28,
+  };
+  if (source) {
+    body.image = await fluxImageReference(source.trim());
+    body.strength = FLUX_IDENTITY_STRENGTH;
   }
-  return null;
+  const started = await submitModel(FLUX_DEV_MODEL, body, `keyframe dispatch (${FLUX_DEV_MODEL})`);
+  return waitForOutput(started.id, 180_000, "keyframe engine");
 }
 
 export type MotionJob = { id: string; status: string; progress: number; engine: MotionEngineId };
 
+function assertStartImage(image: string | undefined): string {
+  const value = image?.trim() ?? "";
+  if (!/^(https?:|data:image\/)/i.test(value)) {
+    throw new VisualEngineError(
+      "WaveSpeed image-to-video requires a start image URL.",
+      400,
+      "image",
+    );
+  }
+  return value;
+}
+
+function motionBody(
+  model: string,
+  prompt: string,
+  duration: number,
+  image: string,
+): Record<string, unknown> {
+  if (model === HAILUO_I2V_MODEL) {
+    return { image, prompt, duration: assertHailuoDuration(duration) };
+  }
+  if (model === SEEDANCE_I2V_MODEL) {
+    return {
+      image,
+      prompt,
+      duration,
+      resolution: NATIVE_RENDER_RESOLUTION,
+      generate_audio: false,
+    };
+  }
+  throw new VisualEngineError(`No confirmed WaveSpeed motion model for ${model}.`, 400, model);
+}
+
 /**
- * Dispatches one cinematic motion block. `referenceImage` is the identity
- * anchor (uploaded character photo or a foundation frame) the shot animates
- * from. `styleReferences` and `audioReference` are the extra context the
- * omni-modal node consumes in the same pass — character/style anchors plus the
- * master stereo track, so the primary shot comes back already in sync.
- * The prompt — including its Genre Visual Laws negative block — is passed
- * through untouched to every engine in the cascade.
+ * Dispatches one cinematic motion block from a 16:9 keyframe.
+ *
+ * `styleReferences` and `audioReference` are not WaveSpeed motion fields.
+ * Seedance `generate_audio` is forced off so the clip stays picture-only;
+ * the studio muxes the uploaded track.
  */
 export async function createMotionBlock(input: {
   prompt: string;
@@ -294,56 +522,19 @@ export async function createMotionBlock(input: {
   audioReference?: string | undefined;
   shotClass?: ShotClass | undefined;
 }): Promise<MotionJob> {
-  const seconds = Math.max(4, Math.min(MAX_BLOCK_SECONDS, Math.round(input.seconds)));
-  const prompt = clampResolutionLanguage(input.prompt);
-  // `styleReferences` (character sheets / photos) are deliberately NOT sent to
-  // the motion model — they are consumed in Stage 1 keyframe generation only.
+  const prompt = promptWithNegatives(input.prompt, 4000);
+  const image = assertStartImage(input.referenceImage);
+  const chain = resolveCinematicMotion(clampCinematicSeconds(input.seconds));
   let lastError: VisualEngineError | null = null;
 
-  const chain = motionChain(input.shotClass ?? "performance");
-  // Evaluate each node once — a half-open node consumes its single probe slot
-  // on this call, so it must not be re-checked below.
   const health = chain.map((engine) => ({ engine, skip: breakerOpen(engine.model) }));
-  // Everything cooling down at once would leave nothing to dispatch, so only
-  // skip open nodes while at least one healthy node remains.
   const healthy = health.filter((h) => !h.skip).map((h) => h.engine);
   const usable = healthy.length > 0 ? healthy : chain;
 
-
   for (const engine of usable) {
-    // Lean single-vendor payload — one billed node per shot, no omni fan-out.
-    // `referenceImage` here is ALWAYS a single 16:9 scene keyframe produced by
-    // Stage 1 — never a character turnaround sheet, which would make the model
-    // animate the sheet layout itself.
-    const payload: Record<string, unknown> = {
-      prompt,
-      negative_prompt: GLOBAL_NEGATIVE_PROMPT,
-      duration: seconds,
-      resolution: NATIVE_RENDER_RESOLUTION,
-      aspect_ratio: "16:9",
-      ...(input.referenceImage
-        ? { image: input.referenceImage, start_image: input.referenceImage }
-        : {}),
-      // The master track slice under this shot rides along so the returned MP4
-      // already carries the active audio stream (no post-hoc mux needed).
-      ...(input.audioReference
-        ? { audio: input.audioReference, audio_url: input.audioReference }
-        : {}),
-    };
-
-
-    // Schema pre-flight: never spend a dispatch on a body the model rejects.
-    const schema = validateDispatchPayload(payload);
-    if (!schema.ok) {
-      const detail = describeDispatchIssues(schema.issues);
-      console.error("[visual] dispatch payload rejected by schema pre-flight:", schema.issues);
-      throw new VisualEngineError(`Render payload failed schema validation — ${detail}`, 400, detail);
-    }
-
-    // No automatic retry loop: one dispatch per engine, then the cascade.
-    // Retrying a failed generation silently doubles the render bill.
+    const payload = motionBody(engine.model, prompt, engine.duration, image);
     try {
-      const prediction = await startPrediction(engine.model, payload);
+      const prediction = await submitModel(engine.model, payload);
       recordSuccess(engine.model);
       return { id: prediction.id, status: prediction.status, progress: 0, engine: engine.id };
     } catch (error) {
@@ -358,40 +549,21 @@ export async function createMotionBlock(input: {
       lastError = failure;
       recordFailure(engine.model, failure.status);
       console.error(`[visual] motion dispatch failed on ${engine.id}:`, failure.message);
-      // Billing stops are terminal everywhere — never burn the fail-safe on them.
       if (failure.status === 402) throw failure;
     }
-
   }
-
-
 
   throw lastError ?? new VisualEngineError("No visual engine is available right now.", null, "");
 }
 
 /**
- * No cloud enhancement/upscale node exists in this pipeline. The master ships
- * at the native 1080p render — picture quality passes are not billed out.
- */
-
-/**
- * Cancels a running prediction so an aborted job stops billing compute
- * immediately instead of running to completion unwatched.
+ * WaveSpeed has no cancel for an in-flight prediction. `POST /predictions/delete`
+ * only removes finished tasks and does not stop a created or processing job,
+ * so this does not call it and does not call Replicate.
  */
 export async function cancelPrediction(id: string): Promise<boolean> {
-  try {
-    const response = await resilientFetch(
-      `${replicateBaseUrl()}/predictions/${id}/cancel`,
-      { method: "POST", headers: credentials() },
-      { label: `render cancel (${id})`, timeoutMs: 30_000, retries: 0, useBreaker: false },
-    );
-    if (!response.ok) {
-      console.error(`[visual] cancel failed [${response.status}] for ${id}`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error("[visual] cancel unreachable:", error);
-    return false;
-  }
+  console.error(
+    `[visual] WaveSpeed cannot cancel in-flight prediction ${id}. Finished-task delete was not called.`,
+  );
+  return false;
 }
